@@ -321,6 +321,10 @@ class V3LeadOut(BaseModel):
     # Whether the Head Physio also referred this patient to a Nutrition Coach. Orthogonal
     # to consultation_decision — see V3ConsultationDecisionInput.
     diet_recommended: Optional[bool] = False
+    # Which of the two the referral was for — see V3ConsultationDecisionInput. Both can be
+    # true, and both false is the plain referral every older consultation carries.
+    diet_consultation: Optional[bool] = False
+    diet_chart: Optional[bool] = False
     rehab_referred: Optional[bool] = False
     # Two marks the branch puts on a patient by hand, and the only fields here that say
     # something about how the branch feels about a patient rather than what the patient has
@@ -609,6 +613,20 @@ class V3ConsultationDecisionInput(BaseModel):
     # treatment"` check in the codebase would silently stop matching half the cases it
     # used to.
     diet_recommended: bool = False
+    # WHICH diet thing the patient is going away with. Two flags rather than one enum, and
+    # both may be on: a Nutritionist appointment and a chart to take home are two different
+    # products on two different shelves, and a patient can leave with both.
+    #
+    # Names only at this stage. Each has a shelf waiting for it — a Diet Consultation is
+    # the timed, bookable `diet` store item and a Diet Chart the flat-priced `diet_package`
+    # one — so linking a package to either is a field beside these rather than a rewrite of
+    # what was recorded.
+    #
+    # Neither is required. `diet_recommended` on its own is the referral it has always
+    # been, which is what every consultation saved before these existed carries, and it
+    # stays the flag the Nutrition Coach's queue and the diet fee read.
+    diet_consultation: bool = False
+    diet_chart: bool = False
     # Sends the patient straight to the Head Physio's Rehab queue instead of picking a
     # Treatment Package here. Its own flag for the same reason diet is: it is a routing
     # choice, not another value of `decision`, and folding it in would break every

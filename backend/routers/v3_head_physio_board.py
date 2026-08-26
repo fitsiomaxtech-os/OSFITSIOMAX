@@ -368,6 +368,11 @@ async def hp_consultation_decision(
     updates = {
         "consultation_decision": payload.decision,
         "diet_recommended": bool(payload.diet_recommended),
+        # Only meaningful with the referral, so they are held to it here rather than
+        # trusted from the form. A Diet Chart recorded on a patient nobody referred to a
+        # Nutritionist is a row no screen would ever show and no queue would ever pick up.
+        "diet_consultation": bool(payload.diet_recommended and payload.diet_consultation),
+        "diet_chart": bool(payload.diet_recommended and payload.diet_chart),
         # Recorded rather than inferred. The Rehab card is derived from "has an appointment
         # with me and no package recommendation yet", which is true of a Consultation Only
         # patient too — without this flag there is no way to tell a patient deliberately
@@ -385,7 +390,16 @@ async def hp_consultation_decision(
     if payload.rehab_referred:
         chosen += " + Rehab"
     if payload.diet_recommended:
-        chosen += " + Diet"
+        # Named as what it is where the Consultant said which, and plain "Diet" where they
+        # did not — the log reads back the choice that was made rather than a shape that
+        # implies a question was answered when it was not.
+        picked = [
+            name for name, on in (
+                ("Diet Consultation", payload.diet_consultation),
+                ("Diet Chart", payload.diet_chart),
+            ) if on
+        ]
+        chosen += (" + " + " + ".join(picked)) if picked else " + Diet"
     if payload.fitness_recommended:
         chosen += " + Fitness"
     if payload.zumba_recommended:

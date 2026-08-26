@@ -234,13 +234,48 @@ const CONSULTATION_ADDONS = [
   { key: "zumba", label: "Zumba", tone: "#db2777" },
 ];
 
+/**
+ * The two things a Diet referral can actually be, revealed once Diet is ticked.
+ *
+ * Independent ticks rather than a choice of one: a patient can be booked in with a
+ * Nutritionist and sold a chart to take home on the same day, and they are two different
+ * products on two different shelves — a Diet Consultation is the timed, bookable `diet`
+ * store item, a Diet Chart the flat-priced `diet_package` one.
+ *
+ * Names only at this stage, deliberately. Each has a shelf waiting for it, so linking a
+ * package to either is a field beside these rather than a rewrite of what is recorded.
+ *
+ * Neither is required. Diet on its own is the referral it has always been, which is what
+ * every consultation saved before today carries, and it stays the flag the Nutrition
+ * Coach's queue and the diet fee read.
+ *
+ * `key` is the draft's spelling, `field` the wire's. Both are written down here rather
+ * than converted where they are used: addonsLabel is handed the raw draft in one place and
+ * a lead's saved fields in another, and a name that changes shape between those two is how
+ * a label comes out reading "Diet" over a patient who was sent for a chart.
+ */
+const DIET_KINDS = [
+  { key: "dietConsultation", field: "diet_consultation", label: "Diet Consultation" },
+  { key: "dietChart", field: "diet_chart", label: "Diet Chart" },
+];
+
 // "Consultation" first always, then whichever add-ons are on — same shape read back from
 // a saved lead (decisionSummaryOf) as from the draft mid-edit, so a label built one way
 // can never say something the other way wouldn't.
-const addonsLabel = ({ treatment, diet, rehab, fitness, zumba }) => [
+//
+// Diet names which of the two where one was picked and stays plain "Diet" where neither
+// was, so the label never implies a question was answered that nobody answered.
+const dietLabels = ({ diet, dietConsultation, dietChart }) => {
+  if (!diet) return [];
+  const on = { dietConsultation, dietChart };
+  const picked = DIET_KINDS.filter((k) => on[k.key]);
+  return picked.length ? picked.map((k) => k.label) : ["Diet"];
+};
+
+const addonsLabel = ({ treatment, diet, dietConsultation, dietChart, rehab, fitness, zumba }) => [
   "Consultation",
   treatment ? "Treatment" : null,
-  diet ? "Diet" : null,
+  ...dietLabels({ diet, dietConsultation, dietChart }),
   rehab ? "Rehab" : null,
   fitness ? "Fitness" : null,
   zumba ? "Zumba" : null,
@@ -977,7 +1012,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // have to be written first, but no add-on has to be picked — every toggle starts off,
   // which submits as a plain Consultation, the same as a patient who needs nothing else.
   // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
-  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
+  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, dietConsultation: false, dietChart: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
   // The confirmation shown after a decision saves, and the flag that reopens the form
   // behind it. Both clear when the popup moves to another lead.
@@ -1191,7 +1226,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
-    setDecisionDraft({ treatment: false, diet: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
+    setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, dietChart: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
     setDecisionReceipt(null);
     setEditingDecision(false);
   }, [selectedLead?.id]);
@@ -1246,6 +1281,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     let payload = {
       decision,
       diet_recommended: decisionDraft.diet,
+      // Only meaningful with the referral, the same pairing the server enforces — and the
+      // same shape rehab_item_id already follows, so an abandoned tick cannot be submitted
+      // once the picker showing it is gone.
+      diet_consultation: decisionDraft.diet ? !!decisionDraft.dietConsultation : false,
+      diet_chart: decisionDraft.diet ? !!decisionDraft.dietChart : false,
       rehab_referred: decisionDraft.rehab,
       // Only meaningful with the referral, and the server enforces the same pairing.
       rehab_item_id: decisionDraft.rehab ? decisionDraft.rehab_item_id || null : null,
@@ -1303,6 +1343,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       planLabel: addonsLabel({
         treatment: lead.consultation_decision === "consultation_treatment",
         diet: !!lead.diet_recommended,
+        dietConsultation: !!lead.diet_consultation,
+        dietChart: !!lead.diet_chart,
         rehab: !!lead.rehab_referred,
         fitness: !!lead.fitness_recommended,
         zumba: !!lead.zumba_recommended,
@@ -1323,6 +1365,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setDecisionDraft({
       treatment: lead.consultation_decision === "consultation_treatment",
       diet: !!lead.diet_recommended,
+      dietConsultation: !!lead.diet_consultation,
+      dietChart: !!lead.diet_chart,
       rehab: !!lead.rehab_referred,
       fitness: !!lead.fitness_recommended,
       zumba: !!lead.zumba_recommended,
@@ -2982,6 +3026,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       {addonsLabel({
                         treatment: selectedLead.consultation_decision === "consultation_treatment",
                         diet: !!selectedLead.diet_recommended,
+                        dietConsultation: !!selectedLead.diet_consultation,
+                        dietChart: !!selectedLead.diet_chart,
                         rehab: !!selectedLead.rehab_referred,
                         fitness: !!selectedLead.fitness_recommended,
                         zumba: !!selectedLead.zumba_recommended,
@@ -3067,6 +3113,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
                               ...(p.key === "rehab" && d.rehab ? { rehab_item_id: "" } : {}),
                               ...(p.key === "zumba" && d.zumba ? { zumba_item_id: "" } : {}),
+                              ...(p.key === "diet" && d.diet ? { dietConsultation: false, dietChart: false } : {}),
                             }))}
                             className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
                             style={selected
@@ -3080,6 +3127,41 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       })}
                     </div>
                   </div>
+
+                  {/* Which of the two the Diet referral is for, offered the moment Diet is
+                      ticked. Both may be on — a Nutritionist appointment and a chart to
+                      take home are two products, not two names for one — and neither is
+                      required: Diet on its own is the referral it has always been, and is
+                      what every consultation saved before today carries. */}
+                  {decisionDraft.diet && (
+                    <div className="mb-3" data-testid="cons-decision-diet-kinds">
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">
+                        Diet <span className="font-normal text-slate-400">(optional)</span>
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {DIET_KINDS.map((k) => {
+                          const selected = !!decisionDraft[k.key];
+                          return (
+                            <button
+                              key={k.key}
+                              type="button"
+                              // Independent of each other, so clicking one never clears the
+                              // other; clicking a chosen one again is the way back off it.
+                              onClick={() => setDecisionDraft((d) => ({ ...d, [k.key]: !d[k.key] }))}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                selected
+                                  ? "border-orange-600 bg-orange-600 text-white"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                              data-testid={`cons-decision-diet-${k.field}`}
+                            >
+                              {k.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* The Rehab shelf from Services and Products, offered the moment Rehab is
                       ticked. Optional: referring to Rehab and settling the course later is
