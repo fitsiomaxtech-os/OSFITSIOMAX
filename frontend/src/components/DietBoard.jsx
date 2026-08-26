@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronRight,
@@ -330,6 +330,11 @@ function DietChartPanel({ patient, chart, onSent }) {
   const [file, setFile] = useState(null);
   const [sending, setSending] = useState(false);
   const [opening, setOpening] = useState(false);
+  // The chart on screen: { url, pdf, name }. null when nothing is open.
+  const [preview, setPreview] = useState(null);
+  // Mirrors preview.url purely so unmount can revoke it — an effect that closed over the
+  // state would be cleaning up whatever the url was when it last ran.
+  const previewRef = useRef(null);
 
   const sent = !!chart?.sent;
   const visible = !!chart?.visible_to_client;
@@ -350,20 +355,56 @@ function DietChartPanel({ patient, chart, onSent }) {
     setSending(false);
   };
 
-  // Fetched as a blob and opened from an object URL: the route needs the session token in a
-  // header, which a plain link cannot send. Revoked on the next tick rather than
-  // immediately — the new tab has to have read it first.
+  // Fetched as a blob: the route needs the session token in a header, which a plain link
+  // cannot send.
+  //
+  // Shown here rather than handed to a new tab. A coach opens the chart to read it back
+  // against the report they are part-way through writing, and a new tab is the one place
+  // that report is not — they lose the form to look at the plan, and come back to it by
+  // hunting through tabs. It also went through window.open after an await, which has lost
+  // the click that started it by the time it runs and gets swallowed by a popup blocker
+  // with nothing thrown to catch and nothing on screen to explain it.
   const view = async () => {
     setOpening(true);
     try {
       const url = await dietChartUrl(patient.lead_id);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const name = chart?.original_name || "";
+      // The stored type where there is one, the file's own name where there is not — a
+      // chart uploaded before content_type was recorded still knows what it is.
+      const pdf = /pdf/i.test(chart?.content_type || "") || /\.pdf$/i.test(name);
+      setPreview({ url, pdf, name: name || "Diet Chart" });
     } catch {
       toast.error("That chart couldn't be opened.");
     }
     setOpening(false);
   };
+
+  // Revoked on the way out rather than on a timer. The bytes are held for exactly as long
+  // as they are on screen, and a coach reading a long chart cannot have it expire under
+  // them mid-read, which a timeout would eventually do.
+  const closePreview = useCallback(() => {
+    setPreview((p) => {
+      if (p) URL.revokeObjectURL(p.url);
+      return null;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!preview) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") closePreview(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview, closePreview]);
+
+  useEffect(() => { previewRef.current = preview?.url || null; }, [preview]);
+
+  // The panel can be unmounted with the chart still open — the report modal behind it
+  // closes, or the board refreshes — and the blob would be held until the tab is closed.
+  // Read through the ref so this can have an empty dependency list and still see the url
+  // that is open at the moment it runs.
+  useEffect(() => () => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+  }, []);
 
   return (
     <div className="rounded-lg border border-orange-200 bg-orange-50/40 p-3" data-testid="diet-chart-panel">
@@ -419,6 +460,57 @@ function DietChartPanel({ patient, chart, onSent }) {
           {sending ? "Sending..." : sent ? "Replace Chart" : "Send Chart"}
         </Button>
       </div>
+
+      {/* Through a portal and above z-[70]: this panel lives inside the report modal, and
+          sometimes inside the patient modal behind that, so rendering it in place would
+          put the chart underneath the form that opened it. */}
+      {preview && createPortal(
+        <div
+          className="fixed inset-0 z-[80] flex flex-col bg-black/70 p-3 sm:p-6"
+          onClick={(e) => { if (e.target === e.currentTarget) closePreview(); }}
+          data-testid="diet-chart-preview"
+        >
+          <div className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+            <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 px-3 py-2">
+              <Salad className="h-4 w-4 shrink-0 text-orange-600" aria-hidden />
+              <p className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-800" title={preview.name}>
+                {preview.name}
+              </p>
+              {/* The way out for a PDF the browser will not draw inline, and for a coach
+                  who wants the file rather than a look at it. A real link off the blob,
+                  not a scripted open: it carries the click that started it, which is the
+                  thing a popup blocker asks for. */}
+              <a
+                href={preview.url}
+                download={preview.name}
+                className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                data-testid="diet-chart-download"
+              >
+                Download
+              </a>
+              <button
+                type="button"
+                onClick={closePreview}
+                className="shrink-0 rounded-md p-1 text-slate-500 transition hover:bg-slate-100"
+                aria-label="Close the chart"
+                data-testid="diet-chart-preview-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 bg-slate-100">
+              {preview.pdf ? (
+                <iframe src={preview.url} title={preview.name} className="h-full w-full border-0" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center overflow-auto p-3">
+                  <img src={preview.url} alt={preview.name} className="max-h-full max-w-full object-contain" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
