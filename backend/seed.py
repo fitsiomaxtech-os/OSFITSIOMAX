@@ -1601,49 +1601,23 @@ async def v3_seed() -> None:
                 }
             )
 
-    first_branch = await v3_col("branches").find_one({}, {"_id": 0})
-    branch_admin_user = await v3_col("users").find_one({"email": "branchadmin@fitsiomax.com"}, {"_id": 0})
-
-    if not first_branch and branch_admin_user:
-        seeded_branch_id = str(uuid.uuid4())
-        seeded_branch = {
-            "id": seeded_branch_id,
-            "branch_name": "Anna Nagar Seed Branch",
-            "address": "Anna Nagar, Chennai",
-            "admin_user_id": branch_admin_user["id"],
-            "admin_name": branch_admin_user["full_name"],
-            "admin_email": branch_admin_user["email"],
-            "admin_phone": "",
-            "vertical": "offline_physiotherapy",
-            "created_at": now_iso(),
-        }
-        await v3_col("branches").insert_one(seeded_branch.copy())
-        first_branch = seeded_branch
-
-    if first_branch:
-        await v3_col("users").update_many(
-            {
-                "email": {"$in": ["branchadmin@fitsiomax.com", "headphysio@fitsiomax.com", "physio@fitsiomax.com"]},
-                "branch_id": None,
-            },
-            {"$set": {"branch_id": first_branch["id"]}},
-        )
-
-    if await v3_col("team_members").count_documents({}) == 0:
-        seed_team = [
-            {
-                "id": str(uuid.uuid4()),
-                "full_name": "Karthik Reddy",
-                "email": "presales@constructions.com",
-                "team_type": "pre_sales",
-                "created_at": now_iso(),
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "full_name": "Divya Pillai",
-                "email": "sales@constructions.com",
-                "team_type": "sales",
-                "created_at": now_iso(),
-            },
-        ]
-        await v3_col("team_members").insert_many([item.copy() for item in seed_team])
+    # No branch and no team member is invented here any more.
+    #
+    # Both were props for the demo logins this function used to create. The seeded branch
+    # only appeared when branchadmin@fitsiomax.com existed, and existed to give that
+    # account somewhere to point; the two team members — Karthik Reddy and Divya Pillai,
+    # on @constructions.com addresses — came in with the CRM this was built out of and
+    # name nobody who works here. The demo accounts went when their hardcoded passwords
+    # did, and these outlived them: on a fresh install they are the whole of what the
+    # Marketing team lists, and every name on it is fictional.
+    #
+    # A branch is opened in Branch Management and a person is hired in HR, where they get
+    # a department and a designation from the structure ensure_structure_departments()
+    # lays down. That structure is the only thing this file still puts in front of
+    # somebody, and it is a list of job titles rather than a list of people. Nothing that
+    # boots should be adding a colleague or a location nobody asked for.
+    #
+    # Nothing is deleted for the same reason deactivate_legacy_demo_admin() deactivates
+    # rather than drops: an install that has already run the old seed keeps its rows, and
+    # whether a fictional branch is worth removing is a decision for whoever can see what
+    # has since been booked against it.
