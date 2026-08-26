@@ -525,6 +525,25 @@ const uniqueDesignations = (names) => {
 };
 
 /**
+ * One department's configured designations, found by jobKey rather than by exact string.
+ *
+ * The department a form holds and the key the structure is grouped under are the same
+ * name, until they aren't: these are typed by hand, so "Doctors ( Dr.'s )" on one screen
+ * and "Doctors (Dr.'s)" in the structure are the same department read two ways. A literal
+ * lookup misses on that difference and returns nothing — and "nothing configured" is what
+ * every caller here treats as "fall back to the whole role list", so a stray bracket
+ * silently unscopes the picker and offers Management's titles under Doctors.
+ */
+const designationsUnder = (groups, department) => {
+  const wanted = jobKey(department);
+  if (!wanted) return [];
+  const exact = groups[department];
+  if (exact) return exact;
+  const hit = Object.keys(groups).find((k) => jobKey(k) === wanted);
+  return hit ? groups[hit] : [];
+};
+
+/**
  * The designations configured under a department — or under all of them.
  *
  * The configured list, not the one read back off whoever happens to hold a job today. Those
@@ -543,25 +562,6 @@ const configuredDesignations = (meta, department) => {
   const groups = meta?.department_designations || {};
   if (department && department !== "Unassigned") return dedupeNames(designationsUnder(groups, department));
   return dedupeNames(Object.values(groups).flat());
-};
-
-/**
- * One department's configured designations, found by jobKey rather than by exact string.
- *
- * The department a form holds and the key the structure is grouped under are the same
- * name, until they aren't: these are typed by hand, so "Doctors ( Dr.'s )" on one screen
- * and "Doctors (Dr.'s)" in the structure are the same department read two ways. A literal
- * lookup misses on that difference and returns nothing — and "nothing configured" is what
- * every caller here treats as "fall back to the whole role list", so a stray bracket
- * silently unscopes the picker and offers Management's titles under Doctors.
- */
-const designationsUnder = (groups, department) => {
-  const wanted = jobKey(department);
-  if (!wanted) return [];
-  const exact = groups[department];
-  if (exact) return exact;
-  const hit = Object.keys(groups).find((k) => jobKey(k) === wanted);
-  return hit ? groups[hit] : [];
 };
 
 const TabPill = ({ active, onClick, children, testid }) => (
