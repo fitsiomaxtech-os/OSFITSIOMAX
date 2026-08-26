@@ -8,6 +8,35 @@
  * comment asking the next reader to keep them that way. This is that block, once, so a
  * third reader cannot quietly disagree with the first two.
  */
+/**
+ * Has the diet side finished, for a patient whose diet IS the course?
+ *
+ * The same question the Nutritionist's own Consultations tab answers, asked off the lead
+ * instead of off that board's row so the two cannot drift: the report is owed unless the
+ * referral was for a chart alone, and the chart is owed only where one was actually
+ * promised. Both flags false is the plain referral every consultation before them carries,
+ * and that has always meant the report.
+ *
+ * Held to patients with no treatment course of their own. Diet runs ALONGSIDE physio
+ * rather than instead of it, so a patient still working through their sessions is not
+ * finished because their chart went out — that is the whole reason the Diet Consultation
+ * chip reads a fact about a lead rather than relocating them. Where they do have a course,
+ * the clauses in isCourseComplete already govern when it ends.
+ *
+ * Check-in days are deliberately not part of this. They are follow-ups to a plan already
+ * delivered, tracked on the Nutritionist's Patients tab against total_days, and a lead
+ * does not carry those counts anyway.
+ */
+const dietCourseComplete = (lead) => {
+  // Referred is not enrolled — no coach, no programme, nothing to have finished.
+  if (!lead.diet_coach_id) return false;
+  if ((lead.total_sessions || 0) > 0) return false;
+  const chartOnly = !!lead.diet_chart && !lead.diet_consultation;
+  const owesReport = !chartOnly && !lead.diet_consultation_report;
+  const owesChart = !!lead.diet_chart && !lead.diet_chart_sent_at;
+  return !owesReport && !owesChart;
+};
+
 export const isCourseComplete = (lead) => {
   // The physio said so. The only deliberate signal in here -- Mark Treatment Complete in
   // the Physio Master View, which writes physio_stage -- and the one the branch could not
@@ -19,6 +48,13 @@ export const isCourseComplete = (lead) => {
   // reason everybody else does -- there is nothing left for them to attend -- and the
   // stage they carry is still written, it just no longer has a pill of its own.
   if (lead.consultation_stage === "Consultation Completed") return true;
+  // A Diet-only patient ends on the diet side and nowhere else. Without this they could
+  // not reach this stage at all: they hold no physio_stage, the branch never marks a diet
+  // patient "Consultation Completed", and their check-ins are diet_sessions rather than
+  // the treatment days the line below counts — so a patient whose report was written and
+  // whose chart had gone out sat wherever the branch last left them, reading as Follow Up
+  // for good, while the Nutritionist's own board counted them finished.
+  if (dietCourseComplete(lead)) return true;
   // Otherwise off the days themselves, rather than a stage somebody remembers to set.
   // Gated on there having been days at all: a patient with none booked has not finished a
   // course, they have not started one.

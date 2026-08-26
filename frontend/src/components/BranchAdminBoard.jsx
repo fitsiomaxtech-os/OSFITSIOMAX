@@ -371,10 +371,39 @@ export const matchesConsultationStage = (lead, stageName) => {
  * branch had plainly dealt with stayed listed under Leads for good. Hence the second half
  * of the match: a mirrored pill only claims a lead while it is still sitting at the
  * branch's own opening. Move it anywhere and it leaves Leads for the stage it was moved to.
+ *
+ * The other exception is Completed, which is now read off the lead rather than written —
+ * the same rule and the same isCourseComplete the Consultations board already shows that
+ * stage through, so the two pill sets sharing one row cannot say different things about
+ * the same patient. A finished patient therefore leaves whichever stage they were parked
+ * in, which is what this pipeline could never do on its own: every other stage in it is
+ * set by a Branch Admin acting on the patient, and nobody acts on a branch board when a
+ * course ends on a physio's or a Nutritionist's.
  */
 export const matchesBranchStage = (lead, stage) => {
-  if (!stage?.mirrors_stage) return lead.branch_stage === stage?.name;
-  return lead.stage === stage.mirrors_stage && lead.branch_stage === stage.unmoved_branch_stage;
+  const name = stage?.name;
+  const here = lead.branch_stage;
+  // Cancel is an abandonment rather than an ending, so it keeps whatever it holds and is
+  // never read as finished. Both spellings: this pipeline stores "Cancelled" and the
+  // consultation one is named "Cancel", and the two pill sets are shown in one row.
+  const abandoned = here === "Cancelled" || here === "Cancel";
+  const finished = !abandoned && isCourseComplete(lead);
+  // Completed is read off the lead here the way it already is on the Consultations board,
+  // rather than waiting for somebody to move them. This pipeline is otherwise written
+  // entirely by hand, and nothing in it was ever going to be written when a course ended
+  // somewhere else — a patient whose treatment the physio closed, or whose diet report and
+  // chart had both gone out, sat under whichever stage the branch last set, which for this
+  // one was the Appointment they had already been to.
+  //
+  // Still claims anyone moved there by hand, so the leads already sitting in Completed
+  // stay in it whether or not the lead reads as finished.
+  if (name === "Completed") return finished || here === "Completed";
+  // And a finished patient leaves every other pill, which is the half that makes the first
+  // half true: a lead counted under both Appointment and Completed is not a pipeline, and
+  // the counts across the row would add up to more than the branch has.
+  if (finished) return false;
+  if (!stage?.mirrors_stage) return here === name;
+  return lead.stage === stage.mirrors_stage && here === stage.unmoved_branch_stage;
 };
 
 /**
