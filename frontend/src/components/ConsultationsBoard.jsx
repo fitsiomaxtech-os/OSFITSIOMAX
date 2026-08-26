@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2 } from "lucide-react";
+import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2, Check } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -3155,6 +3155,237 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // so nothing here requires at least one to be picked.
               const canSave = diagnosisReady && summaryReady && packageReady && dietReady;
 
+              // What the Consultant has ticked, in the shelf's own order. The detail column
+              // is built from this rather than from five separate conditionals, so a card
+              // can never appear for a service that is off, and the two columns cannot
+              // disagree about what is selected.
+              const selectedAddons = CONSULTATION_ADDONS.filter((a) => decisionDraft[a.key]);
+
+              /**
+               * What one ticked service still needs decided.
+               *
+               * One function rather than five blocks stacked in the markup, because the
+               * caller now renders these in a loop -- headed, coloured and ordered by the
+               * shelf. The bodies are the pickers that were already here; what changed is
+               * where they are drawn, not what they do or what they are called in a test.
+               *
+               * A service with nothing to choose says so rather than rendering an empty
+               * card. Fitness is a referral and nothing else, and a card with a blank body
+               * reads as a picker that failed to load.
+               */
+              const addonDetail = (key) => {
+                if (key === "diet") {
+                  return (
+                    <div data-testid="cons-decision-diet-kinds">
+                      {/* Both may be on -- a Nutritionist appointment and a chart to take
+                          home are two products, not two names for one -- but neither being
+                          on is not an answer, and leaving it that way pushes the question to
+                          whoever picks the referral up. */}
+                      <div className="flex flex-wrap gap-2">
+                        {DIET_KINDS.map((k) => {
+                          const selected = !!decisionDraft[k.key];
+                          return (
+                            <button
+                              key={k.key}
+                              type="button"
+                              // Independent of each other, so clicking one never clears the
+                              // other; clicking a chosen one again is the way back off it.
+                              onClick={() => setDecisionDraft((d) => ({ ...d, [k.key]: !d[k.key] }))}
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                                selected
+                                  ? "border-orange-600 bg-orange-600 text-white"
+                                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                              }`}
+                              data-testid={`cons-decision-diet-${k.field}`}
+                            >
+                              {k.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {/* Says why Confirm & Save is greyed out, beside the thing that has
+                          to be answered. The hint at the top of the form names the
+                          Diagnosis Report and the Summary, so without this the button is
+                          disabled with everything it mentions already written. */}
+                      {!dietReady && (
+                        <p className="mt-2 rounded-md border-l-4 border-rose-500 bg-rose-50 px-3 py-1.5 text-[11px] font-medium text-rose-700" data-testid="cons-decision-diet-required">
+                          Pick Diet Consultation, Diet Chart, or both.
+                        </p>
+                      )}
+                    </div>
+                  );
+                }
+
+                if (key === "rehab") {
+                  return (
+                    <div data-testid="cons-decision-rehab-package">
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Rehab Package <span className="font-normal text-slate-400">(optional)</span></label>
+                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-rehab-options">
+                        {rehabPackageItems.map((i) => {
+                          const selected = decisionDraft.rehab_item_id === i.id;
+                          return (
+                            <button
+                              key={i.id}
+                              type="button"
+                              // Clicking the chosen one again clears it, which is the only
+                              // way back to no course once one has been picked.
+                              onClick={() => setDecisionDraft((prev) => ({ ...prev, rehab_item_id: selected ? "" : i.id }))}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                selected
+                                  ? "border-cyan-600 bg-cyan-600 text-white"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                              data-testid={`cons-decision-rehab-option-${i.id}`}
+                            >
+                              {i.name}
+                            </button>
+                          );
+                        })}
+                        {rehabPackageItems.length === 0 && (
+                          <p className="text-xs text-slate-400">No rehab packages in Services and Products yet.</p>
+                        )}
+                      </div>
+                      {/* Session count only, never the price -- the same rule the Treatment
+                          picker follows, with the amount shown to Branch Admin at collection. */}
+                      {decisionDraft.rehab_item_id && (() => {
+                        const item = rehabPackageItems.find((i) => i.id === decisionDraft.rehab_item_id);
+                        if (!item) return null;
+                        const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                        return (
+                          <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-rehab-summary">
+                            {item.name}{count ? ` · ${count} sessions` : ""}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  );
+                }
+
+                if (key === "zumba") {
+                  return (
+                    <div data-testid="cons-decision-zumba-package">
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Zumba Package <span className="font-normal text-slate-400">(optional)</span></label>
+                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-zumba-options">
+                        {zumbaPackageItems.map((i) => {
+                          const selected = decisionDraft.zumba_item_id === i.id;
+                          return (
+                            <button
+                              key={i.id}
+                              type="button"
+                              onClick={() => setDecisionDraft((prev) => ({ ...prev, zumba_item_id: selected ? "" : i.id }))}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                selected
+                                  ? "border-pink-600 bg-pink-600 text-white"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                              data-testid={`cons-decision-zumba-option-${i.id}`}
+                            >
+                              {i.name}
+                            </button>
+                          );
+                        })}
+                        {zumbaPackageItems.length === 0 && (
+                          <p className="text-xs text-slate-400">No Zumba packages in Services and Products yet.</p>
+                        )}
+                      </div>
+                      {decisionDraft.zumba_item_id && (() => {
+                        const item = zumbaPackageItems.find((i) => i.id === decisionDraft.zumba_item_id);
+                        if (!item) return null;
+                        const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                        return (
+                          <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-zumba-summary">
+                            {item.name}{count ? ` · ${count} classes` : ""}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  );
+                }
+
+                if (key === "treatment") {
+                  return (
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
+                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
+                        {treatmentPackageItems.map((i) => {
+                          const selected = decisionDraft.item_id === i.id;
+                          return (
+                            <button
+                              key={i.id}
+                              type="button"
+                              onClick={() => setDecisionDraft((prev) => ({ ...prev, item_id: i.id, sessionsPerWeek: "" }))}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                selected
+                                  ? "border-slate-900 bg-slate-900 text-white"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                              data-testid={`cons-decision-package-option-${i.id}`}
+                            >
+                              {i.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {decisionDraft.item_id && (() => {
+                        const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+                        if (!item) return null;
+                        // Head Physio sees the session count only -- never the price.
+                        // The Treatment Fee amount is derived server-side from
+                        // sessions_override and shown to Branch Admin at fee collection.
+                        const weeks = weeksFromPackageName(item.name);
+                        const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
+                        const totalSessions = weeks && perWeek ? weeks * perWeek : 0;
+                        return (
+                          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50/70 p-3" data-testid="cons-decision-package-summary">
+                            <p className="text-sm font-semibold text-slate-800">{item.name}{weeks ? ` · ${weeks} week${weeks > 1 ? "s" : ""}` : ""}</p>
+                            <div className="mt-2">
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions / week</label>
+                              <div className="flex flex-wrap gap-1.5" data-testid="cons-decision-sessions-per-week">
+                                {[1, 2, 3, 4, 5, 6, 7].map((n) => {
+                                  const selected = perWeek === n;
+                                  return (
+                                    <button
+                                      key={n}
+                                      type="button"
+                                      onClick={() => setDecisionDraft((prev) => ({ ...prev, sessionsPerWeek: String(n) }))}
+                                      className={`h-8 w-8 rounded-md border text-xs font-semibold transition ${
+                                        selected ? "border-sky-500 bg-sky-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                      }`}
+                                      data-testid={`cons-decision-sessions-per-week-${n}`}
+                                    >
+                                      {n}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-total-sessions">
+                                {!weeks
+                                  ? <span className="text-amber-600">Couldn't read a week count from this package's name.</span>
+                                  : !perWeek
+                                  ? "Choose sessions per week"
+                                  : (
+                                    <>
+                                      {perWeek} session{perWeek > 1 ? "s" : ""} Weekly × {weeks} Week{weeks > 1 ? "s" : ""} = <span className="text-sm font-semibold text-slate-800">{totalSessions} Total Sessions</span>
+                                    </>
+                                  )}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                }
+
+                // Fitness, and anything added to the shelf later that carries no picker.
+                return (
+                  <p className="text-xs text-slate-500" data-testid={`cons-decision-detail-none-${key}`}>
+                    Nothing to choose here — recorded as a referral.
+                  </p>
+                );
+              };
+
               if (alreadyMoved) {
                 return (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-decision-summary">
@@ -3238,256 +3469,108 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       Write the Diagnosis Report and Treatment Summary above before Save & Move.
                     </p>
                   )}
-                  {/* Consultation itself needs no toggle — writing this form up is the
-                      consultation. These five are what else the patient is going away
-                      with, and any combination is valid, including none of them.
-                      Five equal columns: they are five choices of one kind, and widths that
-                      follow the length of the words rank them by how long their names
-                      happen to be. Never wrapped, for the reason the scrolling row it
-                      replaced was never wrapped either — one row reads as one group of
-                      choices, two rows read as two groups. The icon sits above the label
-                      until there is width for it alongside, so a narrow column shortens
-                      rather than clipping the word. */}
-                  <div className="mb-3">
-                    <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Also Going Away With</label>
-                    <div className="grid grid-cols-5 gap-2" data-testid="cons-decision-plan-options">
-                      {CONSULTATION_ADDONS.map((p) => {
-                        const selected = !!decisionDraft[p.key];
-                        const Icon = p.icon;
-                        return (
-                          <button
-                            key={p.key}
-                            type="button"
-                            // Turning Treatment off clears the package with it, so an
-                            // abandoned choice can't be submitted once the picker showing
-                            // it is gone.
-                            onClick={() => setDecisionDraft((d) => ({
-                              ...d,
-                              [p.key]: !d[p.key],
-                              ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
-                              ...(p.key === "rehab" && d.rehab ? { rehab_item_id: "" } : {}),
-                              ...(p.key === "zumba" && d.zumba ? { zumba_item_id: "" } : {}),
-                              ...(p.key === "diet" && d.diet ? { dietConsultation: false, dietChart: false } : {}),
-                            }))}
-                            className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[11px] font-semibold transition hover:brightness-95 sm:flex-row sm:gap-1.5"
-                            style={selected
-                              ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
-                              : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
-                            data-testid={`cons-decision-plan-${p.key}`}
-                          >
-                            <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{p.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  {/* Two halves: what the patient is going away with, and what each of
+                      those things still needs decided.
 
-                  {/* Which of the two the Diet referral is for, asked the moment Diet is
-                      ticked and required before this saves. Both may be on — a Nutritionist
-                      appointment and a chart to take home are two products, not two names
-                      for one — but neither being on is not an answer, and leaving it that
-                      way pushes the question to whoever picks the referral up. */}
-                  {decisionDraft.diet && (
-                    <div className="mb-3" data-testid="cons-decision-diet-kinds">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Diet</label>
-                      <div className="flex flex-wrap gap-2">
-                        {DIET_KINDS.map((k) => {
-                          const selected = !!decisionDraft[k.key];
+                      They were one column before, and the second half was the problem. Tick
+                      Treatment, Diet and Rehab and three unrelated pickers stacked up under
+                      the row, each headed by a small grey label, none of them saying which
+                      service it belonged to. The Consultant had to hold the mapping in their
+                      head while scrolling past it, and the row that started it all had
+                      scrolled off the top.
+
+                      Side by side, the shelf stays put while the detail changes beside it.
+                      Every ticked service gets a card in its own colour, headed with the
+                      same icon it carries on the left, so the answer to "what did I pick and
+                      what does it still need" is one glance rather than a scroll. */}
+                  <div className="mb-3 grid gap-4 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]" data-testid="cons-decision-split">
+                    {/* Left: the shelf.
+                        Five across until there is room for the split, which is exactly the
+                        row this replaced and the reasoning it was given — five equal columns
+                        for five choices of one kind, never wrapped, because one row reads as
+                        one group and two rows read as two. Once the split opens they become a
+                        single column, which is still one group and still unwrapped. */}
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Services</label>
+                      <div className="grid grid-cols-5 gap-2 lg:grid-cols-1" data-testid="cons-decision-plan-options">
+                        {CONSULTATION_ADDONS.map((p) => {
+                          const selected = !!decisionDraft[p.key];
+                          const Icon = p.icon;
                           return (
                             <button
-                              key={k.key}
+                              key={p.key}
                               type="button"
-                              // Independent of each other, so clicking one never clears the
-                              // other; clicking a chosen one again is the way back off it.
-                              onClick={() => setDecisionDraft((d) => ({ ...d, [k.key]: !d[k.key] }))}
-                              // bg-slate-50 unpicked rather than white: the card behind these
-                              // is white now, and a white button on it is a label with a
-                              // hairline round it rather than something to press.
-                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                                selected
-                                  ? "border-orange-600 bg-orange-600 text-white"
-                                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                              }`}
-                              data-testid={`cons-decision-diet-${k.field}`}
+                              // Turning Treatment off clears the package with it, so an
+                              // abandoned choice can't be submitted once the picker showing
+                              // it is gone.
+                              onClick={() => setDecisionDraft((d) => ({
+                                ...d,
+                                [p.key]: !d[p.key],
+                                ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
+                                ...(p.key === "rehab" && d.rehab ? { rehab_item_id: "" } : {}),
+                                ...(p.key === "zumba" && d.zumba ? { zumba_item_id: "" } : {}),
+                                ...(p.key === "diet" && d.diet ? { dietConsultation: false, dietChart: false } : {}),
+                              }))}
+                              className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[11px] font-semibold transition hover:brightness-95 sm:flex-row sm:gap-1.5 lg:justify-start lg:px-3 lg:py-2.5"
+                              style={selected
+                                ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
+                                : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
+                              data-testid={`cons-decision-plan-${p.key}`}
                             >
-                              {k.label}
+                              <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{p.label}</span>
+                              {/* Only on the wide layout, where a column of rows has the
+                                  room for it and a tick is the quickest read of which are
+                                  on. The compact row says it with fill alone. */}
+                              {selected && <Check aria-hidden className="ml-auto hidden h-3.5 w-3.5 shrink-0 lg:block" />}
                             </button>
                           );
                         })}
                       </div>
-                      {/* Says why Confirm & Save is greyed out, beside the thing that has
-                          to be answered. The hint at the top of the form names the
-                          Diagnosis Report and the Summary, so without this the button is
-                          disabled with everything it mentions already written. */}
-                      {!dietReady && (
-                        <p className="mt-2 rounded-md border-l-4 border-rose-500 bg-rose-50 px-3 py-1.5 text-[11px] font-medium text-rose-700" data-testid="cons-decision-diet-required">
-                          Pick Diet Consultation, Diet Chart, or both.
-                        </p>
+                    </div>
+
+                    {/* Right: what each ticked service still needs. */}
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Selected Services</label>
+                      {selectedAddons.length === 0 ? (
+                        /* Not an error, and it must not look like one. No add-on is a
+                           complete, valid choice -- a plain Consultation -- and the form
+                           saves from here, so this says what will happen rather than what
+                           is missing. */
+                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-6 text-center" data-testid="cons-decision-detail-empty">
+                          <p className="text-xs font-medium text-slate-500">Nothing selected yet</p>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            Saved as it stands, this is a plain Consultation. Tick a service to set it up.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {selectedAddons.map((a) => {
+                            const Icon = a.icon;
+                            return (
+                              <div
+                                key={a.key}
+                                className="overflow-hidden rounded-lg border bg-white"
+                                style={{ borderColor: `${a.tone}44` }}
+                                data-testid={`cons-decision-detail-${a.key}`}
+                              >
+                                {/* Headed in the service's own colour with the icon it
+                                    carries on the left, so a card and its chip are read as
+                                    one thing rather than matched up by name. */}
+                                <div
+                                  className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider"
+                                  style={{ background: `${a.tone}14`, color: a.tone }}
+                                >
+                                  <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                                  {a.label}
+                                </div>
+                                <div className="p-3">{addonDetail(a.key)}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-                  )}
-
-                  {/* The Rehab shelf from Services and Products, offered the moment Rehab is
-                      ticked. Optional: referring to Rehab and settling the course later is
-                      the flow that existed before this picker, and the receipt still reads
-                      "Waiting on a package in Rehab" when nothing is chosen. */}
-                  {decisionDraft.rehab && (
-                    <div data-testid="cons-decision-rehab-package">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Rehab Package <span className="font-normal text-slate-400">(optional)</span></label>
-                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-rehab-options">
-                        {rehabPackageItems.map((i) => {
-                          const selected = decisionDraft.rehab_item_id === i.id;
-                          return (
-                            <button
-                              key={i.id}
-                              type="button"
-                              // Clicking the chosen one again clears it, which is the only
-                              // way back to no course once one has been picked.
-                              onClick={() => setDecisionDraft((p) => ({ ...p, rehab_item_id: selected ? "" : i.id }))}
-                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
-                                selected
-                                  ? "border-cyan-600 bg-cyan-600 text-white"
-                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                              }`}
-                              data-testid={`cons-decision-rehab-option-${i.id}`}
-                            >
-                              {i.name}
-                            </button>
-                          );
-                        })}
-                        {rehabPackageItems.length === 0 && (
-                          <p className="text-xs text-slate-400">No rehab packages in Services and Products yet.</p>
-                        )}
-                      </div>
-                      {/* Session count only, never the price — the same rule the Treatment
-                          picker follows, with the amount shown to Branch Admin at collection. */}
-                      {decisionDraft.rehab_item_id && (() => {
-                        const item = rehabPackageItems.find((i) => i.id === decisionDraft.rehab_item_id);
-                        if (!item) return null;
-                        const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
-                        return (
-                          <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-rehab-summary">
-                            {item.name}{count ? ` · ${count} sessions` : ""}
-                          </p>
-                        );
-                      })()}
-                    </div>
-                  )}
-
-                  {/* The Zumba shelf, on the same terms as Rehab above: shown when Zumba is
-                      ticked, optional, and named without a price. */}
-                  {decisionDraft.zumba && (
-                    <div data-testid="cons-decision-zumba-package">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Zumba Package <span className="font-normal text-slate-400">(optional)</span></label>
-                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-zumba-options">
-                        {zumbaPackageItems.map((i) => {
-                          const selected = decisionDraft.zumba_item_id === i.id;
-                          return (
-                            <button
-                              key={i.id}
-                              type="button"
-                              onClick={() => setDecisionDraft((p) => ({ ...p, zumba_item_id: selected ? "" : i.id }))}
-                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
-                                selected
-                                  ? "border-pink-600 bg-pink-600 text-white"
-                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                              }`}
-                              data-testid={`cons-decision-zumba-option-${i.id}`}
-                            >
-                              {i.name}
-                            </button>
-                          );
-                        })}
-                        {zumbaPackageItems.length === 0 && (
-                          <p className="text-xs text-slate-400">No Zumba packages in Services and Products yet.</p>
-                        )}
-                      </div>
-                      {decisionDraft.zumba_item_id && (() => {
-                        const item = zumbaPackageItems.find((i) => i.id === decisionDraft.zumba_item_id);
-                        if (!item) return null;
-                        const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
-                        return (
-                          <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-zumba-summary">
-                            {item.name}{count ? ` · ${count} classes` : ""}
-                          </p>
-                        );
-                      })()}
-                    </div>
-                  )}
-
-                  {/* Only the two plans that include treatment need a package. Showing it
-                      for the others would ask for a decision that has no meaning. */}
-                  <div className={needsPackage ? "" : "hidden"}>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
-                    <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
-                      {treatmentPackageItems.map((i) => {
-                        const selected = decisionDraft.item_id === i.id;
-                        return (
-                          <button
-                            key={i.id}
-                            type="button"
-                            onClick={() => setDecisionDraft((p) => ({ ...p, item_id: i.id, sessionsPerWeek: "" }))}
-                            className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
-                              selected
-                                ? "border-slate-900 bg-slate-900 text-white"
-                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                            }`}
-                            data-testid={`cons-decision-package-option-${i.id}`}
-                          >
-                            {i.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {decisionDraft.item_id && (() => {
-                      const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
-                      if (!item) return null;
-                      // Head Physio sees the session count only — never the price.
-                      // The Treatment Fee amount is derived server-side from
-                      // sessions_override and shown to Branch Admin at fee collection.
-                      const weeks = weeksFromPackageName(item.name);
-                      const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
-                      const totalSessions = weeks && perWeek ? weeks * perWeek : 0;
-                      return (
-                        <div className="mt-2 rounded-md border border-slate-200 bg-white p-3" data-testid="cons-decision-package-summary">
-                          <p className="text-sm font-semibold text-slate-800">{item.name}{weeks ? ` · ${weeks} week${weeks > 1 ? "s" : ""}` : ""}</p>
-                          <div className="mt-2">
-                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions / week</label>
-                            <div className="flex flex-wrap gap-1.5" data-testid="cons-decision-sessions-per-week">
-                              {[1, 2, 3, 4, 5, 6, 7].map((n) => {
-                                const selected = perWeek === n;
-                                return (
-                                  <button
-                                    key={n}
-                                    type="button"
-                                    onClick={() => setDecisionDraft((p) => ({ ...p, sessionsPerWeek: String(n) }))}
-                                    className={`h-8 w-8 rounded-md border text-xs font-semibold transition ${
-                                      selected ? "border-sky-500 bg-sky-500 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                                    }`}
-                                    data-testid={`cons-decision-sessions-per-week-${n}`}
-                                  >
-                                    {n}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-total-sessions">
-                              {!weeks
-                                ? <span className="text-amber-600">Couldn't read a week count from this package's name.</span>
-                                : !perWeek
-                                ? "Choose sessions per week"
-                                : (
-                                  <>
-                                    {perWeek} session{perWeek > 1 ? "s" : ""} Weekly × {weeks} Week{weeks > 1 ? "s" : ""} = <span className="text-sm font-semibold text-slate-800">{totalSessions} Total Sessions</span>
-                                  </>
-                                )}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })()}
                   </div>
                   <Button
                     size="sm"
