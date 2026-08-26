@@ -263,6 +263,12 @@ const DIET_KINDS = [
   { key: "dietChart", field: "diet_chart", label: "Diet Chart" },
 ];
 
+// A store item's name, reduced to the letters in it. The branch types these by hand, so
+// "Diet Chart", "diet chart " and "Diet-Chart" all have to arrive at one key -- the same
+// reasoning jobKey uses for department names on the HR side, and for the same reason: a
+// stray space or bracket must not turn one product into two.
+const normDietName = (name) => String(name || "").toLowerCase().replace(/[^a-z]+/g, "");
+
 /**
  * The two diet fees, and every place their wording and their fields differ.
  *
@@ -279,6 +285,8 @@ const DIET_KINDS = [
 const DIET_FEE_KINDS = {
   consultation: {
     label: "Diet Consultation Fee",
+    // The product on the shelf this fee is collected against. See dietItemFor.
+    product: "Diet Consultation",
     receiptPrefix: "DIET",
     paidField: "diet_fee_paid",
     itemField: "diet_package_id",
@@ -289,6 +297,7 @@ const DIET_FEE_KINDS = {
   },
   chart: {
     label: "Diet Chart Fee",
+    product: "Diet Chart",
     receiptPrefix: "DIETCHART",
     paidField: "diet_chart_fee_paid",
     itemField: "diet_chart_package_id",
@@ -297,6 +306,39 @@ const DIET_FEE_KINDS = {
     packageModeField: "diet_chart_package_mode",
     testid: "diet-chart-fee",
   },
+};
+
+/**
+ * Which product on the Diet shelf a given fee is for.
+ *
+ * By name, because nothing else on a store item says. Both products sit under Diet Package,
+ * both carry the same category, and item_type cannot tell them apart either — what
+ * separates a Diet Consultation from a Diet Chart is only what the branch typed when they
+ * priced it.
+ *
+ * Exact match first, then a containing one, so "Diet Chart Package" still resolves. The two
+ * names cannot cross-match, since neither contains the other.
+ *
+ * The last resort is the shelf holding exactly one product — but only where that product is
+ * not plainly the OTHER one. A branch that has priced a Diet Chart and nothing else must not
+ * have its price quoted as the Diet Consultation Fee just for being the only row there;
+ * that is the guess this is meant to avoid, and it would be quoting one product's price
+ * under the other's name.
+ *
+ * Nothing matched returns null, and the card shows "—" rather than a figure it cannot stand
+ * behind. This panel is what Branch Admin reads to take money.
+ */
+const pickDietItem = (items, kind) => {
+  const want = normDietName(DIET_FEE_KINDS[kind]?.product);
+  if (!want) return null;
+  const named = (items || []).map((i) => [normDietName(i.name), i]);
+  const find = (n) => named.find(([name]) => name === n)?.[1] || named.find(([name]) => name.includes(n))?.[1] || null;
+
+  const hit = find(want);
+  if (hit) return hit;
+  if ((items || []).length !== 1) return null;
+  const other = normDietName(DIET_FEE_KINDS[kind === "chart" ? "consultation" : "chart"]?.product);
+  return find(other) ? null : items[0];
 };
 
 // "Consultation" first always, then whichever add-ons are on — same shape read back from
@@ -2304,41 +2346,43 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // ---- Diet Consultation Fee (Branch Admin) ----
   const dietItemById = (id) => dietItems.find((i) => i.id === id);
+
+  const dietItemFor = useCallback((kind) => pickDietItem(dietItems, kind), [dietItems]);
+
+  /** The price this patient would be quoted for one diet product, at their own mode. */
+  const dietPriceOf = useCallback((item) => {
+    if (!item) return null;
+    const mode = selectedLead?.package_mode || selectedLead?.appointment_mode || "offline";
+    const price = mode === "online" ? item.price_online : item.price_offline;
+    return price != null ? Number(price) : null;
+  }, [selectedLead]);
   // Which of the two fees the popup is currently taking. Falls back to the consultation so
   // a draft saved before `kind` existed still opens as the fee it was.
   const dietFeeCfg = DIET_FEE_KINDS[dietFeeDraft?.kind] || DIET_FEE_KINDS.consultation;
 
   /**
-   * What to quote for the Diet Fee before it has been collected.
+   * What to quote for each diet fee before it has been collected.
    *
-   * The lead only carries diet_package_price once the fee is actually taken — the package
-   * is chosen at collection. So this falls back to the store, and only when there is
-   * exactly one Diet package priced: with several, any single number would be a guess at
-   * which one this patient is getting, and this panel is what Branch Admin reads to take
-   * money. Ambiguous means "—" and the real figure appears in the collect popup.
-   */
-  const dietFeeDue = useMemo(() => {
-    if (selectedLead?.diet_package_price != null) return Number(selectedLead.diet_package_price);
-    if (dietItems.length !== 1) return null;
-    const mode = selectedLead?.package_mode || selectedLead?.appointment_mode || "offline";
-    const price = mode === "online" ? dietItems[0].price_online : dietItems[0].price_offline;
-    return price != null ? Number(price) : null;
-  }, [selectedLead, dietItems]);
-  /**
-   * What to quote for the Diet Chart Fee before it has been collected.
+   * The lead only carries the price once the fee is actually taken — the package is named
+   * at collection — so until then it comes off the shelf, from the product that fee is for.
    *
-   * Same rule and same reasoning as dietFeeDue above, off the chart's own fields: quoted
-   * from the store only when there is exactly one diet product priced, because with several
-   * any single figure is a guess at which one this patient is getting, and this is the panel
-   * Branch Admin reads to take money.
+   * It used to quote only when the shelf held exactly one product, on the reasoning that
+   * any figure picked out of several was a guess. That was true while nothing could tell
+   * the products apart. Now that dietItemFor can, the shelf holding both of them is the
+   * normal case rather than the ambiguous one — and refusing to quote there left both cards
+   * reading "—" for every branch that had priced its two products, which is all of them.
    */
-  const dietChartFeeDue = useMemo(() => {
-    if (selectedLead?.diet_chart_package_price != null) return Number(selectedLead.diet_chart_package_price);
-    if (dietItems.length !== 1) return null;
-    const mode = selectedLead?.package_mode || selectedLead?.appointment_mode || "offline";
-    const price = mode === "online" ? dietItems[0].price_online : dietItems[0].price_offline;
-    return price != null ? Number(price) : null;
-  }, [selectedLead, dietItems]);
+  const dietFeeDue = useMemo(() => (
+    selectedLead?.diet_package_price != null
+      ? Number(selectedLead.diet_package_price)
+      : dietPriceOf(dietItemFor("consultation"))
+  ), [selectedLead, dietItemFor, dietPriceOf]);
+
+  const dietChartFeeDue = useMemo(() => (
+    selectedLead?.diet_chart_package_price != null
+      ? Number(selectedLead.diet_chart_package_price)
+      : dietPriceOf(dietItemFor("chart"))
+  ), [selectedLead, dietItemFor, dietPriceOf]);
 
   const dietListPrice = (draft) => {
     const item = dietItemById(draft?.item_id);
@@ -2403,12 +2447,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.error("No Diet Package priced yet — add one in Services and Products > Diet Package.");
       return;
     }
+    // Off the list just loaded rather than off `dietItems`, which the setState above has
+    // not landed in yet on the first open.
+    const match = pickDietItem(items, kind);
+
     setDietFeeDraft({
       kind,
       // Re-collecting keeps whatever was chosen last time, so a correction doesn't
       // silently move the patient onto a different package. Read off this kind's own
       // fields: the chart and the consultation remember different packages.
-      item_id: selectedLead[cfg.itemField] || items[0].id,
+      //
+      // Otherwise it opens on the product this fee is actually for. It used to open on
+      // whichever item sorted first, for both fees — so collecting a Diet Chart Fee
+      // pre-selected the Diet Consultation, and one confirm without reading the dropdown
+      // put the money against the wrong product.
+      item_id: selectedLead[cfg.itemField] || match?.id || items[0].id,
       mode: selectedLead[cfg.packageModeField] || "offline",
       payment_mode: "cash",
       amount: "",
