@@ -361,6 +361,13 @@ async def hp_consultation_decision(
         raise HTTPException(status_code=400, detail="Write the Diagnosis Report before Save & Move")
     if not (lead.get("treatment_summary") or "").strip():
         raise HTTPException(status_code=400, detail="Write the Treatment Summary before Save & Move")
+    # A Diet referral has to say which of the two it is for. Naming neither is an
+    # unfinished answer rather than a plainer referral: it leaves the question for whoever
+    # picks the patient up, which is the gap the two options were added to close.
+    if payload.diet_recommended and not (payload.diet_consultation or payload.diet_chart):
+        raise HTTPException(
+            status_code=400, detail="Pick Diet Consultation, Diet Chart, or both",
+        )
 
     # Completing a consultation moves BOTH pipelines at once: the lead closes out on the
     # Head Physio's board and appears on Branch Admin's Consultation Visit column, which

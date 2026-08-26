@@ -245,9 +245,8 @@ const CONSULTATION_ADDONS = [
  * Names only at this stage, deliberately. Each has a shelf waiting for it, so linking a
  * package to either is a field beside these rather than a rewrite of what is recorded.
  *
- * Neither is required. Diet on its own is the referral it has always been, which is what
- * every consultation saved before today carries, and it stays the flag the Nutrition
- * Coach's queue and the diet fee read.
+ * One of them is required once Diet is ticked, the same way a Treatment Package is once
+ * Treatment is. What stays optional is Diet itself.
  *
  * `key` is the draft's spelling, `field` the wire's. Both are written down here rather
  * than converted where they are used: addonsLabel is handed the raw draft in one place and
@@ -263,8 +262,9 @@ const DIET_KINDS = [
 // a saved lead (decisionSummaryOf) as from the draft mid-edit, so a label built one way
 // can never say something the other way wouldn't.
 //
-// Diet names which of the two where one was picked and stays plain "Diet" where neither
-// was, so the label never implies a question was answered that nobody answered.
+// Diet names which of the two was picked, and falls back to plain "Diet" for the
+// consultations recorded before naming one was required — they are still perfectly good
+// referrals, and a label is not the place to demand they be reopened.
 const dietLabels = ({ diet, dietConsultation, dietChart }) => {
   if (!diet) return [];
   const on = { dietConsultation, dietChart };
@@ -1273,6 +1273,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const submitConsultationDecision = async () => {
     if (!(selectedLead.physio_diagnosis_report || "").trim()) { toast.error("Write the Diagnosis Report first"); return; }
     if (!(selectedLead.treatment_summary || "").trim()) { toast.error("Write the Treatment Summary first"); return; }
+
+    // Ticking Diet without saying which is an unfinished answer, not a referral. Checked
+    // here as well as on the button, the way the Treatment Package is: the button being
+    // disabled explains nothing to somebody who got here another way, and the server
+    // refuses it regardless.
+    if (decisionDraft.diet && !decisionDraft.dietConsultation && !decisionDraft.dietChart) {
+      toast.error("Pick Diet Consultation, Diet Chart, or both");
+      return;
+    }
 
     // No add-on picked submits as a plain Consultation — that's a valid, common outcome
     // (the patient needs nothing further today), not an incomplete form. Only Treatment
@@ -3010,9 +3019,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const needsPackage = decisionDraft.treatment;
               const packageReady = !needsPackage
                 || (!!decisionDraft.item_id && !!selectedPackageWeeks && !!parseInt(decisionDraft.sessionsPerWeek, 10));
+              // Diet on its own is not an answer. Referring a patient without saying which
+              // of the two they are leaving with pushes the question to whoever picks the
+              // referral up, which is the gap this picker was added to close — so ticking
+              // Diet is what makes naming one of them required, exactly as ticking
+              // Treatment is what makes its package required.
+              const dietReady = !decisionDraft.diet
+                || !!decisionDraft.dietConsultation || !!decisionDraft.dietChart;
               // No add-on is a valid, completed choice on its own — a plain Consultation —
               // so nothing here requires at least one to be picked.
-              const canSave = diagnosisReady && summaryReady && packageReady;
+              const canSave = diagnosisReady && summaryReady && packageReady && dietReady;
 
               if (alreadyMoved) {
                 return (
@@ -3128,16 +3144,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
                   </div>
 
-                  {/* Which of the two the Diet referral is for, offered the moment Diet is
-                      ticked. Both may be on — a Nutritionist appointment and a chart to
-                      take home are two products, not two names for one — and neither is
-                      required: Diet on its own is the referral it has always been, and is
-                      what every consultation saved before today carries. */}
+                  {/* Which of the two the Diet referral is for, asked the moment Diet is
+                      ticked and required before this saves. Both may be on — a Nutritionist
+                      appointment and a chart to take home are two products, not two names
+                      for one — but neither being on is not an answer, and leaving it that
+                      way pushes the question to whoever picks the referral up. */}
                   {decisionDraft.diet && (
                     <div className="mb-3" data-testid="cons-decision-diet-kinds">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">
-                        Diet <span className="font-normal text-slate-400">(optional)</span>
-                      </label>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Diet</label>
                       <div className="flex flex-wrap gap-2">
                         {DIET_KINDS.map((k) => {
                           const selected = !!decisionDraft[k.key];
@@ -3160,6 +3174,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           );
                         })}
                       </div>
+                      {/* Says why Confirm & Save is greyed out, beside the thing that has
+                          to be answered. The hint at the top of the form names the
+                          Diagnosis Report and the Summary, so without this the button is
+                          disabled with everything it mentions already written. */}
+                      {!dietReady && (
+                        <p className="mt-1.5 text-[11px] font-medium text-amber-600" data-testid="cons-decision-diet-required">
+                          Pick Diet Consultation, Diet Chart, or both.
+                        </p>
+                      )}
                     </div>
                   )}
 
