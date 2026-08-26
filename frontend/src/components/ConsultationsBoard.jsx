@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2, Check } from "lucide-react";
+import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -3177,6 +3177,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 if (key === "diet") {
                   return (
                     <div data-testid="cons-decision-diet-kinds">
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Diet</label>
                       {/* Both may be on -- a Nutritionist appointment and a chart to take
                           home are two products, not two names for one -- but neither being
                           on is not an answer, and leaving it that way pushes the question to
@@ -3379,9 +3380,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 }
 
                 // Fitness, and anything added to the shelf later that carries no picker.
+                // Names itself, because the coloured edge is the only other thing marking
+                // this block and a colour on its own is not a label.
+                const addon = CONSULTATION_ADDONS.find((a) => a.key === key);
                 return (
                   <p className="text-xs text-slate-500" data-testid={`cons-decision-detail-none-${key}`}>
-                    Nothing to choose here — recorded as a referral.
+                    <span className="font-semibold text-slate-600">{addon?.label || key}</span>
+                    {" — nothing to choose here, recorded as a referral."}
                   </p>
                 );
               };
@@ -3469,109 +3474,80 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       Write the Diagnosis Report and Treatment Summary above before Save & Move.
                     </p>
                   )}
-                  {/* Two halves: what the patient is going away with, and what each of
-                      those things still needs decided.
-
-                      They were one column before, and the second half was the problem. Tick
-                      Treatment, Diet and Rehab and three unrelated pickers stacked up under
-                      the row, each headed by a small grey label, none of them saying which
-                      service it belonged to. The Consultant had to hold the mapping in their
-                      head while scrolling past it, and the row that started it all had
-                      scrolled off the top.
-
-                      Side by side, the shelf stays put while the detail changes beside it.
-                      Every ticked service gets a card in its own colour, headed with the
-                      same icon it carries on the left, so the answer to "what did I pick and
-                      what does it still need" is one glance rather than a scroll. */}
-                  <div className="mb-3 grid gap-4 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]" data-testid="cons-decision-split">
-                    {/* Left: the shelf.
-                        Five across until there is room for the split, which is exactly the
-                        row this replaced and the reasoning it was given — five equal columns
-                        for five choices of one kind, never wrapped, because one row reads as
-                        one group and two rows read as two. Once the split opens they become a
-                        single column, which is still one group and still unwrapped. */}
-                    <div>
-                      <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Services</label>
-                      <div className="grid grid-cols-5 gap-2 lg:grid-cols-1" data-testid="cons-decision-plan-options">
-                        {CONSULTATION_ADDONS.map((p) => {
-                          const selected = !!decisionDraft[p.key];
-                          const Icon = p.icon;
-                          return (
-                            <button
-                              key={p.key}
-                              type="button"
-                              // Turning Treatment off clears the package with it, so an
-                              // abandoned choice can't be submitted once the picker showing
-                              // it is gone.
-                              onClick={() => setDecisionDraft((d) => ({
-                                ...d,
-                                [p.key]: !d[p.key],
-                                ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
-                                ...(p.key === "rehab" && d.rehab ? { rehab_item_id: "" } : {}),
-                                ...(p.key === "zumba" && d.zumba ? { zumba_item_id: "" } : {}),
-                                ...(p.key === "diet" && d.diet ? { dietConsultation: false, dietChart: false } : {}),
-                              }))}
-                              className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[11px] font-semibold transition hover:brightness-95 sm:flex-row sm:gap-1.5 lg:justify-start lg:px-3 lg:py-2.5"
-                              style={selected
-                                ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
-                                : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
-                              data-testid={`cons-decision-plan-${p.key}`}
-                            >
-                              <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-                              <span className="truncate">{p.label}</span>
-                              {/* Only on the wide layout, where a column of rows has the
-                                  room for it and a tick is the quickest read of which are
-                                  on. The compact row says it with fill alone. */}
-                              {selected && <Check aria-hidden className="ml-auto hidden h-3.5 w-3.5 shrink-0 lg:block" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Right: what each ticked service still needs. */}
-                    <div>
-                      <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Selected Services</label>
-                      {selectedAddons.length === 0 ? (
-                        /* Not an error, and it must not look like one. No add-on is a
-                           complete, valid choice -- a plain Consultation -- and the form
-                           saves from here, so this says what will happen rather than what
-                           is missing. */
-                        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-6 text-center" data-testid="cons-decision-detail-empty">
-                          <p className="text-xs font-medium text-slate-500">Nothing selected yet</p>
-                          <p className="mt-1 text-[11px] text-slate-400">
-                            Saved as it stands, this is a plain Consultation. Tick a service to set it up.
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2.5">
-                          {selectedAddons.map((a) => {
-                            const Icon = a.icon;
-                            return (
-                              <div
-                                key={a.key}
-                                className="overflow-hidden rounded-lg border bg-white"
-                                style={{ borderColor: `${a.tone}44` }}
-                                data-testid={`cons-decision-detail-${a.key}`}
-                              >
-                                {/* Headed in the service's own colour with the icon it
-                                    carries on the left, so a card and its chip are read as
-                                    one thing rather than matched up by name. */}
-                                <div
-                                  className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider"
-                                  style={{ background: `${a.tone}14`, color: a.tone }}
-                                >
-                                  <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-                                  {a.label}
-                                </div>
-                                <div className="p-3">{addonDetail(a.key)}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                  {/* Consultation itself needs no toggle — writing this form up is the
+                      consultation. These five are what else the patient is going away
+                      with, and any combination is valid, including none of them.
+                      Five equal columns: they are five choices of one kind, and widths that
+                      follow the length of the words rank them by how long their names
+                      happen to be. Never wrapped, for the reason the scrolling row it
+                      replaced was never wrapped either — one row reads as one group of
+                      choices, two rows read as two groups. The icon sits above the label
+                      until there is width for it alongside, so a narrow column shortens
+                      rather than clipping the word. */}
+                  <div className="mb-3">
+                    <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Also Going Away With</label>
+                    <div className="grid grid-cols-5 gap-2" data-testid="cons-decision-plan-options">
+                      {CONSULTATION_ADDONS.map((p) => {
+                        const selected = !!decisionDraft[p.key];
+                        const Icon = p.icon;
+                        return (
+                          <button
+                            key={p.key}
+                            type="button"
+                            // Turning Treatment off clears the package with it, so an
+                            // abandoned choice can't be submitted once the picker showing
+                            // it is gone.
+                            onClick={() => setDecisionDraft((d) => ({
+                              ...d,
+                              [p.key]: !d[p.key],
+                              ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
+                              ...(p.key === "rehab" && d.rehab ? { rehab_item_id: "" } : {}),
+                              ...(p.key === "zumba" && d.zumba ? { zumba_item_id: "" } : {}),
+                              ...(p.key === "diet" && d.diet ? { dietConsultation: false, dietChart: false } : {}),
+                            }))}
+                            className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[11px] font-semibold transition hover:brightness-95 sm:flex-row sm:gap-1.5"
+                            style={selected
+                              ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
+                              : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
+                            data-testid={`cons-decision-plan-${p.key}`}
+                          >
+                            <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{p.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
+
+                  {/* What each ticked service still needs, under the row that ticked it.
+                      One block per service, in the shelf's own order, so the blocks read
+                      down in the order the chips read across.
+
+                      A coloured left edge and nothing else. Ticking a service used to open a
+                      headed card naming it again, which is a whole line and a tinted bar
+                      spent repeating the word already lit up in the row above — and with one
+                      service picked, most of the panel was the space where the other four
+                      cards would have gone. The edge ties a block to its chip; the label
+                      inside already says which service in words, so the colour is never
+                      carrying that on its own.
+
+                      Nothing ticked renders nothing at all. No add-on is a complete, valid
+                      choice — a plain Consultation — and an empty placeholder is a hole in
+                      the form where the commonest answer should simply take up no room. */}
+                  {selectedAddons.length > 0 && (
+                    <div className="mb-3 space-y-2" data-testid="cons-decision-details">
+                      {selectedAddons.map((a) => (
+                        <div
+                          key={a.key}
+                          className="rounded-r-lg border-l-2 bg-slate-50/70 px-3 py-2.5"
+                          style={{ borderLeftColor: a.tone }}
+                          data-testid={`cons-decision-detail-${a.key}`}
+                        >
+                          {addonDetail(a.key)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <Button
                     size="sm"
                     className="mt-4 h-9 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
