@@ -1100,6 +1100,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
   const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, dietConsultation: false, dietChart: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
+  // Which service's picker is open over the form, by addon key, or null for none.
+  // The pickers used to stack down the form, one block per ticked service, which is what
+  // pushed Confirm below the fold and made picking a second service a scroll. Only one is
+  // ever being answered at a time, so only one is ever on screen.
+  const [addonPicker, setAddonPicker] = useState(null);
   // The confirmation shown after a decision saves, and the flag that reopens the form
   // behind it. Both clear when the popup moves to another lead.
   const [decisionReceipt, setDecisionReceipt] = useState(null);
@@ -1315,6 +1320,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, dietChart: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
     setDecisionReceipt(null);
     setEditingDecision(false);
+    setAddonPicker(null);
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -3161,6 +3167,75 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // disagree about what is selected.
               const selectedAddons = CONSULTATION_ADDONS.filter((a) => decisionDraft[a.key]);
 
+              // Whether ticking a service opens a picker at all. Fitness has nothing to
+              // decide, so clicking it selects and stops there rather than opening a popup
+              // whose only content is a line saying there is nothing in it.
+              const hasPicker = (key) => key !== "fitness";
+
+              // Taking a service off clears whatever was picked under it, so an abandoned
+              // choice can't be submitted once the picker holding it is gone.
+              const clearAddon = (key) => {
+                setDecisionDraft((d) => ({
+                  ...d,
+                  [key]: false,
+                  ...(key === "treatment" ? { item_id: "", sessionsPerWeek: "" } : {}),
+                  ...(key === "rehab" ? { rehab_item_id: "" } : {}),
+                  ...(key === "zumba" ? { zumba_item_id: "" } : {}),
+                  ...(key === "diet" ? { dietConsultation: false, dietChart: false } : {}),
+                }));
+                setAddonPicker((cur) => (cur === key ? null : cur));
+              };
+
+              // Ticking a service is the same act as asking what it should be, so the
+              // picker opens with it, and clicking a service already on is how you get
+              // back to that picker. Nothing here turns a service off: removal is the ×
+              // on its row in Selected, beside the choice actually being thrown away.
+              const pickAddon = (key) => {
+                if (!decisionDraft[key]) setDecisionDraft((d) => ({ ...d, [key]: true }));
+                if (hasPicker(key)) setAddonPicker(key);
+              };
+
+              /**
+               * What one ticked service reads as in the Selected column: the choice in
+               * words, and whether it is still missing something.
+               *
+               * Read off the same draft the pickers write to, so a row can never name a
+               * package that was cleared. `incomplete` is the condition Confirm is
+               * disabled on, said on the row it belongs to -- with the pickers behind a
+               * popup, a form greyed out over an unanswered question would otherwise have
+               * nothing on screen saying which question.
+               */
+              const addonSummary = (key) => {
+                if (key === "treatment") {
+                  const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+                  if (!item) return { text: "Choose a package", incomplete: true };
+                  const weeks = weeksFromPackageName(item.name);
+                  const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
+                  if (!perWeek) return { text: `${item.name} — choose sessions/week`, incomplete: true };
+                  return {
+                    text: `${item.name} · ${perWeek}/week${weeks ? ` · ${weeks * perWeek} sessions` : ""}`,
+                    incomplete: false,
+                  };
+                }
+                if (key === "diet") {
+                  const kinds = DIET_KINDS.filter((k) => decisionDraft[k.key]).map((k) => k.label);
+                  if (!kinds.length) return { text: "Pick Consultation, Chart, or both", incomplete: true };
+                  return { text: kinds.join(" + "), incomplete: false };
+                }
+                if (key === "rehab" || key === "zumba") {
+                  const items = key === "rehab" ? rehabPackageItems : zumbaPackageItems;
+                  const id = key === "rehab" ? decisionDraft.rehab_item_id : decisionDraft.zumba_item_id;
+                  const item = items.find((i) => i.id === id);
+                  // Optional on both, so no package is an answer rather than a gap.
+                  if (!item) return { text: "No package", incomplete: false };
+                  const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                  const unit = key === "zumba" ? "classes" : "sessions";
+                  return { text: `${item.name}${count ? ` · ${count} ${unit}` : ""}`, incomplete: false };
+                }
+                // Fitness, and anything added to the shelf later that carries no picker.
+                return { text: "Referral only", incomplete: false };
+              };
+
               /**
                * What one ticked service still needs decided.
                *
@@ -3477,77 +3552,158 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   {/* Consultation itself needs no toggle — writing this form up is the
                       consultation. These five are what else the patient is going away
                       with, and any combination is valid, including none of them.
-                      Five equal columns: they are five choices of one kind, and widths that
-                      follow the length of the words rank them by how long their names
-                      happen to be. Never wrapped, for the reason the scrolling row it
-                      replaced was never wrapped either — one row reads as one group of
-                      choices, two rows read as two groups. The icon sits above the label
-                      until there is width for it alongside, so a narrow column shortens
-                      rather than clipping the word. */}
-                  <div className="mb-3">
-                    <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Also Going Away With</label>
-                    <div className="grid grid-cols-5 gap-2" data-testid="cons-decision-plan-options">
-                      {CONSULTATION_ADDONS.map((p) => {
-                        const selected = !!decisionDraft[p.key];
-                        const Icon = p.icon;
-                        return (
-                          <button
-                            key={p.key}
-                            type="button"
-                            // Turning Treatment off clears the package with it, so an
-                            // abandoned choice can't be submitted once the picker showing
-                            // it is gone.
-                            onClick={() => setDecisionDraft((d) => ({
-                              ...d,
-                              [p.key]: !d[p.key],
-                              ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
-                              ...(p.key === "rehab" && d.rehab ? { rehab_item_id: "" } : {}),
-                              ...(p.key === "zumba" && d.zumba ? { zumba_item_id: "" } : {}),
-                              ...(p.key === "diet" && d.diet ? { dietConsultation: false, dietChart: false } : {}),
-                            }))}
-                            className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[11px] font-semibold transition hover:brightness-95 sm:flex-row sm:gap-1.5"
-                            style={selected
-                              ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
-                              : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
-                            data-testid={`cons-decision-plan-${p.key}`}
-                          >
-                            <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{p.label}</span>
-                          </button>
-                        );
-                      })}
+
+                      Two columns: the shelf on the left, what has actually been chosen on
+                      the right, and the pickers themselves over the form in a popup. They
+                      used to unroll under the shelf, one block per ticked service, so a
+                      patient going away with three things meant three stacked pickers and
+                      a Confirm button below all of them — picking the third service was a
+                      scroll past the answers to the first two. Only one service is ever
+                      being answered at a time, so only one picker is ever on screen, and
+                      the form stays the height of its two short columns. */}
+                  <div className="mb-3 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Services</label>
+                      {/* A column rather than the row of five this was, so each service
+                          lines up with its own answer opposite and the words are never
+                          squeezed to a fifth of half the panel. */}
+                      <div className="space-y-1.5" data-testid="cons-decision-plan-options">
+                        {CONSULTATION_ADDONS.map((p) => {
+                          const selected = !!decisionDraft[p.key];
+                          const Icon = p.icon;
+                          return (
+                            <button
+                              key={p.key}
+                              type="button"
+                              onClick={() => pickAddon(p.key)}
+                              className="flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold transition hover:brightness-95"
+                              style={selected
+                                ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
+                                : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
+                              data-testid={`cons-decision-plan-${p.key}`}
+                            >
+                              <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{p.label}</span>
+                              {selected && <CheckCircle2 aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* The answers, one row per ticked service, in the shelf's own order so
+                        the rows read down in the order the services read down opposite. A
+                        row is the way back into its picker; the × beside it is the only way
+                        a service comes off, which puts removing one next to the choice
+                        being thrown away rather than on the chip that turned it on. */}
+                    <div>
+                      <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Selected Services</label>
+                      {selectedAddons.length === 0 ? (
+                        /* No add-on is a complete, valid choice — a plain Consultation —
+                           so this says what saving now would do rather than reading as a
+                           panel still waiting to be filled. */
+                        <p
+                          className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-[11px] text-slate-400"
+                          data-testid="cons-decision-selected-empty"
+                        >
+                          Nothing else picked — saves as a plain Consultation.
+                        </p>
+                      ) : (
+                        <div className="space-y-1.5" data-testid="cons-decision-details">
+                          {selectedAddons.map((a) => {
+                            const summary = addonSummary(a.key);
+                            return (
+                              <div
+                                key={a.key}
+                                className="flex items-center gap-1.5 rounded-r-lg border-l-2 bg-slate-50/70 py-1.5 pl-2.5 pr-1.5"
+                                style={{ borderLeftColor: a.tone }}
+                                data-testid={`cons-decision-detail-${a.key}`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => pickAddon(a.key)}
+                                  disabled={!hasPicker(a.key)}
+                                  className="min-w-0 flex-1 text-left disabled:cursor-default"
+                                  data-testid={`cons-decision-selected-${a.key}`}
+                                >
+                                  <span className="block text-[11px] font-semibold" style={{ color: a.tone }}>{a.label}</span>
+                                  <span
+                                    className={`block truncate text-[11px] ${summary.incomplete ? "font-medium text-rose-600" : "text-slate-600"}`}
+                                    title={summary.text}
+                                  >
+                                    {summary.text}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => clearAddon(a.key)}
+                                  className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+                                  title={`Remove ${a.label}`}
+                                  data-testid={`cons-decision-remove-${a.key}`}
+                                >
+                                  <X aria-hidden className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* What each ticked service still needs, under the row that ticked it.
-                      One block per service, in the shelf's own order, so the blocks read
-                      down in the order the chips read across.
-
-                      A coloured left edge and nothing else. Ticking a service used to open a
-                      headed card naming it again, which is a whole line and a tinted bar
-                      spent repeating the word already lit up in the row above — and with one
-                      service picked, most of the panel was the space where the other four
-                      cards would have gone. The edge ties a block to its chip; the label
-                      inside already says which service in words, so the colour is never
-                      carrying that on its own.
-
-                      Nothing ticked renders nothing at all. No add-on is a complete, valid
-                      choice — a plain Consultation — and an empty placeholder is a hole in
-                      the form where the commonest answer should simply take up no room. */}
-                  {selectedAddons.length > 0 && (
-                    <div className="mb-3 space-y-2" data-testid="cons-decision-details">
-                      {selectedAddons.map((a) => (
-                        <div
-                          key={a.key}
-                          className="rounded-r-lg border-l-2 bg-slate-50/70 px-3 py-2.5"
-                          style={{ borderLeftColor: a.tone }}
-                          data-testid={`cons-decision-detail-${a.key}`}
-                        >
-                          {addonDetail(a.key)}
+                  {/* One service's picker, over the form. Rendered from inside the same
+                      block that built addonDetail, so the popup can never open on a service
+                      the form has since had turned off — it closes itself instead. */}
+                  {addonPicker && (() => {
+                    const a = CONSULTATION_ADDONS.find((x) => x.key === addonPicker);
+                    if (!a || !decisionDraft[addonPicker]) return null;
+                    const Icon = a.icon;
+                    return (
+                      <div
+                        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+                        onClick={(e) => { if (e.target === e.currentTarget) setAddonPicker(null); }}
+                        data-testid="cons-decision-picker-modal"
+                      >
+                        <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+                          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                            <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: a.tone }}>
+                              <Icon aria-hidden className="h-4 w-4" /> {a.label}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setAddonPicker(null)}
+                              className="rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                              data-testid="cons-decision-picker-close"
+                            >
+                              <X aria-hidden className="h-4 w-4" />
+                            </button>
+                          </div>
+                          {/* The pickers themselves, unchanged — same bodies, same test
+                              ids, drawn here instead of down the form. */}
+                          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{addonDetail(addonPicker)}</div>
+                          <div className="flex shrink-0 justify-between gap-2 border-t border-slate-100 px-4 py-3">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
+                              onClick={() => clearAddon(addonPicker)}
+                              data-testid="cons-decision-picker-remove"
+                            >
+                              Remove {a.label}
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="h-8 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
+                              onClick={() => setAddonPicker(null)}
+                              data-testid="cons-decision-picker-done"
+                            >
+                              Done
+                            </Button>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    );
+                  })()}
                   <Button
                     size="sm"
                     className="mt-4 h-9 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
