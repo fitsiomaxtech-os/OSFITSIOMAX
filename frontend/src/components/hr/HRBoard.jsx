@@ -1655,8 +1655,9 @@ const GROUP_TONE = {
  *                  one answer about the whole set, not as a list of every branch.
  *   each branch  — in the order Branches & Verticals keeps them, so these sit in the same
  *                  order as the picker that writes them.
- *   Online Mode  — not a gap. The mode has no branch at all (see modeHasBranch), so these
- *                  are filed under the answer they gave rather than under one they didn't.
+ *   Online Mode  — only where the install runs no online branch at all. An online desk is
+ *                  otherwise filed under the online branches themselves, above, in their
+ *                  own place in that order rather than in a group after it.
  *   No branch    — the only real gap, and last, because it is the one to act on.
  *
  * A branch id nothing matches — a branch deleted out from under the record — reads as no
@@ -1664,13 +1665,31 @@ const GROUP_TONE = {
  */
 const branchGroupsOf = (holders, branches) => {
   const known = new Map(branches.map((b) => [b.id, b.branch_name]));
+  // The arm an online desk works, read off the branch's own vertical — the same prefix
+  // Branches & Verticals tags a branch's mode with.
+  const onlineBranches = branches.filter((b) => isOnlineVertical(b.vertical));
   const buckets = new Map();
   const push = (key, label, emp) => {
     if (!buckets.has(key)) buckets.set(key, { key, label, employees: [] });
     buckets.get(key).employees.push(emp);
   };
   holders.forEach((emp) => {
-    if (!modeHasBranch(emp.work_type)) { push(ONLINE_GROUP, ONLINE_MODE_LABEL, emp); return; }
+    if (!modeHasBranch(emp.work_type)) {
+      // Under every online branch, not one: the record cannot say which, because Work Type
+      // clears the branch on the way to Online, and the arm is not one place anyway. An
+      // online consultant takes the online physio arm's calls and the online fitness
+      // arm's, exactly as _consultants_for_vertical in backend/routers/v3_config.py
+      // already has it — that split is online against offline and never physio against
+      // fitness, so the practice is not a wall between these two and they are not filed
+      // as though it were.
+      //
+      // The mode's own heading is what is left when the install has no online branch to
+      // file them under. Without it they would be dropped from a screen that is the only
+      // place their designation is listed.
+      if (onlineBranches.length === 0) { push(ONLINE_GROUP, ONLINE_MODE_LABEL, emp); return; }
+      onlineBranches.forEach((b) => push(b.id, b.branch_name, emp));
+      return;
+    }
     // Both halves of the record, because either can carry the answer alone: a
     // single-branch desk has only branch_id, and list_employees fills that one in from the
     // linked account where the employee row was left blank.
@@ -1701,6 +1720,13 @@ const alsoAtLabel = (emp, branches, branchId) => {
   // from what the heading just said, and under Online Mode it contradicts it outright,
   // reading a branch off a record whose mode is the reason there is no branch to read.
   if (branchId === ALL_BRANCHES || branchId === ONLINE_GROUP || branchId === NO_BRANCH_GROUP) return "";
+  // And never for an online desk, which is now filed under the online branches themselves
+  // rather than under that group — so the group key alone stopped being enough to catch
+  // this. The branches it would read are the ones on the linked LOGIN, which list_employees
+  // fills in and which for a consultant are the rooms their diary serves. Printing "also at
+  // Parrys" beneath a heading naming the online arm says they are in a room, which going
+  // Online is precisely the answer that they are not.
+  if (!modeHasBranch(emp.work_type)) return "";
   const others = [...new Set((emp.branch_ids || []).filter(
     (b) => b && b !== ALL_BRANCHES && b !== branchId && branches.some((x) => x.id === b),
   ))];
