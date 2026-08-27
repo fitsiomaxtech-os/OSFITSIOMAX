@@ -1623,7 +1623,90 @@ const PickerModal = ({
 
 // ---------- Department & Designation ----------
 
+// The two answers that are not a branch, keyed so they can sit in the same map as the ones
+// that are. Shaped like ALL_BRANCHES for the same reason it is: no branch id looks like
+// this, so a real branch can never collide with one of them.
+const ONLINE_GROUP = "__online__";
+const NO_BRANCH_GROUP = "__none__";
 
+// The two that are not a posting to a place, said in the colours the branch badge used
+// before these were headings: violet for a mode that has no branch, amber for the gap.
+// Everything else is a branch and reads as one.
+const GROUP_TONE = {
+  [ONLINE_GROUP]: "text-violet-600",
+  [NO_BRANCH_GROUP]: "text-amber-700",
+};
+
+/** Who holds a designation, filed under the branch each of them works.
+ *
+ * One entry per branch a person covers, not one per person: a Physio working Anna Nagar
+ * and T Nagar is at both, and a screen answering "who works here" that listed them under
+ * only the first would be wrong at the second. So the group totals can sum past the count
+ * on the designation above them — that badge counts people, these count postings, and the
+ * difference is the multi-branch desks being shown honestly rather than a miscount.
+ *
+ * Four kinds of answer, in the order they read:
+ *
+ *   All Branches — a posting, and the widest one, so it comes before any single branch.
+ *                  Not expanded into every group: repeating one person under all of them
+ *                  would bury the people actually at each, which is what the groups are
+ *                  for. It is also what the record says — covering everything is stored as
+ *                  one answer about the whole set, not as a list of every branch.
+ *   each branch  — in the order Branches & Verticals keeps them, so these sit in the same
+ *                  order as the picker that writes them.
+ *   Online Mode  — not a gap. The mode has no branch at all (see modeHasBranch), so these
+ *                  are filed under the answer they gave rather than under one they didn't.
+ *   No branch    — the only real gap, and last, because it is the one to act on.
+ *
+ * A branch id nothing matches — a branch deleted out from under the record — reads as no
+ * branch, which is what it now is.
+ */
+const branchGroupsOf = (holders, branches) => {
+  const known = new Map(branches.map((b) => [b.id, b.branch_name]));
+  const buckets = new Map();
+  const push = (key, label, emp) => {
+    if (!buckets.has(key)) buckets.set(key, { key, label, employees: [] });
+    buckets.get(key).employees.push(emp);
+  };
+  holders.forEach((emp) => {
+    if (!modeHasBranch(emp.work_type)) { push(ONLINE_GROUP, ONLINE_MODE_LABEL, emp); return; }
+    // Both halves of the record, because either can carry the answer alone: a
+    // single-branch desk has only branch_id, and list_employees fills that one in from the
+    // linked account where the employee row was left blank.
+    const ids = [...new Set([...(emp.branch_ids || []), emp.branch_id].filter(Boolean))];
+    if (ids.includes(ALL_BRANCHES)) { push(ALL_BRANCHES, "All Branches", emp); return; }
+    const posted = ids.filter((id) => known.has(id));
+    if (posted.length === 0) { push(NO_BRANCH_GROUP, "No branch", emp); return; }
+    posted.forEach((id) => push(id, known.get(id), emp));
+  });
+  const order = [ALL_BRANCHES, ...branches.map((b) => b.id), ONLINE_GROUP, NO_BRANCH_GROUP];
+  return order.map((k) => buckets.get(k)).filter(Boolean);
+};
+
+/** What else somebody covers, said from inside one branch's group.
+ *
+ * The heading names the branch, so the row does not repeat it. But a desk covering three
+ * branches, shown under one of them with nothing else said, reads as posted there and
+ * nowhere else — and the badge this replaced was the only place that fact appeared.
+ *
+ * Named while there is one other and counted past that, the same rule list_employees uses
+ * for the row's own label in backend/routers/v3_hr.py: one name is the answer somebody
+ * wants and still fits on the line, where four would be truncated into something that
+ * reads like a single branch.
+ */
+const alsoAtLabel = (emp, branches, branchId) => {
+  // Only ever said from inside a real branch. The other three groups are answers about the
+  // whole set rather than one place — "also at Anna Nagar" under All Branches subtracts
+  // from what the heading just said, and under Online Mode it contradicts it outright,
+  // reading a branch off a record whose mode is the reason there is no branch to read.
+  if (branchId === ALL_BRANCHES || branchId === ONLINE_GROUP || branchId === NO_BRANCH_GROUP) return "";
+  const others = [...new Set((emp.branch_ids || []).filter(
+    (b) => b && b !== ALL_BRANCHES && b !== branchId && branches.some((x) => x.id === b),
+  ))];
+  if (others.length === 0) return "";
+  if (others.length === 1) return `also at ${branches.find((b) => b.id === others[0]).branch_name}`;
+  return `also at ${others.length} others`;
+};
 
 const StructureTab = ({ meta, reloadMeta }) => {
   const [depts, setDepts] = useState([]);
@@ -2078,73 +2161,93 @@ const StructureTab = ({ meta, reloadMeta }) => {
                     </div>
 
                     {open && (
-                      <div className="space-y-1.5 border-t border-slate-100 bg-white px-3 py-2" data-testid={`hr-structure-holders-${name}`}>
-                        {holders.map((emp) => (
-                          <div key={emp.id} className="flex flex-wrap items-center gap-2 rounded-md border border-slate-100 px-2.5 py-1.5">
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-slate-800">{emp.full_name}</p>
-                              <p className="truncate text-[11px] text-slate-500">{emp.employee_code || "—"}</p>
-                            </div>
-                            <WorkModeToggle
-                              value={emp.work_type}
-                              disabled={movingEmployee === emp.id}
-                              onPick={(m) => setWorkMode(emp, m)}
-                              testid={`hr-structure-mode-${emp.id}`}
-                            />
-                            {/* Nothing is said here now that the mode has two answers and the
-                                toggle beside it shows which. The slot stays so the branch
-                                column keeps its position down the list. */}
-                            <span className="w-2 shrink-0" />
-                            {/* Said as a word before it is offered as a control: the branch
-                                is the fact being read, and a bare dropdown makes somebody
-                                open it to find out what it already says. Amber when there
-                                is none, because an unposted employee is a gap rather than a
-                                neutral state.
+                      <div className="space-y-3 border-t border-slate-100 bg-white px-3 py-2" data-testid={`hr-structure-holders-${name}`}>
+                        {branchGroupsOf(holders, branches).map((group) => (
+                          <div key={group.key} data-testid={`hr-structure-branch-group-${name}-${group.key}`}>
+                            {/* The branch says itself once, over its people, instead of once
+                                on every row — which is the whole of this grouping: the eye
+                                reads a heading and then a list, where a column of badges
+                                had to be read line by line to find who works where.
 
-                                One width for every row. These are right-aligned against the
-                                buttons, so a badge sized to its own text left a ragged edge
-                                running down the list — "ECR Branch" starting an inch further
-                                right than "Anna Nagar Branch" — and the eye reads that as
-                                two columns rather than one. */}
-                            <span
-                              className={`w-40 shrink-0 truncate rounded px-2 py-0.5 text-center text-[11px] font-semibold ${
-                                !modeHasBranch(emp.work_type)
-                                  ? "bg-violet-50 text-violet-600"
-                                  : emp.branch_name ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"
-                              }`}
-                              title={!modeHasBranch(emp.work_type) ? "Works online, so not posted to a branch" : (emp.branch_name || "No branch")}
-                              data-testid={`hr-structure-branch-${emp.id}`}
-                            >
-                              {!modeHasBranch(emp.work_type) ? ONLINE_MODE_LABEL : (emp.branch_name || "No branch")}
-                            </span>
-                            {/* Nothing to change where the mode has no branch. A control that
-                                opened a picker whose every answer would be cleared again on
-                                the next save would be offering a choice that does not exist.
-                                A fixed slot so the Edit button stays in its column either way. */}
-                            <span className="w-[4.75rem] shrink-0">
-                              {modeHasBranch(emp.work_type) && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 w-full text-[11px] font-medium text-slate-600"
-                                  disabled={movingEmployee === emp.id}
-                                  onClick={() => setBranchPickerFor(emp)}
-                                  aria-label={`Change branch for ${emp.full_name}`}
-                                  data-testid={`hr-structure-branch-change-${emp.id}`}
-                                >
-                                  Change
-                                </Button>
-                              )}
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 shrink-0 text-[11px]"
-                              onClick={() => { setEditingEmployee(emp); setPendingDesignation(name); setShowAddEmployee(true); }}
-                              data-testid={`hr-structure-edit-${emp.id}`}
-                            >
-                              <Pencil className="mr-1 h-3 w-3" /> Edit
-                            </Button>
+                                Counted here as well as on the designation above, and the
+                                two count different things: that badge is people, this is
+                                the size of one posting. See branchGroupsOf. */}
+                            <div className="mb-1 flex items-center gap-2 px-0.5">
+                              <span
+                                className={`shrink-0 truncate text-[11px] font-bold uppercase tracking-wider ${GROUP_TONE[group.key] || "text-sky-700"}`}
+                                title={group.key === ONLINE_GROUP ? "Works online, so not posted to a branch" : group.label}
+                              >
+                                {group.label}
+                              </span>
+                              {/* A rule out to the count, so a short branch name and a long
+                                  one still carry the eye to the same place. */}
+                              <span className="h-px flex-1 bg-slate-100" />
+                              <span className="shrink-0 text-[10px] font-bold text-slate-400">{group.employees.length}</span>
+                            </div>
+                            <div className="space-y-1.5">
+                              {group.employees.map((emp) => (
+                                <div key={emp.id} className="flex flex-wrap items-center gap-2 rounded-md border border-slate-100 px-2.5 py-1.5">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-medium text-slate-800">{emp.full_name}</p>
+                                    <p className="truncate text-[11px] text-slate-500">{emp.employee_code || "—"}</p>
+                                  </div>
+                                  <WorkModeToggle
+                                    value={emp.work_type}
+                                    disabled={movingEmployee === emp.id}
+                                    onPick={(m) => setWorkMode(emp, m)}
+                                    testid={`hr-structure-mode-${emp.id}-${group.key}`}
+                                  />
+                                  {/* Nothing is said here now that the mode has two answers and the
+                                      toggle beside it shows which. The slot stays so the branch
+                                      column keeps its position down the list. */}
+                                  <span className="w-2 shrink-0" />
+                                  {/* Where else this person works, and nothing at all for the
+                                      many who work only here — the heading above has already
+                                      said where "here" is, and repeating it on every row is
+                                      what the grouping is replacing.
+
+                                      One width for every row regardless, empty or not. These
+                                      are right-aligned against the buttons, so a slot sized to
+                                      its own text left a ragged edge running down the list and
+                                      the eye reads that as two columns rather than one. */}
+                                  <span
+                                    className="w-32 shrink-0 truncate text-right text-[11px] font-medium text-slate-400"
+                                    title={emp.branch_name || ""}
+                                    data-testid={`hr-structure-branch-${emp.id}-${group.key}`}
+                                  >
+                                    {alsoAtLabel(emp, branches, group.key)}
+                                  </span>
+                                  {/* Nothing to change where the mode has no branch. A control that
+                                      opened a picker whose every answer would be cleared again on
+                                      the next save would be offering a choice that does not exist.
+                                      A fixed slot so the Edit button stays in its column either way. */}
+                                  <span className="w-[4.75rem] shrink-0">
+                                    {modeHasBranch(emp.work_type) && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 w-full text-[11px] font-medium text-slate-600"
+                                        disabled={movingEmployee === emp.id}
+                                        onClick={() => setBranchPickerFor(emp)}
+                                        aria-label={`Change branch for ${emp.full_name}`}
+                                        data-testid={`hr-structure-branch-change-${emp.id}-${group.key}`}
+                                      >
+                                        Change
+                                      </Button>
+                                    )}
+                                  </span>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 shrink-0 text-[11px]"
+                                    onClick={() => { setEditingEmployee(emp); setPendingDesignation(name); setShowAddEmployee(true); }}
+                                    data-testid={`hr-structure-edit-${emp.id}-${group.key}`}
+                                  >
+                                    <Pencil className="mr-1 h-3 w-3" /> Edit
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         ))}
                         {holders.length === 0 && (
