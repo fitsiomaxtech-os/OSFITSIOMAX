@@ -47,18 +47,46 @@ async def _branch_consultation_visit_stage() -> str:
 async def _resolve_hp_doctor(user: V3UserOut, branch_id: Optional[str] = None) -> Optional[dict]:
     """Find the doctors record for the logged-in head physio/consultant.
 
-    A Head Physio has exactly one, branchless record — they cover the whole organisation —
-    so their own user_id resolves it outright. `branch_id` is only used by a Super Admin
-    driving a specific branch's board, where there is no head-physio login to match on."""
-    doctor = await v3_col("doctors").find_one(
-        {"user_id": user.id, "profile_type": "head_physio"},
-        {"_id": 0},
-    )
-    if doctor:
-        return doctor
+    A Head Physio is SUPPOSED to have exactly one, branchless record — they cover the whole
+    organisation — so their own user_id ought to resolve it outright. In practice they can
+    end up with more than one: several paths mint these records, and consolidate_head_physio_doctors
+    in seed.py exists because they have.
+
+    find_one against that is a coin toss, and every screen a consultant has rides on the
+    answer. Their patients are the appointments carrying this record's id and their calendar
+    is its slots, so landing on the empty twin shows a consultant with a full book an empty
+    board, and nothing on screen says why. That is not a hypothetical: it is what "I moved
+    the patient to the consultant and the consultant cannot see them" looks like from the
+    inside.
+
+    So every record is read and the one holding the work is chosen: the one with
+    appointments against it, else the one with published slots, else the oldest, which is
+    the one the others were duplicated from. Read-only — nothing is merged or deleted here,
+    because throwing away a record with bookings on it is not a repair a page load should
+    be making.
+
+    `branch_id` is only used by a Super Admin driving a specific branch's board, where there
+    is no head-physio login to match on.
+    """
+    mine = await v3_col("doctors").find(
+        {"user_id": user.id, "profile_type": "head_physio"}, {"_id": 0},
+    ).to_list(50)
+    if mine:
+        if len(mine) == 1:
+            return mine[0]
+        ids = [d["id"] for d in mine]
+        # Which of them anything is actually booked against. distinct rather than a count
+        # per record: one query, and the question is only ever "does this one hold any".
+        busy = set(await v3_col("appointments").distinct("doctor_id", {"doctor_id": {"$in": ids}}))
+        mine.sort(key=lambda d: (
+            0 if d["id"] in busy else 1,
+            0 if (d.get("slots") or []) else 1,
+            str(d.get("created_at") or ""),
+        ))
+        return mine[0]
     if user.role == "super_admin":
-        doctor = await v3_col("doctors").find_one({"profile_type": "head_physio"}, {"_id": 0})
-    return doctor
+        return await v3_col("doctors").find_one({"profile_type": "head_physio"}, {"_id": 0})
+    return None
 
 
 @router.get("/head-physio/resolved")

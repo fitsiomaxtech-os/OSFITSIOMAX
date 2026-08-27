@@ -702,7 +702,7 @@ async def team_roster_experts(branch_id: str, profile_type: str) -> list:
     # carries the list and holds branch_id as no more than the first of them.
     rows = await v3_col("users").find(
         {"$or": [{"branch_id": branch_id}, {"branch_ids": branch_id}], "is_active": {"$ne": False}},
-        {"_id": 0, "id": 1, "full_name": 1, "role": 1},
+        {"_id": 0, "id": 1, "full_name": 1, "role": 1, "employee_id": 1},
     ).to_list(500)
     members = [u for u in rows if holds((u.get("role") or "").strip().lower())]
 
@@ -724,6 +724,40 @@ async def team_roster_experts(branch_id: str, profile_type: str) -> list:
         # Stood-down records dropped before the fullest is chosen, not after. Choosing first
         # and checking second would lose somebody whose richest record happens to be the
         # retired one while a live record of theirs sits right behind it.
+        if not found:
+            # Nothing under their login — but that is not the same as nothing at all. A
+            # record can exist for this person carrying no user_id: the profile-only entries
+            # Fitsiomax Experts creates have none, and several older paths wrote one without
+            # linking the account. Creating a second beside it is the worst outcome
+            # available, and it is the one this did until now: the appointments already
+            # booked stay on the unlinked record while every "my own" screen resolves the
+            # new empty one, so a consultant with patients opens a board with none.
+            #
+            # So it is adopted instead — the link written on, the record kept whole with its
+            # slots and its bookings.
+            #
+            # Only on an unambiguous match, the same bar _consultant_login_without_a_link
+            # in routers/v3_hr.py sets for the same kind of repair. The employee they were
+            # hired as is proof; a name is not, so a name is accepted only when exactly one
+            # unlinked record answers to it. A shared name is left alone rather than
+            # guessed at, because the wrong guess hands one person's diary to their
+            # namesake.
+            orphan_query: Dict[str, object] = {"profile_type": profile_type, "user_id": {"$in": [None, ""]}}
+            if profile_type != "head_physio":
+                orphan_query["branch_id"] = branch_id
+            orphans = await v3_col("doctors").find(orphan_query, {"_id": 0}).to_list(200)
+            name = str(u.get("full_name") or "").strip().lower()
+            mine = [d for d in orphans if u.get("employee_id") and d.get("employee_id") == u["employee_id"]]
+            if not mine and name:
+                mine = [d for d in orphans if str(d.get("full_name") or "").strip().lower() == name]
+            if len(mine) == 1:
+                found = mine
+                await v3_col("doctors").update_one(
+                    {"id": mine[0]["id"]},
+                    {"$set": {"user_id": u["id"], **({"employee_id": u["employee_id"]} if u.get("employee_id") else {})}},
+                )
+                found[0]["user_id"] = u["id"]
+
         live = [d for d in found if d.get("is_active") is not False and d.get("branch_active") is not False]
         live.sort(key=lambda d: len(d.get("slots") or []), reverse=True)
         if not live and found:
