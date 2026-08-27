@@ -25,8 +25,18 @@ const blank = {
   expected_consultation_date: "", branch_id: "",
 };
 
-export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchId = null }) => {
-  const [form, setForm] = useState(branchId ? { ...blank, branch_id: branchId } : blank);
+/**
+ * @param lockedDepartment One of DEPARTMENT_OPTIONS' values, fixing the Department instead
+ *   of offering it. Passed by a board that finds its own leads by the vertical this field
+ *   decides — an online arm's — where leaving it open would let somebody file a lead into
+ *   another arm from a board that then could not show it back to them.
+ */
+export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchId = null, lockedDepartment = null }) => {
+  const [form, setForm] = useState({
+    ...blank,
+    ...(branchId ? { branch_id: branchId } : {}),
+    ...(lockedDepartment ? { department: lockedDepartment } : {}),
+  });
   const [extraFields, setExtraFields] = useState({});
   const [customFields, setCustomFields] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -100,7 +110,17 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Patient Details</p>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Department">
-                <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.department} onChange={(e) => set("department", e.target.value)} data-testid="lead-create-department">
+                {/* Shown rather than hidden where it is fixed: the department decides which
+                    board the lead lands on, and that is worth saying out loud on the form
+                    that decides it. Disabled, not removed, so the answer is still read. */}
+                <select
+                  className={`h-10 w-full rounded-md border border-slate-200 px-3 text-sm ${lockedDepartment ? "bg-slate-100 text-slate-500" : ""}`}
+                  value={form.department}
+                  disabled={!!lockedDepartment}
+                  title={lockedDepartment ? "Set by the board you are creating this lead from" : undefined}
+                  onChange={(e) => set("department", e.target.value)}
+                  data-testid="lead-create-department"
+                >
                   <option value="">Select Department</option>
                   {DEPARTMENT_OPTIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
                 </select>

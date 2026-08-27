@@ -48,6 +48,7 @@ import {
   scheduleBranchAppointment,
   getBranches,
   getBranchBoard,
+  getArmBoard,
   getAvailableExperts,
   getAvailableDates,
   getLeadActivity,
@@ -344,6 +345,20 @@ const ROOM_ONLY_TABS = ["zumba", "fitness"];
 const ONLINE_BRANCH_ADMIN_ROLES = ["online_physio_admin", "online_fitness_admin"];
 const runsWithoutARoom = (role) => ONLINE_BRANCH_ADMIN_ROLES.includes(String(role || "").trim().toLowerCase());
 
+// Which Department a lead created on one of those boards is. Pinned rather than left to
+// the dropdown, because the arm board finds its leads by their vertical and the vertical
+// is derived from this field — so a lead entered here with the Department left blank would
+// be saved as offline physiotherapy and vanish from the board that created it. That is the
+// same disappearance this whole path is fixing, one step further along.
+//
+// Kept in step with DEPARTMENT_OPTIONS and VERTICAL_MAP in components/CreateLeadModal.jsx,
+// and through them with ONLINE_ARM_PRACTICE in backend/deps.py, which is what reads the
+// vertical back.
+const ARM_DEPARTMENT = {
+  online_physio_admin: "online_physio",
+  online_fitness_admin: "online_fitness",
+};
+
 /**
  * Does this lead belong under that consultation stage chip?
  *
@@ -560,19 +575,31 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // on every tab, and the board it belongs to is only mounted while somebody is looking
   // at it.
 
+  // Whether this board is scoped to an arm rather than to a branch. An online admin has no
+  // branch_id — an online arm is not a branch record and its leads carry a vertical instead
+  // of a branch — so asking /branch-board for branch "" is asking for nothing, which is
+  // what this board did and why both online admins saw an empty table with no explanation.
+  const armScoped = runsWithoutARoom(currentUser?.role);
+
   const loadBoard = useCallback(async () => {
-    if (!branchId) return null;
+    // Only a branch board needs a branch. Returning here used to be silent, which is how an
+    // admin with no branch got "No patients yet." — the table's empty state standing in for
+    // an answer to a question the board had never asked.
+    if (!branchId && !armScoped) {
+      setBoardData({ noScope: true });
+      return null;
+    }
     setLoading(true);
     let data = null;
     try {
-      data = await getBranchBoard(branchId);
+      data = armScoped ? await getArmBoard() : await getBranchBoard(branchId);
       setBoardData(data);
     } catch (error) {
       toast.error(error?.response?.data?.detail || "Failed to load branch board");
     }
     setLoading(false);
     return data;
-  }, [branchId]);
+  }, [branchId, armScoped]);
 
   // The two hand-made marks on a row: VIP, and needs attention. Patched into the list in
   // place rather than reloading the board — this is a click on one row of a list that can
@@ -1093,6 +1120,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           ) : (
           <>
 
+          {/* An answer where the table would otherwise show its own empty state.
+              "No patients yet." is what a board says when it asked and nothing came back;
+              a board with no branch and no arm never asked, and saying "yet" there sends
+              somebody looking for leads that were never going to arrive. */}
+          {boardData.noScope && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" data-testid="branch-board-no-scope">
+              This account is not posted to a branch, so there is no list to show. Ask your
+              HR Admin to set the branch on it under HR → Credentials.
+            </div>
+          )}
+
           {/* Phone list — six columns can't be read at 430px whichever way they're sized,
               so below md the same rows are stacked as cards instead of being pushed off
               the side of a horizontally-scrolling table. */}
@@ -1437,6 +1475,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         <CreateLeadModal
           isSuperAdmin={false}
           branchId={branchId}
+          // Fixed to this arm's own department where the board is an arm's — see
+          // ARM_DEPARTMENT. Null everywhere else, which leaves the field as it was.
+          lockedDepartment={ARM_DEPARTMENT[String(currentUser?.role || "").trim().toLowerCase()] || null}
           onClose={() => setShowCreateLead(false)}
           onSaved={loadBoard}
         />

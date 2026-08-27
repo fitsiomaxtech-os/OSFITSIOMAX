@@ -5,9 +5,12 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, normalize_slot_time, generate_patient_number
-from deps import v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role
+from deps import (
+    v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role,
+    vertical_names_an_arm,
+)
 from constants import V3_STAGES
-from stage_utils import first_branch_stage_for_branch
+from stage_utils import first_branch_stage_for, first_branch_stage_for_branch
 import lead_control
 from schemas.v3 import (
     V3UserOut, V3LeadCreate, V3LeadUpdate, V3LeadOut,
@@ -69,7 +72,18 @@ async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_requir
     # A lead created directly against a branch (e.g. a walk-in added by Super Admin/Branch
     # Admin) must land on the branch's own New Lead stage too, same as sheet/Meta-imported
     # leads — otherwise it has a branch_id but no branch_stage and never shows on that board.
-    branch_stage = await first_branch_stage_for_branch(payload.branch_id, "New Appointment") if payload.branch_id else None
+    if payload.branch_id:
+        branch_stage = await first_branch_stage_for_branch(payload.branch_id, "New Appointment")
+    elif vertical_names_an_arm(payload.vertical):
+        # An online arm's lead has no branch and never will — the arm is not a branch record
+        # — but it is worked on a board with the same stage strip, so it needs the same
+        # opening or it arrives counted under All Stages and under no stage at all. The
+        # arm's board runs at Pre-Sales control (no branch of its own means nobody has said
+        # otherwise — see _board_payload in routers/v3_branch_admin.py), so it opens where a
+        # Pre-Sales-fed branch opens.
+        branch_stage = await first_branch_stage_for(lead_control.PRE_SALES, "New Appointment")
+    else:
+        branch_stage = None
     patient_number = await generate_patient_number(payload.branch_id) if payload.branch_id else None
     lead = {
         "id": str(uuid.uuid4()),

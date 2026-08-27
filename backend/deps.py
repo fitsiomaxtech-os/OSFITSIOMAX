@@ -1,5 +1,6 @@
 from fastapi import Depends, Header, HTTPException
-from typing import Dict
+from typing import Dict, Optional
+import re
 from database import db, v2_col, v3_col
 from schemas.v1 import AuthUser
 from schemas.v2 import V2UserOut
@@ -120,6 +121,65 @@ def is_branch_admin_role(role: str) -> bool:
     in the company.
     """
     return (role or "").strip().lower() in BRANCH_ADMIN_ROLES
+
+
+# The two admins who run an arm rather than a place, and the practice each one runs.
+#
+# Every other Branch Admin is scoped by user.branch_id. These two are not scoped by
+# anything: an online arm is not a branch record, its leads are created with no branch at
+# all (see CreateLeadModal in the frontend, which offers the branch picker only for the two
+# offline departments), and the branch a lead has is the only thing /branch-board filters
+# on. So both of these boards asked for the leads of branch "" and were answered with
+# nothing, for as long as the roles have existed.
+#
+# What an online lead does carry is its vertical, so that is what their board is scoped by.
+ONLINE_ARM_PRACTICE = {
+    "online_physio_admin": "physio",
+    "online_fitness_admin": "fitness",
+}
+
+# What each practice is called in the wild. `vertical` is not a controlled field — a lead
+# imported from a sheet carries whatever that sheet's column said, and this install already
+# holds "Meta", "referral", "AD" and "whatsapp" in it alongside the real ones. So a set of
+# tokens rather than a literal: "online_fitness" and "online_fitness_gym" are one arm, and
+# "online_physiotherapy" and "online_physio" are the other.
+PRACTICE_TOKENS = {
+    "physio": frozenset({"physio", "physiotherapy"}),
+    "fitness": frozenset({"fitness", "gym"}),
+}
+
+
+def online_arm_practice(role: str) -> Optional[str]:
+    """Which online arm this role runs, or None for everybody else.
+
+    None is the answer for a plain branch_admin too, and deliberately: they have a branch,
+    and an arm-scoped board would show them every online lead in the company.
+    """
+    return ONLINE_ARM_PRACTICE.get((role or "").strip().lower())
+
+
+def vertical_in_arm(vertical: str, practice: str) -> bool:
+    """Whether a lead's `vertical` puts it in one online arm.
+
+    Both halves have to say so. "online" alone cannot answer, because both arms are online
+    and the fitness admin must not be handed the physio arm's patients; the practice token
+    alone cannot either, because "offline_fitness" would then read as the online arm.
+
+    Tokenised on whole words, like _names_the_online_arm in routers/v3_config.py, so a
+    value merely containing the letters cannot pass for the arm.
+    """
+    tokens = set(re.split(r"[^a-z0-9]+", str(vertical or "").strip().lower()))
+    return "online" in tokens and bool(tokens & PRACTICE_TOKENS.get(practice, frozenset()))
+
+
+def vertical_names_an_arm(vertical: str) -> bool:
+    """Whether a vertical puts a lead on either online arm's board.
+
+    For the callers that need to know a lead is arm-worked without caring which arm — the
+    manual-lead endpoint, which has to give it the same opening stage that board's strip
+    starts at.
+    """
+    return any(vertical_in_arm(vertical, practice) for practice in PRACTICE_TOKENS)
 
 
 # Roles that are a Physio under another name, on the same footing as BRANCH_ADMIN_ROLES

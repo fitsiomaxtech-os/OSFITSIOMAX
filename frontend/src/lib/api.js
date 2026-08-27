@@ -164,6 +164,10 @@ export const moveLeadStage = async (leadId, payload) => (await api.post(`/leads/
 export const bookAppointment = async (leadId, payload) => (await api.post(`/leads/${leadId}/book-appointment`, payload)).data;
 
 export const getBranchBoard = async (branchId) => (await api.get(`/branch-board/${branchId}`)).data;
+// The same board for an admin who runs an online arm instead of a branch. Takes no
+// argument on purpose: the arm is read off the caller's own role server-side, so there is
+// nothing here for one arm's admin to point at the other's patients.
+export const getArmBoard = async () => (await api.get("/arm-board")).data;
 export const moveBranchStage = async (leadId, payload) => (await api.post(`/leads/${leadId}/branch-stage`, payload)).data;
 export const schedulePortfolio = async (leadId, payload) => (await api.post(`/leads/${leadId}/schedule-portfolio`, payload)).data;
 export const scheduleBranchFollowUp = async (leadId, payload) => (await api.post(`/leads/${leadId}/branch-follow-up`, payload)).data;

@@ -9,7 +9,10 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, active_doctor_query
-from deps import v3_require_roles, is_head_physio_role, consultants_serving_branch
+from deps import (
+    v3_require_roles, v3_current_user, is_head_physio_role, consultants_serving_branch,
+    online_arm_practice, vertical_in_arm,
+)
 import lead_control
 from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
 from stage_utils import branch_stage_names_for_branch, get_first_stage_name
@@ -355,54 +358,101 @@ async def _stamp_session_progress(leads: list) -> None:
         lead["completed_sessions"] = found["done"]
 
 
+async def _board_payload(leads: list, branch_id: Optional[str]) -> dict:
+    """The Branch Leads response, from a list of leads somebody else has already chosen.
+
+    Split from the endpoint because there are two ways in now and they differ only in that
+    choice: a branch's board asks for the leads at one branch, and an online arm's asks for
+    the leads of one vertical, because an online arm is not a branch and its leads have
+    none — see ONLINE_ARM_PRACTICE in deps.py. Everything after that is the same board and
+    has to stay the same board, or the two would drift into disagreeing about what a stage
+    count means.
+
+    A None branch reads as Pre-Sales control throughout, which is what an arm wants and
+    what branch_lead_control already returns for it: no branch of its own means nobody has
+    said this desk runs its own leads.
+    """
+    await _stamp_session_progress(leads)
+    stage_counts = {}
+    branch_stages = await _branch_stages(branch_id)
+    for stage in branch_stages:
+        # The Leads pill mirrors the Pre-Sales pipeline, so it counts a lead against its
+        # `stage` — and only while that lead is still at the branch's opening, or one
+        # the branch has already moved on would go on being counted here as well as in
+        # the stage it was moved to. Every real branch stage counts on `branch_stage`.
+        mirrors = stage.get("mirrors_stage")
+        if mirrors:
+            unmoved = stage.get("unmoved_branch_stage")
+            matches = sum(
+                1 for lead in leads
+                if lead.get("stage") == mirrors and lead.get("branch_stage") == unmoved
+            )
+        else:
+            matches = sum(1 for lead in leads if lead.get("branch_stage") == stage["name"])
+        stage_counts[stage["name"]] = matches
+    # One malformed lead document shouldn't 500 the whole board — skip it and keep
+    # showing every other lead rather than failing the entire list.
+    lead_list = []
+    for lead in leads:
+        try:
+            lead_list.append(V3LeadOut(**lead))
+        except Exception as e:
+            logging.getLogger(__name__).error(f"branch-board: skipping unparseable lead {lead.get('id')}: {e}")
+    # The board tells the client which desk owns this branch's leads, so the Pre Sales
+    # tab appears and disappears on the same fetch as the leads it works on rather
+    # than needing a second round trip to /branches to find out.
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "lead_control": 1}) if branch_id else None
+    return {
+        "leads": [lead.model_dump() for lead in lead_list],
+        "stage_counts": stage_counts,
+        "lead_control": lead_control.normalize((branch or {}).get("lead_control")),
+        # Sent with the board rather than fetched separately from /stages, which has no
+        # branch to scope by: the stage strip must match the Lead Control on the same
+        # response, or a flipped branch briefly renders the other mode's stages.
+        "stages": branch_stages,
+    }
+
+
 @router.get("/branch-board/{branch_id}")
 async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     try:
         leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
-        await _stamp_session_progress(leads)
-        stage_counts = {}
-        branch_stages = await _branch_stages(branch_id)
-        for stage in branch_stages:
-            # The Leads pill mirrors the Pre-Sales pipeline, so it counts a lead against its
-            # `stage` — and only while that lead is still at the branch's opening, or one
-            # the branch has already moved on would go on being counted here as well as in
-            # the stage it was moved to. Every real branch stage counts on `branch_stage`.
-            mirrors = stage.get("mirrors_stage")
-            if mirrors:
-                unmoved = stage.get("unmoved_branch_stage")
-                matches = sum(
-                    1 for lead in leads
-                    if lead.get("stage") == mirrors and lead.get("branch_stage") == unmoved
-                )
-            else:
-                matches = sum(1 for lead in leads if lead.get("branch_stage") == stage["name"])
-            stage_counts[stage["name"]] = matches
-        # One malformed lead document shouldn't 500 the whole board — skip it and keep
-        # showing every other lead rather than failing the entire list.
-        lead_list = []
-        for lead in leads:
-            try:
-                lead_list.append(V3LeadOut(**lead))
-            except Exception as e:
-                logging.getLogger(__name__).error(f"branch-board: skipping unparseable lead {lead.get('id')}: {e}")
-        # The board tells the client which desk owns this branch's leads, so the Pre Sales
-        # tab appears and disappears on the same fetch as the leads it works on rather
-        # than needing a second round trip to /branches to find out.
-        branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "lead_control": 1})
-        return {
-            "leads": [lead.model_dump() for lead in lead_list],
-            "stage_counts": stage_counts,
-            "lead_control": lead_control.normalize((branch or {}).get("lead_control")),
-            # Sent with the board rather than fetched separately from /stages, which has no
-            # branch to scope by: the stage strip must match the Lead Control on the same
-            # response, or a flipped branch briefly renders the other mode's stages.
-            "stages": branch_stages,
-        }
+        return await _board_payload(leads, branch_id)
     except HTTPException:
         raise
     except Exception as e:
         logging.getLogger(__name__).exception("branch-board: failed to load")
         raise HTTPException(status_code=500, detail=f"branch-board error: {type(e).__name__}: {e}")
+
+
+@router.get("/arm-board")
+async def v3_arm_board(user: V3UserOut = Depends(v3_current_user)):
+    """Branch Leads for an admin who runs an online arm rather than a branch.
+
+    The arm is read off the caller's own role, not asked for in the URL. There are exactly
+    two of these boards and each role runs exactly one of them, so a parameter would only
+    be a way for the fitness admin to request the physio arm's patients.
+
+    Scoped on the lead's `vertical`, which is what an online lead carries instead of a
+    branch. Narrowed in the query on the "online" half and then decided properly in Python,
+    because `vertical` is not a controlled field — this install already holds "Meta",
+    "referral" and "whatsapp" in it — and a token test is the only honest reading of it.
+    See vertical_in_arm in deps.py.
+    """
+    practice = online_arm_practice(user.role)
+    if not practice:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    try:
+        rows = await v3_col("leads").find(
+            {"vertical": {"$regex": "online", "$options": "i"}}, {"_id": 0},
+        ).sort("updated_at", -1).to_list(20000)
+        leads = [r for r in rows if vertical_in_arm(r.get("vertical"), practice)]
+        return await _board_payload(leads, None)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.getLogger(__name__).exception("arm-board: failed to load")
+        raise HTTPException(status_code=500, detail=f"arm-board error: {type(e).__name__}: {e}")
 
 
 @router.post("/leads/{lead_id}/branch-stage")
