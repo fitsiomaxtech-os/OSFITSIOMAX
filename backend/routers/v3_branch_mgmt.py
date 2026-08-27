@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 import uuid
 
 from database import v3_col
-from utils import now_iso, derive_branch_code, active_doctor_query
+from utils import now_iso, derive_branch_code, active_doctor_query, live_branch_query
 from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_head_physio_role, is_diet_role, is_pre_sales_role, is_zumba_role, consultants_serving_branch, PHYSIO_ROLES, HEAD_PHYSIO_ROLES
 # The desks a Physio or Nutritionist can hold several of, and the doctors profile_type
 # each role keeps its calendar under. Imported from HR rather than restated so posting
@@ -260,7 +260,7 @@ async def branch_performance(branch_id: str, _: V3UserOut = Depends(v3_require_r
 
 @router.get("/performance-summary")
 async def performance_summary(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head"))):
-    branches = await v3_col("branches").find({}, {"_id": 0}).to_list(500)
+    branches = await v3_col("branches").find(live_branch_query(), {"_id": 0}).to_list(500)
     summary: List[Dict[str, Any]] = []
     for b in branches:
         bid = b["id"]

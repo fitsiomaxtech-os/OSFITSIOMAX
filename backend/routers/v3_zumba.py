@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from database import v3_col
 from deps import v3_current_user, is_branch_admin_role, is_zumba_role
 from schemas.v3 import V3UserOut
-from utils import now_iso
+from utils import now_iso, live_branch_query
 
 router = APIRouter(prefix="/api/v3")
 
@@ -505,7 +505,7 @@ async def _default_branch_id() -> Optional[str]:
     answers every time rather than whichever Mongo happened to return first.
     """
     wanted = _normalized(DEFAULT_ZUMBA_BRANCH_NAME)
-    rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    rows = await v3_col("branches").find(live_branch_query(), {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     rows.sort(key=lambda b: (b.get("branch_name") or "").lower())
     for row in rows:
         if _normalized(row.get("branch_name")) == wanted:

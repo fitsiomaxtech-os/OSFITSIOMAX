@@ -128,6 +128,38 @@ def normalize_slot_time(value: str) -> str:
 ACTIVE_DOCTOR = {"is_active": {"$ne": False}, "branch_active": {"$ne": False}}
 
 
+# A branch that has not been put in the trash.
+#
+# Archiving is how a branch is removed here — a soft delete, so its leads, its history and
+# its admin survive and Branch Manager > All Archives can put it back. What archiving did
+# NOT do until now was hide it: only /branch-mgmt filtered on this field, so an archived
+# branch went on appearing in the Operations picker, in the Create Lead form, on the
+# dashboards and in every finance and store breakdown — everywhere but the one screen it
+# was archived from.
+#
+# `$ne: True`, not `False`, for the same reason ACTIVE_DOCTOR above is `$ne: False`: every
+# branch created before this field existed has no such field at all, and a filter of
+# {"archived": False} would empty the branch list on the deploy that introduced it.
+LIVE_BRANCH = {"archived": {"$ne": True}}
+
+
+def live_branch_query(query: dict = None) -> dict:
+    """Add "not in the trash" to a `branches` query.
+
+    A helper rather than a spelled-out clause at each call site, exactly like
+    active_doctor_query below, and for exactly the same reason: there are two dozen of
+    those — the pickers, the dashboards, the finance breakdowns, the store's branch list,
+    HR's name map — and a list that forgets it offers a branch somebody has deleted.
+
+    Deliberately not applied to the find_one lookups that resolve a single branch by id.
+    Those answer "what is this record's branch called", and a lead or an appointment
+    written before the branch was archived still happened at it; blanking that name would
+    rewrite history rather than hide a choice. This hides the branch from every list it
+    could be *picked* from, which is what archiving it means.
+    """
+    return {**(query or {}), **LIVE_BRANCH}
+
+
 def active_doctor_query(query: dict = None) -> dict:
     """Add the still-with-us conditions to a `doctors` query.
 

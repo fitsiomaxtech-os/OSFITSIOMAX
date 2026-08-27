@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
 from database import v3_col
+from utils import live_branch_query
 from stage_utils import get_closing_stage_name
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES, V3_BRANCH_STAGES
@@ -95,7 +96,7 @@ async def v3_bd_summary(
 
     total_appointments = await v3_col("appointments").count_documents(appt_match)
     completed_appointments = await v3_col("appointments").count_documents({**appt_match, "status": "completed"})
-    total_branches = await v3_col("branches").count_documents({})
+    total_branches = await v3_col("branches").count_documents(live_branch_query())
     total_connections = await v3_col("sheet_connections").count_documents({})
 
     recent_leads = await v3_col("leads").find(lead_match, {"_id": 0}).sort("created_at", -1).to_list(10)
@@ -455,7 +456,7 @@ async def v3_dashboard_overview(
     finance/revenue-overview — leads/appointments/sessions carry no payment date of
     their own, activity log entries do. Pending Session Amount is the one field that
     ignores start_date/end_date — see the comment at its bucket for why."""
-    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
+    branches = await v3_col("branches").find(live_branch_query(), {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
     branch_by_id = {b["id"]: b for b in branches}
     physio_branches = [b for b in branches if b.get("vertical") == "offline_physiotherapy"]
     other_verticals = list(DASHBOARD_VERTICAL_LABELS.keys())
@@ -882,7 +883,7 @@ async def v3_dashboard_leads_trend(
     from February to April as though the month never happened.
     """
     branches = await v3_col("branches").find(
-        {"vertical": "offline_physiotherapy"}, {"_id": 0, "id": 1, "branch_name": 1}
+        live_branch_query({"vertical": "offline_physiotherapy"}), {"_id": 0, "id": 1, "branch_name": 1}
     ).to_list(500)
     if not branches:
         return {"months": [], "branches": []}
@@ -1207,7 +1208,7 @@ METRIC_ORDER = list(METRIC_DEFS.keys())
 
 
 async def _physio_branches() -> list:
-    rows = await v3_col("branches").find({}, {"_id": 0}).to_list(200)
+    rows = await v3_col("branches").find(live_branch_query(), {"_id": 0}).to_list(200)
     return [b for b in rows if b.get("vertical") == "offline_physiotherapy"]
 
 

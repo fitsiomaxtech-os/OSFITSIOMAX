@@ -5,7 +5,7 @@ import re
 import uuid
 
 from database import v3_col
-from utils import now_iso, normalize_slot_time, derive_branch_code, active_doctor_query
+from utils import now_iso, normalize_slot_time, derive_branch_code, active_doctor_query, live_branch_query
 from security import hash_password
 from deps import v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role, consultants_serving_branch
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
@@ -55,7 +55,7 @@ async def v3_delete_vertical(vertical_id: str, _: V3UserOut = Depends(v3_require
     if not row:
         raise HTTPException(status_code=404, detail="Service type not found")
     in_use = await v3_col("branches").find(
-        {"vertical": row.get("name")}, {"_id": 0, "branch_name": 1}
+        live_branch_query({"vertical": row.get("name")}), {"_id": 0, "branch_name": 1}
     ).to_list(20)
     if in_use:
         names = ", ".join(b.get("branch_name", "?") for b in in_use)
@@ -316,7 +316,7 @@ async def v3_delete_physio_type(physio_type_id: str, _: V3UserOut = Depends(v3_r
 
 @router.get("/branches", response_model=List[V3BranchOut])
 async def v3_get_branches(_: V3UserOut = Depends(v3_current_user)):
-    rows = await v3_col("branches").find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    rows = await v3_col("branches").find(live_branch_query(), {"_id": 0}).sort("created_at", -1).to_list(1000)
     return [V3BranchOut(**row) for row in rows]
 
 
