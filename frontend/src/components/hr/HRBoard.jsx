@@ -42,10 +42,10 @@ const PRACTICE_FITNESS = "fitness";
 const PRACTICE_BOTH = "both";
 const SERVICE_LABELS = { "": "Select", [PRACTICE_PHYSIO]: "Physio", [PRACTICE_FITNESS]: "Fitness", [PRACTICE_BOTH]: "Both" };
 
-// The other axis: which mode somebody works. Two answers, and only one of them is ever
-// chosen — Online. Not choosing it IS the other answer, so Offline needs no picking and
-// blank is not an unanswered field. Practice below keeps its own "both"; that one is a
-// real third answer, where a third mode was only ever the absence of a decision.
+// The other axis: which mode somebody works. Two answers, both pickable, and blank is not
+// a third one: it reads as Offline everywhere, so not choosing still lands on an answer.
+// Practice below keeps its own "both"; that one is a real third answer, where a third mode
+// was only ever the absence of a decision.
 const MODE_ONLINE = "online";
 const MODE_OFFLINE = "offline";
 const MODE_OPTIONS = [MODE_ONLINE, MODE_OFFLINE];
@@ -60,8 +60,8 @@ const MODE_LABELS = { [MODE_ONLINE]: "Online", [MODE_OFFLINE]: "Offline" };
  * is in, because the field was optional for as long as it has existed, and reading it as
  * anything other than "works in the room" would quietly reclassify the whole directory.
  *
- * So the question is only ever asked one way round. Online is the exception that has to be
- * chosen; everything else is the default, and the default is Offline.
+ * So the question has a default rather than a blank: Offline is everything that is not
+ * the word "online", whether it was picked outright or never answered.
  */
 const isOnlineMode = (mode) => mode === MODE_ONLINE;
 const modeValue = (mode) => (isOnlineMode(mode) ? MODE_ONLINE : MODE_OFFLINE);
@@ -1336,24 +1336,25 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
                   a branch's vertical — mode and practice — and Branch narrows on both, the
                   same split Branches & Verticals itself uses. Branch still waits for a Work
                   Type: it is meaningless before that. */}
-              {/* Only Online is offered. Leaving it on Select is not a gap — it is the
-                  other answer, and the field says so underneath rather than making anybody
-                  guess what blank commits them to. Starred and outlined because it decides
-                  whether the Branch field beside it appears at all, which is worth
-                  answering deliberately even though blank is allowed. */}
+              {/* Both answers are offered, the same two the directory's toggle offers.
+                  Leaving it on Select is still not a gap — blank reads as Offline, and the
+                  line underneath says so rather than making anybody guess what blank
+                  commits them to. Starred and outlined because it decides whether the
+                  Branch field beside it appears at all, which is worth answering
+                  deliberately even though blank is allowed. */}
               <Field label="Work Type *">
                 <Select
                   value={form.work_type}
                   onChange={changeWorkType}
-                  options={["", MODE_ONLINE]}
-                  labels={{ "": "Select", [MODE_ONLINE]: "Online" }}
+                  options={["", ...MODE_OPTIONS]}
+                  labels={{ "": "Select", ...MODE_LABELS }}
                   className={form.work_type ? "" : "border-amber-300 bg-amber-50"}
                   testid="hr-emp-worktype"
                 />
                 <p className="mt-1 text-[10px] text-slate-400">
                   {isOnlineMode(form.work_type)
                     ? "Works online, so no branch."
-                    : "Left blank means Offline — works in the room, at the branch below."}
+                    : "Offline — works in the room, at the branch below. Blank reads the same."}
                 </p>
               </Field>
               <Field label="Service">
