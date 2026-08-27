@@ -93,6 +93,20 @@ class V3DoctorServiceInput(BaseModel):
     service_type: str = ""
 
 
+class V3DoctorMeetLinkInput(BaseModel):
+    """The video room an expert takes their appointments in.
+
+    One link per expert, not one per appointment: a Meet room is reusable and the day is
+    already divided by the slots they published, so every patient booked with them can be
+    sent the same address. Nothing here generates it — the expert makes the room in their
+    own Google account and the branch records it.
+
+    Empty clears it, which is the state every expert starts in and the one an in-the-room
+    desk stays in.
+    """
+    meet_link: str = ""
+
+
 class V3PhysioTypeOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -189,6 +203,14 @@ class V3DoctorOut(BaseModel):
     # once. None means the default; a Head Physio is pinned to 1 whatever is stored.
     # See slot_capacity_of() in utils.py.
     slot_capacity: Optional[int] = None
+    # The expert's own video room, recorded on the calendar that publishes their days and
+    # sent to the patient when one of those days is booked.
+    #
+    # Declared, and not left to ride along on the stored record, because this model ignores
+    # extras: an undeclared field is dropped on the way out, so /doctors would answer
+    # without it however faithfully it was saved. service_type is the standing proof —
+    # stored, patched by its own endpoint, and invisible to every caller of this list.
+    meet_link: Optional[str] = ""
     # The working window this expert is rostered on (MANAGEMENT → TIME MANAGEMENT). The
     # name and both ends are resolved from the shift on read, not stored here, so editing
     # a shift's hours moves everyone on it — see shift_utils.attach_shifts.

@@ -9,6 +9,7 @@ import {
   Stethoscope,
   Trash2,
   Users,
+  Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
@@ -24,6 +25,7 @@ import {
   setDoctorSlotCapacity,
   getPhysioTypes,
   setDoctorService,
+  setDoctorMeetLink,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
 import { CenteredPicker } from "@/components/ui/milk-calendar";
@@ -368,11 +370,53 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     setSavingDayShift(false);
   };
 
+  // The video room this expert meets patients in, as typed. Held apart from the record so
+  // the field can be edited without every keystroke claiming to be saved, and so Save has
+  // something to compare against.
+  //
+  // Above selectDoctor, which sets it, for the reason the shift window above is: a const
+  // starts existing where it is written, and a handler reaching back up the file is the
+  // one arrangement that always works.
+  const [meetDraft, setMeetDraft] = useState("");
+  const [savingMeet, setSavingMeet] = useState(false);
+  const meetSaved = (selectedDoctor?.meet_link || "").trim();
+  const meetDirty = meetDraft.trim() !== meetSaved;
+
   const selectDoctor = (doc) => {
     setSelectedDoctor(doc);
     setSelectedDate(null);
     setSelectedDates([]);
     setPendingSlots([]);
+    // Their own room, not the last one that was typed. The field below is one input reused
+    // by everybody in the list, so without this it would open on the previous expert's
+    // link — which then reads as this expert's, and saves as theirs on the next click.
+    setMeetDraft(doc?.meet_link || "");
+  };
+
+  const saveMeetLink = async () => {
+    if (!selectedDoctor) return;
+    setSavingMeet(true);
+    try {
+      const res = await setDoctorMeetLink(selectedDoctor.id, meetDraft.trim());
+      // What the server made of it, not what was typed: a link entered without a scheme
+      // comes back with https on the front, and the field has to show the address that was
+      // actually stored rather than leave the reader believing they saved the other one.
+      const saved = res?.meet_link ?? meetDraft.trim();
+      setMeetDraft(saved);
+      // Both copies, the same way changeService patches them: the list card and the header
+      // read different objects, and reloading the board would close a day mid-publish.
+      // Every record of this person was written, so every row of theirs is patched.
+      const samePerson = (d) =>
+        d.id === selectedDoctor.id
+        || (selectedDoctor.user_id && d.user_id === selectedDoctor.user_id)
+        || (selectedDoctor.employee_id && d.employee_id === selectedDoctor.employee_id);
+      setSelectedDoctor((d) => (d ? { ...d, meet_link: saved } : d));
+      setDoctors((all) => all.map((d) => (samePerson(d) ? { ...d, meet_link: saved } : d)));
+      toast.success(saved ? `${selectedDoctor.full_name} meets at this link` : "Meeting link cleared");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save the meeting link");
+    }
+    setSavingMeet(false);
   };
 
   // If the store's duration arrives (or is changed) after a day was already filled in,
@@ -621,6 +665,73 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
             );
           })}
         </div>
+
+        {/* The expert's own video room, under the list that picked them and before the day
+            being opened on the right — the address a booking made out of that day will
+            carry, so it belongs to the person rather than to any one date.
+
+            One field for the list rather than one per row: it is per expert, but only the
+            selected expert's is ever being answered, and a column of eleven URL inputs is a
+            column nobody can read a name out of. Nothing at all until somebody is picked,
+            for the same reason the calendar beside it is empty until then. */}
+        {selectedDoctor && (
+          <div className="border-t border-slate-100 bg-slate-50/60 p-3" data-testid="doctor-meet-link-panel">
+            <label
+              htmlFor="doctor-meet-link"
+              className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400"
+            >
+              <Video className="h-3.5 w-3.5 text-violet-500" /> Google Meet link
+            </label>
+            <p className="mt-0.5 text-[10px] text-slate-400">
+              {selectedDoctor.full_name}&apos;s own room. Sent to the patient when a slot here is booked.
+            </p>
+            <div className="mt-2 flex items-center gap-1.5">
+              <input
+                id="doctor-meet-link"
+                // text, not url: a room is as often pasted in as "meet.google.com/abc-defg-hij"
+                // as with the scheme on the front, and type="url" marks that invalid while
+                // the server accepts it and puts the https on. inputMode still asks a phone
+                // keyboard for the URL layout.
+                type="text"
+                inputMode="url"
+                value={meetDraft}
+                onChange={(e) => setMeetDraft(e.target.value)}
+                // Enter saves, because this is one field with one button and reaching for
+                // the mouse to commit a line you have just finished typing is a step that
+                // exists only because nobody wired the key.
+                onKeyDown={(e) => { if (e.key === "Enter" && meetDirty && !savingMeet) saveMeetLink(); }}
+                placeholder="meet.google.com/abc-defg-hij"
+                disabled={savingMeet}
+                className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-[11px] text-slate-700 outline-none focus:border-violet-400 disabled:opacity-60"
+                data-testid="doctor-meet-link-input"
+              />
+              <Button
+                size="sm"
+                onClick={saveMeetLink}
+                disabled={savingMeet || !meetDirty}
+                className="h-8 shrink-0 bg-violet-600 px-2.5 text-[11px] hover:bg-violet-700"
+                data-testid="doctor-meet-link-save"
+              >
+                {savingMeet ? "..." : "Save"}
+              </Button>
+            </div>
+            {/* The saved room, openable, so whoever typed it can check it goes where they
+                meant before a patient is sent it. Only once it is saved and the field is
+                back in agreement with it — offering to open a half-typed line would open
+                the wrong room. */}
+            {meetSaved && !meetDirty && (
+              <a
+                href={meetSaved}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1.5 block truncate text-[10px] font-medium text-violet-600 hover:underline"
+                data-testid="doctor-meet-link-open"
+              >
+                Open {meetSaved.replace(/^https?:\/\//, "")}
+              </a>
+            )}
+          </div>
+        )}
       </div>
 
       {/* RIGHT PANEL — Calendar */}

@@ -592,7 +592,9 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    physio = await v3_col("doctors").find_one({"id": payload.physio_id}, {"_id": 0, "full_name": 1, "slot_details": 1})
+    physio = await v3_col("doctors").find_one(
+        {"id": payload.physio_id}, {"_id": 0, "full_name": 1, "slot_details": 1, "meet_link": 1}
+    )
     if not physio:
         raise HTTPException(status_code=404, detail="Physio not found")
 
@@ -674,6 +676,19 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             "slot_time": slot_time,
             "duration": duration,
             "notes": (payload.notes or "").strip(),
+            # The room as it stood when this was booked, copied onto the appointment rather
+            # than looked up through the expert whenever somebody opens it.
+            #
+            # Read off the expert's own record here, never off the payload: the link is
+            # about to be sent to a patient over the clinic's name, and a booking screen
+            # that could name the room would be a booking screen that could send a patient
+            # anywhere. The screen shows what this record says; it does not get to say it.
+            #
+            # Frozen on purpose. An expert who changes their room next month has not
+            # changed where the patients already told to join are going, and rewriting
+            # every past appointment to the new address would move a meeting that has
+            # already been arranged.
+            "meet_link": (physio.get("meet_link") or "").strip(),
             "status": "new_appointment",
             "appt_kind": "consultation",
             "created_by": user.full_name,

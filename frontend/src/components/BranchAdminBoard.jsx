@@ -35,6 +35,7 @@ import {
   PhoneOff,
   Music,
   Dumbbell,
+  Video,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -135,6 +136,11 @@ const apptRows = (a, { compact = false } = {}) => [
   compact ? null : ["Duration", `${a.duration} minutes`],
   compact ? null : ["CONSULTANT", a.headPhysio],
   a.branch ? ["Branch", a.branch] : null,
+  // Where an online appointment actually happens, so the sheet the patient keeps carries
+  // it as plainly as a branch name. Kept in the compact popup too, unlike Date and Time
+  // above: those are dropped because the card overhead already shouts them, and this one
+  // appears nowhere else on that screen.
+  a.meetLink ? ["Google Meet", a.meetLink] : null,
   ["Booked By", a.bookedBy],
 ];
 
@@ -211,8 +217,16 @@ const downloadApptCard = async (a, prebuilt) => {
 };
 
 /** The confirmation as a note to the patient — the day, the hours, the place, and a line
- *  telling them they're in hand. Short lines, because it is read on a phone in WhatsApp. */
+ *  telling them they're in hand. Short lines, because it is read on a phone in WhatsApp.
+ *
+ *  Where the appointment carries a meeting link, the place is that link and the message
+ *  says so instead of naming a branch. The two endings are exclusive on purpose rather
+ *  than the link being one more line on the old one: an address, a map pin and "arrive 10
+ *  minutes early" tell a patient to travel, and a patient told to travel to a video call
+ *  either goes to a branch that is not expecting them or reads the message as a mistake
+ *  and asks. The room is where they are being asked to be, so it is the only place named. */
 const apptMessage = (a) => {
+  const meet = (a.meetLink || "").trim();
   const lines = [
     `Hi ${a.patient},`,
     "",
@@ -220,9 +234,15 @@ const apptMessage = (a) => {
     weekdayLabel(a.date),
     `${to12h(a.time)} to ${endTime12h(a.time, a.duration)}`,
   ];
-  if (a.branch) lines.push(`at ${a.branch}`);
+  // Online is a mode, not a branch, so the branch line goes with the rest of the room.
+  if (a.branch && !meet) lines.push(`at ${a.branch}`);
+  if (meet) lines.push("online, on Google Meet");
   lines.push("", REASSURANCE, "— Team Fitsiomax", "", `CONSULTANT: ${a.headPhysio}`);
   if (a.notes) lines.push(`Notes: ${a.notes}`);
+  if (meet) {
+    lines.push("", "Join here:", meet, "", "Please join 5 minutes early.");
+    return lines.join("\n");
+  }
   if (a.branchAddress) lines.push("", `Location: ${a.branchAddress}`);
   if (a.mapLocation) lines.push(a.mapLocation);
   lines.push("", "Please arrive 10 minutes early.");
@@ -312,7 +332,7 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
   <hr>
   ${rowsHtml(apptRows(a))}
   ${a.notes ? `<div class="note"><b>Notes</b><br>${escapeHtml(a.notes)}</div>` : ""}
-  <div class="note">Please arrive 10 minutes early. To reschedule or cancel, contact the branch
+  <div class="note">${a.meetLink ? "Please join the meeting 5 minutes early." : "Please arrive 10 minutes early."} To reschedule or cancel, contact the branch
   quoting reference ${escapeHtml(a.refNo)}.</div>
   <hr>
   <div class="foot">This is a computer-generated confirmation and needs no signature.<br>Thank you for choosing FITSIOMAX.</div>
@@ -1764,6 +1784,15 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     [apptSlotsForExpert],
   );
 
+  // The chosen CONSULTANT's own record, and the room on it. available-experts answers with
+  // the whole expert row, so the link arrives with the list and choosing somebody reveals
+  // it without a second request.
+  const apptSelectedExpert = useMemo(
+    () => (apptDraft?.physio_id ? (apptExperts.experts || []).find((d) => d.id === apptDraft.physio_id) : null) || null,
+    [apptExperts.experts, apptDraft?.physio_id],
+  );
+  const apptMeetLink = (apptSelectedExpert?.meet_link || "").trim();
+
   useEffect(() => {
     if (!apptDraft || !apptDraft.appointment_date || !branchId) return;
     fetchAvailableExperts(branchId, apptDraft.appointment_date, lead.id);
@@ -2415,6 +2444,44 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     })}
                   </div>
                 )}
+
+                {/* The room the picked CONSULTANT meets in, under the choice that decides
+                    it. Read off their record — set in MANAGEMENT → CONSULTANT CALENDAR —
+                    rather than typed here: it is a fact about the expert, the same one
+                    every patient booked with them is sent, and a booking screen able to
+                    name the room would be a booking screen able to send a patient
+                    anywhere.
+
+                    Said before Confirm rather than only after it, because it is the half
+                    of an online appointment the branch cannot check afterwards. A
+                    consultant with no room recorded is the one case worth interrupting
+                    for: the confirmation is about to go out with nowhere in it. */}
+                {apptSelectedExpert && (
+                  apptMeetLink ? (
+                    <div className="mt-3 rounded-lg border-2 border-violet-200 bg-violet-50 p-3" data-testid="branch-appt-meet-link">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-violet-500">
+                        <Video className="h-3.5 w-3.5" /> Google Meet
+                      </p>
+                      <a
+                        href={apptMeetLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block break-all text-xs font-semibold text-violet-700 hover:underline"
+                        data-testid="branch-appt-meet-link-open"
+                      >
+                        {apptMeetLink.replace(/^https?:\/\//, "")}
+                      </a>
+                      <p className="mt-1.5 text-[10px] text-violet-500">Goes to the patient with the confirmation.</p>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-lg border-2 border-amber-200 bg-amber-50 p-3" data-testid="branch-appt-no-meet-link">
+                      <p className="text-xs font-semibold text-amber-800">No Google Meet link for this CONSULTANT.</p>
+                      <p className="mt-0.5 text-[10px] text-amber-700">
+                        The confirmation will go out without one. Add it in MANAGEMENT → CONSULTANT CALENDAR.
+                      </p>
+                    </div>
+                  )
+                )}
               </div>
 
               {/* STEP 3 — Time slot. Times come only from what the expert has actually
@@ -2579,6 +2646,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       time: apptDraft.appointment_time,
                       duration: apptDraft.duration || 30,
                       headPhysio: hp?.full_name || lead.assigned_physio_name || "—",
+                      // The room this was booked into. The server writes the same value
+                      // onto the appointment off the expert's own record, so what is
+                      // shared here is what the booking holds.
+                      meetLink: (hp?.meet_link || "").trim(),
                       notes: (apptDraft.notes || "").trim(),
                       bookedBy: "Branch Admin",
                     });
@@ -2652,15 +2723,20 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <dl className="mt-5 space-y-2 text-sm">
                 {apptRows(apptConfirm, { compact: true }).filter(Boolean).map(([k, v]) => (
                   <div key={k} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
-                    <dt className="text-slate-500">{k}</dt>
-                    <dd className="text-right font-semibold text-slate-700">{v}</dd>
+                    <dt className="shrink-0 text-slate-500">{k}</dt>
+                    {/* break-words and min-w-0 for the meeting link, which is one
+                        unbroken token long enough to push the row off its own card. */}
+                    <dd className="min-w-0 break-words text-right font-semibold text-slate-700">{v}</dd>
                   </div>
                 ))}
               </dl>
 
-              {/* The two standing instructions, same wording the printed sheet carries. */}
+              {/* The two standing instructions, same wording the printed sheet carries.
+                  The first of them is about travelling to a branch, so an appointment held
+                  in a video room is told to join early instead — the same swap apptMessage
+                  makes, and for the same reason: nobody arrives anywhere for this one. */}
               <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50/60 p-3 text-xs leading-relaxed text-teal-800" data-testid="branch-appt-confirm-note">
-                <p>Please arrive 10 minutes early.</p>
+                <p>{apptConfirm.meetLink ? "Please join the meeting 5 minutes early." : "Please arrive 10 minutes early."}</p>
                 <p>To reschedule or cancel, contact the branch quoting reference {apptConfirm.refNo}.</p>
               </div>
 

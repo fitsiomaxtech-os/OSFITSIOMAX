@@ -18,6 +18,7 @@ from schemas.v3 import (
     V3DoctorCreate, V3DoctorSlotsInput, V3DoctorOut,
     V3TreatmentTypeCreate, V3TreatmentTypeOut,
     V3PhysioTypeCreate, V3PhysioTypeOut, V3PhysioTypeUpdate, V3DoctorServiceInput,
+    V3DoctorMeetLinkInput,
 )
 
 router = APIRouter(prefix="/api/v3")
@@ -209,6 +210,87 @@ async def v3_set_doctor_service(
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Expert not found")
     return {"message": "Service updated", "service_type": name}
+
+
+def _clean_meet_link(raw) -> str:
+    """A meeting link the OS is willing to put in front of a patient, or "" for none.
+
+    Two jobs, and the second is the reason this is not a strip().
+
+    Typed without a scheme, it is given https. A room is copied out of Google Calendar as
+    often as out of the address bar, and "meet.google.com/abc-defg-hij" pasted into an href
+    with no scheme is read as a path on our own domain — a link that looks right in the
+    input, is sent to the patient, and opens nothing.
+
+    Anything that is not then http(s) is refused outright. This string is rendered as an
+    href on the booking screen and pasted into a WhatsApp message that goes out over the
+    clinic's name, so the set of schemes allowed here is the set of things somebody can get
+    a patient to click: javascript: and data: are refused rather than escaped, because
+    there is no version of either that is a room anybody is meeting in.
+    """
+    link = str(raw or "").strip()
+    if not link:
+        return ""
+    # A Meet room is about forty characters. This is not a limit anybody types their way
+    # into by accident — it is there so a field that ends up in a patient's message cannot
+    # be used to store a page of text, and so the calendar never has to render one.
+    if len(link) > 500:
+        raise HTTPException(status_code=400, detail="That meeting link is too long")
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", link):
+        link = f"https://{link}"
+    if not re.match(r"^https?://[^\s/]+", link):
+        raise HTTPException(status_code=400, detail="A meeting link must be an http:// or https:// address")
+    return link
+
+
+@router.patch("/doctors/{doctor_id}/meet-link")
+async def v3_set_doctor_meet_link(
+    doctor_id: str,
+    payload: V3DoctorMeetLinkInput,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Record the video room this expert takes appointments in.
+
+    Set from the calendar that publishes their days, beside the shift and the service,
+    because it is the same kind of fact as those two: something true of the expert that
+    every appointment booked out of this screen then carries.
+
+    Written to every record this person holds, not only the one the calendar happened to
+    open. An expert covering several branches holds one doctors record per branch by
+    design, and the room is theirs rather than the branch's — one link, reusable by every
+    patient, since the day is already divided by the slots they published. Left per-record
+    it would be typed once and then be missing from the other branch's copy, which is the
+    copy the booking popup may well read.
+
+    Matched on the login behind the records, or failing that the employee they were hired
+    as. Neither is guaranteed: a profile-only expert has no login, and the records Fitsiomax
+    Experts creates carry no employee either, so a record with neither is updated alone —
+    it is the only one that can be identified as this person with any certainty, and
+    matching on a name would hand one person's room to their namesake.
+
+    Open to the branch admins, the two online ones included: is_branch_admin_role admits
+    them, and the online arm is the one this was asked for.
+    """
+    link = _clean_meet_link(payload.meet_link)
+    row = await v3_col("doctors").find_one(
+        {"id": doctor_id}, {"_id": 0, "id": 1, "user_id": 1, "employee_id": 1, "full_name": 1}
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    if row.get("user_id"):
+        query: Dict[str, object] = {"user_id": row["user_id"]}
+    elif row.get("employee_id"):
+        query = {"employee_id": row["employee_id"]}
+    else:
+        query = {"id": doctor_id}
+    res = await v3_col("doctors").update_many(query, {"$set": {"meet_link": link}})
+    return {
+        "message": "Meeting link saved" if link else "Meeting link cleared",
+        "meet_link": link,
+        # How many of this person's records now carry it, so the caller can say "on all
+        # three branches" rather than leaving the reader to wonder which one they edited.
+        "records_updated": res.modified_count,
+    }
 
 
 @router.delete("/physio-types/{physio_type_id}")

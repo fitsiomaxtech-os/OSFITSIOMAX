@@ -49,6 +49,20 @@ const wrapLines = (ctx, text, maxWidth) => {
   return out;
 };
 
+/** The same job for a string with nothing to break at — a URL is one word, and wrapLines
+ *  hands it back whole however long it is, which then draws straight off the card. Broken
+ *  by character instead, which is ugly on prose and the only option on an address. */
+const wrapAnywhere = (ctx, text, maxWidth) => {
+  const out = [];
+  let line = "";
+  for (const ch of String(text || "")) {
+    if (line && ctx.measureText(line + ch).width > maxWidth) { out.push(line); line = ch; }
+    else line += ch;
+  }
+  if (line) out.push(line);
+  return out;
+};
+
 /** crossOrigin="anonymous" makes a logo the CDN won't share simply fail to load rather
  *  than silently tainting the canvas — a tainted canvas throws on toBlob, which would
  *  break the share entirely. A null here just means the monogram is drawn instead. */
@@ -76,7 +90,16 @@ export const apptCardPng = async (a) => {
   const font = (size, weight = "400") => `${weight} ${size}px "Segoe UI", system-ui, -apple-system, Arial, sans-serif`;
   probe.font = font(17);
   const noteLines = cancelled ? [] : wrapLines(probe, REASSURANCE, inner - 32);
-  const addrLines = a.branchAddress ? wrapLines(probe, a.branchAddress, inner - 90) : [];
+  // Where the patient is being asked to be. A meeting link answers that instead of the
+  // branch, and replaces it rather than joining it: the card is pasted into the same chat
+  // as the message, so a branch address printed under a video appointment contradicts the
+  // words directly above it. The scheme is dropped because it is the one part of a URL
+  // nobody reads and it costs a line at this width.
+  const meetLink = String(a.meetLink || "").trim();
+  const placeLabel = meetLink ? "GOOGLE MEET" : "LOCATION";
+  const addrLines = meetLink
+    ? wrapAnywhere(probe, meetLink.replace(/^https?:\/\//, ""), inner - 90)
+    : a.branchAddress ? wrapLines(probe, a.branchAddress, inner - 90) : [];
 
   const HERO_H = 196;
   const GREET_H = 44;
@@ -216,7 +239,7 @@ export const apptCardPng = async (a) => {
   if (addrLines.length) {
     ctx.fillStyle = "#64748b";
     ctx.font = font(13, "700");
-    ctx.fillText("LOCATION", PAD, y + 20);
+    ctx.fillText(placeLabel, PAD, y + 20);
     ctx.fillStyle = "#475569";
     ctx.font = font(16);
     addrLines.forEach((ln, i) => ctx.fillText(ln, PAD, y + 44 + i * 24));
@@ -225,7 +248,7 @@ export const apptCardPng = async (a) => {
   ctx.textAlign = "center";
   ctx.fillStyle = "#94a3b8";
   ctx.font = font(14);
-  ctx.fillText("Please arrive 10 minutes early", cx, H - 20);
+  ctx.fillText(meetLink ? "Please join the meeting 5 minutes early" : "Please arrive 10 minutes early", cx, H - 20);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not render the card"))), "image/png");
