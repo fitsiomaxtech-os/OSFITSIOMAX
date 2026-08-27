@@ -933,7 +933,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           ) : consultationsSubTab === "time" ? (
             <TimeManagementPanel branchId={branchId} />
           ) : (
-            <HeadPhysioCalendar branchId={branchId} />
+            // The Google Meet field rides on this: only an online arm's own admin is asked
+            // for a video room, because only their consultations are held in one. The three
+            // calendars above are room desks and never carry it — see HeadPhysioCalendar.
+            <HeadPhysioCalendar branchId={branchId} onlineArm={armScoped} />
           )}
         </div>
       ) : activeView === "zumba" ? (
@@ -1468,6 +1471,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           // its branch stage), so the pill the admin opened it from is what decides —
           // matching the stage strip they were just looking at.
           openedFromMirror={showingMirror}
+          onlineArm={armScoped}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
           onOpenConsultationStage={(stage) => {
@@ -1623,7 +1627,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 };
 
 /* ─── Branch Lead Detail Modal ─── */
-function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage, openedFromMirror = false }) {
+// `onlineArm` reaches the booking popup for one thing: whether a CONSULTANT with no video
+// room is worth warning about. On an online arm it is the whole address of the
+// appointment about to be confirmed. At a branch it is nothing — the consultation is held
+// in a room, the field that would set a link is not offered on that board at all, and an
+// amber panel naming a gap nobody there can fill is noise on every booking they make.
+function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage, openedFromMirror = false, onlineArm = false }) {
   // The board offers two entry stages — the mirrored Pre-Sales "Leads" pill and the branch's
   // own first stage — but a single lead only ever came in through one of them, so its
   // pipeline shows that one and drops the other. Everything from RNR onwards is shared.
@@ -2456,7 +2465,11 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     of an online appointment the branch cannot check afterwards. A
                     consultant with no room recorded is the one case worth interrupting
                     for: the confirmation is about to go out with nowhere in it. */}
-                {apptSelectedExpert && (
+                {/* The link itself wherever there is one — a room recorded against this
+                    consultant is where this appointment is happening, whichever board is
+                    booking it. The warning for a missing one only on an online arm, where
+                    a missing room is a confirmation about to go out with nowhere in it. */}
+                {apptSelectedExpert && (apptMeetLink || onlineArm) && (
                   apptMeetLink ? (
                     <div className="mt-3 rounded-lg border-2 border-violet-200 bg-violet-50 p-3" data-testid="branch-appt-meet-link">
                       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-violet-500">

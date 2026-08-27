@@ -82,10 +82,18 @@ function getFirstDayOfMonth(year, month) {
 //
 // What varies with it: which experts are listed, where slot length comes from, and the
 // language throughout. Publishing availability is the one step all three genuinely share.
-export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) => {
+// `onlineArm` says the board this is mounted on runs an arm with no room in it — one of
+// the two online admins. It gates the Google Meet field and nothing else: an appointment
+// held over video needs an address to hold it at, and one held in a treatment room does
+// not. Passed in rather than worked out here, because the answer is a fact about whose
+// board this is and only BranchAdminBoard is holding that.
+export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onlineArm = false }) => {
   const isPhysio = profileType === "physio";
   const isCoach = profileType === "nutrition_coach";
   const isRehab = profileType === "rehab";
+  // The consultation desk — the one this component was written for, and the else of the
+  // three above rather than a fourth literal, so it cannot fall out of step with them.
+  const isConsultant = !isPhysio && !isCoach && !isRehab;
   // Both the physio and the coach book repeat visits against a plan, so they share the
   // slot-type vocabulary and the per-slot capacity control; only the Head Physio's
   // one-per-lead consultation flow differs.
@@ -672,8 +680,14 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
             One field for the list rather than one per row: it is per expert, but only the
             selected expert's is ever being answered, and a column of eleven URL inputs is a
             column nobody can read a name out of. Nothing at all until somebody is picked,
-            for the same reason the calendar beside it is empty until then. */}
-        {selectedDoctor && (
+            for the same reason the calendar beside it is empty until then.
+
+            Consultants on an online arm's board, and nowhere else. A branch's own
+            CONSULTANT sees their patients in a room that already has an address, so the
+            field asked a question with no answer and offered to put a video link on an
+            appointment nobody was going to hold over video. The Physio, Rehab and Diet
+            calendars are room desks throughout, whichever board they are opened from. */}
+        {isConsultant && onlineArm && selectedDoctor && (
           <div className="border-t border-slate-100 bg-slate-50/60 p-3" data-testid="doctor-meet-link-panel">
             <label
               htmlFor="doctor-meet-link"
