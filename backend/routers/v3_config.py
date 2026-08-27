@@ -7,7 +7,10 @@ import uuid
 from database import v3_col
 from utils import now_iso, normalize_slot_time, derive_branch_code, active_doctor_query, live_branch_query
 from security import hash_password
-from deps import v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role, consultants_serving_branch
+from deps import (
+    v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role,
+    is_physio_role, is_diet_role, is_rehab_role, consultants_serving_branch,
+)
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
 import lead_control
@@ -642,6 +645,144 @@ async def _consultants_for_vertical(rows: list, online: bool) -> list:
         if is_online == online:
             kept.append(r)
     return kept
+
+
+# Which Team desk fills each calendar. The predicates are the ones _desk_holds uses in
+# routers/v3_branch_mgmt.py — imported from deps rather than restated, so a calendar and
+# the Team tab that staffs it cannot come to disagree about whether a `diet_manage` is a
+# Nutritionist or an Online Physio Admin is a Branch Admin.
+#
+# Rehab has no desk on the Team tab, and is here anyway: the rule is the same one, the
+# predicate already exists, and leaving it out would make the Rehab Calendar the one that
+# still answers a different question from the other three.
+DESK_FOR_PROFILE = {
+    "head_physio": is_head_physio_role,
+    "physio": is_physio_role,
+    # super_admin excluded on both, exactly as _desk_holds excludes it: these two predicates
+    # answer "may this account reach that board", which Super Admin may, and standing them
+    # on every branch's Diet and Rehab calendar is not what that means.
+    "nutrition_coach": lambda r: r != "super_admin" and is_diet_role(r),
+    "rehab": lambda r: r != "super_admin" and is_rehab_role(r),
+}
+
+
+async def team_roster_experts(branch_id: str, profile_type: str) -> list:
+    """The expert records for everyone MANAGEMENT → MANAGER → TEAM lists at this desk.
+
+    Team and the calendars had two different answers to one question. Team reads `users`:
+    the logins posted to this branch, filtered by the role predicate for the desk. The
+    calendars read `doctors`: the expert records, which are a separate collection written
+    at hiring, at a Team posting, and by half a dozen other paths. A person on one and not
+    the other is invisible to whichever list they are missing from — which is how an online
+    branch came to show three Consultants on Team and an empty Consultant Calendar.
+
+    So the roster is read Team's way, and the expert record is looked up per person rather
+    than being the thing listed. Where somebody on the roster has no record, one is made
+    here: the record is not the fact of employment, it is the sheet their published hours
+    are written on, and there is no reason for a person Team already says works this desk
+    to be missing one. Making it on read is what lets a calendar that was empty this
+    morning simply work, without anybody being told to go and re-post staff who are
+    already posted.
+
+    A Consultant's record stays branchless and is found without one, because they hold a
+    SINGLE calendar however many branches they take consultations at — two records would
+    mean two independent clash checks and the same person booked into one hour twice. Every
+    other desk holds a separate calendar per branch and is matched with the branch on it.
+
+    Inactive logins are dropped, which is the one place this deliberately parts company
+    with the Team tab. Team keeps them on purpose — it is the screen that switches somebody
+    off, and a row that vanished on deactivation would be a one-way door. A calendar is for
+    publishing hours somebody can be booked into, and a switched-off account is not
+    somebody anyone should be booked with.
+    """
+    holds = DESK_FOR_PROFILE.get(profile_type)
+    if not holds or not branch_id:
+        return []
+    # Both fields, the same query the Team tab runs: a desk that works several branches
+    # carries the list and holds branch_id as no more than the first of them.
+    rows = await v3_col("users").find(
+        {"$or": [{"branch_id": branch_id}, {"branch_ids": branch_id}], "is_active": {"$ne": False}},
+        {"_id": 0, "id": 1, "full_name": 1, "role": 1},
+    ).to_list(500)
+    members = [u for u in rows if holds((u.get("role") or "").strip().lower())]
+
+    out = []
+    for u in members:
+        # head_physio is the one branchless record — see the docstring, and
+        # holds_calendar_per_branch in routers/v3_hr.py, which draws the same line from the
+        # role's side.
+        query: Dict[str, object] = {"user_id": u["id"], "profile_type": profile_type}
+        if profile_type != "head_physio":
+            query["branch_id"] = branch_id
+        # Every record, then the fullest — not find_one. One person can hold several: the
+        # multi-branch model leaves them behind, and half a dozen paths can each add one.
+        # This install has seen a Nutritionist with twenty-one identical rows. Picking
+        # whichever Mongo returned first would open an empty calendar for somebody whose
+        # published hours are sitting on the other record, and publishing into the empty one
+        # would then split their day across two sheets that clash-check separately.
+        found = await v3_col("doctors").find(query, {"_id": 0}).to_list(50)
+        # Stood-down records dropped before the fullest is chosen, not after. Choosing first
+        # and checking second would lose somebody whose richest record happens to be the
+        # retired one while a live record of theirs sits right behind it.
+        live = [d for d in found if d.get("is_active") is not False and d.get("branch_active") is not False]
+        live.sort(key=lambda d: len(d.get("slots") or []), reverse=True)
+        if not live and found:
+            # Every record they have is stood down. Listed nowhere, and deliberately not
+            # replaced: minting a fresh one for somebody who already has records is how a
+            # person ends up with two calendars and a clash check that reads only one.
+            continue
+        row = live[0] if live else None
+        if row is None:
+            row = {
+                "id": str(uuid.uuid4()),
+                "full_name": u.get("full_name") or "",
+                "profile_type": profile_type,
+                "branch_id": None if profile_type == "head_physio" else branch_id,
+                "specialization": "",
+                "slots": [],
+                "slot_details": [],
+                "user_id": u["id"],
+                "created_at": now_iso(),
+            }
+            await v3_col("doctors").insert_one(row.copy())
+        out.append(row)
+    return out
+
+
+@router.get("/branches/{branch_id}/calendar-experts", response_model=List[V3DoctorOut])
+async def v3_calendar_experts(
+    branch_id: str,
+    profile_type: str = "head_physio",
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Who a branch's calendar publishes days for — the Team roster for that desk.
+
+    A separate endpoint rather than a change to /doctors, which has seven callers with
+    seven different questions: the Operations picker, the Master Control list, Pre-Sales,
+    the booking pickers. This one answers only "who does MANAGEMENT → MANAGER → TEAM say
+    works this desk here", which is the question the four calendars are asking and the one
+    they were getting a different answer to.
+
+    A Branch Admin is held to their own branch, the same rule branch_detail applies to the
+    Team tab this reads from. Only where they have one: an account posted nowhere is not
+    narrowed to nowhere.
+    """
+    if is_branch_admin_role(user.role) and user.branch_id and user.branch_id != branch_id:
+        raise HTTPException(status_code=403, detail="You can only open your own branch's calendar")
+    rows = await team_roster_experts(branch_id, profile_type)
+    # The rostered window each of them works, resolved from the shift rather than stored —
+    # the same attach_shifts every other expert list goes through, so a calendar opened
+    # from here cuts its day exactly as one opened from /doctors did.
+    rows = await attach_shifts(rows)
+    out = []
+    for row in rows:
+        try:
+            out.append(V3DoctorOut(**row))
+        except Exception:
+            # One malformed legacy row shouldn't empty a whole calendar — the same guard,
+            # and the same reasoning, as v3_get_doctors below.
+            continue
+    return out
 
 
 @router.get("/doctors", response_model=List[V3DoctorOut])

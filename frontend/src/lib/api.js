@@ -98,6 +98,10 @@ export const updateBranch = async (branchId, payload) => (await api.put(`/branch
 export const deleteBranch = async (branchId) => (await api.delete(`/branches/${branchId}`)).data;
 
 export const getDoctors = async (params) => (await api.get("/doctors", { params })).data;
+// Who a branch's calendar publishes days for: the MANAGEMENT → MANAGER → TEAM roster for
+// that desk, with an expert record made for anybody on it who has none. Separate from
+// getDoctors because that one answers six other screens' questions too.
+export const getCalendarExperts = async (branchId, profileType) => (await api.get(`/branches/${branchId}/calendar-experts`, { params: { profile_type: profileType } })).data;
 export const createDoctor = async (payload) => (await api.post("/doctors", payload)).data;
 export const deleteDoctor = async (doctorId) => (await api.delete(`/doctors/${doctorId}`)).data;
 export const addDoctorSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/slots`, payload)).data;

@@ -16,7 +16,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   addCalendarSlots,
   getDoctorCalendar,
-  getDoctors,
+  getCalendarExperts,
   listShifts,
   listStoreItems,
   removeCalendarSlots,
@@ -97,12 +97,13 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // An empty consultant list is a narrowing, not an absence: consultants are org-wide, so
   // the ones missing here are the ones who work the other arm. Saying "none created yet"
   // sends the reader to HR to create somebody who is already there.
-  const emptyLine =
-    isCoach || isPhysio
-      ? `No ${roleLabelPlural} assigned to this branch yet — ask HR Admin to add one.`
-      : isRehab
-      ? `No ${roleLabelPlural} created yet — ask HR Admin to add one.`
-      : `No ${roleLabelPlural} work this branch's side yet — ask HR Admin for the matching designation, online or in the room.`;
+  // One sentence for all four, because there is now one answer. This list is the Team
+  // roster for the desk, so empty means nobody is on that desk here and the place to fix
+  // it is the tab that staffs it. The three it replaces each guessed at a different cause
+  // — a missing assignment, a person never created, a designation typed without "online" —
+  // from a list that could not tell which, and sent the reader to HR for a posting made in
+  // MANAGER → TEAM.
+  const emptyLine = `No ${roleLabelPlural} on this branch's team yet — add them in MANAGEMENT → MANAGER → TEAM.`;
   const SLOT_TYPES = isRecurring ? SESSION_TYPES : CONSULTATION_TYPES;
   // The three calendars schedule different things and must not be read as interchangeable:
   // a Head Physio's day holds consultations (booked from Branch Leads → Appointment);
@@ -153,35 +154,30 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     return () => { cancelled = true; };
   }, [isRecurring]);
 
-  // Head Physios are common to every branch — they're created once in HR Admin and take
-  // consultations wherever they're needed, so this lists all of them rather than only the
-  // ones carrying this branch's id. Physios are not: they deliver treatment at the branch
-  // they belong to, so PHYSIO CALENDAR stays branch-scoped.
+  // Who works this desk here is MANAGEMENT → MANAGER → TEAM's answer, not this screen's.
   //
-  // Listing them by user account also collapses the duplicate doctors records the
-  // multi-branch model leaves behind — one Head Physio appears once, and the record with
-  // their published slots is the one kept.
+  // The two used to be worked out separately and could disagree. Team reads the logins
+  // posted to the branch; this list read the `doctors` records, which are a different
+  // collection written by a different set of paths — so somebody on one and not the other
+  // was invisible to whichever list they were missing from. An online branch showed three
+  // Consultants on Team and an empty Consultant Calendar, and nothing on either screen
+  // said why.
+  //
+  // calendar-experts answers the Team question and mints the expert record for anybody on
+  // the roster who has none, so the calendar can only ever list the people the Team tab
+  // lists. Adding somebody to a desk there is now the whole of putting them on this
+  // calendar.
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
     try {
-      // The branch is named for consultants too now. It does not narrow them to that
-      // branch — they are org-wide and the endpoint keeps them regardless — but it is what
-      // tells the server which vertical this calendar is, so an online branch is offered
-      // the consultants who take video appointments and an offline one those who take them
-      // in the room. Before this every branch was offered all of them.
-      const all = await getDoctors({ branch_id: branchId });
-      const mine = (all || []).filter((d) => d.profile_type === profileType);
-      // One row per person, not per record. An expert covering several branches holds one
-      // doctors record per branch by design, and several paths can add one — so the raw
-      // list repeats the same person once per record they have ever been given. This
-      // collapsed the Head Physio list from the day it was written; every other calendar
-      // listed the records raw, which is how two Nutritionists came to fill a column with
-      // twenty-one identical rows.
-      //
-      // The record kept is the one with slots on it, so collapsing never hides the
+      const mine = await getCalendarExperts(branchId, profileType);
+      // One row per person. The server returns one record each, so this is no longer
+      // collapsing duplicates — it is the guard that keeps this list from ever showing a
+      // person twice, which is what it was written for when several paths could each add
+      // a record. The one kept is the one with slots on it, so it can never hide a
       // calendar somebody has actually published.
       const best = new Map();
-      mine.forEach((d) => {
+      (mine || []).forEach((d) => {
         const key = d.user_id || d.employee_id || d.full_name || d.id;
         const seen = best.get(key);
         if (!seen || (d.slots || []).length > (seen.slots || []).length) best.set(key, d);
@@ -618,7 +614,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
             <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{doctors.length}</span>
           </div>
           <p className="mt-1 text-[10px] font-medium text-violet-500">{purposeLine}</p>
-          <p className="mt-0.5 text-[10px] text-slate-400">Managed by HR Admin</p>
+          {/* Where this list comes from, named because it is now somewhere the reader can
+              act: HR Admin hires the person, but which desk they hold at which branch —
+              which is all this list is — is answered on the Team tab. */}
+          <p className="mt-0.5 text-[10px] text-slate-400">Staffed in MANAGER → TEAM</p>
         </div>
 
         <div className="flex gap-1.5 overflow-x-auto p-2 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible" data-testid="doctor-list">
