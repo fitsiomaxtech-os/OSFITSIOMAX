@@ -12,7 +12,7 @@ import os
 import random
 import string
 import uuid
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
@@ -273,6 +273,44 @@ async def _build_portal_payload(lead: dict) -> dict:
     reviews = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).sort("raised_at", 1).to_list(50)
     review_numbers = review_numbers_for_lead(reviews)
     diet_days = await v3_col("diet_sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(200)
+    # The video room each of these is held in, joined on at read rather than copied onto
+    # every row when the days were booked.
+    #
+    # Read live on purpose, which is the opposite of what a consultation does. A
+    # consultation freezes the link onto the appointment because the patient was sent a
+    # confirmation naming it, and moving a meeting somebody has already been told about is
+    # not something a later edit should be able to do. Nothing is sent for these: the
+    # patient reads this page, so the room it shows should be the room the expert is in
+    # today. An online physio changing their room otherwise leaves thirty booked days
+    # pointing at a room nobody will be in.
+    #
+    # Blank for a branch's own physio, who has no room recorded because the field is only
+    # offered to the online arms — which is exactly right. Their patient comes to the
+    # branch, and a join link on that day would be an invitation to somewhere nobody is.
+    expert_ids = {s.get("physio_id") for s in sessions if s.get("physio_id")}
+    expert_ids |= {d.get("coach_id") for d in diet_days if d.get("coach_id")}
+    meet_by_expert: Dict[str, str] = {}
+    if expert_ids:
+        async for d in v3_col("doctors").find(
+            {"id": {"$in": list(expert_ids)}}, {"_id": 0, "id": 1, "meet_link": 1},
+        ):
+            link = str(d.get("meet_link") or "").strip()
+            if link:
+                meet_by_expert[d["id"]] = link
+    for s in sessions:
+        s["meet_link"] = meet_by_expert.get(s.get("physio_id"), "")
+    for d in diet_days:
+        d["meet_link"] = meet_by_expert.get(d.get("coach_id"), "")
+    # The coach on the lead rather than on a day, because the diet card shows one
+    # appointment rather than a list — and the days above may not exist yet when the first
+    # one is booked from the consultation.
+    diet_meet_link = ""
+    if lead.get("diet_coach_id"):
+        coach_row = await v3_col("doctors").find_one(
+            {"id": lead["diet_coach_id"]}, {"_id": 0, "meet_link": 1},
+        )
+        diet_meet_link = str((coach_row or {}).get("meet_link") or "").strip()
+
     total = len(sessions)
     completed = len([s for s in sessions if s.get("status") == "completed"])
 
@@ -363,6 +401,9 @@ async def _build_portal_payload(lead: dict) -> dict:
         "diet": {
             "coach_name": lead.get("diet_coach_name"),
             "appointment_at": lead.get("diet_appointment_at"),
+            # Where to join, for a check-in held over video. Empty for a coach seen at the
+            # branch, which is every coach but an online arm's.
+            "meet_link": diet_meet_link,
             "stage": lead.get("diet_stage"),
             # The coach's written plan — the diet counterpart of the physio's Diagnosis
             # Report, and the thing the patient is actually meant to follow.

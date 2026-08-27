@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound } from "lucide-react";
+import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Video } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -296,6 +296,22 @@ export function SessionsTab({ data }) {
                     <Clock className="h-3 w-3" />
                     {s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}
                   </p>
+                  {/* Where to join, for a session held over video. Only on the days still
+                      to come: a link on a session already finished invites somebody into an
+                      empty room, and this list keeps every past day as the record of the
+                      course. Blank for a branch's own physio, who is seen in a treatment
+                      room and has no video room recorded. */}
+                  {s.meet_link && s.status !== "completed" && (
+                    <a
+                      href={s.meet_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-100"
+                      data-testid={`patient-portal-session-meet-${s.session_number}`}
+                    >
+                      <Video className="h-3 w-3" /> Join on Google Meet
+                    </a>
+                  )}
                   {(s.jr_physio_remarks || s.rehab_remarks) && (
                     <div className="mt-1.5 space-y-1 rounded border border-emerald-100 bg-emerald-50 p-2">
                       {s.jr_physio_remarks && (
@@ -440,6 +456,21 @@ function DietCard({ diet }) {
           <div className="rounded-md border border-orange-200 bg-orange-50 px-2.5 py-2 text-xs text-orange-800">
             Diet Consultation on <span className="font-semibold">{date}</span>
             {" at "}<span className="font-semibold">{slotTo12h(diet.appointment_at)}</span>
+            {/* Inside the appointment box rather than under it: it is where that
+                appointment happens, and read as part of the same sentence. Only for a
+                coach on an online arm — a branch's own Nutritionist is seen in the room
+                and has no video room recorded. */}
+            {diet.meet_link && (
+              <a
+                href={diet.meet_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-100"
+                data-testid="patient-portal-diet-meet"
+              >
+                <Video className="h-3 w-3" /> Join on Google Meet
+              </a>
+            )}
           </div>
         )}
         {total > 0 && (
