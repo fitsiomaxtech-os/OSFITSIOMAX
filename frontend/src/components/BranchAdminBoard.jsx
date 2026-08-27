@@ -320,6 +320,30 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
 // Which of the six get a direct slot on the phone bar. The other three go behind More.
 const BOTTOM_NAV_KEYS = ["pipeline", "review", "consultations"];
 
+// The two desks that only exist in a room. Zumba is a class taught in the branch's studio
+// in two fixed morning slots, and Fitness is the gym's membership roll — who is training,
+// who is paused, who owes on a package. Neither is something an arm with no floor sells.
+const ROOM_ONLY_TABS = ["zumba", "fitness"];
+
+/** Whether this role runs an arm that has no room in it.
+ *
+ * Both online branch admins do, and both lose both tabs above — including the Fitness one
+ * from ONLINE FITNESS ADMIN, which looks like the wrong tab to take off that board until
+ * you read what it holds. It is the gym's membership roll, sold against the Fitness shelf
+ * and worked on the floor; online fitness is not run from it. Leaving it there offered a
+ * desk whose every row would have to be somebody else's branch's.
+ *
+ * Matched exactly, like isBranchAdminRole in pages/CRMPage.jsx and for the same reason: a
+ * loose match on the "online" token would also catch a plain branch_admin at a branch
+ * whose name happens to carry the word, and take two working desks off their board.
+ *
+ * The three retired branch_admin_* slugs are deliberately absent. Every one of them named
+ * a practice sold in a room, so none can be the online arm, and reading them as one would
+ * strip the tabs from a physical branch whose account the migration has not reached.
+ */
+const ONLINE_BRANCH_ADMIN_ROLES = ["online_physio_admin", "online_fitness_admin"];
+const runsWithoutARoom = (role) => ONLINE_BRANCH_ADMIN_ROLES.includes(String(role || "").trim().toLowerCase());
+
 /**
  * Does this lead belong under that consultation stage chip?
  *
@@ -745,7 +769,15 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     { key: "patients", label: "Patients", short: "Patients", icon: User },
     { key: "accountant_mgmt", label: "Accountant Manage", short: "Accounts", icon: BadgeIndianRupee },
     { key: "store", label: "Fitsiomax Store", short: "Store", icon: ShoppingCart },
-  ];
+    // Taken off an online arm's own board, where the studio and the gym floor those two
+    // desks run do not exist — see runsWithoutARoom.
+    //
+    // Off `currentUser`, which is only passed where somebody is looking at THEIR OWN
+    // branch (pages/CRMPage.jsx). Super Admin, Operations and Branch-wise all mount this
+    // board without one, and keep every tab: they are reading a branch rather than running
+    // it, and an org-level view that hid a desk depending on whose branch was picked would
+    // be answering a question about the viewer.
+  ].filter((t) => !(ROOM_ONLY_TABS.includes(t.key) && runsWithoutARoom(currentUser?.role)));
 
   // The phone bar carries three of the six plus More; the desktop strip above still shows
   // all six. Both halves come off VIEW_TABS, so a tab added there lands in one or the
