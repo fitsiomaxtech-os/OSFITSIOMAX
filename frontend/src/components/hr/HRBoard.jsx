@@ -1217,6 +1217,14 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
     if (!form.full_name.trim()) { toast.error("Full name required"); setTab("personal"); return; }
     if (!form.department) { toast.error("Pick a Department"); setTab("employment"); return; }
     if (!form.designation) { toast.error("Pick a Designation"); setTab("employment"); return; }
+    // Online is two arms — Online Physiotherapy and Online Fitness — and Service is what
+    // says which of them this person works. Offline does not ask: a room is chosen by name
+    // in the Branch field below, which Online does not have.
+    if (isOnlineMode(form.work_type) && !form.service) {
+      toast.error("Pick a Service — it decides which online arm they work");
+      setTab("employment");
+      return;
+    }
     const payload = { ...form };
     payload.net_salary = Number(payload.net_salary) || 0;
     payload.gross_salary = Number(payload.gross_salary) || 0;
@@ -1353,18 +1361,38 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
                 />
                 <p className="mt-1 text-[10px] text-slate-400">
                   {isOnlineMode(form.work_type)
-                    ? "Works online, so no branch."
+                    ? "Works online, so no branch — Service decides the arm."
                     : "Offline — works in the room, at the branch below. Blank reads the same."}
                 </p>
               </Field>
-              <Field label="Service">
+              {/* Required for Online and not for Offline, because it answers a different
+                  question in each. Offline picks a room by name in the Branch field below.
+                  Online has no such field — an online employee is not AT a branch — and
+                  online is two arms rather than one place, so this is the only thing that
+                  says whether they work Online Physiotherapy or Online Fitness. Left blank
+                  it used to post them to neither, and to nothing at all: the Branch field
+                  clears on the way to Online, and a cleared branch reads downstream as
+                  "taken off their branch". */}
+              <Field label={isOnlineMode(form.work_type) ? "Service *" : "Service"}>
                 <Select
                   value={form.service}
                   onChange={changeService}
                   options={["", PRACTICE_PHYSIO, PRACTICE_FITNESS, PRACTICE_BOTH]}
                   labels={SERVICE_LABELS}
+                  className={isOnlineMode(form.work_type) && !form.service ? "border-amber-300 bg-amber-50" : ""}
                   testid="hr-emp-service"
                 />
+                {isOnlineMode(form.work_type) && (
+                  <p className="mt-1 text-[10px] text-slate-400" data-testid="hr-emp-service-arm">
+                    {form.service === PRACTICE_PHYSIO
+                      ? "Posted to Online Physiotherapy."
+                      : form.service === PRACTICE_FITNESS
+                      ? "Posted to Online Fitness."
+                      : form.service === PRACTICE_BOTH
+                      ? "Posted to both online arms."
+                      : "Which online arm they work — Physio, Fitness, or both."}
+                  </p>
+                )}
               </Field>
               {modeHasBranch(form.work_type) && (
                 <Field label="Branch">
@@ -1675,19 +1703,30 @@ const branchGroupsOf = (holders, branches) => {
   };
   holders.forEach((emp) => {
     if (!modeHasBranch(emp.work_type)) {
-      // Under every online branch, not one: the record cannot say which, because Work Type
-      // clears the branch on the way to Online, and the arm is not one place anyway. An
-      // online consultant takes the online physio arm's calls and the online fitness
-      // arm's, exactly as _consultants_for_vertical in backend/routers/v3_config.py
-      // already has it — that split is online against offline and never physio against
-      // fitness, so the practice is not a wall between these two and they are not filed
-      // as though it were.
+      // Under the arm their Service names, which is the whole of what Service is for on an
+      // online record: online is two arms sold separately, and the Employment tab asks
+      // this precisely because the Branch field it replaces is not offered once Online is
+      // picked. Physio files them under Online Physiotherapy, Fitness under Online
+      // Fitness, and _apply_online_arm in backend/routers/v3_hr.py posts them to the same
+      // branches this reads — so the heading here is where they actually are, not a guess
+      // this screen makes on its own.
       //
-      // The mode's own heading is what is left when the install has no online branch to
-      // file them under. Without it they would be dropped from a screen that is the only
-      // place their designation is listed.
-      if (onlineBranches.length === 0) { push(ONLINE_GROUP, ONLINE_MODE_LABEL, emp); return; }
-      onlineBranches.forEach((b) => push(b.id, b.branch_name, emp));
+      // "both", blank, and an online vertical whose practice cannot be read all take every
+      // arm. The first says so outright; the second is an older record saved before Service
+      // was asked for, and showing them in both arms is the honest reading of a record that
+      // has not answered; the third keeps an arm added by hand from silently swallowing its
+      // own people, the same rule the branch picker follows.
+      const practice = String(emp.service || "").trim().toLowerCase();
+      const arms = onlineBranches.filter((b) => {
+        if (!practice || practice === PRACTICE_BOTH) return true;
+        const p = verticalPractice(b.vertical);
+        return p === null || p === practice;
+      });
+      // The mode's own heading is what is left when no online branch answers — the install
+      // runs none, or none of them is this person's arm. Without it they would be dropped
+      // from a screen that is the only place their designation is listed.
+      if (arms.length === 0) { push(ONLINE_GROUP, ONLINE_MODE_LABEL, emp); return; }
+      arms.forEach((b) => push(b.id, b.branch_name, emp));
       return;
     }
     // Both halves of the record, because either can carry the answer alone: a

@@ -6,7 +6,7 @@ import re
 import uuid
 
 from database import v3_col
-from utils import now_iso
+from utils import now_iso, live_branch_query
 from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES, HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES, LEGACY_BRANCH_ADMIN_ROLES
 from security import hash_password
 from schemas.v3 import V3UserOut
@@ -674,6 +674,88 @@ async def upload_employee_photo(
     return {"url": f"/api/v3/uploads/employees/{filename}"}
 
 
+MODE_ONLINE = "online"
+PRACTICE_BOTH = "both"
+
+# Which practice a vertical names, read off its own tokens rather than matched whole.
+# A vertical is mode and practice together — online_physiotherapy is mode "online" and
+# practice "physio" — and this is the second half of it. Whole underscore-separated tokens,
+# like the role predicates in deps.py, so a name added by hand cannot be caught on a
+# substring. Kept in step with verticalPractice in frontend/src/components/hr/HRBoard.jsx.
+VERTICAL_PRACTICES = {
+    "physio": "physio",
+    "physiotherapy": "physio",
+    "fitness": "fitness",
+    "gym": "fitness",
+}
+
+
+def _vertical_practice(vertical) -> Optional[str]:
+    for token in str(vertical or "").lower().split("_"):
+        if token in VERTICAL_PRACTICES:
+            return VERTICAL_PRACTICES[token]
+    return None
+
+
+async def _online_arm_branch_ids(service: str) -> List[str]:
+    """The branches of the online arm this Service names.
+
+    Online is not one place. It is two arms sold separately, run by two admins and holding
+    two calendars — Online Physiotherapy and Online Fitness — so an employee marked Online
+    has not yet said where they work, and Service is the half of the answer that says it.
+    Physio posts them to the physiotherapy arm, Fitness to the fitness one.
+
+    "both" declines to narrow and takes both, which is what it means everywhere else on
+    this record. So does a vertical this cannot read a practice from: an arm added by hand
+    under an unrecognised name must stay reachable rather than quietly dropping its people,
+    the same rule the branch picker on the Employment tab already follows.
+
+    Offline is deliberately not answered here. A room has an address and somebody chooses
+    it in the Branch picker; this exists because the online arms have no picker to choose
+    from — the field is not asked for once Online is set, on the grounds that an online
+    employee is not AT a branch, and that left them posted nowhere at all.
+    """
+    rows = await v3_col("branches").find(
+        live_branch_query(), {"_id": 0, "id": 1, "vertical": 1},
+    ).to_list(500)
+    wanted = str(service or "").strip().lower()
+    out = []
+    for b in rows:
+        vertical = b.get("vertical")
+        if not str(vertical or "").startswith("online_"):
+            continue
+        practice = _vertical_practice(vertical)
+        if wanted in ("", PRACTICE_BOTH) or practice is None or practice == wanted:
+            out.append(b["id"])
+    return out
+
+
+async def _apply_online_arm(updates: dict, work_type, service) -> None:
+    """Post an Online employee to their arm, in place on the update being written.
+
+    Service is required for them and checked here rather than only in the form, because
+    without it there is no answer to which arm — and until this existed, saving an Online
+    employee did worse than leave the question open. The Employment tab clears the Branch
+    field on the way to Online, which arrives as an empty branch_id, which the cascade below
+    reads as "taken off their branch" and writes through to their login. An Online
+    Consultant saved from HR was being un-posted from the arm they work, disappearing from
+    its Team and from the Consultant Calendar that now reads it.
+
+    Only where work_type is actually part of this save. A partial update that never mentions
+    it is not a statement about the arm and must not repost anybody.
+    """
+    if str(work_type or "").strip().lower() != MODE_ONLINE:
+        return
+    if not str(service or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Service is required for an Online employee — it decides which arm they work",
+        )
+    arm = await _online_arm_branch_ids(service)
+    updates["branch_ids"] = arm
+    updates["branch_id"] = arm[0] if arm else ""
+
+
 @router.post("/employees")
 async def create_employee(payload: EmployeeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     # Department and Designation are what every downstream view groups and colour-codes
@@ -684,6 +766,9 @@ async def create_employee(payload: EmployeeCreate, _: V3UserOut = Depends(v3_req
     if not (payload.designation or "").strip():
         raise HTTPException(status_code=400, detail="Designation is required")
     doc = payload.model_dump()
+    # Online is two arms, and Service says which. Posts them there in place of the Branch
+    # the Employment tab stops asking for once Online is picked — see _apply_online_arm.
+    await _apply_online_arm(doc, doc.get("work_type"), doc.get("service"))
     doc["id"] = str(uuid.uuid4())
     doc["employee_code"] = doc.get("employee_code") or await _next_emp_code()
     doc["status"] = doc.get("status") or "active"
@@ -806,6 +891,20 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
     for field, label in (("department", "Department"), ("designation", "Designation")):
         if field in updates and not str(updates[field]).strip():
             raise HTTPException(status_code=400, detail=f"{label} is required")
+
+    # Online is two arms, and Service says which. Before the branch block below rather than
+    # instead of it: this decides the list, and that block is what reduces any list to the
+    # primary branch_id every single-branch filter in the OS still reads.
+    #
+    # Only when work_type is part of this save. Service can be left out of it — a partial
+    # update that moves somebody Online without restating a practice they already hold is a
+    # normal edit — so the stored one answers where the payload is silent.
+    if "work_type" in updates:
+        service = updates.get("service")
+        if service is None:
+            stored = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0, "service": 1})
+            service = (stored or {}).get("service")
+        await _apply_online_arm(updates, updates["work_type"], service)
 
     # A Nutritionist or a Physio holds a calendar at each branch they work, so the branch
     # picker sends a list. Every other filter in the OS still reads the single branch_id,
