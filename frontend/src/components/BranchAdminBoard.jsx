@@ -918,12 +918,16 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               );
             })}
           </div>
+          {/* onlineArm rides along to each of them: an arm with no room in it meets its
+              patients over video whichever desk they are seeing, so the Google Meet field
+              is offered on all of these. Rehab declines it on its own — a programme day is
+              worked on the floor with the equipment in the room. See HeadPhysioCalendar. */}
           {consultationsSubTab === "physio" ? (
-            <HeadPhysioCalendar branchId={branchId} profileType="physio" />
+            <HeadPhysioCalendar branchId={branchId} profileType="physio" onlineArm={armScoped} />
           ) : consultationsSubTab === "rehab" ? (
-            <HeadPhysioCalendar branchId={branchId} profileType="rehab" />
+            <HeadPhysioCalendar branchId={branchId} profileType="rehab" onlineArm={armScoped} />
           ) : consultationsSubTab === "diet" ? (
-            <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" />
+            <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" onlineArm={armScoped} />
           ) : consultationsSubTab === "missed" ? (
             <MissedClassPanel />
           ) : consultationsSubTab === "manager" ? (

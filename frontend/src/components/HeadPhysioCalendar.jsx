@@ -91,9 +91,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   const isPhysio = profileType === "physio";
   const isCoach = profileType === "nutrition_coach";
   const isRehab = profileType === "rehab";
-  // The consultation desk — the one this component was written for, and the else of the
-  // three above rather than a fourth literal, so it cannot fall out of step with them.
-  const isConsultant = !isPhysio && !isCoach && !isRehab;
   // Both the physio and the coach book repeat visits against a plan, so they share the
   // slot-type vocabulary and the per-slot capacity control; only the Head Physio's
   // one-per-lead consultation flow differs.
@@ -682,12 +679,16 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
             column nobody can read a name out of. Nothing at all until somebody is picked,
             for the same reason the calendar beside it is empty until then.
 
-            Consultants on an online arm's board, and nowhere else. A branch's own
-            CONSULTANT sees their patients in a room that already has an address, so the
-            field asked a question with no answer and offered to put a video link on an
-            appointment nobody was going to hold over video. The Physio, Rehab and Diet
-            calendars are room desks throughout, whichever board they are opened from. */}
-        {isConsultant && onlineArm && selectedDoctor && (
+            Only on an online arm's board. A branch's own desks see their patients in a
+            room that already has an address, so the field would ask a question with no
+            answer and offer to put a video link on an appointment nobody is holding over
+            video.
+
+            Rehab is the one desk on an online board that still does not carry it. A rehab
+            programme day is worked on the floor with equipment in the room — it is what
+            ROOM_ONLY_TABS in BranchAdminBoard.jsx says of Zumba and the gym, and the same
+            is true here — so an arm with no floor is not running one over video. */}
+        {!isRehab && onlineArm && selectedDoctor && (
           <div className="border-t border-slate-100 bg-slate-50/60 p-3" data-testid="doctor-meet-link-panel">
             <label
               htmlFor="doctor-meet-link"
