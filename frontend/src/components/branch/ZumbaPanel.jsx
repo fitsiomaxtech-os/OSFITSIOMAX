@@ -28,7 +28,10 @@ const MASTER = "master";
 
 // The two slots the class is taught in. Kept in step with TIME_SLOTS in
 // backend/routers/v3_zumba.py, which drops anything it does not recognise.
-const TIME_SLOTS = ["10:00 am - 11:00 am", "11:00 am - 12:00 pm"];
+// Exported because MANAGEMENT rosters the same two classes. These strings are matched
+// character for character against TIME_SLOTS in backend/routers/v3_zumba.py — a second
+// copy that drifted would send a slot the server rejects and match no holder here.
+export const TIME_SLOTS = ["10:00 am - 11:00 am", "11:00 am - 12:00 pm"];
 // The same four the consultation and store desks offer, in the same slugs, so a class
 // fee taken in cash reads as cash wherever the money is counted later. Cheque and Partial
 // belong to a treatment plan paid down over months; a membership is settled in one go.

@@ -14,7 +14,7 @@ import {
   Trash2,
   UserPlus,
   X,
-  Activity, HeartPulse,
+  Activity,
   LayoutDashboard,
   FileText,
   Printer,
@@ -69,6 +69,7 @@ import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { TimeManagementPanel } from "@/components/branch/TimeManagementPanel";
+import { ZumbaMastersPanel } from "@/components/branch/ZumbaMastersPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import MissedClassPanel from "@/components/branch/MissedClassPanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
@@ -880,9 +881,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const MANAGEMENT_SUB_TABS = [
     { key: "head_physio", label: "Consultant Calendar", icon: Calendar },
     { key: "physio", label: "Physiotherapist Calendar", icon: Activity },
-    // Between the two it sits between in practice: a rehab course is delivered after
-    // treatment and alongside diet, and the branch publishes all three the same way.
-    { key: "rehab", label: "Rehab Calendar", icon: HeartPulse },
+    // Zumba in the same place, because it answers the same question this row is asking —
+    // who works here and when — in the shape Zumba actually has. A master does not publish
+    // slots one booking at a time; there are two class times and somebody takes each.
+    { key: "zumba", label: "Zumba", icon: Music },
     // Diet is the third vertical, so its calendar sits beside the other two rather than
     // anywhere new — the Branch Admin publishes a Nutrition Coach's days exactly the way
     // they publish a Physio's.
@@ -966,8 +968,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               worked on the floor with the equipment in the room. See HeadPhysioCalendar. */}
           {consultationsSubTab === "physio" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="physio" onlineArm={armScoped} />
-          ) : consultationsSubTab === "rehab" ? (
-            <HeadPhysioCalendar branchId={branchId} profileType="rehab" onlineArm={armScoped} />
+          ) : consultationsSubTab === "zumba" ? (
+            <ZumbaMastersPanel branchId={branchId} />
           ) : consultationsSubTab === "diet" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" onlineArm={armScoped} />
           ) : consultationsSubTab === "missed" ? (
