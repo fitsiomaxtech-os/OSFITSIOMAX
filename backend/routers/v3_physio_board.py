@@ -18,35 +18,34 @@ from routers.v3_reviews import REVIEW_AFTER_DAYS, review_numbers_for_lead
 # Which leads belong to a physio. In its own module because both this board and the
 # reviews router need it, and this one already imports from that one — a helper living
 # in either would close the loop.
-from physio_scope import physio_lead_ids, physio_owns_lead
+from physio_scope import physio_lead_ids, physio_owns_lead, resolve_physio_doctor
 
 router = APIRouter(prefix="/api/v3")
 
 
 async def _resolve_doctor(user: V3UserOut, physio_id: Optional[str] = None) -> Optional[dict]:
-    """Find the doctors record for the logged-in physio. Doctors created via Jr. Physio
-    signup are linked directly by user_id; doctors created via Fitsiomax Experts are only
-    linked to an employee record, so fall back to the users.employee_id -> doctors.employee_id
-    chain to resolve those. Super Admin driving a specific physio's board (Branch Management >
-    Branch Control) can pass that physio's doctor id to resolve directly instead — a branch can
-    have several physios, so branch_id alone isn't enough to disambiguate."""
-    if physio_id and user.role == "super_admin":
-        doctor = await v3_col("doctors").find_one({"id": physio_id, "profile_type": "physio"}, {"_id": 0})
-        if doctor:
-            return doctor
-    doctor = await v3_col("doctors").find_one(
-        {"user_id": user.id, "profile_type": "physio"},
-        {"_id": 0},
-    )
-    if doctor:
-        return doctor
-    raw_user = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1})
-    if raw_user and raw_user.get("employee_id"):
-        doctor = await v3_col("doctors").find_one(
-            {"employee_id": raw_user["employee_id"], "profile_type": "physio"},
-            {"_id": 0},
-        )
-    return doctor
+    """The logged-in physio's own expert record, and every record they hold beside it.
+
+    Lives in physio_scope now rather than here: the Review tab had a resolver of its own
+    that was weaker still (user_id alone, no employee fallback), so one physio could be
+    found by one tab and not by the next. This module already imports from v3_reviews, so
+    a resolver kept here could not be shared back without closing the loop.
+
+    Read it there — it explains why one person holds several of these records and why the
+    reads below are scoped to all of them.
+    """
+    return await resolve_physio_doctor(user.id, user.role, physio_id)
+
+
+def _ids_of(doctor: dict) -> list:
+    """Every expert record id this physio holds, for scoping a read.
+
+    The board asks for the work sitting against ANY of their records, not just the one it
+    opened on: a duplicate row is still the same person, and the branch that booked
+    against it was offered it as them. resolve_physio_doctor puts the set on the record it
+    returns; the fallback keeps a caller that hands over a bare doctor row working.
+    """
+    return doctor.get("physio_ids") or [doctor["id"]]
 
 
 @router.post("/branch/jr-physios")
@@ -96,7 +95,7 @@ async def create_jr_physio(payload: V3CreateJrPhysioInput, user: V3UserOut = Dep
     }
 
 
-async def _rehab_rows(physio_id: str, prefix: str) -> list:
+async def _rehab_rows(physio_ids, prefix: str) -> list:
     """This physio's rehab days whose date starts with `prefix`, shaped like a session row.
 
     `track: "rehab"` is what tells the board apart from a treatment day. Every row also
@@ -106,7 +105,7 @@ async def _rehab_rows(physio_id: str, prefix: str) -> list:
     collections in the first place.
     """
     rows = await v3_col("rehab_sessions").find(
-        {"physio_id": physio_id, "slot_time": {"$regex": f"^{prefix}"}},
+        {"physio_id": {"$in": physio_ids}, "slot_time": {"$regex": f"^{prefix}"}},
         {"_id": 0},
     ).sort("slot_time", 1).to_list(500)
     for row in rows:
@@ -125,20 +124,21 @@ async def physio_today(physio_id: Optional[str] = None, user: V3UserOut = Depend
     if not doctor:
         return {"sessions": [], "new_assigned": [], "date": datetime.now(timezone.utc).date().isoformat()}
 
+    ids = _ids_of(doctor)
     today = datetime.now(timezone.utc).date().isoformat()
     sessions = await v3_col("sessions").find(
-        {"physio_id": doctor["id"], "slot_time": {"$regex": f"^{today}"}},
+        {"physio_id": {"$in": ids}, "slot_time": {"$regex": f"^{today}"}},
         {"_id": 0},
     ).sort("slot_time", 1).to_list(100)
     # Rehab days sit on the same day, in the same room, for the same physio — so the day's
     # list has to hold them or the physio arrives to a patient their board never mentioned.
     # Merged in tagged rather than silently: a rehab day is not a day of the treatment
     # package, and reading as one would put the "Day 3 of 7" count out.
-    sessions = sessions + await _rehab_rows(doctor["id"], today)
+    sessions = sessions + await _rehab_rows(ids, today)
     sessions.sort(key=lambda r: r.get("slot_time") or "")
 
     new_assigned = await v3_col("leads").find(
-        {"assigned_physio_id": doctor["id"], "physio_assigned_at": {"$regex": f"^{today}"}},
+        {"assigned_physio_id": {"$in": ids}, "physio_assigned_at": {"$regex": f"^{today}"}},
         {"_id": 0},
     ).sort("physio_assigned_at", -1).to_list(200)
 
@@ -168,13 +168,14 @@ async def physio_calendar(
     y = year or now.year
     prefix = f"{y}-{str(m).zfill(2)}"
 
+    ids = _ids_of(doctor)
     sessions = await v3_col("sessions").find(
-        {"physio_id": doctor["id"], "slot_time": {"$regex": f"^{prefix}"}},
+        {"physio_id": {"$in": ids}, "slot_time": {"$regex": f"^{prefix}"}},
         {"_id": 0},
     ).sort("slot_time", 1).to_list(500)
     # Same reason as /physio/today: the month has to show the rehab days too, or the week
     # strip counts a day as free that the physio is already booked for.
-    sessions = sessions + await _rehab_rows(doctor["id"], prefix)
+    sessions = sessions + await _rehab_rows(ids, prefix)
     sessions.sort(key=lambda r: r.get("slot_time") or "")
 
     return {
@@ -198,12 +199,12 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
 
     # Rehab patients included: they are this physio's too, and were missing from this list
     # entirely because the lead carries no assigned_physio_id for them.
-    lead_ids = await physio_lead_ids(doctor["id"])
+    lead_ids = await physio_lead_ids(_ids_of(doctor))
     leads = await v3_col("leads").find(
         {"id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("updated_at", -1).to_list(500)
     sessions = await v3_col("sessions").find(
-        {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}}, {"_id": 0}
+        {"physio_id": {"$in": _ids_of(doctor)}, "lead_id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(2000)
     for row in sessions:
         row.setdefault("track", "treatment")
@@ -213,7 +214,7 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
     # Mapped onto the field names the rest of this projection already uses; rehab runs in
     # days and carries no week, so that one stays empty rather than inventing a Week 1.
     rehab = await v3_col("rehab_sessions").find(
-        {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}}, {"_id": 0}
+        {"physio_id": {"$in": _ids_of(doctor)}, "lead_id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(2000)
     for row in rehab:
         row["track"] = "rehab"
@@ -292,13 +293,13 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
     # matches its day rows against, so a rehab patient missing here left the row drawn from
     # a name-and-id stub with no phone — and the list decides a row is clickable by asking
     # whether the lead has one. It was the third place reading the stamp alone.
-    lead_ids = await physio_lead_ids(doctor["id"])
+    lead_ids = await physio_lead_ids(_ids_of(doctor))
     leads = await v3_col("leads").find(
         {"id": {"$in": lead_ids}},
         {"_id": 0},
     ).sort("appointment_datetime", -1).to_list(500)
     day_rows = await v3_col("sessions").find(
-        {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}},
+        {"physio_id": {"$in": _ids_of(doctor)}, "lead_id": {"$in": lead_ids}},
         {"_id": 0, "lead_id": 1, "status": 1, "week_number": 1},
     ).to_list(5000)
     tallies: dict = {}
@@ -342,7 +343,7 @@ async def physio_patient_detail(lead_id: str, physio_id: Optional[str] = None, u
     # Assignment is only one of the two ways a patient becomes this physio's — see
     # physio_owns_lead. Read off the field alone, this refused the record of a rehab
     # patient the physio's own Patients list had just offered them.
-    if not await physio_owns_lead(doctor["id"], lead_id):
+    if not await physio_owns_lead(_ids_of(doctor), lead_id):
         raise HTTPException(status_code=403, detail="This lead is not assigned to you")
 
     return V3LeadOut(**lead).model_dump()
@@ -358,7 +359,7 @@ async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = 
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if not await physio_owns_lead(doctor["id"], lead_id):
+    if not await physio_owns_lead(_ids_of(doctor), lead_id):
         raise HTTPException(status_code=403, detail="This lead is not assigned to you")
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {

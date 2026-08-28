@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from database import v3_col
-from physio_scope import physio_owns_lead
+from physio_scope import physio_owns_lead, resolve_physio_doctor
 from deps import v3_require_roles, is_branch_admin_role, is_physio_role
 from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
 from stage_utils import entry_branch_stage_names
@@ -1367,9 +1367,15 @@ async def client_transaction_history(
     if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Client not found")
     if is_physio_role(user.role):
-        doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1})
+        # Every record they hold, not the one row that happens to carry the login link.
+        # Through find_one this was the fourth place reading a physio's identity its own
+        # way, and here it denies rather than empties: a physio whose patient was booked
+        # against a duplicate row of themselves was told, on their own patient's Payment
+        # History tab, that the client did not exist. See resolve_physio_doctor.
+        doctor = await resolve_physio_doctor(user.id, user.role)
+        ids = (doctor or {}).get("physio_ids") or []
         # Rehab counts as theirs here too, for the reason physio_owns_lead sets out.
-        if not doctor or not await physio_owns_lead(doctor["id"], lead_id):
+        if not ids or not await physio_owns_lead(ids, lead_id):
             raise HTTPException(status_code=404, detail="Client not found")
 
     branch_name = ""

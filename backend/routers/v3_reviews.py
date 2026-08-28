@@ -26,7 +26,7 @@ from utils import now_iso, active_doctor_query
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 
-from physio_scope import physio_lead_ids
+from physio_scope import physio_lead_ids, resolve_physio_doctor
 
 router = APIRouter(prefix="/api/v3")
 
@@ -238,18 +238,24 @@ async def physio_reviews(
 ):
     """This physio's patients, each with how far through treatment they are and whether a
     review has already been raised — so the Physio can see who is due one."""
-    doctor = await v3_col("doctors").find_one(
-        {"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1}
-    )
-    pid = physio_id or (doctor or {}).get("id")
-    if not pid:
+    # The same resolver the Treatment and Patients tabs use. This tab had its own, weaker
+    # one -- a find_one on user_id with no employee fallback at all -- so a physio whose
+    # record carries no link was found by neither, and one whose link sits on a different
+    # record of theirs could be found by the board and not by this. Three tabs of one board
+    # disagreeing about who is logged in is the shape of the bug, not a detail of it.
+    doctor = await resolve_physio_doctor(user.id, user.role, physio_id)
+    if not doctor:
         return {"patients": [], "reviews": []}
+    # Every record the physio holds, for the reads; the one the board opened on, for what
+    # gets written and reported back. See resolve_physio_doctor.
+    ids = doctor.get("physio_ids") or [doctor["id"]]
+    pid = doctor["id"]
 
     # Off the shared helper, so a rehab patient is reviewable by the physio treating them.
     # This read the sessions collection alone, which holds treatment days and nothing else.
-    lead_ids = await physio_lead_ids(pid)
+    lead_ids = await physio_lead_ids(ids)
     leads = await v3_col("leads").find({"id": {"$in": lead_ids}}, {"_id": 0}).to_list(500)
-    existing = await v3_col("reviews").find({"physio_id": pid}, {"_id": 0}).to_list(500)
+    existing = await v3_col("reviews").find({"physio_id": {"$in": ids}}, {"_id": 0}).to_list(500)
     by_lead: dict = {}
     for r in existing:
         by_lead.setdefault(r["lead_id"], []).append(r)
