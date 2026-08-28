@@ -273,6 +273,19 @@ async def _build_portal_payload(lead: dict) -> dict:
     reviews = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).sort("raised_at", 1).to_list(50)
     review_numbers = review_numbers_for_lead(reviews)
     diet_days = await v3_col("diet_sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(200)
+    # The rehab course, which this page has never shown. A patient booked onto rehab saw
+    # nothing of it here: not the days, not the physio, not the remarks written against
+    # them — and the fee for it has been on the Payment tab the whole time, so the one
+    # screen that told them what they had paid for showed a charge with no course behind it.
+    #
+    # Its own collection and its own block, for the reason v3_rehab's docstring gives at
+    # length: `sessions` is read in forty-odd places as treatment days, and folding rehab
+    # into it would fire a physio's week-one review three days early. They are two courses
+    # that share a physio and a calendar, so they are counted apart here too — the tiles
+    # above stay the treatment package's, exactly as the diet block leaves them alone.
+    rehab_days = await v3_col("rehab_sessions").find(
+        {"lead_id": lead_id}, {"_id": 0}
+    ).sort("slot_time", 1).to_list(200)
     # The video room each of these is held in, joined on at read rather than copied onto
     # every row when the days were booked.
     #
@@ -289,6 +302,7 @@ async def _build_portal_payload(lead: dict) -> dict:
     # branch, and a join link on that day would be an invitation to somewhere nobody is.
     expert_ids = {s.get("physio_id") for s in sessions if s.get("physio_id")}
     expert_ids |= {d.get("coach_id") for d in diet_days if d.get("coach_id")}
+    expert_ids |= {r.get("physio_id") for r in rehab_days if r.get("physio_id")}
     meet_by_expert: Dict[str, str] = {}
     if expert_ids:
         async for d in v3_col("doctors").find(
@@ -301,6 +315,8 @@ async def _build_portal_payload(lead: dict) -> dict:
         s["meet_link"] = meet_by_expert.get(s.get("physio_id"), "")
     for d in diet_days:
         d["meet_link"] = meet_by_expert.get(d.get("coach_id"), "")
+    for r in rehab_days:
+        r["meet_link"] = meet_by_expert.get(r.get("physio_id"), "")
     # The coach on the lead rather than on a day, because the diet card shows one
     # appointment rather than a list — and the days above may not exist yet when the first
     # one is booked from the consultation.
@@ -366,6 +382,13 @@ async def _build_portal_payload(lead: dict) -> dict:
                 "status": s.get("status"),
                 "jr_physio_remarks": s.get("jr_physio_remarks"),
                 "rehab_remarks": s.get("rehab_remarks"),
+                # The room this day is held in. Joined onto the row above since the day
+                # video sessions existed, and dropped again right here: this projection
+                # builds a fresh dict per session and never carried the field, so the
+                # portal has been rendering a join button on a value that was always
+                # undefined. The only meeting link that ever reached this page was the
+                # diet block's, which is fetched separately further down.
+                "meet_link": s.get("meet_link") or "",
             }
             for s in sessions
         ],
@@ -427,8 +450,37 @@ async def _build_portal_payload(lead: dict) -> dict:
                     "status": d.get("status"),
                     "coach_remarks": d.get("coach_remarks"),
                     "weight_kg": d.get("weight_kg"),
+                    # Same omission as the sessions list above, and the same fix: a
+                    # check-in held over video had its room joined on and then dropped.
+                    "meet_link": d.get("meet_link") or "",
                 }
                 for d in diet_days
+            ],
+        },
+
+        # The rehab course, beside the diet block and for the same reason it is beside it:
+        # a separate course of care with its own days, its own count and its own fee, run
+        # alongside the treatment package rather than inside it. Its physio may be the same
+        # person delivering the treatment days; the course is not the same course.
+        #
+        # Named off the lead rather than off a day, so a patient assigned a rehab physio
+        # before any day is booked still sees who they are with — the same thing the diet
+        # block does with diet_coach_name.
+        "rehab": {
+            "physio_name": lead.get("rehab_physio_name"),
+            "stage": lead.get("rehab_stage"),
+            "total_days": len(rehab_days),
+            "completed_days": len([r for r in rehab_days if r.get("status") == "completed"]),
+            "days": [
+                {
+                    "day_number": r.get("day_number"),
+                    "total_days": r.get("total_days"),
+                    "slot_time": r.get("slot_time"),
+                    "status": r.get("status"),
+                    "physio_remarks": r.get("physio_remarks"),
+                    "meet_link": r.get("meet_link") or "",
+                }
+                for r in rehab_days
             ],
         },
 

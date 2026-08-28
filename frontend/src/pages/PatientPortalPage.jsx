@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Video } from "lucide-react";
+import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Dumbbell, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Video } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -281,8 +281,28 @@ export function SessionsTab({ data }) {
           {(data.sessions || []).length === 0 ? (
             <p className="px-4 py-6 text-center text-xs text-slate-400">No sessions booked yet</p>
           ) : (
-            (data.sessions || []).map((s) => (
-              <div key={s.session_number} className="flex items-center gap-3 px-4 py-3" data-testid={`patient-portal-session-${s.session_number}`}>
+            (data.sessions || []).map((s) => {
+              // Whether tapping this row should take the patient into the room. Only a day
+              // still to come and only one held over video: a link on a finished session
+              // invites somebody into an empty room, and this list keeps every past day as
+              // the record of the course.
+              const joinable = !!s.meet_link && s.status !== "completed";
+              // The row IS the link when there is one, rather than a small target inside
+              // it. A patient looking at "Session 1, Thursday, 11:30" and wanting to join
+              // taps the session — that is the thing on screen they are thinking about —
+              // so the whole row answers to it. The chip below stays as the visible say-so
+              // that it will; without it a row that silently opens a new tab is a surprise.
+              const Row = joinable ? "a" : "div";
+              const rowProps = joinable
+                ? { href: s.meet_link, target: "_blank", rel: "noopener noreferrer" }
+                : {};
+              return (
+              <Row
+                key={s.session_number}
+                {...rowProps}
+                className={`flex items-center gap-3 px-4 py-3 ${joinable ? "cursor-pointer transition hover:bg-violet-50/60" : ""}`}
+                data-testid={`patient-portal-session-${s.session_number}`}
+              >
                 <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
                   s.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
                 }`}>
@@ -301,16 +321,13 @@ export function SessionsTab({ data }) {
                       empty room, and this list keeps every past day as the record of the
                       course. Blank for a branch's own physio, who is seen in a treatment
                       room and has no video room recorded. */}
-                  {s.meet_link && s.status !== "completed" && (
-                    <a
-                      href={s.meet_link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-100"
+                  {joinable && (
+                    <span
+                      className="mt-1 inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700"
                       data-testid={`patient-portal-session-meet-${s.session_number}`}
                     >
                       <Video className="h-3 w-3" /> Join on Google Meet
-                    </a>
+                    </span>
                   )}
                   {(s.jr_physio_remarks || s.rehab_remarks) && (
                     <div className="mt-1.5 space-y-1 rounded border border-emerald-100 bg-emerald-50 p-2">
@@ -330,8 +347,9 @@ export function SessionsTab({ data }) {
                 }`}>
                   {s.status}
                 </span>
-              </div>
-            ))
+              </Row>
+              );
+            })
           )}
         </div>
       </div>
@@ -357,6 +375,104 @@ export function SessionsTab({ data }) {
           </div>
         </div>
       )}
+
+      <RehabCard rehab={data.rehab} />
+    </div>
+  );
+}
+
+/** The rehab course, when the patient is on one.
+ *
+ *  Its own card under the treatment days rather than mixed into them, because they are two
+ *  courses that happen to share a physio: rehab has its own day numbering, its own count
+ *  and its own fee, and a patient can be on it having never bought a session package. The
+ *  tiles at the top of this tab stay the treatment package's for the same reason - see the
+ *  rehab block in v3_patient_portal, and v3_rehab's own docstring for why the two have
+ *  never shared a collection.
+ *
+ *  Absent entirely until now. A patient booked onto rehab saw no sign of it here while the
+ *  Payment tab showed them the Rehab Fee they had paid, which is a charge with no course
+ *  behind it on the one screen whose job is telling them what they bought.
+ */
+function RehabCard({ rehab }) {
+  const days = rehab?.days || [];
+  // Nothing booked and nobody assigned is not a rehab patient - no empty card for them.
+  // A physio assigned with no days yet still shows, so the patient can see it is coming.
+  if (!rehab || (!days.length && !rehab.physio_name)) return null;
+  const done = rehab.completed_days || 0;
+  const total = rehab.total_days || 0;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-violet-200 bg-white" data-testid="patient-portal-rehab">
+      <div className="border-b border-violet-100 bg-violet-50/60 px-4 py-3">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-violet-800">
+          <Dumbbell className="h-4 w-4 text-violet-500" /> Rehab Exercise Days
+        </h2>
+        <p className="mt-0.5 text-[10px] text-violet-500">
+          {rehab.physio_name ? <>With <span className="font-semibold">{rehab.physio_name}</span>. </> : null}
+          {total ? `${done} of ${total} done` : "No days booked yet"}
+          {" · runs alongside your treatment sessions"}
+        </p>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {days.length === 0 ? (
+          <p className="px-4 py-6 text-center text-xs text-slate-400">No rehab days booked yet</p>
+        ) : (
+          days.map((r) => {
+            // Same rule as a treatment day: the row is the way into the room, and only for
+            // a day still to come that is actually held in one.
+            const joinable = !!r.meet_link && r.status !== "completed";
+            const Row = joinable ? "a" : "div";
+            const rowProps = joinable
+              ? { href: r.meet_link, target: "_blank", rel: "noopener noreferrer" }
+              : {};
+            return (
+              <Row
+                key={r.day_number}
+                {...rowProps}
+                className={`flex items-center gap-3 px-4 py-3 ${joinable ? "cursor-pointer transition hover:bg-violet-50/60" : ""}`}
+                data-testid={`patient-portal-rehab-day-${r.day_number}`}
+              >
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  r.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-violet-100 text-violet-600"
+                }`}>
+                  {r.status === "completed" ? <Check className="h-4 w-4" /> : r.day_number}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-700">
+                    Rehab Day {r.day_number}
+                    {r.total_days ? <span className="text-slate-400"> {"·"} of {r.total_days}</span> : null}
+                  </p>
+                  <p className="flex items-center gap-1 text-[10px] text-slate-400">
+                    <Clock className="h-3 w-3" />
+                    {r.slot_time ? `${r.slot_time.split("T")[0]} at ${slotTo12h(r.slot_time)}` : "—"}
+                  </p>
+                  {joinable && (
+                    <span
+                      className="mt-1 inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700"
+                      data-testid={`patient-portal-rehab-meet-${r.day_number}`}
+                    >
+                      <Video className="h-3 w-3" /> Join on Google Meet
+                    </span>
+                  )}
+                  {r.physio_remarks && (
+                    <div className="mt-1.5 rounded border border-emerald-100 bg-emerald-50 p-2">
+                      <p className="text-[10px] text-emerald-600">
+                        <span className="font-semibold">Rehab: </span>{r.physio_remarks}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold ${
+                  r.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                }`}>
+                  {r.status}
+                </span>
+              </Row>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
