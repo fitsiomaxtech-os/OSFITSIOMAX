@@ -732,6 +732,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     [stages],
   );
 
+  // Which mark the board is narrowed to, if any. Alongside the Date Filter and the search
+  // rather than beside the stage pills: it narrows WHO is on the board, not where they are
+  // in it, so a stage pill still means the same thing under it.
+  const [markFilter, setMarkFilter] = useState(""); // "" | "vip" | "attention"
+
   const filteredLeads = useMemo(() => {
     let list = boardData.leads;
     if (dateFilter) {
@@ -751,26 +756,27 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         l.name?.toLowerCase().includes(q) || l.phone?.includes(q) || l.email?.toLowerCase().includes(q)
       );
     }
+    // Applied here, with the other two, rather than to the list alone. This used to narrow
+    // only the rows and only on All Stages, on the reasoning that two narrowings at once --
+    // each with its own count above it -- is a list nobody can account for. That reasoning
+    // was right about the danger and wrong about the fix: drawn through the same memo the
+    // counts are, every pill on the bar narrows with the list, so the row of counts still
+    // describes exactly what is under it. Nothing is left saying otherwise, and a branch can
+    // ask "which of my VIPs are in Fee Collected" on the stage where that is worked.
+    if (markFilter === "vip") list = list.filter((l) => l.is_vip);
+    else if (markFilter === "attention") list = list.filter((l) => l.needs_attention);
     return list;
-  }, [boardData.leads, searchQuery, dateFilter]);
+  }, [boardData.leads, searchQuery, dateFilter, markFilter]);
 
   // The rows the table is actually showing. Hoisted out of the table body because the
   // select-all box and the delete bar have to agree with it exactly — "select all" that
   // picks up a row the stage filter is hiding deletes something nobody looked at.
-  // Which mark the list is narrowed to, if any. Only ever set on All Stages — the
-  // NARROWING is what is held there, not the marking: a filter that survived a move to
-  // another stage would silently hide most of that stage while its count above still said
-  // otherwise. Putting a mark ON is a different act and is offered on every stage — see
-  // the row markup.
-  const [markFilter, setMarkFilter] = useState(""); // "" | "vip" | "attention"
-  useEffect(() => { if (stageFilter) setMarkFilter(""); }, [stageFilter]);
-
+  // The marks are already applied by filteredLeads above, so this is the stage pill and
+  // nothing else.
   const visibleLeads = useMemo(() => {
     if (stageFilter) return filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter), isConsultationOnlyStage));
-    if (markFilter === "vip") return filteredLeads.filter((l) => l.is_vip);
-    if (markFilter === "attention") return filteredLeads.filter((l) => l.needs_attention);
     return filteredLeads;
-  }, [filteredLeads, stageFilter, stages, markFilter, isConsultationOnlyStage]);
+  }, [filteredLeads, stageFilter, stages, isConsultationOnlyStage]);
 
   // A tick survives scrolling and reopening a row, but not a change to what is on screen.
   // Searching, filtering by date or switching stage replaces the list under the selection,
@@ -1078,15 +1084,19 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 lets the search give up the width instead; on the narrowest phones that
                 leaves the placeholder clipped, which costs less than a second row. */}
             <div className={`${searchOpen ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5 sm:gap-3`}>
-            {/* Narrow the list to one mark. Only on All Stages: that is where a branch
-                puts these on and reads them back, and every other pill is already a
-                narrowing of its own — two narrowings at once, each with its own count
-                above, is a list nobody can account for.
+            {/* Narrow the board to one mark, on every stage rather than on All Stages
+                alone. A branch that has just marked somebody on the stage they are being
+                worked on could not then ask to see only those, which is the question the
+                mark was put on for — and the marks became settable on every stage before
+                the reading of them did.
+
+                Safe on a stage now because the narrowing is applied where the Date Filter
+                and the search are, so the counts along the bar move with the list instead
+                of standing over it saying something else.
 
                 Lit when active, and pressing the lit one clears it, so the same control
                 both narrows and returns. */}
-            {!stageFilter && !isConsultationStage && (
-              <div className="flex shrink-0 items-center gap-1" data-testid="branch-mark-filters">
+            <div className="flex shrink-0 items-center gap-1" data-testid="branch-mark-filters">
                 <button
                   type="button"
                   onClick={() => setMarkFilter((m) => (m === "vip" ? "" : "vip"))}
@@ -1113,8 +1123,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 >
                   <AlertCircle className={`h-4 w-4 ${markFilter === "attention" ? "fill-rose-500 text-white" : "text-slate-400"}`} />
                 </button>
-              </div>
-            )}
+            </div>
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
             <Button
               onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
@@ -1160,6 +1169,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               // search row, which is also where its date filter and green refresh lived.
               externalSearch={searchQuery}
               externalDateFilter={dateFilter}
+              // The mark filter above narrows this board's list the way the search and the
+              // Date Filter beside it do. Without it the pills would count the VIPs and the
+              // table under them would show everybody.
+              externalMarkFilter={markFilter}
               reloadToken={refreshTick}
               // Puts its Fee Collected picker in the toolbar above rather than on its own
               // row underneath — see the slot in that toolbar.
@@ -1419,8 +1432,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                                 row again in two thousand, and mark it there. That is a long
                                 way round to a click, and the mark that does not get made is
                                 the one nobody makes.
-                                The list-NARROWING stays on All Stages, where a count that
-                                describes the whole branch can survive it — see markFilter. */}
+                                Reading them back is offered on every stage too now — see
+                                markFilter, which narrows the counts along with the list so
+                                the bar cannot end up describing a different set. */}
                             <div className="ml-auto flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"

@@ -837,7 +837,7 @@ const PanelCard = ({ children, testid, footer }) => (
   </div>
 );
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false, toolbarSlot = null, onlineArm = false }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, toolbarSlot = null, onlineArm = false }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
   // worth remarking on when they are assigned. Passed in rather than worked out here for
@@ -1172,10 +1172,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     }
   }, [branchId]);
 
-  // Date Filter + search only — deliberately excludes the stage-pill filter, so this can
-  // also drive the per-stage counts below (counting by stage after narrowing to
-  // "everything in the date range", not after already narrowing to one stage).
-  const dateAndSearchFiltered = useMemo(() => {
+  // Everything except the stage pill: the Date Filter, the search, and the VIP/attention
+  // mark. Deliberately excludes the pill so this can also drive the per-stage counts below
+  // — counting by stage after narrowing to "everyone in the date range", not after already
+  // narrowing to one stage. Every narrowing that belongs to the whole board goes in here
+  // rather than onto the rows alone, which is what keeps each pill's count describing the
+  // list it opens.
+  const preStageFiltered = useMemo(() => {
     let rows = board.leads || [];
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
@@ -1193,8 +1196,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       const q = search.trim().toLowerCase();
       rows = rows.filter((l) => `${l.name || ""} ${l.phone || ""}`.toLowerCase().includes(q));
     }
+    // Driven from the Branch Leads toolbar above rather than from a control of this
+    // board's own: these stages are shown inside that board's stage bar, and two mark
+    // filters on one screen would be two answers to the same question.
+    if (externalMarkFilter === "vip") rows = rows.filter((l) => l.is_vip);
+    else if (externalMarkFilter === "attention") rows = rows.filter((l) => l.needs_attention);
     return rows;
-  }, [board.leads, dateFilter, search]);
+  }, [board.leads, dateFilter, search, externalMarkFilter]);
 
   // "Treatments" (Head Physio's own board only) is a cross-cutting view, not a real
   // position in the head_consultation_stage pipeline — a lead shows up here the moment
@@ -1221,9 +1229,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, [isConsultant, stageField]);
 
   const inStage = useMemo(() => {
-    if (!stageFilter) return dateAndSearchFiltered;
-    return dateAndSearchFiltered.filter((l) => matchesStage(l, stageFilter));
-  }, [dateAndSearchFiltered, stageFilter, matchesStage]);
+    if (!stageFilter) return preStageFiltered;
+    return preStageFiltered.filter((l) => matchesStage(l, stageFilter));
+  }, [preStageFiltered, stageFilter, matchesStage]);
 
   const showDiscountColumn = stageFilter === "Fee Collected";
   const cols = showDiscountColumn ? COLS_WITH_DISCOUNT : COLS_PLAIN;
@@ -1244,9 +1252,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // this viewer, and reflect the active filters rather than all-time totals.
   const derivedStageCounts = useMemo(() => {
     const counts = {};
-    stages.forEach((s) => { counts[s.name] = dateAndSearchFiltered.filter((l) => matchesStage(l, s.name)).length; });
+    stages.forEach((s) => { counts[s.name] = preStageFiltered.filter((l) => matchesStage(l, s.name)).length; });
     return counts;
-  }, [dateAndSearchFiltered, stages, matchesStage]);
+  }, [preStageFiltered, stages, matchesStage]);
 
   // Lets a parent label its own cards without fetching the board's data a second time.
   // The per-stage counts go up too, so a parent that has replaced this board's stage bar
@@ -1257,15 +1265,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const stageNames = useMemo(() => stages.map((st) => st.name), [stages]);
 
   useEffect(() => {
-    if (onCountChange) onCountChange(dateAndSearchFiltered.length, derivedStageCounts, stageNames);
-  }, [dateAndSearchFiltered.length, derivedStageCounts, stageNames, onCountChange]);
+    if (onCountChange) onCountChange(preStageFiltered.length, derivedStageCounts, stageNames);
+  }, [preStageFiltered.length, derivedStageCounts, stageNames, onCountChange]);
 
   // The rows themselves, for a parent that merges this board's leads into a list of its
   // own. Safe to depend on directly: it's a useMemo, so its identity only changes when
   // the underlying set does.
   useEffect(() => {
-    if (onRowsChange) onRowsChange(dateAndSearchFiltered);
-  }, [dateAndSearchFiltered, onRowsChange]);
+    if (onRowsChange) onRowsChange(preStageFiltered);
+  }, [preStageFiltered, onRowsChange]);
 
   useEffect(() => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
@@ -2746,7 +2754,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           stageFilter={stageFilter}
           setStageFilter={setStageFilter}
           counts={derivedStageCounts}
-          totalCount={dateAndSearchFiltered.length}
+          totalCount={preStageFiltered.length}
           hideAllStages
           testid="cons-metric"
         />
