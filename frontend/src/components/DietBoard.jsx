@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronRight,
+  ClipboardCheck,
   Eye,
   Lock,
   RefreshCw,
@@ -16,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { LeadMarks } from "@/components/ui/lead-marks";
-import { dietChartUrl, dietConsultations, dietPatients, dietSessions, saveDietConsultationReport, sendDietChart } from "@/lib/api";
+import { dietChartUrl, dietConsultations, dietPatients, dietSessions, recommendDietChart, saveDietConsultationReport, sendDietChart } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
 /**
@@ -330,6 +331,12 @@ function DietChartPanel({ patient, chart, onSent }) {
   const [file, setFile] = useState(null);
   const [sending, setSending] = useState(false);
   const [opening, setOpening] = useState(false);
+  // Whether a chart has been called for at all. Held locally as well as on the patient so
+  // the panel answers the moment it is pressed -- the branch's fee panel is the thing
+  // waiting on it, and a coach who has to reload to see their own recommendation land will
+  // press it twice.
+  const [recommended, setRecommended] = useState(!!patient.diet_chart);
+  const [recommending, setRecommending] = useState(false);
   // The chart on screen: { url, pdf, name }. null when nothing is open.
   const [preview, setPreview] = useState(null);
   // Mirrors preview.url purely so unmount can revoke it — an effect that closed over the
@@ -338,6 +345,22 @@ function DietChartPanel({ patient, chart, onSent }) {
 
   const sent = !!chart?.sent;
   const visible = !!chart?.visible_to_client;
+  const feePaid = !!chart?.fee_paid;
+
+  // The half of the referral that is the coach's to decide. The Consultant sends the
+  // patient for a consultation; whether they leave with a chart is answered here, after
+  // they have been seen, and it is what puts the Diet Chart Fee in front of the branch.
+  const recommend = async () => {
+    setRecommending(true);
+    try {
+      await recommendDietChart(patient.lead_id);
+      setRecommended(true);
+      toast.success("Diet Chart recommended. The branch collects the Diet Chart Fee next.");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't recommend a Diet Chart");
+    }
+    setRecommending(false);
+  };
 
   const send = async () => {
     if (!file) { toast.error("Choose the chart file first"); return; }
@@ -411,6 +434,33 @@ function DietChartPanel({ patient, chart, onSent }) {
       <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-orange-700">
         <Salad className="h-3.5 w-3.5" /> Diet Chart
       </p>
+
+      {/* The first step, and the one that was missing. A chart is a second product at a
+          second price: until it is called for there is nothing for the branch to sell and
+          nothing here for the coach to owe. Said before the uploader rather than beside it,
+          because that is the order it happens in -- recommend, the branch collects, the
+          chart goes out. */}
+      {!recommended ? (
+        <div className="mb-2 rounded-md border border-orange-200 bg-white/70 p-2.5" data-testid="diet-chart-recommend-panel">
+          <p className="text-[11px] leading-relaxed text-slate-600">
+            No Diet Chart has been called for. Recommend one if this patient needs it — the
+            branch collects the Diet Chart Fee after that.
+          </p>
+          <Button
+            className="mt-2 h-8 bg-orange-500 text-[11px] hover:bg-orange-600"
+            onClick={recommend}
+            disabled={recommending}
+            data-testid="diet-chart-recommend"
+          >
+            <ClipboardCheck className="mr-1 h-3.5 w-3.5" />
+            {recommending ? "Recommending..." : "Recommend Diet Chart"}
+          </Button>
+        </div>
+      ) : (
+        <p className="mb-2 text-[11px] font-medium text-emerald-700" data-testid="diet-chart-recommended">
+          Diet Chart recommended{feePaid ? " · fee collected" : " — waiting on the branch to collect the Diet Chart Fee"}
+        </p>
+      )}
 
       {/* What the patient can actually see, said plainly. "Sent" alone would read as
           "they have it", and unpaid they do not. */}

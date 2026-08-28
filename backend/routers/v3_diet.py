@@ -645,6 +645,77 @@ async def get_diet_chart(
     return _chart_out(lead, await _current_chart(lead_id))
 
 
+@router.post("/diet/chart/{lead_id}/recommend")
+async def recommend_diet_chart(
+    lead_id: str,
+    user: V3UserOut = Depends(v3_require_diet),
+):
+    """The Nutrition Coach says this patient needs a Diet Chart.
+
+    The step that was missing between the two halves of the diet vertical. A Diet Chart is
+    a second product at a second price, and until now the Consultant ticked it -- at the
+    consultation, before the patient had ever met a Nutritionist. That is a judgement made
+    by the wrong person at the wrong time: the branch could take a Chart Fee for a chart
+    the coach had not yet decided the patient needed, and the coach could be left owing a
+    document somebody else had already sold.
+
+    So the Consultant refers for the Nutritionist's consultation and nothing else, and this
+    is where a chart enters the picture: after the patient has been seen, from the board of
+    the person who saw them. Setting diet_chart is what puts the Diet Chart Package and the
+    Diet Chart Fee in front of the branch -- every chart row in the Diet panel on
+    ConsultationsBoard is held behind that flag.
+
+    Written by the coach alone, the same as the report and the chart itself: Branch Admin
+    books and collects, and what a patient clinically needs is nobody else's to decide.
+
+    Held to a patient who is actually theirs to see -- one assigned to a Nutrition Coach --
+    but not to a report having been written first: the recommendation is normally made in
+    the same sitting, and demanding the write-up before it would only push coaches to save
+    an empty one to get past the gate.
+
+    One way. Nothing here un-recommends a chart: the branch simply does not collect a fee
+    it was told about by mistake, and a chart already paid for or already sent cannot be
+    taken back by a flag anyway.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if not lead.get("diet_coach_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="This patient has not been assigned to a Nutrition Coach yet",
+        )
+    if lead.get("diet_chart"):
+        # Already recommended. Not an error -- two taps, or two coaches, should read the
+        # same as one -- and the second must not overwrite who recommended it or when.
+        return _chart_out(lead, await _current_chart(lead_id))
+
+    now = now_iso()
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "diet_chart": True,
+        "diet_chart_recommended_at": now,
+        "diet_chart_recommended_by": user.full_name,
+        # A patient can reach a Nutritionist without a Consultant's referral -- the branch
+        # can book one directly -- and a chart recommended for them still makes them a diet
+        # patient on every screen that asks.
+        "diet_recommended": True,
+        "updated_at": now,
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "diet_chart_recommended",
+        # Says what happens next, because the person reading this log is the branch and the
+        # fee is theirs to collect.
+        "details": "Diet Chart recommended by the Nutrition Coach - the Diet Chart Fee can now be collected",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return _chart_out(updated, await _current_chart(lead_id))
+
+
 @router.post("/diet/chart/{lead_id}")
 async def send_diet_chart(
     lead_id: str,

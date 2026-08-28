@@ -389,25 +389,20 @@ async def hp_consultation_decision(
         raise HTTPException(status_code=400, detail="Write the Diagnosis Report before Save & Move")
     if not (lead.get("treatment_summary") or "").strip():
         raise HTTPException(status_code=400, detail="Write the Treatment Summary before Save & Move")
-    # A Diet referral has to say which of the two it is for. Naming neither is an
-    # unfinished answer rather than a plainer referral: it leaves the question for whoever
-    # picks the patient up, which is the gap the two options were added to close.
-    if payload.diet_recommended and not (payload.diet_consultation or payload.diet_chart):
-        raise HTTPException(
-            status_code=400, detail="Pick Diet Consultation, Diet Chart, or both",
-        )
-
     # Completing a consultation moves BOTH pipelines at once: the lead closes out on the
     # Head Physio's board and appears on Branch Admin's Consultation Visit column, which
     # is the one hand-off point between the two.
     updates = {
         "consultation_decision": payload.decision,
         "diet_recommended": bool(payload.diet_recommended),
-        # Only meaningful with the referral, so they are held to it here rather than
-        # trusted from the form. A Diet Chart recorded on a patient nobody referred to a
-        # Nutritionist is a row no screen would ever show and no queue would ever pick up.
-        "diet_consultation": bool(payload.diet_recommended and payload.diet_consultation),
-        "diet_chart": bool(payload.diet_recommended and payload.diet_chart),
+        # A Diet referral IS a referral to the Nutritionist's consultation, so this follows
+        # the flag rather than being asked for beside it.
+        #
+        # diet_chart is NOT written here, and not written back to False either. Whether the
+        # patient needs a chart is the Nutritionist's judgement, made after seeing them and
+        # recorded from their own board; clearing it here would take a chart the coach had
+        # already recommended back off the branch's fee panel.
+        "diet_consultation": bool(payload.diet_recommended),
         # Recorded rather than inferred. The Rehab card is derived from "has an appointment
         # with me and no package recommendation yet", which is true of a Consultation Only
         # patient too — without this flag there is no way to tell a patient deliberately
@@ -425,16 +420,9 @@ async def hp_consultation_decision(
     if payload.rehab_referred:
         chosen += " + Rehab"
     if payload.diet_recommended:
-        # Named as what it is where the Consultant said which, and plain "Diet" where they
-        # did not — the log reads back the choice that was made rather than a shape that
-        # implies a question was answered when it was not.
-        picked = [
-            name for name, on in (
-                ("Diet Consultation", payload.diet_consultation),
-                ("Diet Chart", payload.diet_chart),
-            ) if on
-        ]
-        chosen += (" + " + " + ".join(picked)) if picked else " + Diet"
+        # Named as what it is: the one thing a Consultant can refer for on the diet side.
+        # A chart, where the Nutritionist later recommends one, writes its own line.
+        chosen += " + Diet Consultation"
     if payload.fitness_recommended:
         chosen += " + Fitness"
     if payload.zumba_recommended:

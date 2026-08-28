@@ -358,10 +358,12 @@ async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInp
     Collected in one go, by the same four modes, for the same reason the Diet Consultation
     Fee is: a chart is one plan at one price, so there is nothing to spread over a schedule.
 
-    Independent of the Diet Consultation Fee, deliberately. They are two products on two
-    shelves and a patient may take a chart home without ever booking a coach, so this
-    requires only what that fee requires — the Consultation Fee, and nothing else. Gating
-    it on the diet consultation would shut a door the branch sells through.
+    Still two products on two shelves, and still not gated on the Diet Consultation Fee
+    having been paid. What it now requires is that a chart has been CALLED FOR: the
+    Nutritionist recommends one at the consultation, having seen the patient, and until they
+    do there is nothing here to price. The Consultant used to answer that question at their
+    own consultation, before the patient had met a coach at all, which let this desk collect
+    for a chart nobody had decided was needed.
 
     Does not touch consultation_stage, for the same reason collect_diet_fee does not: diet
     is a parallel vertical, and moving the physio pipeline as a side effect of a diet
@@ -377,6 +379,18 @@ async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInp
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.get("package_paid") is None:
         raise HTTPException(status_code=400, detail="Collect the Consultation Fee first")
+    # A chart has to have been called for before it can be sold, and the Nutritionist is who
+    # calls for one -- see recommend_diet_chart. The branch's own panel already holds the
+    # button behind this flag; this is the half that holds whatever reaches the route
+    # another way, the same as every other gate in this file.
+    #
+    # Leads carrying diet_chart from before this pass, when the Consultant ticked it, are
+    # unaffected: the flag they were given is the flag being read here.
+    if not lead.get("diet_chart"):
+        raise HTTPException(
+            status_code=400,
+            detail="The Nutritionist has not recommended a Diet Chart for this patient yet",
+        )
 
     item = await v3_col("store_items").find_one(
         {"id": payload.item_id, "item_type": {"$in": list(DIET_ITEM_TYPES)}}, {"_id": 0}

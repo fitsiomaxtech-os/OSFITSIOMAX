@@ -685,17 +685,15 @@ class V3ConsultationDecisionInput(BaseModel):
     # one — so linking a package to either is a field beside these rather than a rewrite of
     # what was recorded.
     #
-    # One of them is required whenever diet_recommended is on — see the check in
-    # hp_consultation_decision. Naming neither is an unfinished answer, not a plainer
-    # referral: it leaves the question for whoever picks the patient up.
+    # Neither is sent any more. A Diet referral means one thing here — the Nutritionist's
+    # consultation — so hp_consultation_decision derives diet_consultation from
+    # diet_recommended rather than asking a question with one answer.
     #
-    # They default False rather than being required outright because a consultation with
-    # no Diet at all sends neither, and because every row saved before these existed
-    # carries diet_recommended with neither set. Those stay readable — `diet_recommended`
-    # is still the flag the Nutrition Coach's queue and the diet fee read — they simply
-    # have to answer this the next time somebody edits the decision.
-    diet_consultation: bool = False
-    diet_chart: bool = False
+    # diet_chart is deliberately not accepted at all. Whether this patient needs a chart is
+    # decided AT that consultation, by the Nutritionist who did it, and posted from their
+    # own board — see recommend_diet_chart in routers/v3_diet.py. Taken here it was being
+    # answered before the patient had been seen, and the branch could collect a Chart Fee
+    # for a chart nobody had yet said was needed.
     # Sends the patient straight to the Head Physio's Rehab queue instead of picking a
     # Treatment Package here. Its own flag for the same reason diet is: it is a routing
     # choice, not another value of `decision`, and folding it in would break every

@@ -1144,7 +1144,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // have to be written first, but no add-on has to be picked — every toggle starts off,
   // which submits as a plain Consultation, the same as a patient who needs nothing else.
   // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
-  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, dietConsultation: false, dietChart: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
+  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
   // Which service's picker is open over the form, by addon key, or null for none.
   // The pickers used to stack down the form, one block per ticked service, which is what
@@ -1371,7 +1371,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
-    setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, dietChart: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
+    setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
     setDecisionReceipt(null);
     setEditingDecision(false);
     setAddonPicker(null);
@@ -1420,27 +1420,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (!(selectedLead.physio_diagnosis_report || "").trim()) { toast.error("Write the Diagnosis Report first"); return; }
     if (!(selectedLead.treatment_summary || "").trim()) { toast.error("Write the Treatment Summary first"); return; }
 
-    // Ticking Diet without saying which is an unfinished answer, not a referral. Checked
-    // here as well as on the button, the way the Treatment Package is: the button being
-    // disabled explains nothing to somebody who got here another way, and the server
-    // refuses it regardless.
-    if (decisionDraft.diet && !decisionDraft.dietConsultation && !decisionDraft.dietChart) {
-      toast.error("Pick Diet Consultation, Diet Chart, or both");
-      return;
-    }
-
     // No add-on picked submits as a plain Consultation — that's a valid, common outcome
     // (the patient needs nothing further today), not an incomplete form. Only Treatment
     // demands anything more: its package.
     const decision = decisionDraft.treatment ? "consultation_treatment" : "consultation_only";
     let payload = {
       decision,
+      // A Diet referral is a referral to the Nutritionist's consultation and nothing else,
+      // so this one flag says all of it. The server derives diet_consultation from it and
+      // no longer accepts a chart here at all: whether the patient needs one is decided at
+      // that consultation, by the Nutritionist, and recommended from their own board.
       diet_recommended: decisionDraft.diet,
-      // Only meaningful with the referral, the same pairing the server enforces — and the
-      // same shape rehab_item_id already follows, so an abandoned tick cannot be submitted
-      // once the picker showing it is gone.
-      diet_consultation: decisionDraft.diet ? !!decisionDraft.dietConsultation : false,
-      diet_chart: decisionDraft.diet ? !!decisionDraft.dietChart : false,
       rehab_referred: decisionDraft.rehab,
       // Only meaningful with the referral, and the server enforces the same pairing.
       rehab_item_id: decisionDraft.rehab ? decisionDraft.rehab_item_id || null : null,
@@ -3224,16 +3214,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const needsPackage = decisionDraft.treatment;
               const packageReady = !needsPackage
                 || (!!decisionDraft.item_id && !!selectedPackageWeeks && !!parseInt(decisionDraft.sessionsPerWeek, 10));
-              // Diet on its own is not an answer. Referring a patient without saying which
-              // of the two they are leaving with pushes the question to whoever picks the
-              // referral up, which is the gap this picker was added to close — so ticking
-              // Diet is what makes naming one of them required, exactly as ticking
-              // Treatment is what makes its package required.
-              const dietReady = !decisionDraft.diet
-                || !!decisionDraft.dietConsultation || !!decisionDraft.dietChart;
               // No add-on is a valid, completed choice on its own — a plain Consultation —
-              // so nothing here requires at least one to be picked.
-              const canSave = diagnosisReady && summaryReady && packageReady && dietReady;
+              // so nothing here requires at least one to be picked. Diet asks nothing
+              // either: the referral is to the Nutritionist's consultation, which is the
+              // whole of what a Consultant decides on that side.
+              const canSave = diagnosisReady && summaryReady && packageReady;
 
               // What the Consultant has ticked, in the shelf's own order. The detail column
               // is built from this rather than from five separate conditionals, so a card
@@ -3255,7 +3240,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   ...(key === "treatment" ? { item_id: "", sessionsPerWeek: "" } : {}),
                   ...(key === "rehab" ? { rehab_item_id: "" } : {}),
                   ...(key === "zumba" ? { zumba_item_id: "" } : {}),
-                  ...(key === "diet" ? { dietConsultation: false, dietChart: false } : {}),
+                  ...(key === "diet" ? { dietConsultation: false } : {}),
                 }));
                 setAddonPicker((cur) => (cur === key ? null : cur));
               };
@@ -3265,7 +3250,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // back to that picker. Nothing here turns a service off: removal is the ×
               // on its row in Selected, beside the choice actually being thrown away.
               const pickAddon = (key) => {
-                if (!decisionDraft[key]) setDecisionDraft((d) => ({ ...d, [key]: true }));
+                // Ticking Diet is the referral, whole: there is nothing under it left to
+                // answer, so the flag the wire and the labels read is set with it rather
+                // than by a picker that would only ever have had one button in it.
+                if (!decisionDraft[key]) setDecisionDraft((d) => ({ ...d, [key]: true, ...(key === "diet" ? { dietConsultation: true } : {}) }));
                 if (hasPicker(key)) setAddonPicker(key);
               };
 
@@ -3292,9 +3280,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   };
                 }
                 if (key === "diet") {
-                  const kinds = DIET_KINDS.filter((k) => decisionDraft[k.key]).map((k) => k.label);
-                  if (!kinds.length) return { text: "Pick Consultation, Chart, or both", incomplete: true };
-                  return { text: kinds.join(" + "), incomplete: false };
+                  // Nothing left to be missing. A Diet Chart, where the Nutritionist later
+                  // calls for one, is recorded on the patient and shown on the branch's own
+                  // panel — it was never something this form could answer.
+                  return { text: "Diet Consultation", incomplete: false };
                 }
                 if (key === "rehab" || key === "zumba") {
                   const items = key === "rehab" ? rehabPackageItems : zumbaPackageItems;
@@ -3327,41 +3316,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   return (
                     <div data-testid="cons-decision-diet-kinds">
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Diet</label>
-                      {/* Both may be on -- a Nutritionist appointment and a chart to take
-                          home are two products, not two names for one -- but neither being
-                          on is not an answer, and leaving it that way pushes the question to
-                          whoever picks the referral up. */}
-                      <div className="flex flex-wrap gap-2">
-                        {DIET_KINDS.map((k) => {
-                          const selected = !!decisionDraft[k.key];
-                          return (
-                            <button
-                              key={k.key}
-                              type="button"
-                              // Independent of each other, so clicking one never clears the
-                              // other; clicking a chosen one again is the way back off it.
-                              onClick={() => setDecisionDraft((d) => ({ ...d, [k.key]: !d[k.key] }))}
-                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                                selected
-                                  ? "border-orange-600 bg-orange-600 text-white"
-                                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                              }`}
-                              data-testid={`cons-decision-diet-${k.field}`}
-                            >
-                              {k.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {/* Says why Confirm & Save is greyed out, beside the thing that has
-                          to be answered. The hint at the top of the form names the
-                          Diagnosis Report and the Summary, so without this the button is
-                          disabled with everything it mentions already written. */}
-                      {!dietReady && (
-                        <p className="mt-2 rounded-md border-l-4 border-rose-500 bg-rose-50 px-3 py-1.5 text-[11px] font-medium text-rose-700" data-testid="cons-decision-diet-required">
-                          Pick Diet Consultation, Diet Chart, or both.
-                        </p>
-                      )}
+                      {/* One thing to refer for, so nothing to pick. This asked the
+                          Consultant to choose between a Diet Consultation and a Diet Chart,
+                          which is a question they are in no position to answer: a chart is
+                          decided ON at the consultation, by the Nutritionist who sees the
+                          patient. Ticked here it let the branch collect a Chart Fee for a
+                          chart nobody had yet said was needed, and left the coach owing a
+                          document somebody else had already sold.
+
+                          So this says what the referral is and what follows it. The chart
+                          re-enters from the Nutritionist's own board -- see
+                          recommend_diet_chart -- and only then does a Diet Chart Fee appear
+                          for the branch to collect. */}
+                      <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] leading-relaxed text-orange-800" data-testid="cons-decision-diet-note">
+                        The branch collects the Diet Consultation Fee and books the
+                        Nutritionist. If this patient needs a Diet Chart, the Nutritionist
+                        recommends it after seeing them — and the Diet Chart Fee is
+                        collected then.
+                      </p>
                     </div>
                   );
                 }
@@ -3842,10 +3814,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const dietFeePaid = selectedLead.diet_fee_paid != null;
               const dietAssigned = !!selectedLead.diet_coach_id;
               const dietBooked = !!selectedLead.diet_appointment_at;
-              // The chart half of the referral. `chartReferred` is what the Consultant
-              // ticked; it also comes on once the fee is taken or the coach sends one, so a
-              // chart sold or written off somebody's own judgement still shows here rather
-              // than hiding behind a box nobody remembered to tick.
+              // The chart half of the referral, and no longer the Consultant's to start.
+              // `chartReferred` comes on when the NUTRITIONIST recommends a chart, having
+              // seen the patient — which is the only thing that puts a Diet Chart Fee on
+              // this panel. It also comes on once such a fee is taken or a chart is sent, so
+              // a chart sold or written off somebody's own judgement still shows here.
               const chartReferred = !!selectedLead.diet_chart;
               const dietChartFeePaid = selectedLead.diet_chart_fee_paid != null;
               const chartSent = !!selectedLead.diet_chart_sent_at;
@@ -3944,10 +3917,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           : "Not booked"}
                         tone={dietBooked ? "" : "text-amber-700"}
                       />
-                      {/* The chart's own three rows, and only for a patient it was actually
-                          ticked for. A Diet Chart is a second product on a second shelf at a
+                      {/* The chart's own three rows, and only once a chart has actually been
+                          called for. A Diet Chart is a second product on a second shelf at a
                           second price, so it gets its own fee line rather than sharing the
                           one above — which is also what the lead stores.
+
+                          Nothing here until the Nutritionist recommends one. Until then
+                          there is no chart to price, and a fee line offered against one
+                          would be asking the desk to collect for a decision nobody has made.
 
                           The last row is the one the desk is actually asked about. A chart
                           the coach sent is not a chart the patient can see: unpaid, it is
@@ -3997,14 +3974,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         Collect Diet Fee
                       </Button>
                     )}
-                    {/* Offered only where the Consultant ticked Diet Chart, and it goes once
-                        collected — the same way the fee button above does, and for the same
-                        reason: collecting is a step in a sequence and it is done.
+                    {/* Offered only once the Nutritionist has recommended a chart, and it
+                        goes once collected — the same way the fee button above does, and for
+                        the same reason: collecting is a step in a sequence and it is done.
 
-                        Beside that button rather than after the appointment, because it
-                        waits on nothing. The chart is its own product: a patient can buy one
-                        without ever booking the coach's hour, so nothing about the
-                        consultation gates it and putting it last would imply otherwise. */}
+                        Which puts it, in practice, after the consultation rather than beside
+                        it: the recommendation is made at the appointment the fee above pays
+                        for. It is not gated on that fee here, because the recommendation
+                        cannot exist without it having happened. */}
                     {chartReferred && !dietChartFeePaid && (
                       <Button
                         size="sm"

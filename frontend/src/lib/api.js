@@ -255,6 +255,11 @@ export const collectRehabFee = async (leadId, payload) => (await api.post(`/lead
 export const saveDietConsultationReport = async (leadId, report) => (await api.post(`/diet/consultation-report/${leadId}`, { report })).data;
 
 // ---- The Diet Chart ----
+/** The Nutrition Coach says this patient needs a chart. The step between the two halves of
+ *  the diet vertical: the Consultant refers for the consultation, and whether a chart is
+ *  owed is decided at it, by the coach who did it. Nothing else opens the Diet Chart Fee to
+ *  the branch. Returns the chart's status, the same shape the panel already reads. */
+export const recommendDietChart = async (leadId) => (await api.post(`/diet/chart/${leadId}/recommend`)).data;
 /** The Nutrition Coach sends a chart. Multipart, and deliberately without an explicit
  *  Content-Type: the browser has to set it itself so the multipart boundary matches the
  *  body it just built. Naming it by hand is how an upload arrives as an unparseable form. */
