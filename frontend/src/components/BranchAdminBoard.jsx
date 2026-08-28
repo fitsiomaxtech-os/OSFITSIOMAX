@@ -431,6 +431,14 @@ export const matchesConsultationStage = (lead, stageName) => {
  * of the match: a mirrored pill only claims a lead while it is still sitting at the
  * branch's own opening. Move it anywhere and it leaves Leads for the stage it was moved to.
  *
+ * The third exception is a lead the consultation pipeline has taken over. This board shows
+ * both pipelines as one strip, and nothing writes branch_stage again once the appointment is
+ * booked — so a patient the consultant had already seen went on being counted under
+ * Appointment as well as under Consultation Visit, with the row's own chip (rowStageName)
+ * saying one thing and the pill it was listed under saying the other. Moving forward in the
+ * consultation pipeline takes the lead out of the Branch pills, the same way moving forward
+ * in the Branch pipeline already takes it out of the mirrored Leads pill.
+ *
  * The other exception is Completed, which is now read off the lead rather than written —
  * the same rule and the same isCourseComplete the Consultations board already shows that
  * stage through, so the two pill sets sharing one row cannot say different things about
@@ -439,7 +447,7 @@ export const matchesConsultationStage = (lead, stageName) => {
  * set by a Branch Admin acting on the patient, and nobody acts on a branch board when a
  * course ends on a physio's or a Nutritionist's.
  */
-export const matchesBranchStage = (lead, stage) => {
+export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => false) => {
   const name = stage?.name;
   const here = lead.branch_stage;
   // Cancel is an abandonment rather than an ending, so it keeps whatever it holds and is
@@ -447,6 +455,11 @@ export const matchesBranchStage = (lead, stage) => {
   // consultation one is named "Cancel", and the two pill sets are shown in one row.
   const abandoned = here === "Cancelled" || here === "Cancel";
   const finished = !abandoned && isCourseComplete(lead);
+  // Only the Consultation-ONLY stages hand a lead over. A name both pipelines share
+  // ("Follow Up") gets a single pill backed by the sales-side field, and booking an
+  // appointment seeds exactly that stage — releasing on it would drop every freshly booked
+  // lead out of Appointment with no pill left to land in.
+  const handedOver = !abandoned && isConsultationOnlyStage(lead.consultation_stage);
   // Completed is read off the lead here the way it already is on the Consultations board,
   // rather than waiting for somebody to move them. This pipeline is otherwise written
   // entirely by hand, and nothing in it was ever going to be written when a course ended
@@ -457,10 +470,11 @@ export const matchesBranchStage = (lead, stage) => {
   // Still claims anyone moved there by hand, so the leads already sitting in Completed
   // stay in it whether or not the lead reads as finished.
   if (name === "Completed") return finished || here === "Completed";
-  // And a finished patient leaves every other pill, which is the half that makes the first
-  // half true: a lead counted under both Appointment and Completed is not a pipeline, and
-  // the counts across the row would add up to more than the branch has.
-  if (finished) return false;
+  // And a finished patient — or one the consultation pipeline has moved on — leaves every
+  // other pill, which is the half that makes the first half true: a lead counted under both
+  // Appointment and Consultation Visit is not a pipeline, and the counts across the row
+  // would add up to more than the branch has.
+  if (finished || handedOver) return false;
   if (!stage?.mirrors_stage) return here === name;
   return lead.stage === stage.mirrors_stage && here === stage.unmoved_branch_stage;
 };
@@ -711,6 +725,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // those render the real Consultations board (same table, same popups) instead of the
   // Branch Leads table below.
   const isConsultationStage = !!stageFilter && !stages.some((s) => s.name === stageFilter);
+  // The same test asked of a lead's consultation_stage rather than of the lit pill: has this
+  // lead reached the half of the strip the Branch pipeline does not own? Handed to
+  // matchesBranchStage, which releases it from the Branch pills once it has.
+  const isConsultationOnlyStage = useCallback(
+    (name) => !!name && !stages.some((s) => s.name === name),
+    [stages],
+  );
 
   const filteredLeads = useMemo(() => {
     let list = boardData.leads;
@@ -746,11 +767,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   useEffect(() => { if (stageFilter) setMarkFilter(""); }, [stageFilter]);
 
   const visibleLeads = useMemo(() => {
-    if (stageFilter) return filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter)));
+    if (stageFilter) return filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter), isConsultationOnlyStage));
     if (markFilter === "vip") return filteredLeads.filter((l) => l.is_vip);
     if (markFilter === "attention") return filteredLeads.filter((l) => l.needs_attention);
     return filteredLeads;
-  }, [filteredLeads, stageFilter, stages, markFilter]);
+  }, [filteredLeads, stageFilter, stages, markFilter, isConsultationOnlyStage]);
 
   // A tick survives scrolling and reopening a row, but not a change to what is on screen.
   // Searching, filtering by date or switching stage replaces the list under the selection,
@@ -776,9 +797,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // the table below them right now.
   const salesCounts = useMemo(() => {
     const counts = {};
-    stages.forEach((s) => { counts[s.name] = filteredLeads.filter((l) => matchesBranchStage(l, s)).length; });
+    stages.forEach((s) => { counts[s.name] = filteredLeads.filter((l) => matchesBranchStage(l, s, isConsultationOnlyStage)).length; });
     return counts;
-  }, [filteredLeads, stages]);
+  }, [filteredLeads, stages, isConsultationOnlyStage]);
   const consultationCounts = useMemo(() => {
     const counts = {};
     consultationStages.forEach((s) => {
@@ -1163,7 +1184,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               the side of a horizontally-scrolling table. */}
           <div className="space-y-2 md:hidden" data-testid="branch-list-mobile">
             {(() => {
-              const visible = (stageFilter ? filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter))) : filteredLeads);
+              const visible = (stageFilter ? filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter), isConsultationOnlyStage)) : filteredLeads);
               if (visible.length === 0) {
                 return (
                   <p className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-mobile-empty">
@@ -1653,7 +1674,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // branch_stage and consultation_stage, with shared names (e.g. "Follow Up") kept to a
   // single pill backed by the sales-side field.
   const pipelineStages = [...entryStages, ...consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name))];
-  const isConsultationOnlyStage = (name) => !stages.some((s) => s.name === name);
+  // `!!name` guards the matchesBranchStage call below: a lead with no consultation_stage
+  // has not been handed over, and an undefined name is in neither pipelines' stage list.
+  const isConsultationOnlyStage = (name) => !!name && !stages.some((s) => s.name === name);
   const [activeTab, setActiveTab] = useState("overview");
   const [remarks, setRemarks] = useState([]);
   const [activityLog, setActivityLog] = useState([]);
@@ -2058,7 +2081,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     // Highlighted on the same terms the board filters by, so the pipeline
                     // here agrees with the pill the lead was listed under.
                     const isActive = isMirror
-                      ? matchesBranchStage(lead, s)
+                      ? matchesBranchStage(lead, s, isConsultationOnlyStage)
                       : (lead.branch_stage === stage || lead.consultation_stage === stage);
                     const consultationOnly = isConsultationOnlyStage(stage);
                     // A Consultation-only stage isn't reachable until the lead has actually
