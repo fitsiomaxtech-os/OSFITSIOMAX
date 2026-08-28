@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Music, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Music, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, addZumba, getBranches } from "@/lib/api";
+import { listZumba } from "@/lib/api";
 
 // The three evenings the class runs, in the numbering Date.getDay() uses (0 = Sunday).
 // The same three the membership is sold on — see ZUMBA_CLASS_DAYS in PackagesBoard.jsx
@@ -29,19 +29,12 @@ const weekOf = (iso) => {
 };
 const isClassDayIso = (iso) => CLASS_DAYS.includes(new Date(`${iso}T00:00:00`).getDay());
 
-// The source a referral from this board is filed under. The rest of the vocabulary went
-// with the Source column: where a lead came from is the branch's question, answered before
-// this roll ever saw them, and a master reads a class rather than a pipeline.
-const MASTER = "master";
-
 const shortDate = (iso) => {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
-
-const EMPTY_REFERRAL = { name: "", phone: "", age: "" };
 
 // The two the class is taught in, in the words the branch stores them by -- kept in step
 // with TIME_SLOTS in backend/routers/v3_zumba.py, which drops anything else.
@@ -77,121 +70,6 @@ const SummaryCard = ({ label, value, caption, tone, active, onClick, testid }) =
   </button>
 );
 
-/** Refer a customer into the class: name, phone, age, area, and nothing else.
- *
- *  The fee is deliberately absent. A master hands over a person, and the branch is where
- *  the money is taken and recorded -- asking for it here would invite a figure nobody at
- *  this desk can collect, and the Payment card counts what the branch actually banked. The
- *  source is fixed too: this form exists to record the ones a master brought in. */
-const ReferCustomerModal = ({ masterName, branchId, branchName, onClose, onSaved }) => {
-  const [form, setForm] = useState({ ...EMPTY_REFERRAL });
-  const [saving, setSaving] = useState(false);
-  // Starts on the master's own branch, which is where a referral goes nine times in ten.
-  // Held as an id rather than a name so renaming a branch cannot orphan a registration.
-  const [branch, setBranch] = useState(branchId || "");
-  const [branches, setBranches] = useState([]);
-  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-
-  // Fetched rather than passed down: the board only knows the one branch it is reading,
-  // and a referral may belong to another. A failed fetch leaves the picker on the master's
-  // own branch, which is the answer it would have given anyway.
-  useEffect(() => {
-    let live = true;
-    getBranches()
-      .then((rows) => {
-        if (!live) return;
-        const list = Array.isArray(rows) ? rows : [];
-        setBranches(list);
-        // Keeps the value and the options honest: a master whose own branch is not in the
-        // list would otherwise see the first option selected while the id underneath still
-        // pointed somewhere else, and save against a branch they never chose.
-        setBranch((cur) => (list.some((b) => b.id === cur) ? cur : (list[0]?.id || cur)));
-      })
-      .catch(() => { if (live) setBranches([]); });
-    return () => { live = false; };
-  }, []);
-
-  const submit = async () => {
-    if (!form.name.trim()) { toast.error("Name is required"); return; }
-    setSaving(true);
-    try {
-      await addZumba({
-        name: form.name.trim(),
-        phone: (form.phone || "").trim(),
-        age: form.age === "" ? null : Number(form.age),
-        source: MASTER,
-        // Signed with the master's own name, so the branch's tab reads who referred them
-        // rather than an anonymous "Master".
-        master_name: masterName || "",
-      }, branch || undefined);
-      // Says where they went, because they will not appear on the roll below: a referral
-      // reaches the branch, and only the branch puts somebody in a class.
-      toast.success("Referred to the branch. They join your roll once the branch assigns them to you.");
-      onSaved();
-      onClose();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not refer this customer");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="zumba-refer-modal">
-      <div className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-violet-500 to-fuchsia-600 px-5 py-3 text-white">
-          <p className="text-base font-semibold">Refer Customer</p>
-          <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="zumba-refer-close"><X className="h-4 w-4" /></button>
-        </div>
-
-        <div className="flex-1 space-y-3 overflow-y-auto p-5">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Name *</label>
-            <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Customer name" data-testid="zumba-refer-name" />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Phone</label>
-              <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Mobile number" data-testid="zumba-refer-phone" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Age</label>
-              <Input type="number" min="0" value={form.age} onChange={(e) => set("age", e.target.value)} placeholder="—" data-testid="zumba-refer-age" />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600" htmlFor="zumba-refer-branch">Branch</label>
-            {/* A select rather than a set of pills: there is one branch running Zumba today
-                and a row of one pill reads as a decision nobody is being asked to make. */}
-            <select
-              id="zumba-refer-branch"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-violet-400 focus:outline-none"
-              data-testid="zumba-refer-branch"
-            >
-              {branches.length === 0 && <option value={branchId || ""}>{branchName || "Your branch"}</option>}
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>{b.branch_name || b.name || "Branch"}</option>
-              ))}
-            </select>
-          </div>
-          <p className="rounded-md bg-violet-50 px-3 py-2 text-[11px] font-medium text-violet-700">
-            Referred by <b>{masterName || "you"}</b>. Lands under <b>Refer Master</b> on that branch's Zumba tab, flagged as still needing a fee and a class — the branch fills those in and allocates the master.
-          </p>
-        </div>
-
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
-          <Button variant="outline" onClick={onClose} data-testid="zumba-refer-cancel">Cancel</Button>
-          <Button onClick={submit} disabled={saving} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="zumba-refer-submit">
-            {saving ? "Saving..." : "Save"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 /**
  * The Zumba master's board: the class they run, at their own branch.
  *
@@ -203,7 +81,7 @@ const ReferCustomerModal = ({ masterName, branchId, branchName, onClose, onSaved
  * The branch is never passed: the server scopes a Zumba account to the branch it was
  * hired into, exactly as it scopes a Branch Admin.
  */
-export const ZumbaMasterBoard = ({ currentUser }) => {
+export const ZumbaMasterBoard = () => {
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState({});
   // Which branch this board is reading, as the server resolved it — an account with no
@@ -212,7 +90,6 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [card, setCard] = useState("all"); // "all" | "today"
-  const [referring, setReferring] = useState(false);
   // The day the strip is on. Today to begin with, because the class a master opens this
   // board to check is nearly always the one they are about to teach.
   const [day, setDay] = useState(todayIso);
@@ -261,7 +138,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
 
   return (
     <div className="flex flex-col gap-4" data-testid="zumba-master-board">
-      {/* Row one — find someone, bring someone in, look at the month. */}
+      {/* Row one — find someone, and look at the month. */}
       <div className="flex flex-wrap items-center gap-2" data-testid="zumba-master-toolbar">
         <div className="relative min-w-[12rem] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -273,9 +150,6 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
             data-testid="zumba-master-search"
           />
         </div>
-        <Button onClick={() => setReferring(true)} className="h-10 bg-violet-600 text-white hover:bg-violet-700" data-testid="zumba-master-refer">
-          <Plus className="mr-1 h-4 w-4" />Refer Customer
-        </Button>
         <Button variant="outline" onClick={load} className="h-10 w-10 p-0" title="Refresh" aria-label="Refresh" data-testid="zumba-master-refresh">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
@@ -285,9 +159,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           the class does not run it reads zero, and without the caption a zero looks like
           an empty class rather than no class. */}
       <div className="flex flex-col gap-3 sm:flex-row" data-testid="zumba-master-summary">
-        {/* One way onto this roll: the branch assigned them to you. Referring somebody
-            does not, on purpose — a referral says who brought them in, which is a claim on
-            the lead, not a seat in your class. */}
+        {/* One way onto this roll: the branch assigned them to you. */}
         <SummaryCard
           label="All Customers"
           value={summary.all ?? 0}
@@ -477,16 +349,6 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           )}
         </CardContent>
       </Card>
-
-      {referring && (
-        <ReferCustomerModal
-          masterName={currentUser?.full_name || ""}
-          branchId={branch?.id || ""}
-          branchName={branch?.name || ""}
-          onClose={() => setReferring(false)}
-          onSaved={load}
-        />
-      )}
     </div>
   );
 };
