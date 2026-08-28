@@ -3802,7 +3802,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             {!isConsultant && (() => {
               const stage = selectedLead.consultation_stage;
               const decision = selectedLead.consultation_decision;
-              const cancellable = ["New Appointment", "Follow Up", "Consultation Visit", "Fee Collected", "Physio Assign"].includes(stage);
+              // Cancel belongs before the consultation, not after it. A patient who has
+              // not come in yet can call the appointment off, and that is what cancelling
+              // one means. Once they have been seen the visit is a fact: the paperwork is
+              // being filed against it and the fee taken for it, and a Cancel sitting in
+              // that panel offers to call off something that already happened -- next to
+              // the money it was collected with.
+              //
+              // So the stages before the visit keep it and the stages from the visit on do
+              // not. CancelButton is null there, which is what the {CancelButton} slots in
+              // those panels already render.
+              const cancellable = ["New Appointment", "Follow Up"].includes(stage);
               // Once a lead has moved forward past a stage, it can never come back —
               // there's no manual "move backward" control anymore (see the backend's
               // matching rejection in move-consultation-stage).
@@ -4607,10 +4617,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       tabs={
                         <>
                           {/* The order is the order it happens in: the paperwork is filed,
-                              then the money is taken against it, and Cancel is the way out
-                              of both. Documents leads because it is the step that gates the
-                              other one — a row that opens on a payment it will not let you
-                              take is a row that reads as broken. */}
+                              then the money is taken against it. Documents leads because it
+                              is the step that gates the other one — a row that opens on a
+                              payment it will not let you take is a row that reads as
+                              broken. */}
                           <Button
                             size="sm"
                             variant="outline"
@@ -4626,7 +4636,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <Lbl full={hasDocs ? `Documents (${leadDocCount})` : "Documents — required"} short="Docs" />
                           </Button>
                           {/* Always on screen, and shut until the scan is filed. This panel
-                              is a sequence — paperwork, money, or out — so a step that
+                              is a sequence — paperwork, then money — so a step that
                               disappears once you reach it takes the shape of the sequence
                               with it, and one that opens on a payment it will not take asks
                               for something and refuses it in the same breath. */}
