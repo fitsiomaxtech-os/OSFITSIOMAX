@@ -333,9 +333,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               count behind it, so the day's workload reads without opening anything.
               Two-up on phones, four across from tablet; the bottom bar stays for
               thumb reach. */}
-          {/* items-stretch on the phone row too, so the four come out level there as well
-              as in the grid — the card carrying a filter is taller than the other three
-              and the row has to answer to the tallest rather than each card to itself. */}
+          {/* items-stretch on the phone row too, so the cards come out level there as well
+              as in the grid — they hold different amounts of text and the row has to answer
+              to the tallest rather than each card to itself. */}
           <div className={`-mx-1 flex items-stretch gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid ${TAB_GRID_COLS[WORK_TABS.length] || "sm:grid-cols-4"} sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0`} data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
               const n = t.key === "consultations" ? (consultStages[firstStage] || 0)
@@ -348,7 +348,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               // The wrapper keeps the phone's side-scrolling row of fixed-width cards; the
               // tile itself fills whatever it is given.
               return (
-                <div key={t.key} className="h-full w-[10.5rem] shrink-0 sm:w-auto">
+                // Wider on a phone where the card carries the kind filter in its corner:
+                // at 10.5rem the three buttons and the icon have nowhere to go, and the
+                // card clips rather than wraps. The grid from sm up sizes them equally.
+                <div key={t.key} className={`h-full shrink-0 sm:w-auto ${t.key === "all" ? "w-[13.5rem]" : "w-[10.5rem]"}`}>
                   <StatTile
                     label={t.label}
                     value={n}
@@ -361,8 +364,15 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                     // Inside the All card rather than above the list: All is the only tab
                     // that merges three queues, so the control that picks between them
                     // belongs to that card and to no other.
-                    footer={t.key === "all" ? (
-                      <div className="flex flex-wrap gap-1" data-testid="hp-all-kind-filter">
+                    //
+                    // On the card's top line, running up to its icon, rather than on a rule
+                    // beneath the figure. Under it the three buttons read as a strip of
+                    // their own — a second card grafted to the bottom of this one — and
+                    // pushed the count and its caption up off the line the other three
+                    // cards keep. In the corner they read as what they are: which of the
+                    // things this card counts it is showing.
+                    corner={t.key === "all" ? (
+                      <div className="flex items-center gap-1" data-testid="hp-all-kind-filter">
                         {ALL_KINDS.map((k) => (
                           <button
                             key={k.key}
