@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2 } from "lucide-react";
+import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2, Video } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -837,7 +837,12 @@ const PanelCard = ({ children, testid, footer }) => (
   </div>
 );
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false, toolbarSlot = null }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false, toolbarSlot = null, onlineArm = false }) => {
+  // Whether the board this is mounted on runs an arm with no room in it — one of the two
+  // online admins. It gates one thing: whether a physio with no video room recorded is
+  // worth remarking on when they are assigned. Passed in rather than worked out here for
+  // the reason HeadPhysioCalendar takes the same prop — the answer is a fact about whose
+  // board this is, and only the parent is holding it.
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -1058,6 +1063,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [assigningPhysio, setAssigningPhysio] = useState(false);
   const [physioCalendarData, setPhysioCalendarData] = useState(null);
   const [loadingPhysioCalendar, setLoadingPhysioCalendar] = useState(false);
+  // The physio being booked, and the video room they hold their sessions in.
+  //
+  // Read off the expert's own record, which is where the room lives — one link per
+  // physio, recorded on the Physiotherapist Calendar. Nothing here can set it, and
+  // deliberately: a booking screen that could name the room would be a booking screen that
+  // could send a patient anywhere. It shows what the record says.
+  //
+  // It is shown at all because the patient is about to be given it. The portal joins this
+  // same link onto every session still to come, so booking six days here is booking six
+  // days the patient will be told to join at this address — and until now this screen was
+  // the one place in that chain that never mentioned it.
+  //
+  // Blank for a branch's own physio, who is seen in a treatment room and has no room
+  // recorded. That is the normal state offline and nothing is shown for it.
+  const pickedPhysio = physioOptions.find((p) => p.id === physioPick) || null;
+  const pickedMeetLink = (pickedPhysio?.meet_link || "").trim();
+  // An online arm meets every patient over video, so a physio there with no room recorded
+  // is an oversight worth catching before six days are booked against it — the patient's
+  // portal would show those days with no way to join. Offline this is silent: the whole
+  // list is expected to carry no link.
+  const meetLinkMissing = onlineArm && !!physioPick && !pickedMeetLink;
   // Step 2 — the "pick the treatment dates and times" popup.
   const [showSlotPicker, setShowSlotPicker] = useState(false);
   const [pickedSessionSlots, setPickedSessionSlots] = useState([]); // ["YYYY-MM-DDTHH:MM", ...]
@@ -6428,13 +6454,67 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           }`}
                           data-testid={`cons-physio-option-${p.id}`}
                         >
-                          <span>{p.full_name}{p.specialization ? ` · ${p.specialization}` : ""}</span>
+                          <span className="min-w-0 truncate">{p.full_name}{p.specialization ? ` · ${p.specialization}` : ""}</span>
                           <span className="flex items-center gap-1.5 shrink-0">
+                            {/* Which of them meet over video, before one is picked rather
+                                than after. On an online arm the whole list carries it and
+                                the badge says nothing new — it is the physio MISSING one
+                                that it makes stand out. */}
+                            {(p.meet_link || "").trim() && (
+                              <span
+                                className="flex items-center gap-1 rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700"
+                                data-testid={`cons-physio-option-meet-${p.id}`}
+                              >
+                                <Video className="h-3 w-3" /> Meet
+                              </span>
+                            )}
                             {physioPick === p.id && <CheckCircle2 className="h-3.5 w-3.5" />}
                             <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
                           </span>
                         </button>
                       ))}
+                    </div>
+                  )}
+
+                  {/* The room these days will be held in, and the plain statement that the
+                      patient is the one being given it. The link reaches them through the
+                      portal, which joins it onto every session still to come — so this is
+                      not a copy to send by hand, and saying so is what stops it being sent
+                      twice by two different routes. */}
+                  {pickedMeetLink && (
+                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-physio-meet-link">
+                      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-violet-700">
+                        <Video className="h-3.5 w-3.5" /> Held on Google Meet
+                      </p>
+                      <a
+                        href={pickedMeetLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block truncate text-xs font-semibold text-violet-700 underline underline-offset-2 hover:text-violet-900"
+                        data-testid="cons-physio-meet-link-open"
+                      >
+                        {pickedMeetLink.replace(/^https?:\/\//, "")}
+                      </a>
+                      <p className="mt-1 text-[10px] leading-snug text-violet-500">
+                        {pickedPhysio?.full_name}&apos;s own room. {selectedLead.name} gets this link in their
+                        patient portal against every day booked here — nothing to send by hand.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* No room, on a board whose patients are only ever seen over video. Said
+                      here rather than at the end because the fix is on another screen: six
+                      days booked now would show the patient six days with no way to join. */}
+                  {meetLinkMissing && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="cons-physio-meet-missing">
+                      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                        <AlertCircle className="h-3.5 w-3.5" /> No video room recorded
+                      </p>
+                      <p className="mt-1 text-[10px] leading-snug text-amber-600">
+                        {pickedPhysio?.full_name} has no Google Meet link, so {selectedLead.name} will see these
+                        days in their portal with no way to join. Add one on the Physiotherapist Calendar —
+                        it applies to every day booked with them, including these.
+                      </p>
                     </div>
                   )}
 
@@ -6502,6 +6582,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           {courseName}{totalSessionsNeeded ? ` · ${totalSessionsNeeded} ${dayNoun}s` : ""} ·
                           {" "}one session a day · {sessionMinutes} min each · {openSlotCount} slots open
                         </p>
+                        {/* Where these days will be held, on the screen that fixes them.
+                            A link rather than plain text: whoever is booking can check the
+                            room opens before six days are committed to it. The patient is
+                            given the same address by the portal, so this is a check, not a
+                            copy to send. */}
+                        {pickedMeetLink && (
+                          <a
+                            href={pickedMeetLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1 inline-flex max-w-full items-center gap-1 rounded-md bg-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:bg-white/25 sm:text-[11px]"
+                            data-testid="cons-slot-picker-meet-link"
+                          >
+                            <Video className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{pickedMeetLink.replace(/^https?:\/\//, "")}</span>
+                          </a>
+                        )}
                       </div>
                     </div>
                     <button onClick={() => setShowSlotPicker(false)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-slot-picker-close">

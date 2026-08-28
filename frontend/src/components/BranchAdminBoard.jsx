@@ -1149,6 +1149,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <ConsultationsBoard
               branchId={branchId}
               viewerRole="branch_admin"
+              // Same fact the calendars above are given: an arm with no room in it meets
+              // its patients over video, so Assign Physio says which room and says when
+              // one is missing.
+              onlineArm={armScoped}
               externalStageFilter={stageFilter}
               showOwnStageBar={false}
               autoOpenLeadId={autoOpenLeadId}
