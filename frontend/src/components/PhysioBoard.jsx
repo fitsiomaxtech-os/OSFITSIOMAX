@@ -29,6 +29,7 @@ import { ProgressionTab } from "@/components/ProgressionTab";
 import { LeadMarks } from "@/components/ui/lead-marks";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StatTile } from "@/components/ui/stat-tile";
+import { DocumentPreview, useDocumentPreview } from "@/components/ui/document-preview";
 import {
   physioConsultations,
   physioCompleteConsultation,
@@ -302,13 +303,16 @@ const docSize = (n) => {
  * here that the API would reject is worse than not having them.
  *
  * Bytes come back as an authenticated blob rather than a static URL, so opening one means
- * fetching it first. The object URL is revoked on a timer instead of immediately: revoking
- * it in the same tick closes the tab that was just handed it.
+ * fetching it first. What comes back is shown on this page rather than handed to a new
+ * tab — a physio opens a scan to read it against the days and the notes beside it, and a
+ * tab is the one place those are not. See useDocumentPreview, which owns the blob for
+ * exactly as long as the document is on screen.
  */
 const DocumentsPanel = ({ leadId }) => {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(null);
+  const { preview, openPreview, closePreview } = useDocumentPreview();
 
   useEffect(() => {
     let alive = true;
@@ -325,8 +329,7 @@ const DocumentsPanel = ({ leadId }) => {
     setOpening(doc.id);
     try {
       const url = await openLeadDocument(leadId, doc.id);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      openPreview({ url, name: doc.label || doc.original_name || "Document", contentType: doc.content_type });
     } catch {
       toast.error("Could not open that document");
     } finally {
@@ -372,6 +375,7 @@ const DocumentsPanel = ({ leadId }) => {
           ))}
         </div>
       )}
+      <DocumentPreview preview={preview} onClose={closePreview} testid="physio-document-preview" />
     </div>
   );
 };
