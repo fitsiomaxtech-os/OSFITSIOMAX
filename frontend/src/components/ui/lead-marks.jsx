@@ -3,10 +3,10 @@ import { AlertCircle, Star } from "lucide-react";
 /**
  * The two marks a branch puts on a patient by hand, shown read-only.
  *
- * They are set in one place — Branch Leads, All Stages, where the whole branch is in one
- * list and the judgement can actually be made. Everywhere else a patient surfaces they are
- * only reported: a Consultant seeing the gold star knows to treat this one especially well,
- * a Physio seeing the red flag knows something needs looking at, and neither is being asked
+ * They are set in one place — Branch Leads, on any of its stages, where the branch's own
+ * admin has the patient in front of them. Everywhere else a patient surfaces they are only
+ * reported: a Consultant seeing the gold star knows to treat this one especially well, a
+ * Physio seeing the red flag knows something needs looking at, and neither is being asked
  * to decide it from the fraction of the branch their own board shows them.
  *
  * Renders nothing at all when a patient carries neither, because these lists are long and a

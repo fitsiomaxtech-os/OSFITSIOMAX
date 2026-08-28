@@ -43,7 +43,6 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
-import { LeadMarks } from "@/components/ui/lead-marks";
 import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
 import {
   scheduleBranchAppointment,
@@ -758,11 +757,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // The rows the table is actually showing. Hoisted out of the table body because the
   // select-all box and the delete bar have to agree with it exactly — "select all" that
   // picks up a row the stage filter is hiding deletes something nobody looked at.
-  // Which mark the list is narrowed to, if any. Only ever set on All Stages — the marks
-  // are put on and read there, and a filter that survived a move to another stage would
-  // silently hide most of that stage while its count above still said otherwise.
-  // All Stages only — see the row markup for why.
-  const canMarkLeads = !stageFilter;
+  // Which mark the list is narrowed to, if any. Only ever set on All Stages — the
+  // NARROWING is what is held there, not the marking: a filter that survived a move to
+  // another stage would silently hide most of that stage while its count above still said
+  // otherwise. Putting a mark ON is a different act and is offered on every stage — see
+  // the row markup.
   const [markFilter, setMarkFilter] = useState(""); // "" | "vip" | "attention"
   useEffect(() => { if (stageFilter) setMarkFilter(""); }, [stageFilter]);
 
@@ -1409,42 +1408,42 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                                 control is in the same place on every row — a mark that only
                                 appears once set cannot be set by anyone who has not seen it
                                 set before. */}
-                            {/* Set here and only here — All Stages is the whole branch in
-                                one list, which is where a person decides who is a VIP and
-                                who needs looking at. On a stage pill the same buttons would
-                                be offering that judgement about a fraction of the branch,
-                                against a count that describes the stage rather than the
-                                mark. Every other stage still SHOWS them, read-only, so a
-                                marked patient is recognisable wherever they surface. */}
+                            {/* Settable on every stage, not only on All Stages.
+                                They were All-Stages-only on the reasoning that the whole
+                                branch in one list is where such a judgement is made. But
+                                the judgement is not made against the list — it is made
+                                about the patient in front of you, and the moment it is made
+                                is usually the moment their stage is being worked. Held to
+                                All Stages, a Branch Admin looking at Fee Collected who
+                                learns this one is a VIP has to clear the stage, find the
+                                row again in two thousand, and mark it there. That is a long
+                                way round to a click, and the mark that does not get made is
+                                the one nobody makes.
+                                The list-NARROWING stays on All Stages, where a count that
+                                describes the whole branch can survive it — see markFilter. */}
                             <div className="ml-auto flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                              {canMarkLeads ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "is_vip"); }}
-                                    title={lead.is_vip ? "VIP client — click to remove" : "Mark as VIP client"}
-                                    aria-label={lead.is_vip ? `Remove VIP mark from ${lead.name || "patient"}` : `Mark ${lead.name || "patient"} as VIP`}
-                                    aria-pressed={!!lead.is_vip}
-                                    className="rounded p-1 transition-colors hover:bg-amber-50"
-                                    data-testid={`branch-vip-${lead.id}`}
-                                  >
-                                    <Star className={`h-4 w-4 ${lead.is_vip ? "fill-amber-400 text-amber-500" : "text-slate-300 hover:text-amber-400"}`} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "needs_attention"); }}
-                                    title={lead.needs_attention ? "Needs attention — click to clear" : "Flag as needing attention"}
-                                    aria-label={lead.needs_attention ? `Clear the attention flag on ${lead.name || "patient"}` : `Flag ${lead.name || "patient"} as needing attention`}
-                                    aria-pressed={!!lead.needs_attention}
-                                    className="rounded p-1 transition-colors hover:bg-rose-50"
-                                    data-testid={`branch-attention-${lead.id}`}
-                                  >
-                                    <AlertCircle className={`h-4 w-4 ${lead.needs_attention ? "fill-rose-500 text-white" : "text-slate-300 hover:text-rose-400"}`} />
-                                  </button>
-                                </>
-                              ) : (
-                                <LeadMarks lead={lead} />
-                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "is_vip"); }}
+                                title={lead.is_vip ? "VIP client — click to remove" : "Mark as VIP client"}
+                                aria-label={lead.is_vip ? `Remove VIP mark from ${lead.name || "patient"}` : `Mark ${lead.name || "patient"} as VIP`}
+                                aria-pressed={!!lead.is_vip}
+                                className="rounded p-1 transition-colors hover:bg-amber-50"
+                                data-testid={`branch-vip-${lead.id}`}
+                              >
+                                <Star className={`h-4 w-4 ${lead.is_vip ? "fill-amber-400 text-amber-500" : "text-slate-300 hover:text-amber-400"}`} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "needs_attention"); }}
+                                title={lead.needs_attention ? "Needs attention — click to clear" : "Flag as needing attention"}
+                                aria-label={lead.needs_attention ? `Clear the attention flag on ${lead.name || "patient"}` : `Flag ${lead.name || "patient"} as needing attention`}
+                                aria-pressed={!!lead.needs_attention}
+                                className="rounded p-1 transition-colors hover:bg-rose-50"
+                                data-testid={`branch-attention-${lead.id}`}
+                              >
+                                <AlertCircle className={`h-4 w-4 ${lead.needs_attention ? "fill-rose-500 text-white" : "text-slate-300 hover:text-rose-400"}`} />
+                              </button>
                             </div>
                           </div>
                         </td>
