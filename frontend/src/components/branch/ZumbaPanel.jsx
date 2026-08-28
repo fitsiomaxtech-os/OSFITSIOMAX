@@ -671,6 +671,63 @@ const DetailRow = ({ label, value }) => (
   </div>
 );
 
+/** How the collected fees divide between the two masters and Fitsiomax.
+ *
+ *  Beside the list rather than in the card row above it, because it is a breakdown of one
+ *  card's figure rather than a fifth card: Payment Done already answers what came in, and
+ *  this answers whose it is. Shown only while that card is the one selected, so the header
+ *  of every other view is left alone.
+ *
+ *  The slot is what decides whose money it is. One master takes the 10 o'clock class and
+ *  another the 11 o'clock, each keeps half of what their own slot collected, and the rest
+ *  is Fitsiomax's. Computed on the server so the figures cannot drift from the total on
+ *  the card beside them — see revenue_split in v3_zumba.
+ */
+const RevenueChip = ({ label, sub, value, accent }) => (
+  <div className={`rounded-lg border px-2.5 py-1 ${accent}`}>
+    <p className="text-[9px] font-bold uppercase leading-none tracking-wide opacity-70">{label}</p>
+    <p className="mt-0.5 text-sm font-extrabold leading-none">{rupees(value)}</p>
+    {sub && <p className="mt-0.5 text-[9px] font-medium leading-none opacity-60">{sub}</p>}
+  </div>
+);
+
+const RevenueSplit = ({ split }) => {
+  if (!split) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="zumba-revenue-split">
+      <RevenueChip
+        label="FitsioMax Revenue"
+        value={split.fitsiomax}
+        accent="border-emerald-200 bg-emerald-50 text-emerald-800"
+      />
+      {(split.slots || []).map((s) => (
+        <RevenueChip
+          key={s.slot}
+          // Master 01 takes the first slot and Master 02 the second. The pairing is the
+          // branch's timetable rather than anything a registration records, so the number
+          // comes off the slot's position and no name is claimed for it.
+          label={`Master 0${s.master_no} Revenue`}
+          sub={s.slot}
+          value={s.master_share}
+          accent="border-sky-200 bg-sky-50 text-sky-800"
+        />
+      ))}
+      {/* Normally absent: a membership is prepaid and the slot is set when it is sold. When
+          it is not, that money has no master to go to and sits in the Fitsiomax figure,
+          which would otherwise read as more than Fitsiomax has earned. Named here so the
+          gap is visible where the money is counted, not only on the "to fill in" badge. */}
+      {Number(split.unslotted || 0) > 0 && (
+        <RevenueChip
+          label="No slot yet"
+          sub="counted with FitsioMax"
+          value={split.unslotted}
+          accent="border-amber-200 bg-amber-50 text-amber-800"
+        />
+      )}
+    </div>
+  );
+};
+
 const STATUS_CHIP = {
   active: { label: "On the roll", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
   discontinued: { label: "Discontinued", classes: "border-rose-200 bg-rose-50 text-rose-700" },
@@ -1344,6 +1401,10 @@ export const ZumbaPanel = ({ branchId }) => {
             {/* The collected total used to be printed here because the card beside it had
                 room for a count only. The card carries the figure itself now, so repeating
                 it on the list header would state the same number twice. */}
+            {/* Whose the collected money is, on the card that counts it. Left of the search
+                box so it reads as part of what this list is about rather than as another
+                control. */}
+            {card === "payment_done" && <RevenueSplit split={summary.revenue_split} />}
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <Input
                 value={search}

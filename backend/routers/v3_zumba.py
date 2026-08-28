@@ -876,6 +876,14 @@ async def list_zumba(
     summary["due_total"] = 0.0
     summary["discontinued"] = 0
     summary["leave"] = 0
+    # What came in, kept apart by the slot the customer sits in. The class runs two slots
+    # and a master takes one of them, so the slot is what says whose class the money was
+    # earned in — see the revenue split assembled after this loop.
+    #
+    # Keyed on every slot up front, so a slot nobody has paid for yet reports 0 rather than
+    # dropping out of the split and leaving the branch to wonder which master is missing.
+    collected_by_slot = {slot: 0.0 for slot in TIME_SLOTS}
+    unslotted_collected = 0.0
     for card in CARDS:
         summary[card] = 0
     for r in rows:
@@ -903,6 +911,14 @@ async def list_zumba(
         if paid > 0:
             summary["fee_collected"] += 1
             summary["fee_total"] += paid
+            slot = str(r.get("time_slot") or "").strip()
+            if slot in collected_by_slot:
+                collected_by_slot[slot] += paid
+            else:
+                # Paid, but nobody has said which class they sit in yet. Held apart rather
+                # than dropped into a slot, because guessing one would put money in a
+                # master's column that they may not have earned.
+                unslotted_collected += paid
 
     summary["due_total"] = round(summary["due_total"], 2)
     summary["fee_total"] = round(summary["fee_total"], 2)
@@ -911,6 +927,45 @@ async def list_zumba(
     # Admin's Master's Revenue card cannot drift apart: they are reading one number.
     summary["master_revenue"] = round(summary["fee_total"] * MASTER_SHARE, 2)
     summary["fitsiomax_revenue"] = round(summary["fee_total"] - summary["master_revenue"], 2)
+
+    # The same money again, split by the slot it was earned in — which is the split the
+    # branch is actually paid out on. One master takes the 10 o'clock class and another
+    # takes the 11 o'clock, each keeps half of what their own slot collected, and what is
+    # left over is Fitsiomax's.
+    #
+    # The slot decides it, not assigned_master_id. Those two answer different questions —
+    # the assignment records who teaches a customer, the slot records when they come — and
+    # the branch is paid out on when the class ran. Nothing here writes the assignment: a
+    # revenue figure should not quietly re-file a customer under a different master.
+    #
+    # Fitsiomax's share is the remainder, never a second multiplication, for the reason
+    # MASTER_SHARE's own comment gives: these figures are somebody's pay and they have to
+    # add back up to exactly what was taken. That also decides where unslotted money goes.
+    # It falls to Fitsiomax until a slot is put on it, which is the only answer that keeps
+    # the four numbers reconciling — and it is reported on its own below so nobody reads
+    # Fitsiomax's share as larger than it has really earned.
+    slot_rows = []
+    for index, slot in enumerate(TIME_SLOTS):
+        collected = round(collected_by_slot[slot], 2)
+        slot_rows.append({
+            "slot": slot,
+            # Which master's class this is, by position: the first slot is Master 01. The
+            # number rather than a name, because the pairing is the branch's timetable and
+            # not something any record here holds.
+            "master_no": index + 1,
+            "collected": collected,
+            "master_share": round(collected * MASTER_SHARE, 2),
+        })
+    masters_total = round(sum(r["master_share"] for r in slot_rows), 2)
+    summary["revenue_split"] = {
+        "total": summary["fee_total"],
+        "slots": slot_rows,
+        "fitsiomax": round(summary["fee_total"] - masters_total, 2),
+        "masters_total": masters_total,
+        # Collected from customers with no slot recorded yet. 0 in the ordinary case, and
+        # the reason the Fitsiomax figure can exceed half the total when it is not.
+        "unslotted": round(unslotted_collected, 2),
+    }
 
     # The masters this branch has actually been referred by, gathered off the registrations
     # themselves. No separate roster to keep in step with reality: a name typed once is
