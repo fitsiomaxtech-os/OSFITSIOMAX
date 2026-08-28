@@ -420,3 +420,77 @@ async def consultants_serving_branch(rows: list, branch_id: str) -> list:
         elif r.get("branch_id") == branch_id:
             kept.append(r)
     return kept
+
+
+async def collapse_duplicate_experts(rows: list) -> list:
+    """One row per person per desk per branch, not one per expert record.
+
+    Assign Physio was offering the same physio three times over, three identical lines
+    reading "Sowdraya" with nothing to tell them apart. Every one of them is a real
+    `doctors` row: half a dozen paths mint these records, most of them without a user_id
+    to dedupe against — 26 of the 29 physio records in the db_backup snapshot carry none —
+    so the branch sync in HR cannot see what is already there and adds another beside it.
+    The same install has been seen with twenty-one identical rows for one Nutritionist.
+
+    Collapsed on the NAME within a branch and a desk, not on user_id, for the reason the
+    Nutritionist picker in routers/v3_diet.py collapses the same way: the pair this exists
+    to merge is exactly one linked row and one legacy row carrying no link, so keying on
+    that id gives them different keys and merges nothing. Branch and profile_type stay in
+    the key, so two different branches keep their own rows and a physio is never folded
+    into a nutritionist of the same name.
+
+    Two genuinely different physios sharing a name at one branch would merge. The pickers
+    this feeds show the name and nothing else, so they are already indistinguishable in
+    them; nothing legible is lost that was not already lost.
+
+    The row kept is the one carrying the most published hours, then the one patients are
+    actually booked against, then the one linked to a login, then the oldest, which is the
+    one the others were duplicated from.
+
+    Published hours lead for the same reason they lead in team_roster_experts, which
+    answers this question for the calendars: the id that survives here is the id the picker
+    opens a calendar on and then writes into `sessions.physio_id`, so keeping the empty
+    twin offers a physio whose next screen has no date to pick. Ranking the two lists the
+    same way is also what keeps them agreeing — a branch that publishes days onto one
+    record and books against another has split one physio's diary in half.
+
+    Bookings break the tie beneath that, where two rows are equally empty and only one
+    holds the patients, so the sessions already filed stay with the record that survives.
+
+    Nothing is merged or deleted. This is a read-side answer to records that already
+    exist; collapsing them for real means moving bookings between records, which is not a
+    repair a picker should be making on a page load.
+    """
+    groups: Dict[tuple, list] = {}
+    order: list = []
+    for row in rows:
+        name = str(row.get("full_name") or "").strip().lower()
+        # A row with no name is keyed on its own id, so blanks never collapse into
+        # each other — they are unidentifiable, not the same person.
+        key = (row.get("profile_type"), row.get("branch_id"), name or f"id:{row.get('id')}")
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(row)
+
+    contended = [r["id"] for key in order if len(groups[key]) > 1 for r in groups[key] if r.get("id")]
+    busy: set = set()
+    if contended:
+        # Only the rows actually in contention, and only when there are any: the common
+        # case is no duplicates at all, and it must not cost three extra queries.
+        # Treatment days, rehab days and appointments each point at an expert record by a
+        # different field name, and work on any of them is work.
+        for col, field in (("appointments", "doctor_id"), ("sessions", "physio_id"), ("rehab_sessions", "physio_id")):
+            busy |= set(await v3_col(col).distinct(field, {field: {"$in": contended}}))
+
+    def rank(row: dict) -> tuple:
+        return (
+            # Negated because this sorts ascending: the fullest calendar first, so a row
+            # with a day published beats one with an hour and both beat an empty twin.
+            -len(row.get("slots") or []),
+            0 if row.get("id") in busy else 1,
+            0 if row.get("user_id") else 1,
+            str(row.get("created_at") or ""),
+        )
+
+    return [sorted(groups[key], key=rank)[0] for key in order]

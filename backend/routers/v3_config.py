@@ -10,6 +10,7 @@ from security import hash_password
 from deps import (
     v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role,
     is_physio_role, is_diet_role, is_rehab_role, consultants_serving_branch,
+    collapse_duplicate_experts,
 )
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
@@ -878,6 +879,12 @@ async def v3_get_doctors(
             want = "online" if _names_the_online_arm(b.get("vertical") or user.role) else "offline"
     if want:
         rows = await _consultants_for_vertical(rows, want == "online")
+    # One line per person, not one per record. Every caller of this endpoint is a picker —
+    # Assign Physio, the Operations and Pre-Sales pickers, the booking popup's experts —
+    # and each of them was listing the same physio once per duplicate `doctors` row, three
+    # identical names with nothing to choose between them. The calendars already got a
+    # deduped answer through team_roster_experts; this is the same answer for the pickers.
+    rows = await collapse_duplicate_experts(rows)
     rows = await attach_shifts(rows)
     out = []
     for row in rows:
