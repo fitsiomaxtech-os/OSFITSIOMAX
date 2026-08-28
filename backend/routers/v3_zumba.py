@@ -1003,27 +1003,73 @@ async def list_zumba(
 MASTER_SLOT_FIELD = "zumba_time_slot"
 
 
-async def _master_teaching(branch_id: Optional[str], slot: str) -> Optional[dict]:
-    """The master who takes this slot at this branch, or None.
+async def _branch_masters(branch_id: Optional[str]) -> List[dict]:
+    """The Zumba master accounts at this branch, in a settled order.
 
-    None is an ordinary answer, not a failure: a branch that has not yet said who teaches
-    the ten o'clock class has customers in it all the same, and they sit unassigned until
-    somebody does. Refusing the registration instead would make a missing setting look like
-    a bad customer record.
+    Sifted in Python rather than queried by a role literal because the slug is whatever was
+    typed in Roles & Credentials -- "zumba" on this install, "zumba_master" on the next.
+    Super Admin is excluded deliberately: they may reach the Zumba desk, which is not the
+    same as teaching a class, and this list decides whose customers are whose.
+
+    Ordered by when the account was made, oldest first. The order matters -- it is what
+    pairs them to the two classes below -- so it has to be one that does not move under
+    them. A name would: renaming a master, or hiring one alphabetically earlier, would swap
+    which class each takes and with it half a day's takings.
     """
-    if not slot or slot not in TIME_SLOTS:
-        return None
-    query: dict = {MASTER_SLOT_FIELD: slot, "is_active": {"$ne": False}}
+    query: dict = {"is_active": {"$ne": False}}
     if branch_id:
         query["branch_id"] = branch_id
     rows = await v3_col("users").find(
-        query, {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1}
-    ).sort("full_name", 1).to_list(50)
-    # The same sift list_zumba_masters applies, for the same reason: the role slug is typed
-    # by hand, and Super Admin may reach the desk without teaching a class.
-    for r in rows:
-        if (r.get("role") or "") != "super_admin" and is_zumba_role(r.get("role") or ""):
-            return r
+        query,
+        {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1, "created_at": 1, MASTER_SLOT_FIELD: 1},
+    ).to_list(200)
+    masters = [
+        r for r in rows
+        if (r.get("role") or "") != "super_admin" and is_zumba_role(r.get("role") or "")
+    ]
+    masters.sort(key=lambda r: (str(r.get("created_at") or ""), str(r.get("full_name") or "")))
+    return masters
+
+
+def _slot_of_master(masters: List[dict], master: dict) -> str:
+    """Which class this master takes: the one recorded on them, or the one their place in
+    the roster implies.
+
+    The branch does not have to say. A branch runs two classes and hires two masters for
+    them, so the first master takes the ten o'clock and the second takes the eleven --
+    which is the arrangement itself, not a setting about it, and making somebody enter it
+    before any customer could be filed was asking them to tell the OS what it already knew.
+
+    Recorded beats implied, and the moment ANY master here has a class recorded the implied
+    pairing stops applying to all of them. Half a branch on one rule and half on the other
+    is the state where two masters end up answering to the same class -- so a branch that
+    says nothing is paired by order, and a branch that says anything is taken at its word.
+    """
+    explicit = {str(m.get(MASTER_SLOT_FIELD) or "").strip() for m in masters}
+    if explicit & set(TIME_SLOTS):
+        recorded = str(master.get(MASTER_SLOT_FIELD) or "").strip()
+        return recorded if recorded in TIME_SLOTS else ""
+    try:
+        place = [m["id"] for m in masters].index(master["id"])
+    except (KeyError, ValueError):
+        return ""
+    return TIME_SLOTS[place] if place < len(TIME_SLOTS) else ""
+
+
+async def _master_teaching(branch_id: Optional[str], slot: str) -> Optional[dict]:
+    """The master who takes this slot at this branch, or None.
+
+    None is an ordinary answer, not a failure: a branch with no master accounts yet has
+    customers in its classes all the same, and they sit unassigned until it has one.
+    Refusing the registration instead would make a missing account look like a bad customer
+    record.
+    """
+    if not slot or slot not in TIME_SLOTS:
+        return None
+    masters = await _branch_masters(branch_id)
+    for m in masters:
+        if _slot_of_master(masters, m) == slot:
+            return m
     return None
 
 
@@ -1149,25 +1195,21 @@ async def list_zumba_masters(
     offering a dropdown that assigns customers to nobody.
     """
     branch_id = await _branch_for(user, branch_id)
-    query: dict = {"is_active": {"$ne": False}}
-    if branch_id:
-        query["branch_id"] = branch_id
-    rows = await v3_col("users").find(
-        query, {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1}
-    ).sort("full_name", 1).to_list(200)
-    # Super Admin excluded deliberately. is_zumba_role answers "may this account reach the
-    # Zumba desk", which Super Admin may, not "is this person a master who teaches a class",
-    # which they are not -- and this list is the one that hands customers to somebody.
+    masters = await _branch_masters(branch_id)
     return [
         {
-            "id": r["id"],
-            "name": (r.get("full_name") or r.get("email") or "").strip(),
-            # Which class they take. This is what files customers to them now, so the
-            # roster has to report it wherever it is offered.
-            "time_slot": r.get(MASTER_SLOT_FIELD) or "",
+            "id": m["id"],
+            "name": (m.get("full_name") or m.get("email") or "").strip(),
+            # The class they actually take, implied or recorded, resolved by the one helper
+            # that files customers -- so what this list says and what a registration lands
+            # on can never be two different answers.
+            "time_slot": _slot_of_master(masters, m),
+            # Whether anybody said so, or it follows from the roster. The branch's control
+            # reads this to say which it is showing, rather than presenting an arrangement
+            # nobody chose as though somebody had.
+            "slot_set": str(m.get(MASTER_SLOT_FIELD) or "").strip() in TIME_SLOTS,
         }
-        for r in rows
-        if (r.get("role") or "") != "super_admin" and is_zumba_role(r.get("role") or "")
+        for m in masters
     ]
 
 

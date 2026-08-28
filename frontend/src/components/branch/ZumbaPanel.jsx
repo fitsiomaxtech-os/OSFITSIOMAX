@@ -691,25 +691,28 @@ const RevenueChip = ({ label, sub, value, accent }) => (
   </div>
 );
 
-/** Which master takes which class — the one place the pairing is decided.
+/** Who takes each class — shown, and correctable, but not something to fill in.
  *
- *  Slot first, not master first, because that is the shape of the fact: a branch has two
- *  classes and each needs somebody to take it, and asking it this way round makes it
- *  impossible to express the thing that broke this before — two masters answering to the
- *  same class.
+ *  Nothing here needs setting up. A branch runs two classes and hires two masters for
+ *  them, so the first master takes the ten o'clock and the second the eleven, and a
+ *  customer's class time files them to that master from the day the account exists. This
+ *  row reports that arrangement rather than asking for it.
  *
- *  Set once and then left alone. Everything downstream reads it: a customer's class time
- *  files them to whoever takes that class, that master's own board shows them, and half of
- *  what they paid is counted as that master's. Changing it moves all three together, which
- *  is why the server re-files the slot's customers on the same call rather than leaving the
- *  setting describing a rule the roll does not follow.
+ *  It is still changeable, because the order can be wrong — a third master, or two hired
+ *  the other way round — and the alternative to a correction here is a branch whose
+ *  takings are split against a pairing nobody agrees with and nothing can move. Changing
+ *  one is what the server treats as the branch speaking: from then on every class is taken
+ *  at its word rather than implied.
+ *
+ *  Slot first, not master first, because that is the shape of the fact and because asking
+ *  it this way round cannot express two masters answering to the same class.
  */
 const ClassMasters = ({ masters, onSet, busy }) => (
   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2" data-testid="zumba-class-masters">
     <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Who takes each class</span>
     {masters.length === 0 ? (
       <span className="text-[11px] text-slate-500" data-testid="zumba-class-masters-empty">
-        No Zumba accounts at this branch yet — add one in HR Admin, then customers can be filed to a class.
+        No Zumba accounts at this branch yet — add one in HR Admin, then customers are filed to a class automatically.
       </span>
     ) : (
       TIME_SLOTS.map((slot) => {
@@ -724,7 +727,7 @@ const ClassMasters = ({ masters, onSet, busy }) => (
               className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 outline-none focus:border-sky-400 disabled:opacity-60"
               data-testid={`zumba-class-master-${slot}`}
             >
-              <option value="">Nobody yet</option>
+              <option value="">Nobody</option>
               {masters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </label>
@@ -1951,9 +1954,13 @@ export const ZumbaPanel = ({ branchId }) => {
                         Goes to <span className="font-semibold text-slate-700">{teacher.name}</span>, who takes this class.
                       </p>
                     ) : (
+                      // Only ever seen by a branch with no Zumba accounts at all. The class
+                      // itself needs no setting up — the first master takes the ten
+                      // o'clock and the second the eleven — so there is nothing to tell
+                      // somebody to go and do, only somebody to hire.
                       <p className="rounded-md bg-amber-50 px-2.5 py-2 text-[11px] text-amber-700" data-testid="zumba-field-time-nomaster">
-                        Nobody is set to take this class yet, so this customer will sit unassigned.
-                        Set it above the list and everyone in this class moves across.
+                        No Zumba accounts at this branch yet, so this customer will sit unassigned.
+                        Add one in HR Admin and everyone in this class moves across.
                       </p>
                     );
                   })()}
