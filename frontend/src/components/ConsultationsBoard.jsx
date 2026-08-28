@@ -1245,8 +1245,35 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     // which the Branch Leads bar reads the same rows through, rather than copied and kept
     // in step by hand. Branch pipeline only: the Consultant's own board has no such stage.
     if (!isConsultant && stageName === "Completed") return isCourseComplete(lead);
+    // And a finished patient leaves every other position in the pipeline, which is the half
+    // that makes the line above true. Nothing ever writes "Completed" onto a lead, so the
+    // stage field goes on reading whatever the branch last moved them to -- Fee Collected,
+    // Physio Assign -- long after there is nothing left for them to attend. Read raw, they
+    // were counted in both places at once and the row's own chip contradicted the pill that
+    // had just listed it: "moved to Completed, still in Fee Collected".
+    //
+    // Above the two cross-cutting stages on purpose, not below them: Rehab and Diet
+    // Consultation are facts about a patient rather than positions, and they run alongside
+    // the pipeline by design -- see matchesConsultationStage in BranchAdminBoard.
+    //
+    // Cancel keeps whatever it holds. Abandoning a course is not finishing one, and the
+    // branch pipeline reads it the same way.
+    if (!isConsultant && lead[stageField] !== "Cancel" && isCourseComplete(lead)) return false;
     return lead[stageField] === stageName;
   }, [isConsultant, stageField]);
+
+  /**
+   * What a row's stage chip says.
+   *
+   * The field for everybody the pipeline still holds, and "Completed" for a patient it no
+   * longer does. The same reading matchesStage above filters by, so the chip on a row and
+   * the pill it was listed under cannot say different things about one patient.
+   */
+  const rowStageName = useCallback((lead) => (
+    !isConsultant && lead[stageField] !== "Cancel" && isCourseComplete(lead)
+      ? "Completed"
+      : lead[stageField]
+  ), [isConsultant, stageField]);
 
   const inStage = useMemo(() => {
     if (!stageFilter) return preStageFiltered;
@@ -2823,7 +2850,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               {loading ? "Loading…" : externalDate ? "No patients on this day." : "No patients in this stage yet."}
             </p>
           ) : filtered.map((l, i) => {
-            const hex = stageColor(l[stageField]);
+            const rowStage = rowStageName(l);
+            const hex = stageColor(rowStage);
             const wa = waNumber(l.phone);
             return (
               // A div, not a button: the Call and WhatsApp actions below are interactive
@@ -2942,7 +2970,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             </thead>
             <tbody>
               {filtered.map((l, i) => {
-                const hex = stageColor(l[stageField]);
+                const rowStage = rowStageName(l);
+                const hex = stageColor(rowStage);
                 return (
                   <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
                     <td className="px-3 py-3 align-middle text-slate-400">{i + 1}</td>
@@ -2954,9 +2983,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <span
                         className="inline-flex max-w-full items-center gap-1 truncate rounded-[5px] px-2 py-0.5 text-xs font-semibold"
                         style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}
-                        title={l[stageField] || ""}
+                        title={rowStage || ""}
                       >
-                        {l[stageField] || "—"}
+                        {rowStage || "—"}
                       </span>
                     </td>
                     <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>

@@ -412,6 +412,17 @@ export const matchesConsultationStage = (lead, stageName) => {
   // Nothing left to attend — see isCourseComplete, which both boards showing this stage
   // now read it through.
   if (stageName === "Completed") return isCourseComplete(lead);
+  // And nowhere else in the pipeline, which is the half that makes that line true. Nothing
+  // writes "Completed" onto a lead, so consultation_stage still reads Fee Collected or
+  // Physio Assign for a patient with nothing left to attend — counted under both, with the
+  // two counts along one bar adding up to more patients than the branch has.
+  //
+  // Below the cross-cutting pair above it on purpose: Rehab and Diet Consultation are facts
+  // about a patient rather than positions, and are meant to hold whoever they describe.
+  //
+  // Cancel keeps whatever it holds: abandoning a course is not finishing one, the same rule
+  // matchesBranchStage follows.
+  if (lead.consultation_stage !== "Cancel" && isCourseComplete(lead)) return false;
   return lead.consultation_stage === stageName;
 };
 
@@ -705,6 +716,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     (lead) => {
       if (showingMirror && lead.branch_stage) return mirrorStage.name;
       if (lead.branch_stage && finalBranchStages.has(lead.branch_stage)) return lead.branch_stage;
+      // Finished, and no stage field anywhere says so — nothing writes "Completed" onto a
+      // lead, which is why both pill sets read it off the patient instead. The chip has to
+      // read it the same way or a row listed under Completed sits there saying Fee
+      // Collected. Cancelled leads are already answered by the final-stage line above.
+      if (lead.consultation_stage !== "Cancel" && isCourseComplete(lead)) return "Completed";
       return lead.consultation_stage || lead.branch_stage;
     },
     [showingMirror, mirrorStage, finalBranchStages],
