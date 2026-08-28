@@ -397,6 +397,26 @@ const weeksFromPackageName = (name) => {
   return match ? parseInt(match[1], 10) : null;
 };
 
+// Shortest course first, so a row of durations reads 01, 02, 03 ... 10.
+//
+// These pickers took the store's own order, which is the order the packages happened to be
+// added in — so the Treatment Package row opened on "10 Week, 09, 08, 07, 06, 01, 02...",
+// a list of numbers with no order in it at all. Somebody reaching for 03 Week has to read
+// every pill to find it, and the one they land on is decided by whoever added the shelf.
+//
+// Sorted on the leading number rather than the name, because "10 Week" sorts before
+// "02 Week" as text. Anything not named that way has no duration to sort by and keeps its
+// place at the end, in the order the store gave it — sort is stable, so a shelf of them
+// stays as it was rather than being shuffled by a comparator that cannot tell them apart.
+const byDuration = (a, b) => {
+  const wa = weeksFromPackageName(a?.name);
+  const wb = weeksFromPackageName(b?.name);
+  if (wa == null && wb == null) return 0;
+  if (wa == null) return 1;
+  if (wb == null) return -1;
+  return wa - wb;
+};
+
 // One fixed color per payment mode, consistent everywhere it's offered.
 const PAYMENT_MODE_COLORS = {
   cash: "#059669",
@@ -1374,14 +1394,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // bare item_type check offered a Zumba class as a Treatment Package. An item saved
   // before the other shelves existed carries no category and is a treatment package by
   // definition, so it keeps its place here.
-  const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session" && (i.category || "physiotherapy") === "physiotherapy");
+  const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session" && (i.category || "physiotherapy") === "physiotherapy").sort(byDuration);
   // The Rehab shelf, offered beside the referral itself. A rehab course is a session item
   // under its own category and is priced the same way — a per-session rate whose total is
   // the rate times the course's session count.
-  const rehabPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "rehab");
+  const rehabPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "rehab").sort(byDuration);
   // The Zumba shelf. Its plan amount is stored divided down to a per-class rate, exactly
   // like a rehab course, so the same rate-times-count arithmetic returns the plan price.
-  const zumbaPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "zumba");
+  const zumbaPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "zumba").sort(byDuration);
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
