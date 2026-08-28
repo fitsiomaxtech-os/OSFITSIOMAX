@@ -36,13 +36,6 @@ const shortDate = (iso) => {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
-// The two the class is taught in, in the words the branch stores them by -- kept in step
-// with TIME_SLOTS in backend/routers/v3_zumba.py, which drops anything else.
-const SESSIONS = [
-  { key: "10:00 am - 11:00 am", label: "1st Session", when: "10:00 am - 11:00 am" },
-  { key: "11:00 am - 12:00 pm", label: "2nd Session", when: "11:00 am - 12:00 pm" },
-];
-
 /** What the roll below is showing, so the header names the open card rather than
  *  always saying "Customers" over a list that has been narrowed. */
 const CARD_TITLES = {
@@ -93,7 +86,6 @@ export const ZumbaMasterBoard = () => {
   // The day the strip is on. Today to begin with, because the class a master opens this
   // board to check is nearly always the one they are about to teach.
   const [day, setDay] = useState(todayIso);
-  const [session, setSession] = useState(""); // "" = both slots, else the time_slot chosen
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,29 +104,28 @@ export const ZumbaMasterBoard = () => {
   useEffect(() => { load(); }, [load]);
 
   // Who is booked into a given day: the roll on a class day, nobody on any other. A
-  // membership books all three evenings, so there is no per-day list beyond that -- what
-  // the day does change is which hour the tabs below split it into.
-  const bookedOn = (iso, slot = "") => {
-    if (!isClassDayIso(iso)) return [];
-    return slot ? rows.filter((r) => r.time_slot === slot) : rows;
-  };
-  // How many of today's class are in each slot, counted off the roll rather than asked for
-  // separately, so a tab and the list behind it cannot disagree.
-  const bookedIn = (slot) => bookedOn(day, slot).length;
+  // membership books all three evenings, so there is no per-day list beyond that.
+  //
+  // No longer split by the hour. It used to offer Both / 1st Session / 2nd Session, from
+  // when a master could be handed customers out of either — the branch picked the master
+  // and picked the time, and the two did not have to agree. A class now belongs to one
+  // master, so every customer on this board is in that master's own hour and the tabs
+  // divided the roll into itself and nothing.
+  const bookedOn = (iso) => (isClassDayIso(iso) ? rows : []);
 
   const visible = useMemo(() => {
     // Today's card is the whole roll on a class day and nobody on any other day, matching
     // what the figure itself counts: a membership books all three evenings, so there is no
-    // per-day list to draw — only a class, or no class. What it does split by is the hour,
-    // because the two sessions are two rooms of people and a master teaches one at a time.
+    // per-day list to draw — only a class, or no class. Nor is it split by the hour any
+    // more: this board is one master's roll and a master takes one class.
     let list = rows;
     if (card === "today") {
-      list = bookedOn(day, session);
+      list = bookedOn(day);
     }
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
-  }, [rows, search, card, session, day]);
+  }, [rows, search, card, day]);
 
   return (
     <div className="flex flex-col gap-4" data-testid="zumba-master-board">
@@ -166,7 +157,7 @@ export const ZumbaMasterBoard = () => {
           caption="Assigned to your class by the branch"
           tone="border-violet-200 bg-violet-50 text-violet-900"
           active={card === "all"}
-          onClick={() => { setCard("all"); setSession(""); }}
+          onClick={() => setCard("all")}
           testid="zumba-card-all"
         />
         <SummaryCard
@@ -209,7 +200,7 @@ export const ZumbaMasterBoard = () => {
               const selected = iso === day;
               const isToday = iso === todayIso();
               const classDay = isClassDayIso(iso);
-              const booked = bookedOn(iso, session).length;
+              const booked = bookedOn(iso).length;
               return (
                 <button
                   key={iso}
@@ -246,37 +237,6 @@ export const ZumbaMasterBoard = () => {
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
-
-      {/* Under today's card, and only there: the two slots are how one class day divides,
-          not a way to read the whole roll. Each says how many are in it, so choosing is
-          done from the numbers rather than by trying one. */}
-      {card === "today" && (
-        <div className="flex flex-wrap items-center gap-2" data-testid="zumba-master-sessions">
-          <button
-            type="button"
-            onClick={() => setSession("")}
-            className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${session === "" ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"}`}
-            data-testid="zumba-master-session-all"
-          >
-            Both sessions
-          </button>
-          {SESSIONS.map((slot) => (
-            <button
-              key={slot.key}
-              type="button"
-              onClick={() => setSession(session === slot.key ? "" : slot.key)}
-              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${session === slot.key ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"}`}
-              title={slot.when}
-              data-testid={`zumba-master-session-${slot.key.startsWith("10") ? "1" : "2"}`}
-            >
-              {slot.label}
-              <span className={`ml-1.5 font-normal ${session === slot.key ? "text-white/80" : "text-slate-400"}`}>
-                {slot.when} · {bookedIn(slot.key)}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
 
       <Card>
         <CardContent className="p-0">

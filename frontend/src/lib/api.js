@@ -627,6 +627,10 @@ export const deleteZumba = async (registrationId) => (await api.delete(`/branch/
 // from the `masters` list listZumba returns: that one is names typed onto referrals, this
 // one is accounts a student can actually be handed to.
 export const listZumbaMasters = async (branchId) => (await api.get("/branch/zumba/masters", { params: branchId ? { branch_id: branchId } : {} })).data;
+// Which class a master takes. Empty time_slot stands them down from the one they had.
+// Re-files that slot's customers to them server-side, so the setting and the roll cannot
+// describe different arrangements — see set_zumba_master_slot.
+export const setZumbaMasterSlot = async (masterId, timeSlot) => (await api.patch(`/branch/zumba/masters/${masterId}/slot`, { time_slot: timeSlot || "" })).data;
 // Moving somebody along the class pipeline is the daily action, so it is its own call
 // rather than a field on the edit form. The stages themselves come back on listZumba,
 // straight from what Super Admin has in CI/CD ROOTS.

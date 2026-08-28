@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, setZumbaStatus, acceptZumbaReferral, renewZumba, collectZumba, listStoreItems } from "@/lib/api";
+import { listZumba, listZumbaMasters, setZumbaMasterSlot, addZumba, updateZumba, deleteZumba, setZumbaStatus, acceptZumbaReferral, renewZumba, collectZumba, listStoreItems } from "@/lib/api";
 
 // How a registration arrived, as the branch would say it. A referral is recorded against
 // the master who made it rather than against a single "Masters" bucket, so these six are
@@ -691,6 +691,49 @@ const RevenueChip = ({ label, sub, value, accent }) => (
   </div>
 );
 
+/** Which master takes which class — the one place the pairing is decided.
+ *
+ *  Slot first, not master first, because that is the shape of the fact: a branch has two
+ *  classes and each needs somebody to take it, and asking it this way round makes it
+ *  impossible to express the thing that broke this before — two masters answering to the
+ *  same class.
+ *
+ *  Set once and then left alone. Everything downstream reads it: a customer's class time
+ *  files them to whoever takes that class, that master's own board shows them, and half of
+ *  what they paid is counted as that master's. Changing it moves all three together, which
+ *  is why the server re-files the slot's customers on the same call rather than leaving the
+ *  setting describing a rule the roll does not follow.
+ */
+const ClassMasters = ({ masters, onSet, busy }) => (
+  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2" data-testid="zumba-class-masters">
+    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Who takes each class</span>
+    {masters.length === 0 ? (
+      <span className="text-[11px] text-slate-500" data-testid="zumba-class-masters-empty">
+        No Zumba accounts at this branch yet — add one in HR Admin, then customers can be filed to a class.
+      </span>
+    ) : (
+      TIME_SLOTS.map((slot) => {
+        const holder = masters.find((m) => m.time_slot === slot);
+        return (
+          <label key={slot} className="flex items-center gap-1.5 text-[11px] text-slate-600">
+            <span className="font-medium text-slate-500">{slot}</span>
+            <select
+              value={holder?.id || ""}
+              disabled={busy}
+              onChange={(e) => onSet(slot, e.target.value, holder?.id || "")}
+              className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 outline-none focus:border-sky-400 disabled:opacity-60"
+              data-testid={`zumba-class-master-${slot}`}
+            >
+              <option value="">Nobody yet</option>
+              {masters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+        );
+      })
+    )}
+  </div>
+);
+
 const RevenueSplit = ({ split }) => {
   if (!split) return null;
   return (
@@ -1164,6 +1207,35 @@ export const ZumbaPanel = ({ branchId }) => {
     return () => { live = false; };
   }, [branchId]);
 
+  // Handing a class to a master. The server re-files that class's customers on the same
+  // call, so both the roster and the registrations are refetched rather than patched in
+  // place — half a dozen rows change owner and the assignment shows on every one of them.
+  const [settingSlot, setSettingSlot] = useState(false);
+  const setClassMaster = async (slot, nextId, currentId) => {
+    if (nextId === currentId) return;
+    setSettingSlot(true);
+    try {
+      // Clearing a class means standing down whoever holds it; there is no id to send it
+      // against otherwise, which is why the current holder is passed in.
+      const res = nextId
+        ? await setZumbaMasterSlot(nextId, slot)
+        : await setZumbaMasterSlot(currentId, "");
+      const moved = Number(res?.customers_moved || 0);
+      toast.success(
+        nextId
+          ? `${res?.name || "Master"} takes ${slot}${moved ? ` · ${moved} customer${moved === 1 ? "" : "s"} moved` : ""}`
+          : `${slot} is nobody's for now${moved ? ` · ${moved} released` : ""}`,
+      );
+      const roster = await listZumbaMasters(branchId).catch(() => null);
+      if (Array.isArray(roster)) setZumbaMasters(roster);
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not set that class");
+    } finally {
+      setSettingSlot(false);
+    }
+  };
+
   const visible = useMemo(() => {
     let list = rows;
     // A customer who has discontinued is off the roll, so they appear on their own card and
@@ -1369,6 +1441,8 @@ export const ZumbaPanel = ({ branchId }) => {
           />
         ))}
       </div>
+
+      <ClassMasters masters={zumbaMasters} onSet={setClassMaster} busy={settingSlot} />
 
       <Card>
         <CardContent className="p-0">
@@ -1847,34 +1921,42 @@ export const ZumbaPanel = ({ branchId }) => {
                   )}
                 </div>
 
-                {/* Its own field rather than a second use of Source: Source is how this
-                    customer arrived, this is whose class they are in. Only what is set here
-                    reaches a master's board — referring somebody does not put them on your
-                    own roll, which is the point of keeping the two apart. */}
-                <div className="space-y-2">
-                  <FieldLabel>Assign To</FieldLabel>
-                  {zumbaMasters.length === 0 ? (
-                    <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500" data-testid="zumba-field-assign-empty">
-                      No Zumba accounts at this branch yet. Add one in HR Admin to assign customers to a class.
-                    </p>
-                  ) : (
-                    <FormSelect
-                      value={form.assigned_master_id}
-                      onChange={(v) => setForm({ ...form, assigned_master_id: v })}
-                      testid="zumba-field-assign"
-                    >
-                      <option value="">Unassigned</option>
-                      {zumbaMasters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                    </FormSelect>
-                  )}
-                </div>
+                {/* Time, and nothing beside it. There used to be an Assign To picker here
+                    as well, which asked the same question twice: a branch runs two classes
+                    and one master takes each, so the class this customer comes to already
+                    says whose they are. Two ways to say one thing can only ever add a
+                    disagreement — and it did, with a master's own board counting one roll
+                    while the revenue split counted another.
 
+                    Who that is now follows from the class time, and is named underneath so
+                    the answer is still on screen at the moment it is decided. Which master
+                    takes which class is set once, above the list. */}
                 <div className="space-y-2">
                   <FieldLabel>Time</FieldLabel>
                   <FormSelect value={form.time_slot} onChange={(v) => setForm({ ...form, time_slot: v })} testid="zumba-field-time">
                     <option value="">Not set</option>
                     {TIME_SLOTS.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
                   </FormSelect>
+                  {(() => {
+                    if (!form.time_slot) {
+                      return (
+                        <p className="text-[11px] text-slate-400" data-testid="zumba-field-time-hint">
+                          The class time decides which master this customer goes to.
+                        </p>
+                      );
+                    }
+                    const teacher = zumbaMasters.find((m) => m.time_slot === form.time_slot);
+                    return teacher ? (
+                      <p className="text-[11px] text-slate-500" data-testid="zumba-field-time-master">
+                        Goes to <span className="font-semibold text-slate-700">{teacher.name}</span>, who takes this class.
+                      </p>
+                    ) : (
+                      <p className="rounded-md bg-amber-50 px-2.5 py-2 text-[11px] text-amber-700" data-testid="zumba-field-time-nomaster">
+                        Nobody is set to take this class yet, so this customer will sit unassigned.
+                        Set it above the list and everyone in this class moves across.
+                      </p>
+                    );
+                  })()}
                 </div>
 
                 {/* When the term runs, side by side because the second follows from the

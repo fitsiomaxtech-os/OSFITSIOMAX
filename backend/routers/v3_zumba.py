@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from database import v3_col
-from deps import v3_current_user, is_branch_admin_role, is_zumba_role
+from deps import v3_current_user, v3_require_roles, is_branch_admin_role, is_zumba_role
 from schemas.v3 import V3UserOut
 from utils import now_iso, live_branch_query
 
@@ -993,35 +993,75 @@ async def list_zumba(
     }
 
 
-async def _assignment(payload: ZumbaInput, user: V3UserOut) -> dict:
-    """The master this customer is assigned to, resolved to id and name.
+# Which slot a master teaches, stored on their own account. The pairing has to live
+# somewhere and this is the only record that is already one-per-master and one-per-branch.
+#
+# Set once by the Branch Admin and then left alone, which is the point: the alternative
+# considered was to read it off the roster's order and call the first master "Master 01",
+# and that would have handed the ten o'clock class -- and half its takings -- to whoever
+# was hired with a name earlier in the alphabet.
+MASTER_SLOT_FIELD = "zumba_time_slot"
 
-    Empty for a Zumba master: assigning is the Branch Admin's call, and a master posting
-    their own referral must not be able to put themselves on the roll -- that is exactly
-    the thing the assignment is meant to keep out. Returning no keys at all rather than
-    blank ones also means a master editing a row leaves the branch's assignment alone
-    instead of clearing it.
+
+async def _master_teaching(branch_id: Optional[str], slot: str) -> Optional[dict]:
+    """The master who takes this slot at this branch, or None.
+
+    None is an ordinary answer, not a failure: a branch that has not yet said who teaches
+    the ten o'clock class has customers in it all the same, and they sit unassigned until
+    somebody does. Refusing the registration instead would make a missing setting look like
+    a bad customer record.
+    """
+    if not slot or slot not in TIME_SLOTS:
+        return None
+    query: dict = {MASTER_SLOT_FIELD: slot, "is_active": {"$ne": False}}
+    if branch_id:
+        query["branch_id"] = branch_id
+    rows = await v3_col("users").find(
+        query, {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1}
+    ).sort("full_name", 1).to_list(50)
+    # The same sift list_zumba_masters applies, for the same reason: the role slug is typed
+    # by hand, and Super Admin may reach the desk without teaching a class.
+    for r in rows:
+        if (r.get("role") or "") != "super_admin" and is_zumba_role(r.get("role") or ""):
+            return r
+    return None
+
+
+async def _assignment(payload: ZumbaInput, user: V3UserOut, branch_id: Optional[str]) -> dict:
+    """The master this customer is assigned to, taken from the slot they come in.
+
+    The slot decides it, and nothing else does. A branch runs two classes and one master
+    takes each, so "which class are they in" and "whose customer are they" are one question
+    asked twice -- and asking it twice is what let the two answers disagree, with a master's
+    own board counting one roll while the branch's revenue split counted another. The
+    Branch Admin now answers it once, on the master, and every registration reads it.
+
+    This is also why the form no longer offers an Assign To control. It was a second way to
+    say the same thing, and the only thing a second way can add is a contradiction.
+
+    Empty for a Zumba master: a master posting their own referral must not be able to put
+    themselves on the roll. Returning no keys at all rather than blank ones also means a
+    master editing a row leaves the branch's assignment alone instead of clearing it.
 
     The name is stored beside the id so a board can print it without a second read, while
     the id stays the thing that is matched on -- a master who is renamed keeps their roll.
     """
     if _is_master_account(user):
         return {}
-    master_id = (payload.assigned_master_id or "").strip()
-    if not master_id:
+    slot = (payload.time_slot or "").strip()
+    master = await _master_teaching(branch_id, slot)
+    if not master:
+        # No slot on the customer yet, or nobody teaching it. Cleared rather than left as
+        # it was, so a customer moved from the ten o'clock class to the eleven cannot keep
+        # the first master's name on a row that is now somebody else's.
         return {"assigned_master_id": "", "assigned_master_name": ""}
-    account = await v3_col("users").find_one(
-        {"id": master_id}, {"_id": 0, "full_name": 1, "email": 1}
-    )
-    if not account:
-        raise HTTPException(status_code=400, detail="That master no longer has an account")
     return {
-        "assigned_master_id": master_id,
-        "assigned_master_name": (account.get("full_name") or account.get("email") or "").strip(),
+        "assigned_master_id": master["id"],
+        "assigned_master_name": (master.get("full_name") or master.get("email") or "").strip(),
     }
 
 
-async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
+async def _clean(payload: ZumbaInput, user: V3UserOut, branch_id: Optional[str] = None) -> dict:
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
@@ -1090,7 +1130,7 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
         # taken while reporting that nothing was.
         **money,
         "stage": _settle_stage(payload.stage, await _zumba_stages(), CARD_OF_SOURCE.get(source, "direct")),
-        **await _assignment(payload, user),
+        **await _assignment(payload, user, branch_id),
     }
 
 
@@ -1119,10 +1159,91 @@ async def list_zumba_masters(
     # Zumba desk", which Super Admin may, not "is this person a master who teaches a class",
     # which they are not -- and this list is the one that hands customers to somebody.
     return [
-        {"id": r["id"], "name": (r.get("full_name") or r.get("email") or "").strip()}
+        {
+            "id": r["id"],
+            "name": (r.get("full_name") or r.get("email") or "").strip(),
+            # Which class they take. This is what files customers to them now, so the
+            # roster has to report it wherever it is offered.
+            "time_slot": r.get(MASTER_SLOT_FIELD) or "",
+        }
         for r in rows
         if (r.get("role") or "") != "super_admin" and is_zumba_role(r.get("role") or "")
     ]
+
+
+class ZumbaMasterSlotInput(BaseModel):
+    # Empty takes a master off a slot, which is a real instruction: somebody has stopped
+    # teaching that class and their customers should stop being filed to them.
+    time_slot: Optional[str] = ""
+
+
+@router.patch("/branch/zumba/masters/{master_id}/slot")
+async def set_zumba_master_slot(
+    master_id: str,
+    payload: ZumbaMasterSlotInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Say which class this master takes, and hand them that class.
+
+    The Branch Admin's call, not a master's -- which is why this is the one Zumba endpoint
+    that does not admit the Zumba role. A master who could set their own slot could file
+    the branch's customers, and half their takings, to themselves.
+
+    Two writes, and the second is the point. Setting the slot without re-filing the
+    customers already in it would leave the setting describing a rule the roll does not
+    follow: the ten o'clock class would say Master 01 while the people in it stayed
+    assigned to nobody. So every registration in that slot at this branch moves to them,
+    and any row still pointing at them from the OTHER slot is released -- a master takes
+    one class, and a stale assignment from the class they used to take is exactly the
+    disagreement this whole arrangement exists to remove.
+
+    Discontinued rows are moved too. They are somebody's record of a customer who came to
+    that class, and leaving them behind would attribute a past customer to whoever last
+    held the slot.
+    """
+    slot = (payload.time_slot or "").strip()
+    if slot and slot not in TIME_SLOTS:
+        raise HTTPException(status_code=400, detail="That is not one of the class times")
+    account = await v3_col("users").find_one(
+        {"id": master_id}, {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1, "branch_id": 1},
+    )
+    if not account or not is_zumba_role(account.get("role") or "") or (account.get("role") or "") == "super_admin":
+        raise HTTPException(status_code=404, detail="That master no longer has an account")
+    branch_id = await _branch_for(user, account.get("branch_id"))
+    if is_branch_admin_role(user.role) and account.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+
+    # One master to a slot. Whoever held it is stood down first, or two accounts would
+    # answer to the same class and _master_teaching would pick between them by name.
+    if slot:
+        await v3_col("users").update_many(
+            {"id": {"$ne": master_id}, "branch_id": account.get("branch_id"), MASTER_SLOT_FIELD: slot},
+            {"$set": {MASTER_SLOT_FIELD: ""}},
+        )
+    await v3_col("users").update_one({"id": master_id}, {"$set": {MASTER_SLOT_FIELD: slot}})
+
+    name = (account.get("full_name") or account.get("email") or "").strip()
+    moved = 0
+    if slot:
+        res = await v3_col("zumba_registrations").update_many(
+            {"branch_id": branch_id, "time_slot": slot},
+            {"$set": {"assigned_master_id": master_id, "assigned_master_name": name}},
+        )
+        moved = res.modified_count
+        await v3_col("zumba_registrations").update_many(
+            {"branch_id": branch_id, "assigned_master_id": master_id, "time_slot": {"$ne": slot}},
+            {"$set": {"assigned_master_id": "", "assigned_master_name": ""}},
+        )
+    else:
+        # Off the slot: the class they were taking is nobody's until it is given to
+        # somebody, so their roll is released rather than left pointing at a master who no
+        # longer teaches it.
+        res = await v3_col("zumba_registrations").update_many(
+            {"branch_id": branch_id, "assigned_master_id": master_id},
+            {"$set": {"assigned_master_id": "", "assigned_master_name": ""}},
+        )
+        moved = res.modified_count
+    return {"id": master_id, "name": name, "time_slot": slot, "customers_moved": moved}
 
 
 async def _write_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
@@ -1163,7 +1284,7 @@ async def add_zumba(
         "payment_lines": [],
         "payment_mode": "",
         "payment_reference": "",
-        **await _clean(payload, user),
+        **await _clean(payload, user, branch_id),
         "created_at": now_iso(),
         "created_by": user.full_name or user.email,
     }
@@ -1259,7 +1380,9 @@ async def update_zumba(
         raise HTTPException(status_code=403, detail="Not your branch")
 
     changes = {
-        **await _clean(payload, user),
+        # The row's own branch, not the caller's: the slot's master is looked up per branch,
+        # and a Super Admin editing another branch's row must resolve it against that one.
+        **await _clean(payload, user, existing.get("branch_id")),
         "updated_at": now_iso(),
         "updated_by": user.full_name or user.email,
     }
