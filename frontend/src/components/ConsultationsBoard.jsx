@@ -1315,10 +1315,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
   // Everyone who paid this tab's own fee. Outside Fee Collected the tabs do not exist,
   // so the stage's rows pass through whole.
-  const filtered = useMemo(
-    () => (showDiscountColumn ? inStage.filter((l) => activeFee.paid(l) > 0) : inStage),
-    [inStage, showDiscountColumn, activeFee],
-  );
+  const filtered = useMemo(() => {
+    const rows = showDiscountColumn ? inStage.filter((l) => activeFee.paid(l) > 0) : inStage;
+    // In the order the day is actually worked: 10:45 before 2:30 before 5:00. The server
+    // sends these newest-updated first, which puts whoever was last edited at the top —
+    // a useful order for a change log and the wrong one for a list somebody works down.
+    //
+    // Date first, so a range still reads day by day rather than collapsing every 9am
+    // together. Times are 24-hour "HH:MM" and zero-padded, so they compare as text.
+    //
+    // Anyone without an appointment goes last rather than sorting as an empty string,
+    // which would put the unbooked at the head of the running order. A row booked on the
+    // day with no time set stands in at the end of that day for the same reason: empty
+    // sorts before "09:00", so it would otherwise open the list.
+    const at = (l) => `${l.appointment_date}T${l.appointment_time || "99:99"}`;
+    return [...rows].sort((a, b) => {
+      if (!a.appointment_date) return b.appointment_date ? 1 : 0;
+      if (!b.appointment_date) return -1;
+      return at(a).localeCompare(at(b));
+    });
+  }, [inStage, showDiscountColumn, activeFee]);
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
