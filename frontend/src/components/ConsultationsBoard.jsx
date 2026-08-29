@@ -911,7 +911,7 @@ const consultationDiscount = (l) => {
 // amount so nothing is squeezed to make room. Both sets are written out literally because
 // Tailwind reads the source for class names and would compile nothing from a template.
 const COLS_WITH_DISCOUNT = {
-  sno: "w-[4%]", patient: "w-[9%]", pno: "w-[7%]", phone: "w-[9%]", email: "w-[9%]",
+  sno: "w-[4%]", patient: "w-[16%]", pno: "w-[6%]", phone: "w-[8%]", email: "w-[4%]",
   stage: "w-[10%]", expert: "w-[8%]", collected: "w-[8%]", discount: "w-[7%]",
   appt: "w-[8%]", updated: "w-[7%]", total: "w-[8%]", action: "w-[6%]",
 };
@@ -964,8 +964,15 @@ const rupees = (n) => `Rs.${Math.round(Number(n) || 0).toLocaleString("en-IN")}`
 // what they came to in total. Summed off FEE_TABS so a fee added there is counted here
 // without this needing to know about it.
 const totalPaid = (l) => FEE_TABS.reduce((sum, t) => sum + t.paid(l), 0);
+// Patient carries two lines now — the name, and what the consultation decided under it —
+// so it is the widest column rather than one of the middle ones. The room comes from Email,
+// which was thirteen per cent showing "dinezramyasri.008@g..." on every row: an address cut
+// off before the domain identifies nobody, and the whole of it is on the row's own popup.
+//
+// These must still total 100 under table-fixed, and the two sets are written out literally
+// because Tailwind reads the source for class names and compiles nothing from a template.
 const COLS_PLAIN = {
-  sno: "w-[4%]", patient: "w-[13%]", pno: "w-[10%]", phone: "w-[12%]", email: "w-[13%]",
+  sno: "w-[4%]", patient: "w-[22%]", pno: "w-[9%]", phone: "w-[11%]", email: "w-[6%]",
   stage: "w-[13%]", expert: "w-[11%]", discount: "", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
 };
 
