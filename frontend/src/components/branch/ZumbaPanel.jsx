@@ -1158,8 +1158,9 @@ export const ZumbaPanel = ({ branchId }) => {
   // the same list as `masters` above: that one is names typed onto referrals, and a
   // referral name with no account behind it cannot be given a class.
   const [zumbaMasters, setZumbaMasters] = useState([]);
-  // The Zumba shelf as Super Admin priced it — 1, 3 and 6 month memberships. Read rather
-  // than hardcoded, so a change of price on the shelf is the change of price here.
+  // The Zumba shelf as Super Admin priced it — a membership per term, monthly through
+  // yearly. Read rather than hardcoded, so a change of price on the shelf, or a term
+  // priced away from the standard amount, is the change of price here.
   const [packages, setPackages] = useState([]);
   // Which branch these rows belong to, as the server resolved it. Printed rather than
   // assumed: an empty list is either "nobody has registered" or "you are looking at the

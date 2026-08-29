@@ -29,9 +29,9 @@ export const TABS = [
   // Moved in from its own top-level nav tab — the treatment catalogue belongs beside the
   // other things Super Admin catalogues here, not among Dashboard/HR/Branches.
   { key: "treatment", label: "Treatments", icon: ClipboardList },
-  // Beside Treatments, and after it, because the two are read together: a treatment is
-  // what is wrong with the patient, a physio type is the service sold to them.
-  { key: "physio_type", label: "Service", icon: Activity },
+  // Beside Treatments, and after it, because the two are read together: a Treatment is
+  // what is wrong with the patient, a Physiotherapy Treatment is what is sold to them.
+  { key: "physio_type", label: "Physiotherapy Treatment", icon: Activity },
   { key: "history", label: "History", icon: History },
 ];
 
@@ -394,10 +394,14 @@ const fixedSessionsFor = (category) => FIXED_SESSIONS_BY_CATEGORY[category] ?? F
  */
 const ZUMBA_CLASSES_PER_MONTH = 12;
 const ZUMBA_CLASS_DAYS = "Mon · Wed · Fri";
+// The price on each term is where the box opens, not what the term must cost: Super Admin
+// prices the shelf and a branch sells what was saved, so a membership renegotiated at the
+// counter is typed over here rather than worked around by inventing another package.
 const ZUMBA_PLANS = [
   { months: 1, label: "1 Month", price: 3000 },
   { months: 3, label: "3 Months", price: 9000 },
   { months: 6, label: "6 Months", price: 15000 },
+  { months: 12, label: "1 Year", price: 30000 },
 ];
 const zumbaSessionsFor = (months) => months * ZUMBA_CLASSES_PER_MONTH;
 const formatRupees = (amount) => {
@@ -472,14 +476,27 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   // amount, not a per-session rate. What is stored is still the rate (see submit) — this is
   // only about which figure the person filling the form is asked for.
   const isCourseTotal = COURSE_TOTAL_CATEGORIES.has(category);
-  // Zumba has one dial: how many months. The membership is sold at a standard price, so
-  // the amount is a property of the plan rather than something typed beside it — as a free
-  // field it drifted, and a 1 Month membership could be saved at 9,600.
+  // Zumba has two dials: how many months, and what those months cost. The term sets the
+  // class count and seeds the amount from the shelf's own price list; the amount is then
+  // editable, because the standard price is what a membership usually sells for rather
+  // than the only figure it can ever be sold at.
   const [planMonths, setPlanMonths] = useState(
     () => zumbaMonthsFor(item?.sessions_offline || item?.sessions_online || 0) || ZUMBA_PLANS[0].months,
   );
   const zumbaPlan = ZUMBA_PLANS.find((p) => p.months === planMonths) || ZUMBA_PLANS[0];
-  const planPrice = zumbaPlan.price;
+  // One amount per term, so switching between them to compare does not overwrite a figure
+  // typed against another, and switching back returns to what was entered.
+  const [planPrices, setPlanPrices] = useState(() => {
+    const seeded = Object.fromEntries(ZUMBA_PLANS.map((p) => [p.months, p.price]));
+    // Editing: the row holds a per-class rate, so the figure actually typed is that rate
+    // across the whole plan. Recovered here so the box opens on the amount that was agreed
+    // rather than snapping back to the shelf default it was moved off.
+    const savedMonths = zumbaMonthsFor(item?.sessions_offline || item?.sessions_online || 0);
+    if (savedMonths) seeded[savedMonths] = packageTotal(item, "offline") || packageTotal(item, "online");
+    return seeded;
+  });
+  const planPrice = planPrices[planMonths] ?? zumbaPlan.price;
+  const setPlanPrice = (value) => setPlanPrices((prev) => ({ ...prev, [planMonths]: value }));
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
   // On a course-priced shelf these hold the course total, recovered from the stored rate
@@ -542,6 +559,9 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
     // nothing on a course shelf, and on a per-session shelf it sells a course nobody can
     // attend. Both are worse than being asked for a number.
     if (!isZumba && !(sessions > 0)) { toast.error("Sessions must be at least 1"); return; }
+    // The membership amount is the whole of what gets charged, so an empty or zero box
+    // here sells a term for nothing rather than at a discount.
+    if (isZumba && !(Number(planPrice) > 0)) { toast.error("Plan amount must be more than 0"); return; }
     setSaving(true);
     try {
       let image_url = item?.image_url || null;
@@ -654,7 +674,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                   className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${planMonths === plan.months ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
                   data-testid={`zumba-plan-${plan.months}m`}
                 >
-                  {plan.label}<span className="ml-1.5 text-xs font-normal opacity-70">₹{plan.price}</span>
+                  {plan.label}<span className="ml-1.5 text-xs font-normal opacity-70">₹{formatRupees(planPrices[plan.months] ?? plan.price)}</span>
                 </button>
               ))}
             </div>
@@ -664,9 +684,23 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                 <div className="flex items-center justify-between"><span>Days</span><span className="font-bold">{ZUMBA_CLASS_DAYS}</span></div>
                 <div className="flex items-center justify-between"><span>Classes a month</span><span className="font-bold">{ZUMBA_CLASSES_PER_MONTH}</span></div>
                 <div className="flex items-center justify-between"><span>Total classes</span><span className="font-bold" data-testid="zumba-plan-sessions">{sessions}</span></div>
-                {/* Stated, not typed. The price belongs to the plan — picking the term is
-                    what sets it, and an editable box here is what let one drift. */}
-                <div className="flex items-center justify-between"><span>Plan amount</span><span className="font-bold" data-testid="zumba-plan-price">₹{planPrice}</span></div>
+                {/* Typed, seeded from the term. Picking a term fills this in with what the
+                    shelf normally charges for it; overwriting it prices this membership at
+                    what was agreed, and the per class rate below follows the box. */}
+                <div className="flex items-center justify-between gap-2">
+                  <span>Plan amount</span>
+                  <div className="relative w-28">
+                    <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-violet-600">₹</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={planPrice}
+                      onChange={(e) => setPlanPrice(e.target.value)}
+                      className="h-7 border-violet-200 bg-white pl-5 text-right text-xs font-bold text-violet-900"
+                      data-testid="zumba-plan-price"
+                    />
+                  </div>
+                </div>
               </div>
               <div className="mt-2 flex items-center justify-between border-t border-violet-200 pt-1.5">
                 <span className="text-[11px] font-semibold text-violet-700">Per Class</span>
