@@ -3138,7 +3138,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             <div className="flex flex-wrap gap-1.5 border-b border-slate-100 pb-3" data-testid="cons-detail-tabs">
               {[
                 { key: "overview", label: "Overview" },
-                { key: "followup", label: "Follow up" },
+                // Not for the Consultant, for the same reason the Timeline is not: chasing
+                // a patient who did not pick up is the branch's errand, and scheduling the
+                // next call is theirs to schedule. A Consultant is here to write up the
+                // consultation in front of them.
+                ...(isConsultant ? [] : [{ key: "followup", label: "Follow up" }]),
                 { key: "documents", label: "Documents" },
                 // The four uploads a case sheet closes on, and the only screen that can
                 // verify them: the physio delivering the course gathers the clips, and
