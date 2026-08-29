@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw, ClipboardList, HeartPulse, Music2, GraduationCap } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw, ClipboardList, HeartPulse, Music2, GraduationCap, Home } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,14 +13,15 @@ import { PhysioTypesBoard } from "@/components/PhysioTypesBoard";
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
   { key: "sessions", label: "Sessions", icon: CalendarRange },
-  // Four more programmes sold the same way a session package is — same create form, same
+  // Five more programmes sold the same way a session package is — same create form, same
   // per-session pricing — each with its own catalogue rather than a sub-tab of Sessions,
-  // because that is the shelf a branch browses them from. Zumba is offline only; the
-  // other three sell both ways (see MODE_TAB_KEYS).
+  // because that is the shelf a branch browses them from. Zumba and Home Visit are offline
+  // only; the other three sell both ways (see MODE_TAB_KEYS).
   { key: "rehab", label: "Rehab", icon: HeartPulse },
   { key: "zumba", label: "Zumba Class", icon: Music2 },
   { key: "fitness", label: "Fitness", icon: Dumbbell },
   { key: "workshop", label: "Workshop", icon: GraduationCap },
+  { key: "home_visit", label: "Home Visit", icon: Home },
   { key: "diet", label: "Diet Package", icon: Salad },
   { key: "tablet", label: "Tablet", icon: Pill },
   { key: "supplementary", label: "Supplementary", icon: FlaskConical },
@@ -452,14 +453,14 @@ const packageTotal = (item, mode) => {
 // prices two different ways.
 const COURSE_TOTAL_CATEGORIES = new Set(["rehab", "fitness"]);
 
-// Shelves with no online price to ask for. Group and Personal Training happen in the gym:
-// there is no version of them taken over video, so a second box asking what they cost
-// online was a question with no answer, and a figure typed into it went to the store as a
-// price somebody could be charged.
+// Shelves with no online price to ask for. Group and Personal Training happen in the gym
+// and a home visit happens at the customer's house: there is no version of either taken
+// over video, so a second box asking what they cost online was a question with no answer,
+// and a figure typed into it went to the store as a price somebody could be charged.
 //
 // The stored row still carries both prices -- the booking path picks one by mode, and a
 // zero on the other reads as free -- so what is entered once is written to both.
-const OFFLINE_ONLY_CATEGORIES = new Set(["fitness"]);
+const OFFLINE_ONLY_CATEGORIES = new Set(["fitness", "home_visit"]);
 const COURSE_TOTAL_DEFAULTS = { rehab: { online: 14000, offline: 18000 } };
 
 // Only a whole number of months is a plan. Anything else is a Zumba row saved before this
@@ -1451,8 +1452,8 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 // Which tabs have a panel. Everything else falls through to the placeholder; Vending
 // Machine is the only one left, and it has no backend at all yet.
 /**
- * The tabs that are a session package under another name: Rehab, Zumba Class, Fitness and
- * Workshop.
+ * The tabs that are a session package under another name: Rehab, Zumba Class, Fitness,
+ * Workshop and Home Visit.
  *
  * Each is its own catalogue (`category`) sold through the session form, so Create on any of
  * them opens exactly what Sessions opens. `noun` only changes the wording on the empty
@@ -1469,9 +1470,14 @@ const SESSION_LIKE_TABS = {
   // OFFLINE_ONLY_CATEGORIES names it, so a workshop takes the plain shape: the standard
   // session count, priced per session, with both an online and an offline price asked for.
   workshop: { category: "workshop", noun: "workshop" },
+  // Named in OFFLINE_ONLY_CATEGORIES and nothing else, so a home visit is priced per
+  // visit like the standard shelf but asked for once: there is no version of somebody
+  // coming to your house that happens over video, and a second box for it would take a
+  // figure the store could charge for a service that cannot be delivered.
+  home_visit: { category: "home_visit", noun: "home visit" },
 };
 
-const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "diet", "history", "treatment", "physio_type", ...INVENTORY_TABS]);
+const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "home_visit", "diet", "history", "treatment", "physio_type", ...INVENTORY_TABS]);
 
 // TABS above stays a flat, unbroken export — BranchStoreBoard.jsx imports and filters it
 // for its own layout too, and reshaping it here would reshape that board's as well.
@@ -1492,8 +1498,8 @@ const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitn
 export const SUPER_ADMIN_CATALOGUE_TABS = new Set(["physio_type"]);
 
 export const MODE_TAB_KEYS = {
-  all: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment", "physio_type"]),
-  offline: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "diet", "tablet", "supplementary", "equipment", "treatment", "physio_type"]),
+  all: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment", "physio_type"]),
+  offline: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "treatment", "physio_type"]),
   online: new Set(["consultations", "sessions", "rehab", "fitness", "workshop", "diet", "treatment", "physio_type"]),
 };
 
@@ -1739,8 +1745,8 @@ export const PackagesBoard = () => {
       {view === "catalog" && tab === "consultations" && <ConsultationsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
       {view === "catalog" && tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
       {/* The same panel Sessions runs, told which catalogue it is looking at. Its Create
-          opens the session package form, which is what was asked for — one form, three
-          more shelves, rather than three near-copies that drift apart. */}
+          opens the session package form, which is what was asked for — one form behind
+          every one of these shelves, rather than a near-copy each that drifts apart. */}
       {view === "catalog" && SESSION_LIKE_TABS[tab] && (
         <SessionsPhysiotherapyPanel
           key={tab}

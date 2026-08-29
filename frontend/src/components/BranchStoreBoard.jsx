@@ -222,7 +222,8 @@ export const BranchDietPanel = ({ reloadToken, modeFilter = "all" }) => (
 );
 
 /**
- * Rehab, Zumba Class, Fitness and Workshop — Super Admin's four session-shaped shelves, read-only
+ * Rehab, Zumba Class, Fitness, Workshop and Home Visit — Super Admin's five session-shaped
+ * shelves, read-only
  * here as every other catalogue is. Same panel, told which category to list; without these
  * the tabs still appear (they come off the shared TABS list) and land on the "coming soon"
  * placeholder, which is not what a branch should see for a shelf that has stock on it.
@@ -232,6 +233,7 @@ const SESSION_LIKE_TABS = {
   zumba: { category: "zumba", empty: "No Zumba classes available yet." },
   fitness: { category: "fitness", empty: "No fitness packages available yet." },
   workshop: { category: "workshop", empty: "No workshops available yet." },
+  home_visit: { category: "home_visit", empty: "No home visits available yet." },
 };
 
 // The three shelves that are stock: a catalogue, a count per branch, and the same add,
