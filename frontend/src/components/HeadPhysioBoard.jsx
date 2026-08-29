@@ -94,6 +94,14 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   // replaces the single day rather than narrowing it further: the board offers one scope
   // at a time, or the counts on the cards would describe a different set from the list.
   const [dateRange, setDateRange] = useState(null);
+  // The third scope: no date at all. The day strip answers "which day", the range answers
+  // "which days", and this answers "never mind the date" — which neither of the other two
+  // can express, since clearing the range only hands the board back to a single day.
+  //
+  // It replaces them rather than combining with them, the same way a range replaces the
+  // day. Two live scopes on one row invite the reader to read the counts as the overlap.
+  const [allTime, setAllTime] = useState(false);
+  const showAllTime = () => { setAllTime(true); setDateRange(null); };
   // Which of the three queues All is showing. Lives on the All card itself.
   const [allKind, setAllKind] = useState("all");
   // Reported up by each list so the cards can be labelled without fetching twice.
@@ -177,6 +185,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   // What All actually renders. Narrowed by the filter on the All card itself; the
   // count on that card stays the full total, because it is the card's own figure and
   // a number that moved when you filtered under it would be reporting the filter.
+  // What the empty All list is empty *of*. "Nothing on this day" under an all-time count
+  // of zero names a day the board was not looking at.
+  const emptyAllText = allTime ? "Nothing on record." : dateRange ? "Nothing in this range." : "Nothing on this day.";
+
   const visibleAllRows = useMemo(
     () => (allKind === "all" ? allRows : allRows.filter((r) => r.kind === allKind)),
     [allRows, allKind],
@@ -321,11 +333,25 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
             data-testid="hp-search-input"
           />
         </div>
+        {/* Beside the search rather than as a sixth preset inside the date filter. "Show
+            me everything" is a different question from "which dates", and a preset named
+            All Time inside a control called Date Filter is a contradiction filed where
+            nobody would look for it. */}
+        <button
+          type="button"
+          onClick={() => (allTime ? setAllTime(false) : showAllTime())}
+          aria-pressed={allTime}
+          title={allTime ? "Back to the day picked on the strip" : "Count every date, ignoring the day and the range"}
+          className={`h-9 shrink-0 rounded-md border px-3 text-sm font-semibold transition ${allTime ? "border-teal-500 bg-teal-500 text-white hover:bg-teal-600" : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:text-teal-700"}`}
+          data-testid="hp-all-time-btn"
+        >
+          All Time
+        </button>
         {/* Dimmed and inert while a range is set — two live scopes on one row invite the
             reader to combine them, and the board answers to one. */}
         <div
-          className={`shrink-0 lg:border-l lg:border-slate-100 lg:pl-4 ${dateRange ? "pointer-events-none opacity-40" : ""}`}
-          aria-disabled={dateRange ? "true" : undefined}
+          className={`shrink-0 lg:border-l lg:border-slate-100 lg:pl-4 ${dateRange || allTime ? "pointer-events-none opacity-40" : ""}`}
+          aria-disabled={dateRange || allTime ? "true" : undefined}
           data-testid="hp-header-day-filter"
         >
           <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
@@ -343,7 +369,11 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
         </button>
         {/* After Refresh, with its own presets and a custom range. Clearing it hands the
             board back to the week strip. */}
-        <div className="shrink-0" data-testid="hp-header-range-filter">
+        <div
+          className={`shrink-0 ${allTime ? "pointer-events-none opacity-40" : ""}`}
+          aria-disabled={allTime ? "true" : undefined}
+          data-testid="hp-header-range-filter"
+        >
           <DateFilterPopover value={dateRange} onChange={setDateRange} testid="hp-date-filter" centered />
         </div>
       </div>
@@ -362,9 +392,13 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                 : t.key === "review" ? reviewCount
                 // All is the two of them together, every stage, nothing narrowed.
                 : consultCount + reviewCount;
-              const sub = t.key === "consultations" ? (firstStage ? `in ${firstStage}` : "on this day")
-                : t.key === "review" ? "on this day"
-                : "everything on this day";
+              // The caption names the scope the figure was counted over, so it has to
+              // move with it — a count of every review ever raised sitting under the words
+              // "on this day" is the card reporting a day it did not count.
+              const when = allTime ? "all time" : dateRange ? "in this range" : "on this day";
+              const sub = t.key === "consultations" ? (firstStage ? `in ${firstStage}` : when)
+                : t.key === "review" ? when
+                : `everything ${when}`;
               // The wrapper keeps the phone's side-scrolling row of fixed-width cards; the
               // tile itself fills whatever it is given.
               return (
@@ -420,8 +454,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
             <ConsultationsBoard
               branchId={effectiveBranchId}
               viewerRole="head_physio"
-              externalDate={dateRange ? undefined : workDate}
-              externalDateFilter={dateRange || undefined}
+              externalDate={allTime ? null : (dateRange ? undefined : workDate)}
+              externalDateFilter={allTime ? undefined : (dateRange || undefined)}
               hideDateFilter
               externalSearch={search}
               mobileCards
@@ -440,8 +474,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
 
           <div className={workTab === "review" ? "" : "hidden"} data-testid="hp-work-review">
             <HeadPhysioReviewTab
-              selectedDate={dateRange ? null : workDate}
-              dateRange={dateRange}
+              selectedDate={allTime || dateRange ? null : workDate}
+              dateRange={allTime ? null : dateRange}
               compact={workTab === "all"}
               onCountChange={setReviewCount}
               onRowsChange={setReviewRows}
@@ -462,7 +496,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                   there rather than scrolling sideways past the ones that matter. */}
               <div className="space-y-2 sm:hidden">
                 {groupedAllRows.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Nothing on this day.</p>
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">{emptyAllText}</p>
                 ) : groupedAllRows.map((g, i) => {
                   const st = groupStage(g);
                   const who = collapse(g.entries, (e) => e.who);
@@ -521,7 +555,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {groupedAllRows.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">{emptyAllText}</td></tr>
                     ) : groupedAllRows.map((g, i) => {
                       const st = groupStage(g);
                       const many = g.entries.length > 1;
