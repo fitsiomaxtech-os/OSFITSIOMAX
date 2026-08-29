@@ -857,6 +857,32 @@ const PanelCard = ({ children, testid, footer }) => (
   </div>
 );
 
+/**
+ * The colour an appointment wears in the list.
+ *
+ * Meant rather than decorative: what someone scanning this column wants is which of these
+ * is today, and the three read apart at a glance instead of needing the date parsed. Today
+ * is amber because it is the one being worked; still to come is sky; already gone is grey,
+ * because a date in the past is context rather than a thing to do.
+ *
+ * Local midnight, not UTC — toISOString would call an early-morning appointment yesterday's
+ * for the five and a half hours the clinic is ahead of it.
+ */
+const APPOINTMENT_TONE = {
+  today: "border-amber-200 bg-amber-50 text-amber-700",
+  upcoming: "border-sky-200 bg-sky-50 text-sky-700",
+  past: "border-slate-200 bg-slate-50 text-slate-500",
+};
+
+const appointmentTone = (date) => {
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const on = String(date || "").slice(0, 10);
+  if (!on) return APPOINTMENT_TONE.past;
+  if (on === today) return APPOINTMENT_TONE.today;
+  return on > today ? APPOINTMENT_TONE.upcoming : APPOINTMENT_TONE.past;
+};
+
 export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, toolbarSlot = null, onlineArm = false }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
@@ -3026,13 +3052,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         column happens to run out — so the dates stack in a straight
                         edge down the column instead of breaking at a different word
                         on every row. */}
-                    <td className="whitespace-nowrap px-3 py-3 align-middle text-xs text-slate-500">
+                    <td className="whitespace-nowrap px-3 py-3 align-middle text-xs">
                       {l.appointment_date ? (
-                        <>
-                          <span className="block">{l.appointment_date}</span>
-                          {l.appointment_time && <span className="block text-slate-400">{to12h(l.appointment_time)}</span>}
-                        </>
-                      ) : "—"}
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-semibold ${appointmentTone(l.appointment_date)}`}
+                          data-testid={`cons-appt-${l.id}`}
+                        >
+                          <Calendar className="h-3 w-3 shrink-0" />
+                          <span>
+                            {l.appointment_date}
+                            {/* On one line with the date rather than under it. The chip is
+                                the unit being read, and a two-line pill in a row of
+                                one-line cells drags the whole row taller. */}
+                            {l.appointment_time && <span className="ml-1 font-bold">{to12h(l.appointment_time)}</span>}
+                          </span>
+                        </span>
+                      ) : <span className="text-slate-400">—</span>}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 align-middle text-xs text-slate-400">{(l.updated_at || "").slice(0, 10) || "—"}</td>
                     {showDiscountColumn && (
