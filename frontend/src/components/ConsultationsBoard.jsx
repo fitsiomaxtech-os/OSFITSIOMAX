@@ -3055,17 +3055,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     <td className="whitespace-nowrap px-3 py-3 align-middle text-xs">
                       {l.appointment_date ? (
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-semibold ${appointmentTone(l.appointment_date)}`}
+                          className={`inline-flex max-w-full flex-col items-start rounded-md border px-2 py-1 font-semibold ${appointmentTone(l.appointment_date)}`}
                           data-testid={`cons-appt-${l.id}`}
                         >
-                          <Calendar className="h-3 w-3 shrink-0" />
-                          <span>
+                          {/* Stacked, because this column is 8% of a fixed-layout table
+                              and the two on one line ran the chip out over Updated beside
+                              it. The width is what the stacked pair was sized for. */}
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3 shrink-0" />
                             {l.appointment_date}
-                            {/* On one line with the date rather than under it. The chip is
-                                the unit being read, and a two-line pill in a row of
-                                one-line cells drags the whole row taller. */}
-                            {l.appointment_time && <span className="ml-1 font-bold">{to12h(l.appointment_time)}</span>}
                           </span>
+                          {l.appointment_time && (
+                            <span className="pl-4 text-[11px] font-bold opacity-90">{to12h(l.appointment_time)}</span>
+                          )}
                         </span>
                       ) : <span className="text-slate-400">—</span>}
                     </td>
