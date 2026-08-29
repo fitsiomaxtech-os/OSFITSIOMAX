@@ -6,13 +6,13 @@ import { toast } from "@/components/ui/sonner";
 import { getPhysioTypes, createPhysioType, updatePhysioType, deletePhysioType } from "@/lib/api";
 
 /**
- * Super Admin > Services and Products > Type of Physios.
+ * Super Admin > Services and Products > Physiotherapy Treatment.
  *
- * The physiotherapy services the clinic sells, by name. Built alongside Treatments and
- * kept apart from it because the two answer different questions: a treatment is what is
- * wrong with the patient — Frozen Shoulder, Knee Pain — and a service is what is being
- * sold to them. Folding them into one list would mean picking a diagnosis where a service
- * is wanted.
+ * The physiotherapy treatments the clinic sells, by name. Built alongside Treatments and
+ * kept apart from it because the two answer different questions: a Treatment is what is
+ * wrong with the patient — Frozen Shoulder, Knee Pain — and a Physiotherapy Treatment is
+ * what is being sold to them. Folding them into one list would mean picking a diagnosis
+ * where a thing to sell is wanted.
  *
  * A name and nothing else, for the same reason Treatments is: the price, the session count
  * and the duration belong to a package in FITSIO STORE, and repeating them here would be a
@@ -39,7 +39,7 @@ export const PhysioTypesBoard = () => {
     try {
       setRows(await getPhysioTypes());
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Failed to load services");
+      toast.error(e?.response?.data?.detail || "Failed to load physiotherapy treatments");
     }
     setLoading(false);
   }, []);
@@ -53,7 +53,7 @@ export const PhysioTypesBoard = () => {
 
   const saveEdit = async () => {
     const name = (editing.name || "").trim();
-    if (!name) { toast.error("Service name is required"); return; }
+    if (!name) { toast.error("Physiotherapy Treatment name is required"); return; }
     setSavingEdit(true);
     try {
       await updatePhysioType(editing.id, { name });
@@ -87,7 +87,7 @@ export const PhysioTypesBoard = () => {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search services..."
+            placeholder="Search physiotherapy treatments..."
             className="h-10 pl-8"
             data-testid="physio-type-search"
           />
@@ -107,32 +107,32 @@ export const PhysioTypesBoard = () => {
         <Button
           onClick={() => setShowCreate(true)}
           className="h-10 w-10 shrink-0 bg-sky-600 p-0 text-white hover:bg-sky-700 sm:w-auto sm:px-4"
-          title="Add Service"
-          aria-label="Add Service"
+          title="Add Physiotherapy Treatment"
+          aria-label="Add Physiotherapy Treatment"
           data-testid="physio-type-create-btn"
         >
           <Plus className="h-4 w-4 sm:mr-1" />
-          <span className="hidden sm:inline">Add Service</span>
+          <span className="hidden sm:inline">Add Physiotherapy Treatment</span>
         </Button>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Type of Physios <span className="text-slate-400">({rows.length})</span>
+            Physiotherapy Treatment <span className="text-slate-400">({rows.length})</span>
           </p>
         </div>
 
         {loading && rows.length === 0 ? (
-          <p className="px-4 py-12 text-center text-sm text-slate-400" data-testid="physio-type-loading">Loading services...</p>
+          <p className="px-4 py-12 text-center text-sm text-slate-400" data-testid="physio-type-loading">Loading physiotherapy treatments...</p>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center" data-testid="physio-type-empty">
             <Activity className="h-9 w-9 text-slate-300" />
             <p className="text-sm text-slate-500">
-              {rows.length === 0 ? "No services yet." : `Nothing matches "${search}".`}
+              {rows.length === 0 ? "No physiotherapy treatments yet." : `Nothing matches "${search}".`}
             </p>
             {rows.length === 0 && (
-              <p className="text-xs text-slate-400">Click <span className="font-semibold">Add Service</span> to add the first one.</p>
+              <p className="text-xs text-slate-400">Click <span className="font-semibold">Add Physiotherapy Treatment</span> to add the first one.</p>
             )}
           </div>
         ) : (
@@ -177,7 +177,7 @@ export const PhysioTypesBoard = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="physio-type-edit-dialog">
           <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
-              <h3 className="text-base font-semibold text-slate-900">Rename service</h3>
+              <h3 className="text-base font-semibold text-slate-900">Rename physiotherapy treatment</h3>
               <button onClick={() => setEditing(null)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close" data-testid="physio-type-edit-close">
                 <X className="h-4 w-4" />
               </button>
@@ -187,13 +187,13 @@ export const PhysioTypesBoard = () => {
               value={editing.name}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
               onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }}
-              placeholder="Service name"
+              placeholder="Physiotherapy Treatment name"
               data-testid="physio-type-edit-input"
             />
             {/* Says what a rename reaches, because it reaches further than this list: an
                 expert already offered under the old name is moved to the new one. */}
             <p className="text-[11px] text-slate-400">
-              Every expert offered under this service is renamed with it.
+              Every expert offered under this physiotherapy treatment is renamed with it.
             </p>
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => setEditing(null)} data-testid="physio-type-edit-cancel">Cancel</Button>
@@ -213,9 +213,9 @@ export const PhysioTypesBoard = () => {
                 <Trash2 className="h-5 w-5 text-rose-600" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-base font-semibold text-slate-900">Delete service?</h3>
+                <h3 className="text-base font-semibold text-slate-900">Delete physiotherapy treatment?</h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  <b className="text-slate-700">{confirmDelete.name}</b> is removed from the Service list. An expert is still offered under it, this is refused rather than leaving them stranded.
+                  <b className="text-slate-700">{confirmDelete.name}</b> is removed from the Physiotherapy Treatment list. An expert is still offered under it, this is refused rather than leaving them stranded.
                 </p>
               </div>
             </div>
@@ -233,7 +233,7 @@ export const PhysioTypesBoard = () => {
 };
 
 /**
- * Type a service and Save.
+ * Type a physiotherapy treatment and Save.
  *
  * Stays open after saving and clears the field, because filling a list is a batch job —
  * closing after each would mean reopening it a dozen times to type a dozen names. The
@@ -252,7 +252,7 @@ const AddServiceDialog = ({ existing = [], onClose, onSaved }) => {
   );
 
   const submit = async () => {
-    if (!trimmed) { toast.error("Enter a service name"); return; }
+    if (!trimmed) { toast.error("Enter a physiotherapy treatment name"); return; }
     if (duplicate) return;
     setSaving(true);
     try {
@@ -275,15 +275,15 @@ const AddServiceDialog = ({ existing = [], onClose, onSaved }) => {
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-slate-200 px-5 py-3">
           <div>
-            <h3 className="text-base font-semibold text-slate-900">Add Service</h3>
-            <p className="text-xs text-slate-500">Add a physio service. Keep adding — this stays open.</p>
+            <h3 className="text-base font-semibold text-slate-900">Add Physiotherapy Treatment</h3>
+            <p className="text-xs text-slate-500">Add a physiotherapy treatment. Keep adding — this stays open.</p>
           </div>
           <button onClick={close} className="text-slate-400 hover:text-slate-600" data-testid="physio-type-create-close"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="space-y-3 p-5">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-700">Service Name *</label>
+            <label className="mb-1 block text-xs font-medium text-slate-700">Physiotherapy Treatment Name *</label>
             <Input
               value={name}
               autoFocus
