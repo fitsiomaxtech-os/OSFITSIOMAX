@@ -2012,6 +2012,16 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
   const avatarFirstChar = (lead.name?.trim()?.charAt(0) || "?").toUpperCase();
 
+  // The follow-up the lead is actually on, for the Overview preview below. Newest first
+  // and skipping the rescheduled ones, which is the same rule the Follow-Up tab draws
+  // with — a booking that was moved is history, not the appointment somebody is waiting
+  // on, and previewing it would name a date nobody is going to call on.
+  const followUps = lead.follow_ups || [];
+  const activeFollowUp = followUps.slice().reverse().find((f) => f.status !== "rescheduled") || null;
+  // Matched loosely rather than against a literal "Follow Up": these names are editable in
+  // Pipeline Stage Management, and a rename there should not silently empty this card.
+  const atFollowUpStage = /follow\s*-?\s*up/i.test(headerStageName || "");
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
       {/* A floating card on every size, not a full-bleed sheet on a phone. Edge to edge
@@ -2078,6 +2088,63 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <div className="flex items-center justify-between text-sm"><span className="text-xs font-medium text-slate-500">Email</span><span className="font-medium text-slate-800">{lead.email || "—"}</span></div>
                 </div>
               </div>
+
+              {/* Between Contact and the pipeline, because on a lead sitting at Follow Up
+                  the next call is the thing the popup is being opened to check. The
+                  Follow-Up tab still owns scheduling and the full history; this is the one
+                  line of it worth reading without changing tabs, and it says so with a link
+                  rather than repeating the form. */}
+              {(followUps.length > 0 || atFollowUpStage) && (
+                <div className="overflow-hidden rounded-xl border border-amber-100 bg-white shadow-sm" data-testid="branch-lead-followup-preview">
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-700">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700"><Bell className="h-4 w-4" /></span>
+                      Follow-Up
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("follow-up")}
+                      className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-50"
+                      data-testid="branch-lead-followup-preview-open"
+                    >
+                      {activeFollowUp ? "Manage" : "Schedule"}
+                    </button>
+                  </div>
+                  {activeFollowUp ? (() => {
+                    const dt = new Date(`${activeFollowUp.date}T${activeFollowUp.time}:00`);
+                    const isUpcoming = dt.getTime() > Date.now();
+                    // Everything before the one that stands. Counted rather than listed:
+                    // the tab is where a history belongs, and a preview that grows with it
+                    // stops being a preview.
+                    const earlier = followUps.length - 1;
+                    return (
+                      <div className="space-y-2 px-4 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-800" data-testid="branch-lead-followup-preview-when">
+                            {dt.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} · {activeFollowUp.time}
+                          </p>
+                          {/* Overdue is the state worth colouring: an upcoming call needs
+                              no action today, a missed one does. */}
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold text-white ${isUpcoming ? "bg-emerald-500" : "bg-rose-500"}`}>
+                            {isUpcoming ? "UPCOMING" : "OVERDUE"}
+                          </span>
+                        </div>
+                        {activeFollowUp.remarks && (
+                          <div className="rounded-md bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700 ring-1 ring-slate-100">{activeFollowUp.remarks}</div>
+                        )}
+                        <p className="text-[11px] text-slate-400">
+                          Set by {activeFollowUp.created_by || "—"}
+                          {earlier > 0 && ` · ${earlier} earlier ${earlier === 1 ? "follow-up" : "follow-ups"}`}
+                        </p>
+                      </div>
+                    );
+                  })() : (
+                    <p className="px-4 py-3 text-sm text-slate-400" data-testid="branch-lead-followup-preview-empty">
+                      No follow-up scheduled yet.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* The booked slot leads, because on a lead sitting at Appointment that is
                   the thing somebody opened this popup to read. It used to be missing
