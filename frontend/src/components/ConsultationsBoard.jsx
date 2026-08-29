@@ -1025,7 +1025,7 @@ const COLS_WITH_DISCOUNT = {
 const FEE_TABS = [
   {
     key: "consultation",
-    label: "Consultation",
+    label: "Consultant",
     tone: "#0284c7",
     paid: (l) => Number(l.package_paid) || 0,
     item: (l) => l.package_name || l.consultation_item_name || "",
@@ -1033,11 +1033,19 @@ const FEE_TABS = [
   },
   {
     key: "treatment",
-    label: "Treatment",
+    label: "Physio",
     tone: "#059669",
     paid: (l) => Number(l.treatment_fee_paid) || 0,
     item: (l) => l.session_package_name || "",
     mode: (l) => l.treatment_fee_payment_mode || "",
+  },
+  {
+    key: "rehab",
+    label: "Rehab",
+    tone: "#0891b2",
+    paid: (l) => Number(l.rehab_fee_paid) || 0,
+    item: (l) => l.rehab_package_name || "",
+    mode: (l) => l.rehab_fee_payment_mode || "",
   },
   {
     key: "diet",
@@ -1048,6 +1056,12 @@ const FEE_TABS = [
     mode: (l) => l.diet_fee_payment_mode || "",
   },
 ];
+
+// Deliberately not here: Fitness. A gym membership is a `fitness_registrations` row with
+// its own name and phone and no lead_id on it at all — a fitness member is not a patient
+// on this board, so there is nothing on these rows to filter by and a Fitness option would
+// report zero for everyone forever. Those takings are counted in Finance, which reads that
+// collection directly.
 
 const rupees = (n) => `Rs.${Math.round(Number(n) || 0).toLocaleString("en-IN")}`;
 
@@ -1644,6 +1658,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // the fee that puts a patient in this stage, so it is the one that answers "everyone".
   const [feeTab, setFeeTab] = useState("consultation");
   const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
+
+  // How many patients are behind each fee, counted off the stage's own rows. On pills this
+  // was optional decoration; in a dropdown it is the only way to see that Rehab holds eight
+  // and Diet five without opening each in turn.
+  const feeCounts = useMemo(() => {
+    if (!showDiscountColumn) return {};
+    const out = {};
+    for (const t of FEE_TABS) out[t.key] = inStage.filter((l) => t.paid(l) > 0).length;
+    return out;
+  }, [inStage, showDiscountColumn]);
   // Everyone who paid this tab's own fee. Outside Fee Collected the tabs do not exist,
   // so the stage's rows pass through whole.
   const filtered = useMemo(() => {
@@ -3314,23 +3338,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           ? "flex shrink-0 items-center gap-1.5"
           : "flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-1"}
           data-testid={compact ? "cons-fee-tabs-toolbar" : "cons-fee-tabs"}>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-          {FEE_TABS.map((t) => {
-            const on = t.key === activeFee.key;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setFeeTab(t.key)}
-                className={`flex-1 rounded-md px-3 py-2 text-left transition sm:flex-none ${on ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
-                style={on ? { background: t.tone } : undefined}
-                data-testid={`cons-fee-tab-${t.key}`}
-              >
-                <span className="block text-xs font-semibold">{t.label}</span>
-              </button>
-            );
-          })}
-          </div>
+        {/* One dropdown rather than a pill each. At three they fitted the toolbar; Rehab
+            made four and Fitness would have made five, and five pills push the search box
+            off a laptop before they push it off a phone. The name of the desk is the whole
+            label, and every option carries its own count so the size of each is readable
+            without opening it. */}
+        <label className="flex min-w-0 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white pl-2.5 pr-1" data-testid="cons-fee-picker">
+          <IndianRupee className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Fee Collected
+          </span>
+          <select
+            value={activeFee.key}
+            onChange={(e) => setFeeTab(e.target.value)}
+            aria-label="Which fee to show"
+            className="h-9 min-w-0 max-w-[15rem] appearance-none rounded-md border-0 bg-transparent pl-1 pr-2 text-xs font-semibold outline-none"
+            style={{ color: activeFee.tone }}
+            data-testid="cons-fee-select"
+          >
+            {FEE_TABS.map((t) => (
+              <option key={t.key} value={t.key} className="text-slate-800">
+                {t.label} Fee Collected ({feeCounts[t.key] ?? 0})
+              </option>
+            ))}
+          </select>
+          </label>
 
         </div>
   );
