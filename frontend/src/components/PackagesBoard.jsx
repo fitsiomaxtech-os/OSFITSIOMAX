@@ -931,6 +931,13 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
   // heading for a thing that is not sold, which reads as two prices to choose between.
   const offlineOnly = OFFLINE_ONLY_CATEGORIES.has(item.category);
   const showOnline = mode !== "offline" && !offlineOnly;
+  // The one box such a shelf has is the offline one, so the Online filter has to keep it.
+  // Hiding it there left both boxes suppressed at once and the card printed a package with
+  // no price on it at all — a figure that exists, is charged, and had nowhere to appear.
+  //
+  // It says "At the gym" rather than "Offline Mode", which is the same answer the Online
+  // filter needs: this is sold in the room, and here is what it costs.
+  const showOffline = mode !== "online" || offlineOnly;
   return (
   <div className={`grid gap-2 ${mode === "all" && !offlineOnly ? "grid-cols-2" : "grid-cols-1"}`} data-testid={testid}>
     {showOnline && (
@@ -946,7 +953,7 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
         </div>
       </div>
     )}
-    {mode !== "online" && (
+    {showOffline && (
       <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800">
           <MapPin className="h-3.5 w-3.5" />{offlineOnly ? "At the gym" : "Offline Mode"}
