@@ -28,9 +28,17 @@ jobs:
       # `npm install` rather than `npm ci`: package-lock.json is not tracked in
       # this repo, and `ci` refuses to run without one. If the lockfile is ever
       # committed, switch this to `npm ci` -- it is faster and it pins.
+      #
+      # --legacy-peer-deps because this project does not install without it. The
+      # tree declares date-fns ^4.1.0 while react-day-picker 8.10.1 peer-requires
+      # date-fns ^2.28.0 || ^3.0.0, so npm 7+ refuses with ERESOLVE. The two have
+      # been coexisting in every working install here -- 4.4.0 alongside 8.10.1 --
+      # so this flag describes what the project has always done rather than
+      # loosening anything. The real fix is to reconcile those two versions; until
+      # someone does, dropping this flag breaks every run.
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --legacy-peer-deps
 
       # CI is forced false because create-react-app promotes warnings to errors
       # when it is set, and this tree carries pre-existing exhaustive-deps
