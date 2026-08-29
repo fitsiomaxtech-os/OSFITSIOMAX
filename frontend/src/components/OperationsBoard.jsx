@@ -178,22 +178,35 @@ const OperationsConsultantTab = ({ branches, actingUser }) => {
     <div className="space-y-4" data-testid="ops-consultant-tab">
       <div className="flex flex-wrap items-center gap-3">
         <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-consultant-picker" />
+        {/* Named, because a bare box reading "Yamini" next to a row of branch pills does
+              not say what it is choosing — it could as easily be a filter on the branch
+              list. The label carries the accessible name too: this select had none at all,
+              so a screen reader announced it as an unlabelled combo box.
+
+              Inline rather than stacked above, so it lines up with the pills beside it
+              instead of making the row two lines tall. */}
         {selectedId && (
-          <div className="relative" title="The board below always shows this branch's whole Consultant queue, whichever name is picked here">
-            <select
-              value={selectedConsultantId}
-              onChange={(e) => setSelectedConsultantId(e.target.value)}
-              className="h-10 min-w-[220px] appearance-none rounded-md border border-slate-200 bg-white px-3 pr-8 text-sm"
-              data-testid="ops-consultant-person-select"
-            >
-              {consultants.length === 0 ? (
-                <option value="">No Consultant assigned to this branch</option>
-              ) : (
-                consultants.map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)
-              )}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          </div>
+          <label className="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white pl-3 pr-1" title="The board below always shows this branch's whole Consultant queue, whichever name is picked here">
+            <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Select Consultant
+            </span>
+            <span className="relative">
+              <select
+                value={selectedConsultantId}
+                onChange={(e) => setSelectedConsultantId(e.target.value)}
+                aria-label="Select Consultant"
+                className="h-8 min-w-[160px] appearance-none rounded-md border-0 bg-transparent pl-1 pr-7 text-sm font-medium text-slate-800 outline-none"
+                data-testid="ops-consultant-person-select"
+              >
+                {consultants.length === 0 ? (
+                  <option value="">No Consultant assigned to this branch</option>
+                ) : (
+                  consultants.map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)
+                )}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            </span>
+          </label>
         )}
       </div>
       {selectedId ? (
