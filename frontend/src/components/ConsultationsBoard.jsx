@@ -1112,6 +1112,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (leadRxCount === null) return;
     if (docsGateOpen) setProgrammeDetail("documents");
   }, [selectedLead?.id, leadRxCount, docsGateOpen]);
+
+  // And moves on by itself once the page is filed. The tab opened on Documents because
+  // the fee was waiting on the prescription; the moment the prescription is on file that
+  // reason is gone, and leaving the reader on a finished uploader makes them hunt for the
+  // step the panel just unlocked.
+  //
+  // Only on the change from none to one, reported by the uploader itself: a reload that
+  // finds the scan already there, or somebody opening Documents to read it after the
+  // money is in, is left where they are. `lastRxCount` is a ref rather than the state
+  // above because the reporter is a callback the uploader holds — it fires from a fetch,
+  // and the state it closed over can be a render behind.
+  const lastRxCount = useRef(null);
+  useEffect(() => { lastRxCount.current = null; }, [selectedLead?.id]);
+  const notePrescriptionCount = (count) => {
+    const had = lastRxCount.current;
+    lastRxCount.current = count;
+    setLeadRxCount(count);
+    // Nothing to move on to once the fee is in: the tab is a receipt then, not a step.
+    if (had === 0 && count > 0 && selectedLead?.package_paid == null) {
+      setProgrammeDetail((cur) => (cur === "documents" ? "own" : cur));
+    }
+  };
   const [assignTrack, setAssignTrack] = useState("treatment"); // "treatment" | "rehab"
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
@@ -4211,7 +4233,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       kind="prescription"
                       fixedLabel="Prescription"
                       canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
-                      onChanged={(count) => setLeadRxCount(count)}
+                      onChanged={notePrescriptionCount}
                     />
                   </div>
                   {/* Everything else the patient has on file — reports, scans, scheme
