@@ -734,14 +734,69 @@ def _installment_status(inst: dict, today: str) -> str:
     return "upcoming"
 
 
+# Every fee that can leave a balance behind, and the fields its schedule lives on.
+#
+# A balance is recorded identically for all five — one unpaid installment on that fee's
+# own payment_details — so one map is enough to read any of them, collect against any of
+# them, and report on any of them. Keyed by the name a caller passes; "treatment" is the
+# default everywhere, since it was the only fee that could carry a schedule when this
+# endpoint was written and every existing caller still sends nothing.
+FEE_SCHEDULES = {
+    "treatment": {
+        "details": "treatment_fee_payment_details", "paid": "treatment_fee_paid",
+        "mode": "treatment_fee_payment_mode", "package": "session_package_name",
+        "label": "Treatment Fee", "action": "treatment_fee_collected",
+    },
+    "consultation": {
+        "details": "package_payment_details", "paid": "package_paid",
+        "mode": "package_payment_mode", "package": "package_name",
+        "label": "Consultation Fee", "action": "package_payment_collected",
+    },
+    "rehab": {
+        "details": "rehab_fee_payment_details", "paid": "rehab_fee_paid",
+        "mode": "rehab_fee_payment_mode", "package": "rehab_package_name",
+        "label": "Rehab Fee", "action": "rehab_fee_collected",
+    },
+    "diet": {
+        "details": "diet_fee_payment_details", "paid": "diet_fee_paid",
+        "mode": "diet_fee_payment_mode", "package": "diet_package_name",
+        "label": "Diet Consultation Fee", "action": "diet_fee_collected",
+    },
+    "diet_chart": {
+        "details": "diet_chart_fee_payment_details", "paid": "diet_chart_fee_paid",
+        "mode": "diet_chart_fee_payment_mode", "package": "diet_chart_package_name",
+        "label": "Diet Chart Fee", "action": "diet_chart_fee_collected",
+    },
+}
+
+
+def _fee_installments(lead: dict, fee: str = "treatment") -> list:
+    """One fee's installment schedule, whatever put it there. A schedule exists whenever
+    the record has one — from choosing 'Partial Payment' outright, from collecting for
+    only some of a package's sessions, or from a collection that came up short of what
+    was payable. Keyed off the data shape rather than the stored payment_mode, so every
+    path shares every downstream balance/schedule/status calculation for free."""
+    return (lead.get(FEE_SCHEDULES[fee]["details"]) or {}).get("installments") or []
+
+
 def _treatment_installments(lead: dict) -> list:
-    """A Treatment Fee installment schedule exists whenever the record has one —
-    whether it came from choosing 'Partial Payment' outright, or from collecting
-    Cash/UPI/Card/Cheque for only some of the package's sessions right now (the
-    remaining sessions get scheduled the same way). Keyed off the data shape
-    itself rather than the stored payment_mode, so both paths share every
-    downstream balance/schedule/status calculation for free."""
-    return (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+    """The Treatment Fee's schedule — the one most of this file means when it says
+    "installments", kept as its own name because most of this file only wants that one."""
+    return _fee_installments(lead, "treatment")
+
+
+def _all_unpaid_installments(lead: dict) -> list:
+    """Every balance still owed across all five fees, as (fee, index, installment).
+
+    A patient can owe on more than one at once — a part-paid Consultation Fee and a
+    part-paid Diet Fee are two separate debts on two separate schedules — so anything
+    reporting what someone owes has to look at all of them, not only the treatment one."""
+    out = []
+    for fee in FEE_SCHEDULES:
+        for idx, inst in enumerate(_fee_installments(lead, fee)):
+            if not inst.get("paid"):
+                out.append((fee, idx, inst))
+    return sorted(out, key=lambda row: row[2].get("due_date") or "")
 
 
 def _lead_outstanding_balance(lead: dict) -> float:
@@ -754,9 +809,10 @@ def _lead_outstanding_balance(lead: dict) -> float:
     balance = 0.0
     if lead.get("package_id") and lead.get("package_paid") is None:
         balance += lead.get("package_price") or 0
-    installments = _treatment_installments(lead)
-    if installments:
-        balance += sum(i.get("amount", 0) for i in installments if not i.get("paid"))
+    # Every fee's unpaid rows, not only the Treatment Fee's. Any of the five can be part
+    # collected now with the rest scheduled, and a Diet balance is owed exactly as much
+    # as a treatment one — counting only treatment would drop it off what this says.
+    balance += sum(inst.get("amount", 0) for _, _, inst in _all_unpaid_installments(lead))
     return round(balance, 2)
 
 
@@ -780,29 +836,55 @@ def _lead_payment_progress(lead: dict) -> Optional[dict]:
 
 def _lead_outstanding_detail(lead: dict, today: str) -> dict:
     """Outstanding Amount table — full bill/paid/balance picture per client, plus
-    the next due date (from the Partial Payment schedule, if any) and a status
+    the next due date (from whichever fee's schedule falls due first) and a status
     badge: overdue (past due date), due_soon (due within 3 days), or partial
     (owes money but nothing scheduled yet / due further out)."""
-    # A confirmed Consultation Fee (even at a negotiated discount) is fully
-    # settled -- its "bill" for outstanding-balance purposes is whatever was
-    # actually collected, not the original assigned price.
-    package_paid = lead.get("package_paid")
-    total_bill = package_paid if package_paid is not None else (lead.get("package_price") or 0)
-    paid_amount = package_paid or 0
-    due_date = None
-    next_installment_number = None
+    # A fee settled in one payment is settled in full, even at a discount that was
+    # negotiated down: its "bill" here is what was actually collected, since the
+    # discount was a decision rather than money still owed. A fee with a schedule is a
+    # different matter — the schedule is the bill, both halves of it, so what has been
+    # collected and what has not are read off the rows rather than off *_paid.
+    package_installments = _fee_installments(lead, "consultation")
+    if package_installments:
+        total_bill = sum(i.get("amount", 0) for i in package_installments)
+        paid_amount = sum(i.get("amount", 0) for i in package_installments if i.get("paid"))
+    else:
+        package_paid = lead.get("package_paid")
+        total_bill = package_paid if package_paid is not None else (lead.get("package_price") or 0)
+        paid_amount = package_paid or 0
 
     installments = _treatment_installments(lead)
     if installments:
         total_bill += sum(i.get("amount", 0) for i in installments)
         paid_amount += sum(i.get("amount", 0) for i in installments if i.get("paid"))
-        unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", ""))
-        if unpaid:
-            due_date = unpaid[0].get("due_date")
-            next_installment_number = installments.index(unpaid[0]) + 1
     elif lead.get("treatment_fee_paid"):
         total_bill += lead.get("treatment_fee_paid") or 0
         paid_amount += lead.get("treatment_fee_paid") or 0
+
+    # Rehab and Diet have never been part of this picture, and a fee collected in one
+    # payment still isn't — adding them wholesale would restate every existing row.
+    # A balance is different: it is money the branch is owed and has to chase, so a fee
+    # that left one is counted here, both halves, the same way the two above are.
+    for fee in ("rehab", "diet", "diet_chart"):
+        rows = _fee_installments(lead, fee)
+        if rows:
+            total_bill += sum(i.get("amount", 0) for i in rows)
+            paid_amount += sum(i.get("amount", 0) for i in rows if i.get("paid"))
+
+    # The nearest thing owed across every fee, so the badge and the date describe what
+    # actually falls due next rather than only what the Treatment Fee does.
+    unpaid = _all_unpaid_installments(lead)
+    due_date = None
+    next_installment_number = None
+    next_installment_fee = None
+    if unpaid:
+        next_fee, next_idx, next_inst = unpaid[0]
+        due_date = next_inst.get("due_date")
+        # 1-based, matching what the Payment Schedules table shows, and named by the fee
+        # it belongs to — the quick-collect action posts both back, so a balance on any
+        # fee can be taken from here rather than only a Treatment Fee one.
+        next_installment_number = next_idx + 1
+        next_installment_fee = next_fee
 
     balance = round(max(total_bill - paid_amount, 0), 2)
     due_soon_cutoff = (datetime.fromisoformat(today).date() + timedelta(days=3)).isoformat()
@@ -821,6 +903,7 @@ def _lead_outstanding_detail(lead: dict, today: str) -> dict:
         "due_date": due_date,
         "status": status,
         "next_installment_number": next_installment_number,
+        "next_installment_fee": next_installment_fee,
     }
 
 
@@ -1293,9 +1376,16 @@ async def revenue_overview(
                 "due_date": detail["due_date"],
                 "status": detail["status"],
                 "next_installment_number": detail["next_installment_number"],
+                "next_installment_fee": detail["next_installment_fee"],
             })
-        installments = _treatment_installments(l)
-        if installments:
+        # Every fee's schedule, not only the Treatment Fee's. A schedule is a schedule
+        # whichever fee left it — a Consultation Fee part paid today with the rest due
+        # Friday is exactly the thing this table exists to show — and each row carries
+        # the fee it belongs to so a collect action knows which one to post against.
+        for fee, cfg in FEE_SCHEDULES.items():
+            installments = _fee_installments(l, fee)
+            if not installments:
+                continue
             installments_total = len(installments)
             installments_paid = len([i for i in installments if i.get("paid")])
             for idx, inst in enumerate(installments, start=1):
@@ -1304,7 +1394,11 @@ async def revenue_overview(
                     "client_name": l.get("name", "Unknown"),
                     "phone": l.get("phone", ""),
                     "branch_name": branch_name_map.get(l.get("branch_id"), ""),
-                    "category": "session",  # Treatment Fee installment schedule (Partial Payment, or a partial-sessions collection)
+                    # "session" kept for the Treatment Fee so nothing reading this
+                    # table by its old category has to change.
+                    "category": "session" if fee == "treatment" else fee,
+                    "fee": fee,
+                    "fee_label": cfg["label"],
                     "installment_number": idx,
                     "amount": inst.get("amount", 0),
                     "due_date": inst.get("due_date", ""),
@@ -1436,8 +1530,16 @@ async def client_transaction_history(
     # (UTR, cheque number, the account's last four). Those are written at collection
     # time but were never returned here, so the Client Details popup had no way to show
     # them -- the card number itself is never stored, only the last four digits.
+    #
+    # Every fee's schedule, each row saying which fee it belongs to: a client can owe on
+    # more than one at a time (a part-paid Consultation Fee and a part-paid Diet Fee are
+    # two debts, not one), and a row that did not name its fee could not be collected
+    # against the right one. Numbers restart per fee, so "fee + number" is what
+    # identifies a row here, not the number alone.
     schedule = [
         {
+            "fee": fee,
+            "fee_label": FEE_SCHEDULES[fee]["label"],
             "installment_number": idx,
             "amount": inst.get("amount", 0),
             "due_date": inst.get("due_date", ""),
@@ -1453,7 +1555,8 @@ async def client_transaction_history(
             "transfer_reference": inst.get("transfer_reference"),
             "transaction_id": inst.get("transaction_id"),
         }
-        for idx, inst in enumerate(installments, start=1)
+        for fee in FEE_SCHEDULES
+        for idx, inst in enumerate(_fee_installments(lead, fee), start=1)
     ]
 
     consultation_status = None
@@ -1501,7 +1604,15 @@ async def client_transaction_history(
             "session_paid": session["paid"],
             "session_due": session["due"],
             "session_status": session["status"],
-            "next_installment_number": session["next_installment_number"],
+            # The next thing owed on any fee, not only the Treatment Fee's schedule —
+            # both halves of the answer, since the number alone no longer identifies a
+            # row now that every fee can have one.
+            "next_installment_number": outstanding_detail["next_installment_number"],
+            "next_installment_fee": outstanding_detail["next_installment_fee"],
+            "next_installment_label": (
+                FEE_SCHEDULES[outstanding_detail["next_installment_fee"]]["label"]
+                if outstanding_detail["next_installment_fee"] else None
+            ),
         },
         "schedule": schedule,
         "transactions": transactions,
@@ -1516,21 +1627,26 @@ async def mark_installment_paid(
     payload: V3MarkInstallmentPaidInput = V3MarkInstallmentPaidInput(),
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
 ):
-    """Payment Schedules — mark one Partial Payment installment as collected.
+    """Payment Schedules — mark one installment as collected.
     installment_number is 1-based (matches what the Payment Schedules table shows).
     When payload.payment_mode is sent (the Branch Admin's per-row Collect popup),
-    this records the same mode-specific details every other Treatment Fee mode does
-    and logs a 'treatment_fee_collected' activity entry, so the collection shows up
-    in Session Collections / Accountant Manage exactly like a fresh collection would.
-    Omitting payment_mode keeps the old bare "just flip paid" behavior (e.g. the
-    Outstanding Amount panel's quick-collect action)."""
+    this records the same mode-specific details a fresh collection does and logs that
+    fee's own activity entry, so it shows up in Session Collections / Accountant Manage
+    exactly like one. Omitting payment_mode keeps the old bare "just flip paid" behavior
+    (e.g. the Outstanding Amount panel's quick-collect action).
+
+    payload.fee names which fee's schedule the row belongs to — any of the five can leave
+    a balance behind, and a balance is collectable under any payment mode regardless of
+    how the first part of the fee was paid. It defaults to the Treatment Fee, so callers
+    written before the other four could carry a balance keep working unchanged."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Client not found")
     if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    details = lead.get("treatment_fee_payment_details") or {}
+    cfg = FEE_SCHEDULES[payload.fee]
+    details = lead.get(cfg["details"]) or {}
     installments = details.get("installments") or []
     idx = installment_number - 1
     if idx < 0 or idx >= len(installments):
@@ -1645,21 +1761,29 @@ async def mark_installment_paid(
         # the schedule they belong to has none, since scheduling moves no money.
         transaction_id = await generate_transaction_id(lead.get("branch_id"))
         installments[idx] = {**installments[idx], "paid": True, "amount": amount, "payment_mode": mode, "transaction_id": transaction_id, **mode_fields}
-        activity_details = f"Collected Installment #{installment_number} for session package '{lead.get('session_package_name')}' · Rs.{amount} via {mode}{detail_suffix} · Txn {transaction_id}"
+        activity_details = f"Collected {cfg['label']} Installment #{installment_number} for '{lead.get(cfg['package']) or cfg['label']}' · Rs.{amount} via {mode}{detail_suffix} · Txn {transaction_id}"
     else:
         installments[idx]["paid"] = True
 
-    await v3_col("leads").update_one(
-        {"id": lead_id},
-        {"$set": {"treatment_fee_payment_details.installments": installments}},
-    )
+    # Keep the fee's own *_paid field in step with the money that has actually arrived,
+    # but only where it is tracking that. A Treatment Fee Partial Payment plan books the
+    # whole price the moment the schedule is created, so adding to it here would count the
+    # same money twice. Every other schedule — including all four of the other fees' —
+    # exists because a collection came up short and books only what was handed over that
+    # day, so the balance has to be added as it arrives or no revenue total ever sees it.
+    set_fields = {f"{cfg['details']}.installments": installments}
+    if not (payload.fee == "treatment" and lead.get(cfg["mode"]) == "partial"):
+        collected = installments[idx].get("amount") or 0
+        set_fields[cfg["paid"]] = round((lead.get(cfg["paid"]) or 0) + collected, 2)
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": set_fields})
 
     if activity_details:
         await v3_col("lead_activity").insert_one({
             "id": str(uuid.uuid4()),
             "transaction_id": transaction_id,
             "lead_id": lead_id,
-            "action": "treatment_fee_collected",
+            "action": cfg["action"],
             "details": activity_details,
             "created_by": user.full_name,
             "created_by_role": user.role,
@@ -1667,4 +1791,4 @@ async def mark_installment_paid(
         })
 
     updated_details = {**details, "installments": installments}
-    return {"message": "Installment marked as paid", "transaction_id": transaction_id, "balance": _lead_outstanding_balance({**lead, "treatment_fee_payment_details": updated_details})}
+    return {"message": "Installment marked as paid", "transaction_id": transaction_id, "balance": _lead_outstanding_balance({**lead, cfg["details"]: updated_details})}

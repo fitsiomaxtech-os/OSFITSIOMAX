@@ -192,6 +192,96 @@ PART_SESSION_MODES = ("cash", "upi", "card", "cheque", "account_transfer")
 DENOMINATIONS = (500, 200, 100, 50, 20, 10)
 
 
+def settle_fee_money(
+    *,
+    list_price,
+    amount,
+    discount_in,
+    balance_due_date,
+    total_price=None,
+    allow_discount=True,
+    over_label="above listed fee",
+    existing_installments=None,
+):
+    """The three facts one collection has to keep apart: the discount that was agreed,
+    the money that came in, and whatever is still owed.
+
+    Every fee in this file used to work the gap between the price and the amount out as a
+    discount. That reads a part payment as a write-off: a desk taking Rs.750 of a Rs.1000
+    fee cancelled the Rs.250 the patient was coming back with, and nothing was left on the
+    record to collect. A discount is only ever `discount_in` — a figure somebody typed —
+    and whatever the amount falls short of the price is a balance, returned here as an
+    unpaid installment for the caller to store on the fee's own payment_details. That is
+    the same shape a Partial Payment schedule uses, so Payment Schedules, Outstanding
+    Amount and the client's own panel read it for free, and it can be collected later
+    under any payment mode.
+
+    Shared by all five collect endpoints rather than restated in each, because restating
+    it in each is how the same mistake came to be in all five.
+
+    `list_price` is what the discount comes off. `total_price` is the whole bill the
+    balance is measured against, and defaults to `list_price` — they differ only for the
+    Treatment Fee, where a collection can cover some of a package's sessions: the discount
+    is measured against those sessions, the balance against the package.
+
+    `allow_discount` is False for the modes that cannot negotiate one (Cheque and Partial
+    Payment keep their locked price), which also stops a discount arriving on a payload
+    that has no box to type it in.
+    """
+    discount = round(discount_in or 0, 2) if allow_discount else 0
+    if discount < 0:
+        raise HTTPException(status_code=400, detail="Discount cannot be negative")
+    if discount > list_price:
+        raise HTTPException(status_code=400, detail=f"Discount cannot be more than the Rs.{list_price:g} being collected for")
+    net_payable = round(list_price - discount, 2)
+
+    reason = None
+    suffix = ""
+    if discount > 0:
+        reason = "Discount"
+        suffix = f" · Actual Price Rs.{list_price}, Discount Rs.{discount}"
+    elif allow_discount and amount > net_payable + 0.01:
+        # Over the fee is recorded rather than refused — it is usually a rounding-up the
+        # patient insisted on — and keeps the negative-discount convention the reports
+        # already read, so nothing downstream has to learn a new sign.
+        discount = -round(amount - net_payable, 2)
+        reason = "Additional amount collected"
+        suffix = f" · Actual Price Rs.{net_payable}, Rs.{abs(discount)} {over_label}"
+
+    bill = list_price if total_price is None else total_price
+    balance = round(bill - discount - amount, 2)
+    installments = None
+    carry = None
+    balance_suffix = ""
+    if balance > 0.009:
+        if not balance_due_date:
+            raise HTTPException(status_code=400, detail="A due date is required for the balance amount")
+        installments = [
+            {"amount": amount, "due_date": _now()[:10], "paid": True},
+            {"amount": balance, "due_date": balance_due_date, "paid": False},
+        ]
+        balance_suffix = f" · balance Rs.{balance} due {balance_due_date}"
+    elif existing_installments and all(i.get("paid") for i in existing_installments):
+        # Nothing new is owed, but this fee has been collected in pieces before and every
+        # piece is in. Those rows are the record of how the money actually arrived, and a
+        # correction to the mode or the amount is no reason to erase it — dropping them
+        # would take the earlier payments out of every schedule and outstanding figure
+        # that reads them. Carried only when they are all settled: an unpaid row left over
+        # from a balance this collection has now cleared would be a debt nobody owes.
+        carry = existing_installments
+
+    return {
+        "discount": discount,
+        "reason": reason,
+        "suffix": suffix,
+        "net_payable": net_payable,
+        "balance": balance,
+        "installments": installments,
+        "carry": carry,
+        "balance_suffix": balance_suffix,
+    }
+
+
 def _denomination_total(raw) -> tuple:
     """What a counted pile of notes comes to, and the tidied count behind it.
 
@@ -350,27 +440,36 @@ async def collect_diet_fee(lead_id: str, payload: V3CollectDietFeeInput, user: V
     original_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
     if original_price is None:
         raise HTTPException(status_code=400, detail=f"This Diet Package has no {payload.mode} price set")
-    amount = payload.amount if payload.amount is not None else original_price
+    net_payable = round(original_price - round(payload.discount_amount or 0, 2), 2)
+    amount = payload.amount if payload.amount is not None else net_payable
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
-    # Same discount handling as the Consultation Fee: the gap between the listed price and
-    # what was actually taken is recorded with a reason, so Transaction History shows why
-    # rather than only the final number.
-    discount_amount = round(original_price - amount, 2)
-    discount_reason = None
-    discount_suffix = ""
-    if discount_amount > 0:
-        discount_reason = "Discount"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Discount Rs.{discount_amount}"
-    elif discount_amount < 0:
-        discount_reason = "Additional amount collected"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above listed fee"
+    # Same rule as the Consultation Fee, and every other fee: only a typed discount comes
+    # off the listed price, and money short of what is then payable is a balance recorded
+    # against this fee rather than quietly forgiven.
+    settled = settle_fee_money(
+        list_price=original_price,
+        amount=amount,
+        discount_in=payload.discount_amount,
+        balance_due_date=payload.balance_due_date,
+        existing_installments=(lead.get("diet_fee_payment_details") or {}).get("installments"),
+    )
+    discount_amount = settled["discount"]
+    discount_reason = settled["reason"]
+    discount_suffix = settled["suffix"]
+    balance_suffix = settled["balance_suffix"]
 
     payment_details, detail_suffix = build_payment_details(payload)
     is_update = lead.get("diet_fee_paid") is not None
     transaction_id = await generate_transaction_id(lead.get("branch_id"))
     payment_details["transaction_id"] = transaction_id
+    if discount_amount > 0:
+        payment_details["discount_amount"] = discount_amount
+    # The new balance if this collection left one, otherwise whatever schedule the fee
+    # already had — see settle_fee_money: a correction must not erase how the money came in.
+    if settled["installments"] or settled["carry"]:
+        payment_details["installments"] = settled["installments"] or settled["carry"]
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "diet_package_id": item["id"],
@@ -390,7 +489,7 @@ async def collect_diet_fee(lead_id: str, payload: V3CollectDietFeeInput, user: V
         "transaction_id": transaction_id,
         "lead_id": lead_id,
         "action": "diet_fee_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Diet Consultation Fee Rs.{amount} for '{item['name']}' ({payload.mode}) via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
+        "details": f"{'Updated' if is_update else 'Collected'} Diet Consultation Fee Rs.{amount} for '{item['name']}' ({payload.mode}) via {payload.payment_mode}{detail_suffix}{discount_suffix}{balance_suffix} · Txn {transaction_id}",
         "original_amount": original_price,
         "collected_amount": amount,
         "discount_amount": discount_amount if discount_amount != 0 else None,
@@ -463,24 +562,33 @@ async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInp
     original_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
     if original_price is None:
         raise HTTPException(status_code=400, detail=f"This Diet Package has no {payload.mode} price set")
-    amount = payload.amount if payload.amount is not None else original_price
+    net_payable = round(original_price - round(payload.discount_amount or 0, 2), 2)
+    amount = payload.amount if payload.amount is not None else net_payable
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
-    discount_amount = round(original_price - amount, 2)
-    discount_reason = None
-    discount_suffix = ""
-    if discount_amount > 0:
-        discount_reason = "Discount"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Discount Rs.{discount_amount}"
-    elif discount_amount < 0:
-        discount_reason = "Additional amount collected"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above listed fee"
+    settled = settle_fee_money(
+        list_price=original_price,
+        amount=amount,
+        discount_in=payload.discount_amount,
+        balance_due_date=payload.balance_due_date,
+        existing_installments=(lead.get("diet_chart_fee_payment_details") or {}).get("installments"),
+    )
+    discount_amount = settled["discount"]
+    discount_reason = settled["reason"]
+    discount_suffix = settled["suffix"]
+    balance_suffix = settled["balance_suffix"]
 
     payment_details, detail_suffix = build_payment_details(payload)
     is_update = lead.get("diet_chart_fee_paid") is not None
     transaction_id = await generate_transaction_id(lead.get("branch_id"))
     payment_details["transaction_id"] = transaction_id
+    if discount_amount > 0:
+        payment_details["discount_amount"] = discount_amount
+    # The new balance if this collection left one, otherwise whatever schedule the fee
+    # already had — see settle_fee_money: a correction must not erase how the money came in.
+    if settled["installments"] or settled["carry"]:
+        payment_details["installments"] = settled["installments"] or settled["carry"]
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "diet_chart_package_id": item["id"],
@@ -504,7 +612,7 @@ async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInp
         "transaction_id": transaction_id,
         "lead_id": lead_id,
         "action": "diet_chart_fee_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Diet Chart Fee Rs.{amount} for '{item['name']}' ({payload.mode}) via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
+        "details": f"{'Updated' if is_update else 'Collected'} Diet Chart Fee Rs.{amount} for '{item['name']}' ({payload.mode}) via {payload.payment_mode}{detail_suffix}{discount_suffix}{balance_suffix} · Txn {transaction_id}",
         "original_amount": original_price,
         "collected_amount": amount,
         "discount_amount": discount_amount if discount_amount != 0 else None,
@@ -545,6 +653,10 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         raise HTTPException(status_code=400, detail="No consultation package assigned yet")
 
     original_price = lead["package_price"]
+    # What is payable once the typed discount is off the price. The amount falls back to
+    # it rather than to the price, and anything below it is a balance, not a write-off —
+    # settle_fee_money below is where both of those are worked out.
+    net_payable = round(original_price - round(payload.discount_amount or 0, 2), 2)
     if lines:
         # Summed from the tenders rather than taken alongside them. Two numbers for one
         # sum is one number too many: the total and its parts can only ever disagree,
@@ -558,23 +670,27 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
                 detail=f"The payments add up to Rs.{amount:g}, but the fee being collected is Rs.{payload.amount:g}",
             )
     else:
-        amount = payload.amount if payload.amount is not None else original_price
+        amount = payload.amount if payload.amount is not None else net_payable
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
-    # Assigned price vs what was actually collected — Branch Admin can negotiate a
-    # discount on the spot (e.g. Rs.800 assigned, client only has Rs.750). The gap is
-    # logged on the activity record so Transaction History shows the reason, not just
-    # the final number.
-    discount_amount = round(original_price - amount, 2) if original_price is not None else 0
-    discount_suffix = ""
-    discount_reason = None
-    if discount_amount > 0:
-        discount_reason = "Discount"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Discount Rs.{discount_amount}"
-    elif discount_amount < 0:
-        discount_reason = "Additional amount collected"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above assigned fee"
+    # A discount Branch Admin negotiated on the spot (Rs.800 assigned, Rs.750 agreed) is
+    # typed into the Discount box and logged with its reason, so Transaction History says
+    # why and not just how much. What it is NOT is any amount that happens to come in
+    # under the price: a client paying Rs.750 of Rs.800 today and the rest on Friday owes
+    # Rs.50, and that is scheduled as a balance rather than forgiven.
+    settled = settle_fee_money(
+        list_price=original_price,
+        amount=amount,
+        discount_in=payload.discount_amount,
+        balance_due_date=payload.balance_due_date,
+        over_label="above assigned fee",
+        existing_installments=(lead.get("package_payment_details") or {}).get("installments"),
+    )
+    discount_amount = settled["discount"]
+    discount_reason = settled["reason"]
+    discount_suffix = settled["suffix"]
+    balance_suffix = settled["balance_suffix"]
 
     payment_details = {}
     detail_suffix = ""
@@ -660,6 +776,15 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     # either half would make the record say something that is only half true. Finance
     # reads the breakdown off payment_details and off the activity line below.
     settled_mode = "split" if lines else payload.payment_mode
+    # Both go on the record, not only into the activity line: the discount so reopening
+    # the popup reloads what was agreed instead of starting at zero, and the balance so
+    # every panel that reads a schedule can show it and collect it later.
+    if discount_amount > 0:
+        payment_details["discount_amount"] = discount_amount
+    # The new balance if this collection left one, otherwise whatever schedule the fee
+    # already had — see settle_fee_money: a correction must not erase how the money came in.
+    if settled["installments"] or settled["carry"]:
+        payment_details["installments"] = settled["installments"] or settled["carry"]
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_paid": amount,
         "package_payment_mode": settled_mode,
@@ -672,7 +797,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         "transaction_id": transaction_id,
         "lead_id": lead_id,
         "action": "package_payment_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {settled_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
+        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {settled_mode}{detail_suffix}{discount_suffix}{balance_suffix} · Txn {transaction_id}",
         "original_amount": original_price,
         "collected_amount": amount,
         "discount_amount": discount_amount if discount_amount != 0 else None,
@@ -713,26 +838,35 @@ async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user:
         raise HTTPException(status_code=400, detail="No Rehab course was chosen at the consultation yet")
 
     original_price = lead["rehab_package_price"]
-    amount = payload.amount if payload.amount is not None else original_price
+    net_payable = round(original_price - round(payload.discount_amount or 0, 2), 2)
+    amount = payload.amount if payload.amount is not None else net_payable
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
-    # Same discount handling every other fee uses: the gap between what was listed and
-    # what was taken is recorded with a reason, so history says why and not just how much.
-    discount_amount = round(original_price - amount, 2)
-    discount_reason = None
-    discount_suffix = ""
-    if discount_amount > 0:
-        discount_reason = "Discount"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Discount Rs.{discount_amount}"
-    elif discount_amount < 0:
-        discount_reason = "Additional amount collected"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above listed fee"
+    # Same rule every fee is settled by: a discount is the figure that was typed, and
+    # money short of what that leaves payable is a balance still owed, not a write-off.
+    settled = settle_fee_money(
+        list_price=original_price,
+        amount=amount,
+        discount_in=payload.discount_amount,
+        balance_due_date=payload.balance_due_date,
+        existing_installments=(lead.get("rehab_fee_payment_details") or {}).get("installments"),
+    )
+    discount_amount = settled["discount"]
+    discount_reason = settled["reason"]
+    discount_suffix = settled["suffix"]
+    balance_suffix = settled["balance_suffix"]
 
     payment_details, detail_suffix = build_payment_details(payload)
     is_update = lead.get("rehab_fee_paid") is not None
     transaction_id = await generate_transaction_id(lead.get("branch_id"))
     payment_details["transaction_id"] = transaction_id
+    if discount_amount > 0:
+        payment_details["discount_amount"] = discount_amount
+    # The new balance if this collection left one, otherwise whatever schedule the fee
+    # already had — see settle_fee_money: a correction must not erase how the money came in.
+    if settled["installments"] or settled["carry"]:
+        payment_details["installments"] = settled["installments"] or settled["carry"]
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "rehab_fee_paid": amount,
@@ -748,7 +882,7 @@ async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user:
         "transaction_id": transaction_id,
         "lead_id": lead_id,
         "action": "rehab_fee_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Rehab Fee Rs.{amount} for '{lead.get('rehab_package_name', 'Rehab')}' ({lead.get('rehab_package_mode') or 'offline'}) via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
+        "details": f"{'Updated' if is_update else 'Collected'} Rehab Fee Rs.{amount} for '{lead.get('rehab_package_name', 'Rehab')}' ({lead.get('rehab_package_mode') or 'offline'}) via {payload.payment_mode}{detail_suffix}{discount_suffix}{balance_suffix} · Txn {transaction_id}",
         "original_amount": original_price,
         "collected_amount": amount,
         "discount_amount": discount_amount if discount_amount != 0 else None,
@@ -765,10 +899,12 @@ async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user:
 async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Branch admin collects the Treatment Fee for the Session package the Head
     Physio already chose during the consultation decision (Consultation + Treatment).
-    The package itself is locked in from session_package_id — Cash/UPI/Card can
-    manually override the amount (discount, rounding, partial cash collected) and
-    require an explicit confirmation; Cheque/Partial Payment keep the locked
-    session_package_price as before. Both Consultation Fee and Treatment Fee are
+    The package itself is locked in from session_package_id — Cash/UPI/Card/Account
+    Transfer can manually override the amount and require an explicit confirmation;
+    Cheque/Partial Payment keep the locked session_package_price as before. What comes
+    off the bill is only `discount_amount`, which somebody has to type; an amount below
+    what is then payable is a part payment, and the rest is scheduled as an unpaid
+    balance installment to be collected later under any payment mode. Both Consultation Fee and Treatment Fee are
     collected while the lead rests in the 'Fee Collected' stage; it stays there
     after this call — moving on to Physio Assign is a separate, explicit action
     (assign-consultation-physio), not an automatic side effect of payment."""
@@ -812,10 +948,15 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         if total_sessions and (sessions_now <= 0 or sessions_now > total_sessions):
             raise HTTPException(status_code=400, detail="Sessions Covered Now must be between 1 and the package's total sessions")
         is_partial_sessions = total_sessions > 0 and sessions_now < total_sessions
-        if is_partial_sessions and not payload.balance_due_date:
-            raise HTTPException(status_code=400, detail="A due date is required for the balance sessions")
 
     computed_amount = round(sessions_now * per_session_rate, 2) if total_sessions else original_price
+
+    # Only a typed discount comes off the bill, and only the modes that settle now can
+    # negotiate one — see settle_fee_money, which every fee in this file is settled by.
+    # Worked out here, ahead of the amount, because the amount defaults to what it leaves
+    # payable; the balance it leaves is settled once the amount is known, further down.
+    can_discount = payload.payment_mode in SETTLED_NOW_MODES
+    net_payable = round(computed_amount - (round(payload.discount_amount or 0, 2) if can_discount else 0), 2)
 
     if payload.payment_mode in SETTLED_NOW_MODES:
         if lines:
@@ -832,7 +973,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
                     detail=f"The payments add up to Rs.{amount:g}, but the fee being collected is Rs.{payload.amount:g}",
                 )
         else:
-            amount = payload.amount if payload.amount is not None else computed_amount
+            amount = payload.amount if payload.amount is not None else net_payable
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be greater than zero")
     elif payload.payment_mode == "cheque":
@@ -843,20 +984,23 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if payload.payment_mode in SETTLED_NOW_MODES and not payload.confirmed:
         raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
 
-    # Same discount tracking as the Consultation Fee — compared against
-    # what these specific sessions should cost (not the whole package's price),
-    # so collecting for fewer sessions is never mistaken for a discount.
-    discount_amount = 0
-    discount_reason = None
-    discount_suffix = ""
-    if payload.payment_mode in SETTLED_NOW_MODES:
-        discount_amount = round(computed_amount - amount, 2)
-        if discount_amount > 0:
-            discount_reason = "Discount"
-            discount_suffix = f" · Actual Price Rs.{computed_amount}, Discount Rs.{discount_amount}"
-        elif discount_amount < 0:
-            discount_reason = "Additional amount collected"
-            discount_suffix = f" · Actual Price Rs.{computed_amount}, Rs.{abs(discount_amount)} above assigned fee"
+    # The discount that was agreed, and whatever of the package is still owed once this
+    # money is in — one rule, shared with every other fee. The discount is measured
+    # against the sessions being collected for; the balance against the whole package,
+    # so collecting for fewer sessions leaves the rest owing rather than discounted.
+    settled = settle_fee_money(
+        list_price=computed_amount,
+        total_price=original_price,
+        amount=amount,
+        discount_in=payload.discount_amount,
+        balance_due_date=payload.balance_due_date,
+        allow_discount=can_discount,
+        over_label="above assigned fee",
+        existing_installments=(lead.get("treatment_fee_payment_details") or {}).get("installments"),
+    )
+    discount_amount = settled["discount"]
+    discount_reason = settled["reason"]
+    discount_suffix = settled["suffix"]
 
     # Mode-specific required fields + a structured payment_details record for the
     # receipt/activity log. Account number is never persisted beyond its last 4 digits.
@@ -971,19 +1115,30 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         ]
         detail_suffix = f" · {', '.join(parts)}"
 
-    # Cash/UPI/Card/Cheque covering only some sessions right now — schedule the
-    # remaining sessions as a single balance installment, reusing the exact same
-    # `installments` shape Partial Payment uses so Payment Schedules / Outstanding
-    # Amount / the client's own Payment Schedule panel all pick it up for free.
-    balance_suffix = ""
-    if payload.payment_mode in PART_SESSION_MODES and is_partial_sessions:
+    # The discount goes on the record, not only into the activity line, so reopening the
+    # popup to correct a payment mode reloads the discount that was agreed instead of
+    # starting at zero and turning the difference back into a balance nobody owes.
+    if discount_amount > 0:
+        payment_details["discount_amount"] = discount_amount
+
+    # The balance the helper worked out, stored on the record with the sessions each half
+    # covers — the one thing a treatment schedule carries that the other fees' don't,
+    # since theirs are a single price paid once.
+    balance_suffix = settled["balance_suffix"]
+    if payload.payment_mode in PART_SESSION_MODES and settled["installments"]:
         remaining_sessions = total_sessions - sessions_now
-        remaining_amount = round(original_price - amount, 2)
+        paid_now, owing = settled["installments"]
         payment_details["installments"] = [
-            {"sessions": sessions_now, "amount": amount, "due_date": _now()[:10], "paid": True},
-            {"sessions": remaining_sessions, "amount": remaining_amount, "due_date": payload.balance_due_date, "paid": False},
+            {**paid_now, "sessions": sessions_now},
+            {**owing, "sessions": remaining_sessions},
         ]
-        balance_suffix = f" · covers {sessions_now} of {total_sessions} sessions, balance Rs.{remaining_amount} ({remaining_sessions} sessions) due {payload.balance_due_date}"
+        covered = f" · covers {sessions_now} of {total_sessions} sessions" if is_partial_sessions else ""
+        sessions_label = f" ({remaining_sessions} sessions)" if remaining_sessions > 0 else ""
+        balance_suffix = f"{covered} · balance Rs.{settled['balance']}{sessions_label} due {payload.balance_due_date}"
+    elif settled["carry"] and not payment_details.get("installments"):
+        # Nothing new owed, and no Partial Payment plan written just now — keep the
+        # schedule the fee already had, for the reason settle_fee_money gives.
+        payment_details["installments"] = settled["carry"]
 
     # Partial Payment only schedules a plan here -- no money moves, so it gets no
     # transaction id. Each installment is collected separately and earns its own.

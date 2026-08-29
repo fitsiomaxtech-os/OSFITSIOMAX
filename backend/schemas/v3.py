@@ -533,6 +533,16 @@ class V3CollectPackagePaymentInput(BaseModel):
     # Account Transfer — reuses the four bank fields above (same last-4 rule) and adds
     # the bank's own reference for the transfer, which is what a dispute is traced by.
     transfer_reference: Optional[str] = None
+    # A discount is typed here or it does not exist, and an `amount` below what is then
+    # payable is a part payment, not a write-off. Both were the same number before: the
+    # gap between the price and the amount was booked as a discount, so a desk taking
+    # Rs.750 of a Rs.1000 fee cancelled the Rs.250 the patient was coming back with.
+    # Whatever is short of the fee is scheduled as an unpaid balance instead, which is
+    # what balance_due_date dates -- required whenever there is one.
+    #
+    # Inherited by the Diet, Diet Chart and Rehab fees, which are collected the same way.
+    discount_amount: Optional[float] = None
+    balance_due_date: Optional[str] = None
 
 
 class V3CollectDietFeeInput(V3CollectPackagePaymentInput):
@@ -636,6 +646,12 @@ class V3CollectTreatmentFeeInput(BaseModel):
     # total; the remaining sessions are scheduled as a single balance installment.
     sessions_now: Optional[int] = None
     balance_due_date: Optional[str] = None
+    # A discount is typed here or it does not exist. It used to be inferred -- whatever
+    # the amount fell short of the fee was written off -- which meant a Branch Admin
+    # taking Rs.3000 of a Rs.5000 fee today erased the Rs.2000 the patient still owed.
+    # Those are two different facts: only what arrives in this field comes off the bill,
+    # and anything else short of it is scheduled as a balance installment instead.
+    discount_amount: Optional[float] = None
 
 
 class V3MarkInstallmentPaidInput(BaseModel):
@@ -647,6 +663,12 @@ class V3MarkInstallmentPaidInput(BaseModel):
     # Collections / Accountant Manage), same as every other Treatment Fee mode.
     payment_mode: Optional[Literal["cash", "upi", "card", "cheque", "account_transfer"]] = None
     amount: Optional[float] = None
+    # Which fee's schedule the installment belongs to. Any of the five can leave a
+    # balance behind -- each on its own payment_details, all in the same shape -- and
+    # each is collected through here. Defaults to the Treatment Fee, which was the only
+    # one that could have a schedule when this endpoint was written, so every existing
+    # caller keeps working without sending it.
+    fee: Literal["treatment", "consultation", "rehab", "diet", "diet_chart"] = "treatment"
     # One installment is collected across the same desk as the fee it belongs to, so it
     # counts its cash the same way -- see V3PaymentLineInput.denominations.
     denominations: Optional[dict] = None

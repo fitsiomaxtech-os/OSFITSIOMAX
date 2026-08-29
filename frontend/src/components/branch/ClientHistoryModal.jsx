@@ -277,7 +277,7 @@ const NextStep = ({ pd, balance, hasSchedule }) => {
     bodyClass = "text-rose-800";
     title = `${fmt(balance)} outstanding`;
     body = hasSchedule
-      ? `Installment #${pd.next_installment_number} is the next one due. Collect it from this screen.`
+      ? `${pd.next_installment_label || "Installment"} #${pd.next_installment_number} is the next one due. Collect it from this screen.`
       : "Not on an installment schedule — collect it from the client's card in Consultations.";
   } else if (quoted > 0 && paid <= 0) {
     tone = "border-amber-500 bg-amber-50";
@@ -369,7 +369,11 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
     window.location.href = `tel:${client.phone.replace(/[^0-9+]/g, "")}`;
   };
 
-  const nextInstallment = schedule.find((s) => s.installment_number === pd.next_installment_number);
+  // Numbering restarts per fee, so a row is identified by both — matching on the number
+  // alone would find, say, the Consultation Fee's row #2 when the Diet Fee's is due.
+  const nextInstallment = schedule.find(
+    (s) => s.installment_number === pd.next_installment_number && s.fee === (pd.next_installment_fee || "treatment")
+  );
 
   /** Opens the confirmation popup rather than collecting on the spot. Money changing
    *  hands off a single unguarded click is how a client gets charged twice. */
@@ -418,6 +422,9 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
 
     setRecording(true);
     try {
+      // Which fee's balance this is. Omitted, the server would take it as the Treatment
+      // Fee's — the only schedule that existed when that default was written.
+      payload.fee = pd.next_installment_fee || "treatment";
       await markInstallmentPaid(leadId, pd.next_installment_number, payload);
       toast.success(`${fmt(amount)} collected from ${client.name}`);
       setCollectDraft(null);
@@ -609,7 +616,10 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Payment Schedule</p>
                   <div className="space-y-1.5">
                     {schedule.map((s) => (
-                      <div key={s.installment_number} className="rounded-lg border border-slate-100 px-3 py-1.5 text-xs" data-testid={`client-history-schedule-${s.installment_number}`}>
+                      <div key={`${s.fee || "treatment"}-${s.installment_number}`} className="rounded-lg border border-slate-100 px-3 py-1.5 text-xs" data-testid={`client-history-schedule-${s.fee || "treatment"}-${s.installment_number}`}>
+                        {/* Which fee this row belongs to. Numbering restarts per fee, so
+                            without it a client owing on two reads as "#1, #2, #1, #2". */}
+                        {s.fee_label && <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{s.fee_label}</p>}
                         <div className="flex items-center justify-between">
                           <span className="w-8 font-medium text-slate-500">#{s.installment_number}</span>
                           <span className="flex-1"><Badge meta={SCHEDULE_STATUS_META[s.status] || SCHEDULE_STATUS_META.upcoming} /></span>
@@ -619,7 +629,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                         {/* How this one was settled, once it has been — the UTR or cheque
                             number is the only way to match it to a bank statement later. */}
                         {s.payment_mode && (
-                          <div className="mt-1 flex flex-wrap items-center gap-1 pl-8" data-testid={`client-history-schedule-ref-${s.installment_number}`}>
+                          <div className="mt-1 flex flex-wrap items-center gap-1 pl-8" data-testid={`client-history-schedule-ref-${s.fee || "treatment"}-${s.installment_number}`}>
                             <span className="rounded-[4px] border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{formatMode(s.payment_mode)}</span>
                             {paidReference(s).map((chip) => (
                               <span key={chip} className="rounded-[4px] bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500">{chip}</span>
@@ -690,7 +700,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                   className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
                   data-testid="client-history-record-payment"
                 >
-                  <Wallet className="h-3.5 w-3.5" /> {recording ? "Saving..." : `Collect installment #${pd.next_installment_number}`}
+                  <Wallet className="h-3.5 w-3.5" /> {recording ? "Saving..." : `Collect ${pd.next_installment_label || "installment"} #${pd.next_installment_number}`}
                 </button>
               ) : (
                 <span data-testid="client-history-collect-note">
@@ -724,7 +734,10 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                   point of the confirmation step. */}
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-                  Installment #{pd.next_installment_number}{pd.installments_total ? ` of ${pd.installments_total}` : ""}
+                  {pd.next_installment_label || "Installment"} #{pd.next_installment_number}
+                  {/* installments_total counts the Treatment Fee's schedule, so "of N"
+                      is only true when that is the fee being collected. */}
+                  {pd.next_installment_fee === "treatment" && pd.installments_total ? ` of ${pd.installments_total}` : ""}
                 </p>
                 <p className="mt-0.5 text-2xl font-bold text-emerald-700">{fmt(nextInstallment?.amount)}</p>
                 <p className="mt-0.5 text-[11px] text-emerald-700/80">
