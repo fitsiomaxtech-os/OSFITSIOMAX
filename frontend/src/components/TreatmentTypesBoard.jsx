@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ClipboardList, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { ClipboardList, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { getTreatmentTypes, createTreatmentType, deleteTreatmentType } from "@/lib/api";
+import { getTreatmentTypes, createTreatmentType, updateTreatmentType, deleteTreatmentType } from "@/lib/api";
 
 /**
  * Super Admin > Treatment — the catalogue of treatments the clinic offers.
@@ -13,15 +13,24 @@ import { getTreatmentTypes, createTreatmentType, deleteTreatmentType } from "@/l
  * question about which one is right. This list is the vocabulary; the store is the price
  * list.
  *
- * Nothing consumes it yet. It is a catalogue to fill now and pick from later, which is
- * also why deleting is unguarded — see v3_delete_treatment_type for the check it will
- * need the moment something does reference one.
+ * The Treatment Summary checklist on a consultation picks from it. What that writes is
+ * free text on the lead, not a reference back here, which is why deleting is still
+ * unguarded — see v3_delete_treatment_type for the check it will need the moment
+ * something does hold an id.
+ *
+ * It is also why a rename only moves the picklist. A summary already written keeps the
+ * words it was written with: those are clinical notes, and correcting a spelling in the
+ * catalogue is not licence to edit what a Head Physio recorded on the day.
  */
 export const TreatmentTypesBoard = () => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  // The row being renamed, as { id, name } — edited on this copy so an abandoned edit
+  // leaves the list untouched.
+  const [editing, setEditing] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   const load = useCallback(async () => {
@@ -40,6 +49,21 @@ export const TreatmentTypesBoard = () => {
     const q = search.trim().toLowerCase();
     return q ? rows.filter((r) => (r.name || "").toLowerCase().includes(q)) : rows;
   }, [rows, search]);
+
+  const saveEdit = async () => {
+    const name = (editing.name || "").trim();
+    if (!name) { toast.error("Treatment name is required"); return; }
+    setSavingEdit(true);
+    try {
+      await updateTreatmentType(editing.id, { name });
+      toast.success(`Renamed to ${name}`);
+      setEditing(null);
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Rename failed");
+    }
+    setSavingEdit(false);
+  };
 
   const remove = async (row) => {
     try {
@@ -117,6 +141,15 @@ export const TreatmentTypesBoard = () => {
                 <ClipboardList className="h-4 w-4 shrink-0 text-slate-300" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{row.name}</span>
                 <button
+                  onClick={() => setEditing({ id: row.id, name: row.name })}
+                  className="shrink-0 rounded p-1.5 text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
+                  title={`Rename ${row.name}`}
+                  aria-label={`Rename ${row.name}`}
+                  data-testid={`treatment-edit-${row.id}`}
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
                   onClick={() => setConfirmDelete(row)}
                   className="shrink-0 rounded p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
                   title={`Delete ${row.name}`}
@@ -137,6 +170,38 @@ export const TreatmentTypesBoard = () => {
           onClose={() => setShowCreate(false)}
           onSaved={() => { setShowCreate(false); load(); }}
         />
+      )}
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="treatment-edit-dialog">
+          <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-base font-semibold text-slate-900">Rename treatment</h3>
+              <button onClick={() => setEditing(null)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close" data-testid="treatment-edit-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <Input
+              autoFocus
+              value={editing.name}
+              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }}
+              placeholder="Treatment name"
+              data-testid="treatment-edit-input"
+            />
+            {/* Says how far a rename does not reach, the opposite of the note on the
+                Physiotherapy Treatment board, because here that is the surprising half. */}
+            <p className="text-[11px] text-slate-400">
+              The picklist changes. Treatment Summaries already written keep the old name.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => setEditing(null)} data-testid="treatment-edit-cancel">Cancel</Button>
+              <Button onClick={saveEdit} disabled={savingEdit || !editing.name.trim()} className="bg-sky-600 hover:bg-sky-700" data-testid="treatment-edit-save">
+                {savingEdit ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {confirmDelete && (

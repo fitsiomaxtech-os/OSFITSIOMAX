@@ -20,7 +20,7 @@ from schemas.v3 import (
     V3BranchCreate, V3BranchOut, V3BranchUpdate,
     V3TeamMemberCreate, V3TeamMemberOut,
     V3DoctorCreate, V3DoctorSlotsInput, V3DoctorOut,
-    V3TreatmentTypeCreate, V3TreatmentTypeOut,
+    V3TreatmentTypeCreate, V3TreatmentTypeUpdate, V3TreatmentTypeOut,
     V3PhysioTypeCreate, V3PhysioTypeOut, V3PhysioTypeUpdate, V3DoctorServiceInput,
     V3DoctorMeetLinkInput,
 )
@@ -102,6 +102,44 @@ async def v3_add_treatment_type(payload: V3TreatmentTypeCreate, _: V3UserOut = D
     doc = {"id": str(uuid.uuid4()), "name": name, "created_at": now_iso()}
     await v3_col("treatment_types").insert_one(doc.copy())
     return V3TreatmentTypeOut(**doc)
+
+
+@router.patch("/treatment-types/{treatment_type_id}", response_model=V3TreatmentTypeOut)
+async def v3_update_treatment_type(
+    treatment_type_id: str,
+    payload: V3TreatmentTypeUpdate,
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Rename a treatment.
+
+    A correction, not a re-pointing: a treatment typed as "Fozen Shoulder" is the same
+    entry as the one spelled right, and the catalogue is a vocabulary that has to be
+    correctable in place. Deleting and re-adding would work only because nothing holds an
+    id yet, and it loses created_at along the way.
+
+    Nothing is written through, unlike a service rename. What consumes this list is the
+    Treatment Summary checklist, whose ticks are composed into the free text saved on a
+    lead — clinical notes, written on a day, by a person. Rewriting a treatment's name
+    inside notes already recorded would change what a Head Physio is on record as having
+    written, so past summaries keep the words they were written with and only the picklist
+    moves on.
+    """
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Treatment name is required")
+    existing = await v3_col("treatment_types").find_one({"id": treatment_type_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Treatment not found")
+    # The same case-insensitive rule the create has, minus this row: fixing a treatment's
+    # capitalisation is not a clash with itself.
+    clash = await v3_col("treatment_types").find_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}, "id": {"$ne": treatment_type_id}},
+        {"_id": 0, "name": 1},
+    )
+    if clash:
+        raise HTTPException(status_code=409, detail=f"'{clash['name']}' already exists")
+    await v3_col("treatment_types").update_one({"id": treatment_type_id}, {"$set": {"name": name}})
+    return V3TreatmentTypeOut(**{**existing, "name": name})
 
 
 @router.delete("/treatment-types/{treatment_type_id}")

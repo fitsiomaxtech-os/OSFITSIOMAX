@@ -61,6 +61,10 @@ class V3TreatmentTypeCreate(BaseModel):
     name: str
 
 
+class V3TreatmentTypeUpdate(BaseModel):
+    name: str
+
+
 class V3TreatmentTypeOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

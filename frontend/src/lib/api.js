@@ -78,6 +78,7 @@ export const deleteVertical = async (id) => (await api.delete(`/verticals/${id}`
 // Treatment catalogue — Super Admin > Treatment.
 export const getTreatmentTypes = async () => (await api.get("/treatment-types")).data;
 export const createTreatmentType = async (payload) => (await api.post("/treatment-types", payload)).data;
+export const updateTreatmentType = async (id, payload) => (await api.patch(`/treatment-types/${id}`, payload)).data;
 export const deleteTreatmentType = async (id) => (await api.delete(`/treatment-types/${id}`)).data;
 
 // Type of Physios — the physiotherapy services offered, Super Admin > Services and
