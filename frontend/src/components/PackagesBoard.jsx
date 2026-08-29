@@ -13,13 +13,17 @@ import { PhysioTypesBoard } from "@/components/PhysioTypesBoard";
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
   { key: "sessions", label: "Sessions", icon: CalendarRange },
-  // Five more programmes sold the same way a session package is — same create form, same
+  // Four more programmes sold the same way a session package is — same create form, same
   // per-session pricing — each with its own catalogue rather than a sub-tab of Sessions,
   // because that is the shelf a branch browses them from. Zumba and Home Visit are offline
-  // only; the other three sell both ways (see MODE_TAB_KEYS).
+  // only; the other two sell both ways (see MODE_TAB_KEYS).
+  //
+  // Fitness is not among them. It is reached from Sessions > Fitness, the sub-tab that
+  // always wrote this catalogue, and a top-level tab beside it was a second door onto one
+  // shelf — two places showing the same rows and no way to tell that from two shelves
+  // that happened to agree. The category is untouched: only the door is gone.
   { key: "rehab", label: "Rehab", icon: HeartPulse },
   { key: "zumba", label: "Zumba Class", icon: Music2 },
-  { key: "fitness", label: "Fitness", icon: Dumbbell },
   { key: "workshop", label: "Workshop", icon: GraduationCap },
   { key: "home_visit", label: "Home Visit", icon: Home },
   { key: "diet", label: "Diet Package", icon: Salad },
@@ -1530,13 +1534,13 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
  * them opens exactly what Sessions opens. `noun` only changes the wording on the empty
  * state and the button's title — the shelf, the form and the record are the same shape.
  *
- * Fitness deliberately points at the category the Sessions > Fitness sub-tab already
- * writes to, so the tab shows that catalogue rather than an empty second one beside it.
+ * Fitness is deliberately absent. It used to sit here pointing at the category the
+ * Sessions > Fitness sub-tab already writes to, which kept the two from drifting but left
+ * one shelf reachable from two tabs; the sub-tab is the one that stayed.
  */
 const SESSION_LIKE_TABS = {
   rehab: { category: "rehab", noun: "rehab package" },
   zumba: { category: "zumba", noun: "Zumba class" },
-  fitness: { category: "fitness", noun: "fitness package" },
   // Nothing in FIXED_SESSIONS_BY_CATEGORY, COURSE_TOTAL_CATEGORIES or
   // OFFLINE_ONLY_CATEGORIES names it, so a workshop takes the plain shape: the standard
   // session count, priced per session, with both an online and an offline price asked for.
@@ -1548,7 +1552,7 @@ const SESSION_LIKE_TABS = {
   home_visit: { category: "home_visit", noun: "home visit" },
 };
 
-const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "home_visit", "diet", "history", "treatment", "physio_type", ...INVENTORY_TABS]);
+const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "history", "treatment", "physio_type", ...INVENTORY_TABS]);
 
 // TABS above stays a flat, unbroken export — BranchStoreBoard.jsx imports and filters it
 // for its own layout too, and reshaping it here would reshape that board's as well.
@@ -1569,9 +1573,9 @@ const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitn
 export const SUPER_ADMIN_CATALOGUE_TABS = new Set(["physio_type"]);
 
 export const MODE_TAB_KEYS = {
-  all: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment", "physio_type"]),
-  offline: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "treatment", "physio_type"]),
-  online: new Set(["consultations", "sessions", "rehab", "fitness", "workshop", "diet", "treatment", "physio_type"]),
+  all: new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment", "physio_type"]),
+  offline: new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "treatment", "physio_type"]),
+  online: new Set(["consultations", "sessions", "rehab", "workshop", "diet", "treatment", "physio_type"]),
 };
 
 const MODE_FILTERS = [

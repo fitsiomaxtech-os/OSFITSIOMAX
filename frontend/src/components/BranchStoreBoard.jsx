@@ -192,7 +192,20 @@ export const BranchSessionsPanel = ({ reloadToken, modeFilter = "all" }) => {
           modeFilter={modeFilter}
         />
       )}
-      {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-sessions-subpanel-fitness" />}
+      {/* Was a "coming soon" card, which cost nothing while the top-level Fitness tab
+          listed this same shelf beside it. That tab is gone, so this is now the only way a
+          branch reaches the fitness catalogue and it has to actually list it. */}
+      {sub === "fitness" && (
+        <BranchItemsPanel
+          key="fitness"
+          category="fitness"
+          itemType="session"
+          emptyLabel="No fitness packages available yet."
+          testidPrefix="branch-session-fitness"
+          reloadToken={reloadToken}
+          modeFilter={modeFilter}
+        />
+      )}
       {/* Rehab arrives here because SESSIONS_SUBTABS is the same list Super Admin's page
           reads, so the sub-tab shows up the moment it is added there. It is the shelf the
           top-level Rehab tab already lists, read-only as everything on this board is —
@@ -237,16 +250,19 @@ export const BranchDietPanel = ({ reloadToken, modeFilter = "all" }) => (
 );
 
 /**
- * Rehab, Zumba Class, Fitness, Workshop and Home Visit — Super Admin's five session-shaped
- * shelves, read-only
- * here as every other catalogue is. Same panel, told which category to list; without these
- * the tabs still appear (they come off the shared TABS list) and land on the "coming soon"
- * placeholder, which is not what a branch should see for a shelf that has stock on it.
+ * Rehab, Zumba Class, Workshop and Home Visit — Super Admin's four session-shaped shelves,
+ * read-only here as every other catalogue is. Same panel, told which category to list;
+ * without these the tabs still appear (they come off the shared TABS list) and land on the
+ * "coming soon" placeholder, which is not what a branch should see for a shelf that has
+ * stock on it.
+ *
+ * Fitness is not here any more, having lost its top-level tab. It is read from
+ * Sessions > Fitness instead, which is the only door onto that shelf now and so had to
+ * stop being a placeholder — see BranchSessionsPanel above.
  */
 const SESSION_LIKE_TABS = {
   rehab: { category: "rehab", empty: "No rehab packages available yet." },
   zumba: { category: "zumba", empty: "No Zumba classes available yet." },
-  fitness: { category: "fitness", empty: "No fitness packages available yet." },
   workshop: { category: "workshop", empty: "No workshops available yet." },
   home_visit: { category: "home_visit", empty: "No home visits available yet." },
 };
