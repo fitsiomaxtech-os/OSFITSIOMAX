@@ -400,6 +400,30 @@ const addonParts = ({ treatment, diet, dietConsultation, dietChart, rehab, fitne
 
 const addonsLabel = (decision) => addonParts(decision).join(" + ");
 
+// One colour per service on the plan line under a patient's name, so
+// "Consultation | Treatment (35 Sessions)" reads as two things that were sold rather than
+// one grey sentence nobody stops on. The tones are the ones this board already gives these
+// services -- the addon chips in CONSULTATION_ADDONS, the Consultant fee tab in FEE_TABS --
+// picked from there rather than chosen fresh, so a green "Treatment" on this line means the
+// same Treatment a green chip means in the decision popup.
+//
+// No red among them, deliberately: on a list of patients a red word reads as something
+// wrong with that row, and every part of this line is a service the clinic agreed to give.
+//
+// Order matters. These are matched by prefix, and "Diet Consultation" starts with both
+// "Diet" and, further in, the word Consultation -- it is Diet sitting above Consultation
+// here that makes it colour as the Diet part it is.
+const PLAN_PART_TONES = [
+  ["Diet", "#eb6834"],
+  ["Rehab", "#0891b2"],
+  ["Fitness", "#7c3aed"],
+  ["Zumba", "#db2777"],
+  ["Treatment", "#1baf7a"],
+  ["Consultation", "#0284c7"],
+];
+
+const planPartTone = (part) => PLAN_PART_TONES.find(([label]) => part.startsWith(label))?.[1] || "#64748b";
+
 // What this consultation decided, read off a saved lead for the row under their name.
 // Built from addonParts like everything else, so the line in the list cannot name a
 // different plan from the one the popup shows when you open it.
@@ -3572,14 +3596,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           Truncated with the whole of it on hover — this column is a tenth
                           of the table, and a plan can run to four services. */}
                       {(() => {
-                        const plan = leadPlanParts(l).join(" | ");
+                        const parts = leadPlanParts(l);
+                        const plan = parts.join(" | ");
                         return (
                           <span
                             className="mt-0.5 block truncate text-[10px] font-normal text-slate-400"
                             title={plan}
                             data-testid={`cons-plan-${l.id}`}
                           >
-                            {plan}
+                            {/* Each service tinted in its own colour, kept inline so the
+                                line still truncates as one string in a column this narrow —
+                                the hover title stays the plain "A | B" reading. */}
+                            {parts.map((part, n) => {
+                              const tone = planPartTone(part);
+                              return (
+                                <span key={part}>
+                                  {n > 0 && <span className="px-1 text-slate-300">|</span>}
+                                  <span
+                                    className="rounded-[3px] px-1 py-px font-semibold"
+                                    style={{ background: `${tone}14`, color: tone }}
+                                  >
+                                    {part}
+                                  </span>
+                                </span>
+                              );
+                            })}
                           </span>
                         );
                       })()}
