@@ -5443,7 +5443,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <>
                           {FeeActions}
                           {treatmentFeePaid && showOwnTab && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
-                          {DietDetailButton}
+                          {/* No Diet tab on this row. The Diet Fee card below is the way
+                              into the diet programme from here — a button in the tab row
+                              as well put the same view two doors apart on one screen,
+                              above a panel whose job right now is the fee that is due. */}
                           {RehabDetailButton}
                           {CancelButton}
                         </>
