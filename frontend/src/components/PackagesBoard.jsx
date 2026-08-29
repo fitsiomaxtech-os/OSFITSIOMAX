@@ -46,9 +46,14 @@ export const CONSULTATIONS_SUBTABS = [
   { key: "diet", label: "Diet Consultations", icon: Salad },
 ];
 
+// Each of these is a category the session form already writes to, reached from under
+// Sessions as well as from its own top-level tab. Rehab and Fitness are the same shelf in
+// both places, deliberately: one catalogue read from wherever it is looked for, rather
+// than a second one beside it holding different rows.
 export const SESSIONS_SUBTABS = [
   { key: "physiotherapy", label: "Physiotherapy", icon: Activity },
   { key: "fitness", label: "Fitness", icon: Dumbbell },
+  { key: "rehab", label: "Rehab", icon: HeartPulse },
 ];
 
 export const PlaceholderPanel = ({ label, testid }) => (
@@ -1156,6 +1161,20 @@ const SessionsPanel = ({ reloadToken, toolbarSlot, modeFilter = "all" }) => {
 
       {sub === "physiotherapy" && <SessionsPhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
       {sub === "fitness" && <SessionsPhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
+      {/* Keyed, like the top-level shelves are: without it React keeps the panel instance
+          across a sub-tab switch and the previous category's rows sit there until the new
+          ones land. `noun` matches the Rehab tab's, so Create and the empty state say the
+          same thing whichever way the shelf was reached. */}
+      {sub === "rehab" && (
+        <SessionsPhysiotherapyPanel
+          key="rehab"
+          category="rehab"
+          noun="rehab package"
+          reloadToken={reloadToken}
+          toolbarSlot={toolbarSlot}
+          modeFilter={modeFilter}
+        />
+      )}
     </div>
   );
 };

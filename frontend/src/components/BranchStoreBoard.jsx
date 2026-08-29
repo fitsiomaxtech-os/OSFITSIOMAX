@@ -193,6 +193,21 @@ export const BranchSessionsPanel = ({ reloadToken, modeFilter = "all" }) => {
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-sessions-subpanel-fitness" />}
+      {/* Rehab arrives here because SESSIONS_SUBTABS is the same list Super Admin's page
+          reads, so the sub-tab shows up the moment it is added there. It is the shelf the
+          top-level Rehab tab already lists, read-only as everything on this board is —
+          without this the button would select nothing and leave the panel blank. */}
+      {sub === "rehab" && (
+        <BranchItemsPanel
+          key="rehab"
+          category="rehab"
+          itemType="session"
+          emptyLabel="No rehab packages available yet."
+          testidPrefix="branch-session-rehab"
+          reloadToken={reloadToken}
+          modeFilter={modeFilter}
+        />
+      )}
     </div>
   );
 };
