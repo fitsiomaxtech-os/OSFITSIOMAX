@@ -177,17 +177,31 @@ export function ProgressionTab({ leadId, canUpload = true, canVerify = false }) 
                 the three that are actually files; this one is the review itself. */}
             {req.input === "text" ? (
               <div className="mt-2">
-                <textarea
-                  value={reviewDraft}
-                  onChange={(e) => setReviewDraft(e.target.value)}
-                  disabled={closed}
-                  rows={3}
-                  placeholder="Paste the Google review link, or type the review the patient left"
-                  className="w-full rounded-lg border border-slate-200 p-2.5 text-xs text-slate-700 focus:border-sky-400 focus:outline-none disabled:bg-slate-50"
-                  data-testid="progression-review-text"
-                />
+                {/* The review is written by whoever collected it. A reader who cannot add
+                    one gets it as text rather than as a box that looks fillable and a Save
+                    that would be refused — the same rule the three uploads follow, which
+                    was never applied here because this one is typed rather than filed. */}
+                {canUpload ? (
+                  <textarea
+                    value={reviewDraft}
+                    onChange={(e) => setReviewDraft(e.target.value)}
+                    disabled={closed}
+                    rows={3}
+                    placeholder="Paste the Google review link, or type the review the patient left"
+                    className="w-full rounded-lg border border-slate-200 p-2.5 text-xs text-slate-700 focus:border-sky-400 focus:outline-none disabled:bg-slate-50"
+                    data-testid="progression-review-text"
+                  />
+                ) : req.text ? (
+                  <p className="whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-700" data-testid="progression-review-readonly">
+                    {req.text}
+                  </p>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-slate-200 p-2.5 text-xs italic text-slate-400" data-testid="progression-review-readonly">
+                    Nothing added yet — the physio adds this.
+                  </p>
+                )}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {!closed && (
+                  {canUpload && !closed && (
                     <Button
                       size="sm"
                       disabled={busyKind === "progress_review" || reviewDraft.trim() === (req.text || "").trim()}

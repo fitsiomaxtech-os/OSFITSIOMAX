@@ -4991,7 +4991,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             {detailTab === "progression" && (
               <ProgressionTab
                 leadId={selectedLead.id}
-                canUpload={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                /* The Consultant verifies but does not gather. The clips and the review
+                   come from the physio delivering the course, and this tab is on the
+                   Consultant's popup so somebody other than the person who filmed them
+                   says they count — checking your own work makes the requirement prove
+                   nothing. So: view and verify here, upload elsewhere. */
+                canUpload={["branch_admin", "super_admin"].includes(viewerRole)}
                 canVerify={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
               />
             )}

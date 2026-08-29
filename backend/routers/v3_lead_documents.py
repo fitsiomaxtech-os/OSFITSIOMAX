@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles
+from deps import v3_require_roles, is_physio_role
 from schemas.v3 import V3UserOut
 
 router = APIRouter(prefix="/api/v3")
@@ -125,6 +125,24 @@ def is_shared_with_patient(doc: dict) -> bool:
 # delete one.
 READ_ROLES = ("branch_admin", "super_admin", "head_physio", "physio", "nutrition_coach")
 WRITE_ROLES = ("branch_admin", "super_admin", "head_physio")
+
+# The case sheet's four are the exception, and a narrow one. A physio still may not file or
+# remove a patient's reports — that is what WRITE_ROLES is about, and a report is ordered by
+# the branch or the Consultant. But the progression clips and the review are gathered by the
+# physio delivering the course, because they are the only person in the room for them: they
+# film the week, they ask for the review.
+#
+# So the physio may add these kinds and nothing else, and may not verify any of them. The
+# Consultant verifies, which is the whole point of the split — somebody other than whoever
+# filmed it says it counts, and checking your own work makes the requirement prove nothing.
+PROGRESSION_WRITE_ROLES = (*WRITE_ROLES, "physio")
+
+
+def may_write_kind(role: str, kind: str) -> bool:
+    """Whether this role may add something of this kind."""
+    if role in WRITE_ROLES:
+        return True
+    return is_physio_role(role) and (kind or GENERAL) in {k for k, *_ in PROGRESSION_KINDS}
 
 
 async def store_upload(file: UploadFile, doc_id: str, ext: str) -> tuple:
@@ -238,8 +256,14 @@ async def upload_lead_document(
     file: UploadFile = File(...),
     label: Optional[str] = Form(""),
     kind: Optional[str] = Form(GENERAL),
-    user: V3UserOut = Depends(v3_require_roles(*WRITE_ROLES)),
+    user: V3UserOut = Depends(v3_require_roles(*PROGRESSION_WRITE_ROLES)),
 ):
+    # A physio gets in for the case sheet's clips and nothing else. Checked on the kind
+    # rather than at the door, because the door is the same one a consultation form comes
+    # through — widening it would hand them the whole of a patient's file.
+    if not may_write_kind(user.role, kind or GENERAL):
+        raise HTTPException(status_code=403, detail="Not allowed")
+
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1, "name": 1})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -324,7 +348,7 @@ class ReviewInput(BaseModel):
 async def set_google_review(
     lead_id: str,
     payload: ReviewInput,
-    user: V3UserOut = Depends(v3_require_roles(*WRITE_ROLES)),
+    user: V3UserOut = Depends(v3_require_roles(*PROGRESSION_WRITE_ROLES)),
 ):
     """The patient's Google review — the link, or the words themselves.
 
