@@ -137,6 +137,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
         stage: done ? "Consultation · Completed" : "Consultation",
         tone: done ? "emerald" : "sky",
         when: l.appointment_date ? `${l.appointment_date} ${to12h(l.appointment_time)}` : "",
+        // Sorted on separately from `when`, which is written to be read: to12h turns 15:00
+        // into "3:00 PM", and "3:00 PM" sorts above "10:00 AM" as text. This is the raw
+        // 24-hour value, zero-padded, which compares correctly.
+        at: `${l.appointment_date}T${l.appointment_time || "99:99"}`,
         who: l.assigned_physio_name || "",
       };
     }),
@@ -150,9 +154,25 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       stage: r.status === "completed" ? "Review · Completed" : "Review",
       tone: r.status === "completed" ? "emerald" : "violet",
       when: r.review_date || "",
+      // A review is booked on a day and not at an hour, so it sorts to the end of its own
+      // day rather than to some invented time inside it.
+      at: r.review_date ? `${r.review_date}T99:99` : "",
       who: r.physio_name || "",
     })),
-  ], [consultRows, reviewRows]);
+  ]
+    // In the order the day is worked -- 10:00 AM, then 3:00 PM, then 5:00 PM -- the same
+    // order the Consultations tab beside this one is in. The rows arrive newest-updated
+    // first, which is the order they were last touched in and not the order they happen
+    // in; merging two queues that way put whoever was edited most recently on top of a
+    // list somebody reads downwards.
+    //
+    // Anything with no date at all goes last rather than first, where an empty string
+    // would otherwise put it.
+    .sort((a, b) => {
+      if (!a.at) return b.at ? 1 : 0;
+      if (!b.at) return -1;
+      return a.at.localeCompare(b.at);
+    }), [consultRows, reviewRows]);
 
   // What All actually renders. Narrowed by the filter on the All card itself; the
   // count on that card stays the full total, because it is the card's own figure and
