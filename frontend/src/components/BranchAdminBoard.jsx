@@ -611,9 +611,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // Bumped by Refresh. loadBoard only reloads the branch leads; on a consultation stage
   // the rows on screen come from ConsultationsBoard, which needs telling separately.
   const [refreshTick, setRefreshTick] = useState(0);
-  // Callback ref, not useRef: the Consultations board only portals once this node exists,
-  // and a plain ref's assignment does not re-render to tell it so.
-  const [feeTabsSlot, setFeeTabsSlot] = useState(null);
   const [showCreateLead, setShowCreateLead] = useState(false);
   // Ticked rows in the leads table, and the confirm dialog they feed. A Set because this
   // is asked "is this row ticked" once per row on every render, and 2,000 rows against an
@@ -1143,8 +1140,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 below instead. The same instance would have had to be two anyway — one
                 row cannot be both in the toolbar and under it.
 
-                shrink-0 so the search is what gives way when the Fee Collected picker
-                lands in the slot below and the row gets tighter. */}
+                shrink-0 so the search is what gives way when the row gets tighter. */}
             {onConsultationTab && (
               <div className="hidden shrink-0 xl:block">
                 <QuickDateFilterBar
@@ -1163,15 +1159,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 and leaving these beside it would overflow again, which is the whole thing
                 being fixed. */}
             {!searchOpen && branchPicker}
-            {/* Where the Fee Collected picker lands — Consultation / Treatment / Diet, in
-                the toolbar rather than on a row of its own below it, which is where it
-                sits in reading order: pick the fee, then the date, then act. The board
-                that owns the picker portals it in here (see toolbarSlot).
-
-                `contents` rather than a plain div: an empty slot would otherwise still be
-                a flex item and take one of the toolbar's gaps on every stage that has no
-                picker to show. */}
-            <div ref={setFeeTabsSlot} className="contents" />
             {/* Icons only. The labels live on title/aria-label rather than being dropped,
                 so hovering still says what each one does and a screen reader still
                 announces it — an unlabelled glyph that announces nothing is a button only
@@ -1308,9 +1295,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               // table under them would show everybody.
               externalMarkFilter={markFilter}
               reloadToken={refreshTick}
-              // Puts its Fee Collected picker in the toolbar above rather than on its own
-              // row underneath — see the slot in that toolbar.
-              toolbarSlot={feeTabsSlot}
               // Eight columns can't be read on a phone — without this the consultation
               // stages fall back to the desk table and every field arrives truncated.
               mobileCards

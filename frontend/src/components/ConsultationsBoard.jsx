@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2, Video } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1186,7 +1185,7 @@ const appointmentTone = (date) => {
   return on > today ? APPOINTMENT_TONE.upcoming : APPOINTMENT_TONE.past;
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, toolbarSlot = null, onlineArm = false }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
   // worth remarking on when they are assigned. Passed in rather than worked out here for
@@ -1659,9 +1658,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [feeTab, setFeeTab] = useState("consultation");
   const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
 
-  // How many patients are behind each fee, counted off the stage's own rows. On pills this
-  // was optional decoration; in a dropdown it is the only way to see that Rehab holds eight
-  // and Diet five without opening each in turn.
+  // How many patients are behind each fee, counted off the stage's own rows. Carried on the
+  // tab itself as a badge, so that Rehab holds eight and Diet five is readable from the row
+  // without opening either.
   const feeCounts = useMemo(() => {
     if (!showDiscountColumn) return {};
     const out = {};
@@ -3326,44 +3325,50 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setAssigningDiet(false);
   };
 
-  // The fee picker for the Fee Collected stage. Held as a function because it renders in
-  // one of two places: its own row under the toolbar, or — when the parent hands down a
-  // slot — inside that toolbar, ahead of the date filter. `compact` drops the card wrapper
-  // for the second, where the toolbar is already the card.
-  const feeTabsBar = (compact) => (
-        // The row was three pills against a wide empty white band. The purchased / not
-        // purchased picker takes that space at the far end, which both fills it and puts
-        // the two controls in reading order: pick the fee, then pick which half of it.
-        <div className={compact
-          ? "flex shrink-0 items-center gap-1.5"
-          : "flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-1"}
-          data-testid={compact ? "cons-fee-tabs-toolbar" : "cons-fee-tabs"}>
-        {/* One dropdown rather than a pill each. At three they fitted the toolbar; Rehab
-            made four and Fitness would have made five, and five pills push the search box
-            off a laptop before they push it off a phone. The name of the desk is the whole
-            label, and every option carries its own count so the size of each is readable
-            without opening it. */}
-        <label className="flex min-w-0 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white pl-2.5 pr-1" data-testid="cons-fee-picker">
-          <IndianRupee className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-          <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+  // The fee picker for the Fee Collected stage: one sub-tab per desk, on a row of its own
+  // under the toolbar — the same shape every other board's sub-tabs take (see Packages'
+  // sessions-subtabs), which is the shape this one had before it was folded into a select.
+  //
+  // Tabs rather than a dropdown because all four answers are the point. The branch reads
+  // this row to see what came in from each desk today, and a dropdown shows one desk at a
+  // time and hides the other three behind a click. Four desk names and four badges fit a
+  // laptop row with room to spare; they wrap on a phone rather than overflow.
+  const feeTabsBar = (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="cons-fee-tabs">
+          {/* The phrase once, on the row, rather than four times across it. The dropdown
+              carried it as a caption and each option repeated it; as tabs, "Consultant Fee
+              Collected / Physio Fee Collected / Rehab Fee Collected / Diet Fee Collected"
+              is the same three words read four times and twice the row. What differs
+              between the tabs is the desk, so the desk is what the tab is called. */}
+          <span className="ml-1.5 mr-1 shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-slate-400">
             Fee Collected
           </span>
-          <select
-            value={activeFee.key}
-            onChange={(e) => setFeeTab(e.target.value)}
-            aria-label="Which fee to show"
-            className="h-9 min-w-0 max-w-[15rem] appearance-none rounded-md border-0 bg-transparent pl-1 pr-2 text-xs font-semibold outline-none"
-            style={{ color: activeFee.tone }}
-            data-testid="cons-fee-select"
-          >
-            {FEE_TABS.map((t) => (
-              <option key={t.key} value={t.key} className="text-slate-800">
-                {t.label} Fee Collected ({feeCounts[t.key] ?? 0})
-              </option>
-            ))}
-          </select>
-          </label>
-
+          {FEE_TABS.map((t) => {
+            const on = t.key === activeFee.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setFeeTab(t.key)}
+                aria-pressed={on}
+                // The visible label is one word now, so the full question goes on the
+                // accessible name — "Physio" alone tells a screen reader nothing.
+                aria-label={`${t.label} Fee Collected (${feeCounts[t.key] ?? 0})`}
+                // flex-1 below sm so four tabs share a phone's width evenly instead of
+                // leaving a ragged last row; at sm+ each takes only the width of its label.
+                className={`flex-1 rounded-md px-3 py-2 text-left transition sm:flex-none ${on ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                style={on ? { background: t.tone } : undefined}
+                data-testid={`cons-fee-tab-${t.key}`}
+              >
+                <span className="block whitespace-nowrap text-xs font-semibold">
+                  {t.label}
+                  <span className={`ml-1.5 rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
+                    {feeCounts[t.key] ?? 0}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </div>
   );
 
@@ -3410,22 +3415,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       </div>
 
       {/* Which fee the Fee Collected list is showing. Only here: this stage is the one
-          place where a patient may have paid up to three separate things, and everywhere
-          else there is nothing yet to split. Each tab carries its own count and total, so
-          the three questions the branch actually asks of this stage — what came in from
-          consultations, from treatment, from diet — are answered without opening a row.
+          place where a patient may have paid up to four separate things, and everywhere
+          else there is nothing yet to split. Each tab carries its own count, so the
+          questions the branch actually asks of this stage — what came in from the
+          consultant, from physio, from rehab, from diet — are answered without opening
+          a row, and at a glance rather than one desk per click.
+
+          A row of its own under the toolbar, not inside it. Four tabs will not share that
+          line with the search box and the range buttons at any width worth designing for,
+          and this is a sub-tab bar over the list below — the same place, and the same
+          shape, every other board puts one.
 
           Above both the phone cards and the desk table, because it governs both: it filters
           `filtered`, which each of them renders. */}
-      {showDiscountColumn && (toolbarSlot ? (
-        <>
-          {/* Into the toolbar, immediately before the date filter. Desktop only: that
-              row already fights for width on a phone — six controls against 330px — so
-              below sm the picker keeps the line of its own it has always had. */}
-          {createPortal(<div className="hidden shrink-0 sm:flex">{feeTabsBar(true)}</div>, toolbarSlot)}
-          <div className="sm:hidden">{feeTabsBar(false)}</div>
-        </>
-      ) : feeTabsBar(false))}
+      {showDiscountColumn && feeTabsBar}
 
       {mobileCards && (
         <div className="space-y-2 sm:hidden" data-testid="cons-mobile-cards">
