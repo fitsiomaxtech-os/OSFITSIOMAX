@@ -4455,6 +4455,112 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               );
             })()}
 
+            {/* What the Consultant decided, read back for the branch — sitting between the
+                consultation's own two boxes and the panel that collects money against it.
+                The Consultant has this card already (cons-decision-summary, above), but
+                only they could see it: a Branch Admin opening a patient to take a fee saw
+                the diagnosis and the treatment list and then a payment panel, with the
+                plan those fees are FOR named nowhere on the screen. Read-only here — the
+                decision is the Consultant's to change, and Edit stays on their card. */}
+            {!isConsultant && !!selectedLead.consultation_decision && (() => {
+              const weeks = weeksFromPackageName(selectedLead.session_package_name);
+              const total = selectedLead.session_package_sessions || 0;
+              const perWeek = weeks && total ? Math.round(total / weeks) : 0;
+              const onTreatment = selectedLead.consultation_decision === "consultation_treatment";
+
+              // One row per service the patient is going away with, in the shelf's own
+              // order — built off the same lead fields addonsLabel reads, so the headline
+              // and the rows under it cannot name different plans.
+              const rows = [
+                onTreatment && {
+                  icon: Activity,
+                  label: "Treatment Package",
+                  value: selectedLead.session_package_name || "Not named",
+                  note: perWeek && weeks
+                    ? `${perWeek} weekly × ${weeks} week${weeks === 1 ? "" : "s"} = ${total} sessions`
+                    : total ? `${total} sessions` : null,
+                },
+                selectedLead.diet_recommended && {
+                  icon: Salad,
+                  label: "Diet",
+                  value: dietLabels({
+                    diet: true,
+                    dietConsultation: !!selectedLead.diet_consultation,
+                    dietChart: !!selectedLead.diet_chart,
+                  }).join(" + "),
+                  note: null,
+                },
+                selectedLead.rehab_referred && {
+                  icon: HeartPulse,
+                  label: "Rehab Package",
+                  value: selectedLead.rehab_package_name || "Referred",
+                  note: selectedLead.rehab_package_sessions ? `${selectedLead.rehab_package_sessions} sessions` : null,
+                },
+                selectedLead.fitness_recommended && {
+                  icon: Dumbbell,
+                  label: "Fitness",
+                  value: "Referred",
+                  note: null,
+                },
+                selectedLead.zumba_recommended && {
+                  icon: Music2,
+                  label: "Zumba Plan",
+                  value: selectedLead.zumba_package_name || "Referred",
+                  note: null,
+                },
+              ].filter(Boolean);
+
+              return (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-treatment-suggestions">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                      <ClipboardCheck className="h-3.5 w-3.5" /> Treatment Suggestions
+                    </p>
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      From the Consultant
+                    </span>
+                  </div>
+
+                  {/* The plan in one line first, then what each part of it actually is —
+                      the same order the Consultant confirmed it in. */}
+                  <p className="text-sm font-semibold text-slate-800" data-testid="cons-treatment-suggestions-plan">
+                    {addonsLabel({
+                      treatment: onTreatment,
+                      diet: !!selectedLead.diet_recommended,
+                      dietConsultation: !!selectedLead.diet_consultation,
+                      dietChart: !!selectedLead.diet_chart,
+                      rehab: !!selectedLead.rehab_referred,
+                      fitness: !!selectedLead.fitness_recommended,
+                      zumba: !!selectedLead.zumba_recommended,
+                    })}
+                  </p>
+
+                  {rows.length > 0 ? (
+                    <div className="mt-2 rounded-md border border-emerald-100 bg-white">
+                      <dl className="divide-y divide-emerald-50">
+                        {rows.map((r) => {
+                          const Icon = r.icon;
+                          return (
+                            <div key={r.label} className="flex items-baseline justify-between gap-3 px-2.5 py-1.5">
+                              <dt className="flex shrink-0 items-center gap-1.5 text-[11px] text-slate-500">
+                                <Icon className="h-3 w-3 text-slate-400" /> {r.label}
+                              </dt>
+                              <dd className="min-w-0 truncate text-right text-xs font-semibold text-slate-800" title={r.value}>
+                                {r.value}
+                                {r.note && <span className="ml-1 font-medium text-slate-400">· {r.note}</span>}
+                              </dd>
+                            </div>
+                          );
+                        })}
+                      </dl>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-slate-500">A plain consultation — nothing else was recommended.</p>
+                  )}
+                </div>
+              );
+            })()}
+
             {!isConsultant && (() => {
               const stage = selectedLead.consultation_stage;
               const decision = selectedLead.consultation_decision;
