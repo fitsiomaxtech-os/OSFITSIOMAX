@@ -3345,7 +3345,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // so nothing here requires at least one to be picked. Diet asks nothing
               // either: the referral is to the Nutritionist's consultation, which is the
               // whole of what a Consultant decides on that side.
-              const canSave = diagnosisReady && summaryReady && packageReady;
+              //
+              // Rehab does ask. It is a course of a named length at a named price, so a
+              // patient referred to it with no package chosen reaches the branch with
+              // nothing to book and nothing to collect -- the same gap Confirm is held
+              // open for on the Treatment package above, held here the same way.
+              const rehabReady = !decisionDraft.rehab || !!decisionDraft.rehab_item_id;
+              const canSave = diagnosisReady && summaryReady && packageReady && rehabReady;
 
               // What the Consultant has ticked, in the shelf's own order. The detail column
               // is built from this rather than from five separate conditionals, so a card
@@ -3416,8 +3422,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   const items = key === "rehab" ? rehabPackageItems : zumbaPackageItems;
                   const id = key === "rehab" ? decisionDraft.rehab_item_id : decisionDraft.zumba_item_id;
                   const item = items.find((i) => i.id === id);
-                  // Optional on both, so no package is an answer rather than a gap.
-                  if (!item) return { text: "No package", incomplete: false };
+                  // Zumba is a standing referral: the classes run either way, so no
+                  // package there means the patient was sent to them without one bought up
+                  // front. Rehab is a course or it is nothing -- ticked with no package it
+                  // names no sessions, no price and nothing for the branch to book or
+                  // collect, so the tick on its own is a gap rather than an answer.
+                  if (!item) return key === "rehab"
+                    ? { text: "Choose a package", incomplete: true }
+                    : { text: "No package", incomplete: false };
                   const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
                   const unit = key === "zumba" ? "classes" : "sessions";
                   return { text: `${item.name}${count ? ` · ${count} ${unit}` : ""}`, incomplete: false };
@@ -3468,7 +3480,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 if (key === "rehab") {
                   return (
                     <div data-testid="cons-decision-rehab-package">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Rehab Package <span className="font-normal text-slate-400">(optional)</span></label>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Rehab Package</label>
                       <div className="flex flex-wrap gap-2" data-testid="cons-decision-rehab-options">
                         {rehabPackageItems.map((i) => {
                           const selected = decisionDraft.rehab_item_id === i.id;
@@ -3476,9 +3488,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <button
                               key={i.id}
                               type="button"
-                              // Clicking the chosen one again clears it, which is the only
-                              // way back to no course once one has been picked.
-                              onClick={() => setDecisionDraft((prev) => ({ ...prev, rehab_item_id: selected ? "" : i.id }))}
+                              // Always a selection, never a clear. Rehab has to carry a
+                              // package, so clicking the chosen one again would only put
+                              // the form back into the state Confirm refuses -- the way
+                              // out of Rehab is Remove Rehab, which says so on the button.
+                              onClick={() => setDecisionDraft((prev) => ({ ...prev, rehab_item_id: i.id }))}
                               className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
                                 selected
                                   ? "border-cyan-600 bg-cyan-600 text-white"
@@ -3830,6 +3844,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   {addonPicker && (() => {
                     const a = CONSULTATION_ADDONS.find((x) => x.key === addonPicker);
                     if (!a || !decisionDraft[addonPicker]) return null;
+                    // What this service still needs, read off the same helper the row in
+                    // the form reads, so the popup and the row can never disagree about
+                    // whether the choice has been made.
+                    const pickerSummary = addonSummary(addonPicker);
                     const Icon = a.icon;
                     return (
                       <div
@@ -3864,10 +3882,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             >
                               Remove {a.label}
                             </Button>
+                            {/* Shut while the open picker is still missing something, so
+                                the popup cannot be dismissed by the one button that reads
+                                like the choice was made. The X and the backdrop still
+                                close it -- this is not a trap, it is the difference
+                                between leaving and finishing. */}
                             <Button
                               size="sm"
                               className="h-8 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
                               onClick={() => setAddonPicker(null)}
+                              disabled={pickerSummary.incomplete}
+                              title={pickerSummary.incomplete ? pickerSummary.text : undefined}
                               data-testid="cons-decision-picker-done"
                             >
                               Done
