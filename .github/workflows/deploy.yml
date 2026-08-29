@@ -6,9 +6,55 @@ on:
       - main
 
 jobs:
-  deploy:
-    runs-on: [self-hosted, osfitsiomax-vps]
+  # Nothing in this pipeline used to look at the code before it reached the
+  # server. The deploy job ran the script on the VPS and that was the whole of
+  # it, so every build check anyone made was voluntary and local -- which is no
+  # check at all. On 2026-08-29 a commit was one command away from shipping a
+  # component that imported a module nobody had committed; the build step below
+  # is what catches that class of failure.
+  #
+  # This runs on a GitHub-hosted runner rather than the VPS. The repo is public,
+  # so they cost nothing, and a verification competing for the box it is meant
+  # to be protecting is not much of a safety net.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # `npm install` rather than `npm ci`: package-lock.json is not tracked in
+      # this repo, and `ci` refuses to run without one. If the lockfile is ever
+      # committed, switch this to `npm ci` -- it is faster and it pins.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+
+      # CI is forced false because create-react-app promotes warnings to errors
+      # when it is set, and this tree carries pre-existing exhaustive-deps
+      # warnings in BranchReviewPanel, ClientHistoryModal, NetCashflowSunburst
+      # and CRMPage. The gate is here to catch what does not compile, not to
+      # fail a deploy on lint that was already on main before it existed.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+        env:
+          CI: false
+
+      # Python syntax only -- a half-saved router, which is a state this repo
+      # reaches whenever more than one session is writing to it. It does NOT
+      # check imports or anything at runtime. Note which step catches what: a
+      # JavaScript import of a module nobody committed fails in the build step
+      # above, not here.
+      - name: Compile backend
+        run: python3 -m compileall -q backend
+
+  # Gated. The VPS is only touched once the tree above has been shown to build.
+  deploy:
+    needs: verify
+    runs-on: [self-hosted, osfitsiomax-vps]
     steps:
       - name: Deploy to VPS
         run: bash /root/deploy-osfitsiomax.sh
