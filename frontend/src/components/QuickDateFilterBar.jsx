@@ -18,6 +18,10 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
  *           { key, label, from: Date|null, to: Date|null } | null. null means All.
  *  - onChange: (next) => void. Emits null for All.
  *  - testid: string prefix for the row's test ids.
+ *  - inline: true when the row is being dropped into a toolbar beside other controls
+ *            rather than standing on a line of its own. It then refuses to wrap and
+ *            refuses to be shrunk, so the six ranges stay on one line and whatever
+ *            elastic sits beside them (a search field) gives up the width instead.
  */
 
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
@@ -74,7 +78,7 @@ export const intersectDateFilters = (a, b) => {
   return { key: `${a.key}+${b.key}`, label: `${a.label} · ${b.label}`, from, to };
 };
 
-export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date" }) => {
+export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inline = false }) => {
   // What lights up. All is the resting state, so a cleared filter lights All rather than
   // leaving the row with nothing selected and no way to tell it apart from a custom range.
   const activeKey = value?.key || "all";
@@ -83,8 +87,16 @@ export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date" }) =
   return (
     /* One row at every width, six equal columns on a phone so nothing lands off screen —
        an overflow-x row here puts Last 90 Days half past the edge. Desktop keeps natural
-       widths, since stretching six buttons across a 1400px board would be absurd. */
-    <div className="flex items-center gap-1 sm:flex-wrap sm:gap-2" data-testid={testid}>
+       widths, since stretching six buttons across a 1400px board would be absurd.
+
+       Standing alone the row may wrap on a wide-but-crowded board, which costs nothing
+       when there is only empty page under it. Inline in a toolbar it must not: wrapping
+       there breaks the one line the toolbar is, so it holds its width and the field
+       beside it shrinks instead. */
+    <div
+      className={`flex items-center gap-1 sm:gap-2 ${inline ? "shrink-0 flex-nowrap" : "sm:flex-wrap"}`}
+      data-testid={testid}
+    >
       {QUICK_DATE_PRESETS.map((p) => (
         <button
           key={p.key}

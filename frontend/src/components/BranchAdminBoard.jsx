@@ -1133,6 +1133,28 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 data-testid="branch-search"
               />
             </div>
+            {/* The one-tap ranges, in the toolbar beside the search rather than on a row
+                of their own underneath: search, then ranges, then the actions, one
+                horizontal line that never wraps.
+
+                From xl only. The six ranges want ~570px and the five action buttons on the
+                right ~240px; under about 1280px they cannot share a line with the search
+                without squeezing it to a stub, so narrower screens keep the stacked row
+                below instead. The same instance would have had to be two anyway — one
+                row cannot be both in the toolbar and under it.
+
+                shrink-0 so the search is what gives way when the Fee Collected picker
+                lands in the slot below and the row gets tighter. */}
+            {onConsultationTab && (
+              <div className="hidden shrink-0 xl:block">
+                <QuickDateFilterBar
+                  value={quickDate}
+                  onChange={setQuickDate}
+                  testid="branch-cons-quick-date-inline"
+                  inline
+                />
+              </div>
+            )}
             {/* Branch Wise's own picker, handed down so it sits in this row rather than in
                 a bar of its own above it. Nothing renders here on a real Branch Admin's
                 board — they have one branch and never pick.
@@ -1200,7 +1222,18 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                   <AlertCircle className={`h-4 w-4 ${markFilter === "attention" ? "fill-rose-500 text-white" : "text-slate-400"}`} />
                 </button>
             </div>
-            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
+            {/* Off the Consultation toolbar. The range row beside it ends in this exact
+                popover — Custom is a DateFilterPopover — so keeping both put two calendars
+                on one line asking the same question, and the row the branch asked for has
+                five buttons on the end, not six.
+
+                It returns the moment it actually holds a range. This filter is kept across
+                tabs, so one set over Branch Leads would otherwise go on narrowing the
+                consultation list from off-screen with nothing left to clear it. Branch
+                Leads, which has no range row, always shows it. */}
+            {(!onConsultationTab || dateFilter) && (
+              <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
+            )}
             <Button
               onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
               disabled={loading}
@@ -1229,27 +1262,29 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             </div>
           </div>
 
-          {/* A second date control, and deliberately not a replacement for the calendar
-              button in the toolbar above — that one still opens the shared popover with
-              Yesterday, Last Month and an exact day in it, unchanged.
+          {/* The same range row as the one in the toolbar, for the widths where it will
+              not fit up there — below xl this is the only copy on screen, and above it
+              this one is the one that goes.
 
-              This row is the fast path: the four ranges a branch actually asks for, one tap
-              each, with the same popover on the end for anything else. It sits under the
-              toolbar rather than in it because six more controls would not fit beside the
-              search, and because the ranges narrow the whole screen — the stage counts
-              above as well as the rows below — so they read better on a line of their own
-              spanning both.
+              A second date control, and deliberately not a replacement for the calendar
+              button the toolbar keeps on Branch Leads — that one still opens the shared
+              popover with Yesterday, Last Month and an exact day in it, unchanged.
+
+              The fast path: the four ranges a branch actually asks for, one tap each, with
+              the same popover on the end for anything else.
 
               Consultation tab only, and it reaches every stage: the range is folded into
               effectiveDateFilter, which feeds both the stage counts on the bar above and
               the ConsultationsBoard underneath, so a pill's number always describes the
               list that pill opens. */}
           {onConsultationTab && (
-            <QuickDateFilterBar
-              value={quickDate}
-              onChange={setQuickDate}
-              testid="branch-cons-quick-date"
-            />
+            <div className="xl:hidden">
+              <QuickDateFilterBar
+                value={quickDate}
+                onChange={setQuickDate}
+                testid="branch-cons-quick-date"
+              />
+            </div>
           )}
 
           {onConsultationTab ? (
