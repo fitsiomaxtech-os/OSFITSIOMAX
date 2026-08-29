@@ -2019,28 +2019,33 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
           top of the list, and nothing to tap beside it to dismiss. Height is capped so
           the darkened list stays visible above and below; the body below scrolls. */}
       <div className="flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[90vh] sm:max-w-2xl" data-testid="branch-lead-modal">
-        {/* Gradient header */}
-        <div className="relative bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500 px-5 py-4 text-white">
+        {/* Plain header. The gradient made this the loudest thing on a screen whose
+            subject is the cards underneath — the patient's name and their stage are the
+            information here, and they read better on white than reversed out of three
+            colours. Every chip in it had been picked to survive that background: white on
+            20% white, a name with no colour of its own inheriting the band's. Those are
+            set against the page now instead. */}
+        <div className="relative border-b border-slate-200 bg-white px-5 py-4">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/95 text-base font-bold text-indigo-600 shadow-md">{avatarFirstChar}</span>
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-base font-bold text-slate-600 ring-1 ring-slate-200">{avatarFirstChar}</span>
               <div>
-                <p className="text-base font-semibold leading-tight" data-testid="branch-lead-name">{lead.name}</p>
+                <p className="text-base font-semibold leading-tight text-slate-900" data-testid="branch-lead-name">{lead.name}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   {lead.patient_number && (
-                    <span className="rounded-[5px] bg-white/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-white" data-testid="branch-lead-patient-number">{lead.patient_number}</span>
+                    <span className="rounded-[5px] bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-600" data-testid="branch-lead-patient-number">{lead.patient_number}</span>
                   )}
-                  <span className="rounded-[5px] bg-white/95 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700" data-testid="branch-lead-stage">
+                  <span className="rounded-[5px] border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700" data-testid="branch-lead-stage">
                     {/* Named the same way the row that opened this popup was: opened from
                         Leads it reads Leads, and the pipeline below highlights Leads too. */}
                     {headerStageName ? stageDisplayLabel(headerStageName) : "No Stage"}
                   </span>
-                  {lead.consultation_fee && <span className="rounded-full bg-teal-100/95 px-2 py-0.5 text-[10px] font-semibold text-teal-800">Fee Rs.{lead.consultation_fee}</span>}
-                  {lead.package_amount && <span className="rounded-full bg-emerald-100/95 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">Pkg Rs.{lead.package_amount}</span>}
+                  {lead.consultation_fee && <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700 ring-1 ring-teal-100">Fee Rs.{lead.consultation_fee}</span>}
+                  {lead.package_amount && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100">Pkg Rs.{lead.package_amount}</span>}
                 </div>
               </div>
             </div>
-            <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="branch-lead-close">
+            <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" data-testid="branch-lead-close">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -2074,13 +2079,32 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 </div>
               </div>
 
-              {(lead.appointment_department || lead.appointment_mode || lead.diagnosis) && (
+              {/* The booked slot leads, because on a lead sitting at Appointment that is
+                  the thing somebody opened this popup to read. It used to be missing
+                  entirely: the card was drawn only when a department, a mode or a
+                  diagnosis had been filled in, none of which booking an appointment
+                  writes — so a patient with a day and a time on file had a popup that
+                  never mentioned either, and the only sign of the appointment was the
+                  word in the header. */}
+              {(lead.appointment_date || lead.appointment_time || lead.appointment_department || lead.appointment_mode || lead.diagnosis) && (
                 <div className="overflow-hidden rounded-xl border border-blue-100 bg-white shadow-sm" data-testid="branch-lead-appointment-details">
                   <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
                     <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-700"><ClipboardList className="h-4 w-4" /></span>
                     <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Appointment Details</p>
                   </div>
                   <div className="space-y-2 px-4 py-3">
+                    {lead.appointment_date && (
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="shrink-0 text-xs font-medium text-slate-500">Date</span>
+                        <span className="text-right font-medium text-slate-800" data-testid="branch-lead-appt-date">{weekdayLabel(lead.appointment_date)}</span>
+                      </div>
+                    )}
+                    {lead.appointment_time && (
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="shrink-0 text-xs font-medium text-slate-500">Time</span>
+                        <span className="text-right font-semibold text-slate-900" data-testid="branch-lead-appt-time">{to12h(lead.appointment_time)}</span>
+                      </div>
+                    )}
                     {lead.appointment_department && (
                       <div className="flex items-center justify-between text-sm"><span className="text-xs font-medium text-slate-500">Service</span><span className="font-medium capitalize text-slate-800">{lead.appointment_department === "physio" ? "Physiotherapy" : "Fitness"}</span></div>
                     )}
