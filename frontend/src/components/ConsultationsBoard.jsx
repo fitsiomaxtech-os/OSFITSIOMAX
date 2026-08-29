@@ -3189,7 +3189,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     onUnlock={unlockPhysioDiag}
                     rows={3}
                     placeholder="Write the full diagnosis report..."
-                    presetKind="diagnosis_report"
+                    /* No preset picker here. A diagnosis is written about one patient, so
+                       a saved phrase to drop in is a phrase that fits somebody else — and
+                       the dropdown and its Save sat above the box making the one thing
+                       this card is for look like the second thing to do. The text saves
+                       itself as it is typed, so there is nothing else to press. */
                     testPrefix="cons-physio-diagnosis"
                   />
                 )}
