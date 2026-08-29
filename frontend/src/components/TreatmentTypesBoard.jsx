@@ -22,7 +22,15 @@ import { getTreatmentTypes, createTreatmentType, updateTreatmentType, deleteTrea
  * words it was written with: those are clinical notes, and correcting a spelling in the
  * catalogue is not licence to edit what a Head Physio recorded on the day.
  */
-export const TreatmentTypesBoard = () => {
+/**
+ * `canEdit` off is the branch's copy of this list.
+ *
+ * The catalogue is Super Admin's to keep -- the create, rename and delete endpoints are
+ * all super_admin-only -- so a branch shown the buttons would get a form that 403s on
+ * submit. It reads the same list from the same place and nothing else, which is the whole
+ * of what a branch needs from it: to see what the OS offers, not to change it.
+ */
+export const TreatmentTypesBoard = ({ canEdit = true }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -103,6 +111,7 @@ export const TreatmentTypesBoard = () => {
         </Button>
         {/* Icon-only on a phone, full label from sm up — the words would take half the row
             on the narrowest screen for a button used occasionally. */}
+        {canEdit && (
         <Button
           onClick={() => setShowCreate(true)}
           className="h-10 w-10 shrink-0 bg-sky-600 p-0 text-white hover:bg-sky-700 sm:w-auto sm:px-4"
@@ -113,6 +122,7 @@ export const TreatmentTypesBoard = () => {
           <Plus className="h-4 w-4 sm:mr-1" />
           <span className="hidden sm:inline">Create Treatment</span>
         </Button>
+        )}
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white">
@@ -130,8 +140,11 @@ export const TreatmentTypesBoard = () => {
             <p className="text-sm text-slate-500">
               {rows.length === 0 ? "No treatments yet." : `Nothing matches "${search}".`}
             </p>
-            {rows.length === 0 && (
+            {rows.length === 0 && canEdit && (
               <p className="text-xs text-slate-400">Click <span className="font-semibold">Create Treatment</span> to add the first one.</p>
+            )}
+            {rows.length === 0 && !canEdit && (
+              <p className="text-xs text-slate-400">Super Admin adds them in Services and Products &gt; Treatments.</p>
             )}
           </div>
         ) : (
@@ -140,6 +153,7 @@ export const TreatmentTypesBoard = () => {
               <li key={row.id} className="flex items-center gap-3 px-4 py-3" data-testid={`treatment-row-${row.id}`}>
                 <ClipboardList className="h-4 w-4 shrink-0 text-slate-300" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{row.name}</span>
+                {canEdit && (
                 <button
                   onClick={() => setEditing({ id: row.id, name: row.name })}
                   className="shrink-0 rounded p-1.5 text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
@@ -149,6 +163,8 @@ export const TreatmentTypesBoard = () => {
                 >
                   <Pencil className="h-4 w-4" />
                 </button>
+                )}
+                {canEdit && (
                 <button
                   onClick={() => setConfirmDelete(row)}
                   className="shrink-0 rounded p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
@@ -158,13 +174,14 @@ export const TreatmentTypesBoard = () => {
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      {showCreate && (
+      {canEdit && showCreate && (
         <CreateTreatmentDialog
           existing={rows}
           onClose={() => setShowCreate(false)}
@@ -172,7 +189,7 @@ export const TreatmentTypesBoard = () => {
         />
       )}
 
-      {editing && (
+      {canEdit && editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="treatment-edit-dialog">
           <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
@@ -204,7 +221,7 @@ export const TreatmentTypesBoard = () => {
         </div>
       )}
 
-      {confirmDelete && (
+      {canEdit && confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="treatment-delete-dialog">
           <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
             <div className="flex items-start gap-3">

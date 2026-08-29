@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { listStoreItems, getBranches } from "@/lib/api";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
+import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
 import {
   TABS,
   SUPER_ADMIN_CATALOGUE_TABS,
@@ -273,7 +274,7 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 
 // Which tabs have a panel of their own. The rest fall through to the placeholder, and a
 // tab graduates by being added here rather than by another branch in the JSX below.
-const PANELS_BUILT = new Set(["consultations", "sessions", "diet", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
+const PANELS_BUILT = new Set(["consultations", "sessions", "diet", "treatment", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
 
 /**
  * A branch's own FITSIO STORE — scoped to its own vertical rather than offering every
@@ -373,6 +374,13 @@ export const FitsiomaxStorePanel = ({ branchId }) => {
         />
       )}
       {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
+      {/* The same board Super Admin keeps this catalogue on, read-only. The tab has been
+          in this row since it was built and had no panel behind it, so a branch clicking
+          Treatments got "setup coming soon" for a list that has been populated all along.
+          Read-only rather than hidden: the create, rename and delete endpoints are all
+          super_admin-only, so the buttons would 403, but the list itself is exactly what a
+          branch needs to see. */}
+      {tab === "treatment" && <TreatmentTypesBoard canEdit={false} />}
       {!PANELS_BUILT.has(tab) && branchStoreTabs.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`branch-store-panel-${t.key}`} />
       ))}
