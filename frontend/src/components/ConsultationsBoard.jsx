@@ -358,14 +358,33 @@ const dietLabels = ({ diet, dietConsultation, dietChart }) => {
   return picked.length ? picked.map((k) => k.label) : ["Diet"];
 };
 
-const addonsLabel = ({ treatment, diet, dietConsultation, dietChart, rehab, fitness, zumba }) => [
+const addonParts = ({ treatment, diet, dietConsultation, dietChart, rehab, fitness, zumba, sessions }) => [
   "Consultation",
-  treatment ? "Treatment" : null,
+  // The session count rides along only where it was asked for. Nobody passes it from the
+  // popup or the WhatsApp message, which name the package on their own line, so those two
+  // read exactly as they did.
+  treatment ? `Treatment${sessions ? ` (${sessions} Session${sessions === 1 ? "" : "s"})` : ""}` : null,
   ...dietLabels({ diet, dietConsultation, dietChart }),
   rehab ? "Rehab" : null,
   fitness ? "Fitness" : null,
   zumba ? "Zumba" : null,
-].filter(Boolean).join(" + ");
+].filter(Boolean);
+
+const addonsLabel = (decision) => addonParts(decision).join(" + ");
+
+// What this consultation decided, read off a saved lead for the row under their name.
+// Built from addonParts like everything else, so the line in the list cannot name a
+// different plan from the one the popup shows when you open it.
+const leadPlanParts = (lead) => addonParts({
+  treatment: lead.consultation_decision === "consultation_treatment",
+  diet: !!lead.diet_recommended,
+  dietConsultation: !!lead.diet_consultation,
+  dietChart: !!lead.diet_chart,
+  rehab: !!lead.rehab_referred,
+  fitness: !!lead.fitness_recommended,
+  zumba: !!lead.zumba_recommended,
+  sessions: lead.session_package_sessions || 0,
+});
 
 // What a confirmed treatment reads as, on screen and in a WhatsApp message. One shape
 // for both, so the message cannot say something the popup does not.
@@ -3239,7 +3258,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 return (
                   <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
                     <td className="px-3 py-3 align-middle text-slate-400">{i + 1}</td>
-                    <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" /></td>
+                    <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>
+                      <span className="block truncate">{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" /></span>
+                      {/* What they are going away with, under the name. Reading it meant
+                          opening every row: the Stage column says where the paperwork has
+                          got to, not what was decided, and those are different questions.
+                          Truncated with the whole of it on hover — this column is a tenth
+                          of the table, and a plan can run to four services. */}
+                      {(() => {
+                        const plan = leadPlanParts(l).join(" | ");
+                        return (
+                          <span
+                            className="mt-0.5 block truncate text-[10px] font-normal text-slate-400"
+                            title={plan}
+                            data-testid={`cons-plan-${l.id}`}
+                          >
+                            {plan}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="truncate px-4 py-3 align-middle font-mono text-xs text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
                     <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.phone}>{l.phone || "—"}</td>
                     <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.email}>{l.email || "—"}</td>
