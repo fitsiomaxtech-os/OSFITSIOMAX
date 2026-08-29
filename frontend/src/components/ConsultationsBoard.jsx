@@ -3144,7 +3144,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 // verify them: the physio delivering the course gathers the clips, and
                 // checking their own work would make the requirement prove nothing.
                 { key: "progression", label: "Progression" },
-                { key: "timeline", label: "Timeline" },
+                // Not for the Consultant. The timeline is every stage move, call attempt
+                // and save on the lead — a branch's working record of how the patient got
+                // here, and the people who wrote it are the ones who read it back. A
+                // Consultant opening this popup is here to write a diagnosis, and eight
+                // rows of "Branch stage: 'Branch Assign' -> 'RNR'" is not the case they
+                // are being asked about.
+                ...(isConsultant ? [] : [{ key: "timeline", label: "Timeline" }]),
                 { key: "profile", label: "Profile" },
               ].map((t) => (
                 <button
