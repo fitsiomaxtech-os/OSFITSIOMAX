@@ -65,7 +65,6 @@ import {
 import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
-import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
@@ -730,19 +729,21 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   );
   const entryStageNames = [mirrorStage?.name, realEntryStage?.name].filter(Boolean);
 
-  // Branch Leads' stage bar shows both pipelines' stages in one continuous strip, so a
-  // branch admin never needs to leave this tab to track a patient's whole journey. Any
-  // stage name shared by both pipelines (e.g. "Follow Up") only gets one pill, backed by
-  // the sales-side field — the Consultations tab itself is still the place to see a lead
-  // sitting in the post-appointment Follow Up.
-  const combinedStages = useMemo(
-    () => [...stages, ...consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name))],
+  // A stage the Consultation pipeline owns and the Branch one does not. Any name the two
+  // share (e.g. "Follow Up") stays on the Branch side and is backed by the sales field, so
+  // one name never gets a pill on both bars answering off different columns.
+  const consultationOnlyStages = useMemo(
+    () => consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name)),
     [stages, consultationStages],
   );
-  // True only when the active pill is one of the Consultation-only stages just merged in —
-  // those render the real Consultations board (same table, same popups) instead of the
-  // Branch Leads table below.
-  const isConsultationStage = !!stageFilter && !stages.some((s) => s.name === stageFilter);
+  // The two bars used to be one. Branch Leads carried both pipelines end to end, which put
+  // thirteen pills on a strip where the first six answer "has this lead been picked up"
+  // and the rest answer "how is their treatment going" — one bar reading as one question
+  // when it was two, and a patient counted under Leads and again under Fee Collected.
+  //
+  // Each tab now shows the stages its own pipeline owns, and the board under it is decided
+  // by the tab rather than by which pill happens to be lit.
+  const onConsultationTab = activeView === "branch_consultation";
   // The same test asked of a lead's consultation_stage rather than of the lit pill: has this
   // lead reached the half of the strip the Branch pipeline does not own? Handed to
   // matchesBranchStage, which releases it from the Branch pills once it has.
@@ -755,6 +756,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // rather than beside the stage pills: it narrows WHO is on the board, not where they are
   // in it, so a stage pill still means the same thing under it.
   const [markFilter, setMarkFilter] = useState(""); // "" | "vip" | "attention"
+
+  // Switching tabs drops a stage the new tab has no pill for. Left alone it would narrow
+  // the board to a stage with nothing on screen naming it and no second click to clear it.
+  // A filter the new tab *does* own survives, which is what lets a lead popup send the
+  // reader straight to its Consultation stage without this undoing the trip.
+  useEffect(() => {
+    const ownedHere = (activeView === "branch_consultation" ? consultationOnlyStages : stages)
+      .some((st) => st.name === stageFilter);
+    if (stageFilter && !ownedHere) setStageFilter(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
 
   const filteredLeads = useMemo(() => {
     let list = boardData.leads;
@@ -831,7 +843,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     });
     return counts;
   }, [filteredLeads, consultationStages]);
-  const combinedCounts = { ...consultationCounts, ...salesCounts };
 
   // "All Stages" is the count of every lead matching the active Date Filter/search —
   // every lead in the branch when neither is set.
@@ -997,8 +1008,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <HeadPhysioCalendar branchId={branchId} onlineArm={armScoped} />
           )}
         </div>
-      ) : activeView === "branch_consultation" ? (
-        <PlaceholderPanel label="Consultation" testid="branch-panel-consultation" />
       ) : activeView === "zumba" ? (
         <ZumbaPanel branchId={branchId} />
       ) : activeView === "fitness" ? (
@@ -1013,16 +1022,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         <AccountantManageTab branchId={branchId} />
       ) : (
         <>
-          {/* Stage Head Bar — Pre-Sales style sticky segmented tabs. Merges in the
-              Consultation pipeline's stages too, so this one bar covers a patient's whole
-              journey; selecting one of those switches the view below to the real
-              Consultations board (see isConsultationStage). */}
+          {/* Stage Head Bar — Pre-Sales style sticky segmented tabs, and the same block
+              serves both tabs: the pills, the toolbar under them and the table are one
+              screen answering to one filter, so the two tabs differ by which pipeline's
+              stages the bar is given and which board sits underneath, and by nothing
+              else. Two copies of this would be two toolbars to keep in step. */}
           <StageTabBar
-            stages={combinedStages}
+            stages={onConsultationTab ? consultationOnlyStages : stages}
             stageFilter={stageFilter}
             setStageFilter={setStageFilter}
-            counts={combinedCounts}
+            counts={onConsultationTab ? consultationCounts : salesCounts}
             totalCount={totalLeads}
+            // All Stages counts every lead on the branch, which is the Branch Leads
+            // question. Over the Consultation pills it would head a row that only counts
+            // patients who have reached treatment with a figure that includes those who
+            // never will.
+            hideAllStages={onConsultationTab}
             testid="branch-metric"
             plain
           />
@@ -1048,7 +1063,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 <Input
                   autoFocus
                   className="pl-9 pr-9"
-                  placeholder={isConsultationStage ? "Search in Consultations..." : "Search patients..."}
+                  placeholder={onConsultationTab ? "Search in Consultations..." : "Search patients..."}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   data-testid="branch-search-mobile"
@@ -1081,7 +1096,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input
                 className="pl-9"
-                placeholder={isConsultationStage ? "Search patients in Consultations..." : "Search patients..."}
+                placeholder={onConsultationTab ? "Search patients in Consultations..." : "Search patients..."}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 data-testid="branch-search"
@@ -1183,7 +1198,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             </div>
           </div>
 
-          {isConsultationStage ? (
+          {onConsultationTab ? (
             <ConsultationsBoard
               branchId={branchId}
               viewerRole="branch_admin"
@@ -1553,6 +1568,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             // has (Collect Payment, Physio Assign, etc.), instead of duplicating them here.
             setAutoOpenLeadId(selectedLead.id);
             setSelectedLead(null);
+            // The Consultation stages moved to their own tab, so the handoff has to go
+            // there as well as set the pill — setting the pill alone would leave the
+            // reader on Branch Leads with a filter that has no pill and no board.
+            setActiveView("branch_consultation");
             setStageFilter(stage);
           }}
           onMoved={() => {
