@@ -36,6 +36,7 @@ import {
   Music,
   Dumbbell,
   Video,
+  HeartPulse,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -64,6 +65,7 @@ import {
 import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
+import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
@@ -847,6 +849,14 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // and a truncated "Accountant Ma…" reads worse than a word chosen to be short.
   const VIEW_TABS = [
     { key: "pipeline", label: "Branch Leads", short: "Leads", icon: LayoutDashboard },
+    // Empty on purpose for now: the tab is the navigation going in ahead of what will sit
+    // behind it, so the position is settled while the panel is still being decided.
+    //
+    // `branch_consultation`, not `consultation`, because `consultations` two rows down is
+    // already taken — by the tab labelled Management, for historical reasons. Two keys a
+    // single letter apart, both compared as strings against activeView, is a bug waiting
+    // for whoever types the wrong one; there is nothing to make it announce itself.
+    { key: "branch_consultation", label: "Consultation", short: "Consult", icon: HeartPulse },
     // Sits next to Branch Leads because it is the other list of people the branch is
     // signing up — but its own list, not a stage of theirs: nobody registering for a
     // Zumba class is consulted, treated or discharged.
@@ -987,6 +997,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <HeadPhysioCalendar branchId={branchId} onlineArm={armScoped} />
           )}
         </div>
+      ) : activeView === "branch_consultation" ? (
+        <PlaceholderPanel label="Consultation" testid="branch-panel-consultation" />
       ) : activeView === "zumba" ? (
         <ZumbaPanel branchId={branchId} />
       ) : activeView === "fitness" ? (
