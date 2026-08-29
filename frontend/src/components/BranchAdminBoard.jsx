@@ -1930,6 +1930,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
   useEffect(() => {
     if (activeTab === "timeline") { loadRemarks(); loadActivity(); }
+    if (activeTab === "rnr") { loadActivity(); }
   }, [activeTab, lead.id]);
 
   const moveStage = async (stage) => {
@@ -2008,6 +2009,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     { key: "overview", label: "Overview", color: "bg-sky-500" },
     { key: "follow-up", label: "Follow-Up", color: "bg-amber-500" },
     { key: "timeline", label: "Timeline", color: "bg-emerald-500" },
+    { key: "rnr", label: "RNR Record", color: "bg-rose-500" },
   ];
 
   const avatarFirstChar = (lead.name?.trim()?.charAt(0) || "?").toUpperCase();
@@ -2021,6 +2023,18 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // Matched loosely rather than against a literal "Follow Up": these names are editable in
   // Pipeline Stage Management, and a rename there should not silently empty this card.
   const atFollowUpStage = /follow\s*-?\s*up/i.test(headerStageName || "");
+  // The attempts, newest last, exactly as the endpoint wrote them — one lead_activity row
+  // per press of +1 No Answer, carrying who pressed it and when.
+  const rnrLog = activityLog.filter((a) => a.action === "rnr_attempt");
+  const rnrCount = lead.rnr_attempts || 0;
+  // The literal is inherited from the tracker this replaces, and from the stage seed that
+  // writes it (ensure_rnr_stage). Unlike Follow Up it is not matched loosely: RNR is an
+  // initialism, and a loose test for three letters catches stage names that merely contain
+  // them.
+  const atRnrStage = lead.branch_stage === "RNR";
+  // Drawn for a lead that has been called and not answered even after it has moved on:
+  // the attempts are the reason it sits where it does, and they do not stop being true.
+  const showRnrCard = atRnrStage || rnrCount > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
@@ -2088,6 +2102,68 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <div className="flex items-center justify-between text-sm"><span className="text-xs font-medium text-slate-500">Email</span><span className="font-medium text-slate-800">{lead.email || "—"}</span></div>
                 </div>
               </div>
+
+              {/* Above the pipeline for the same reason the Follow-Up card is: on a lead
+                  parked at RNR, how many times somebody has rung is what the popup is
+                  being opened to find out. It used to sit *under* the stage picker, below
+                  a row of eleven buttons, which is a long way past the point the reader
+                  had already made up their mind.
+
+                  RNR first and Follow Up second, matching the order the two stages come
+                  in on the pipeline itself. */}
+              {showRnrCard && (
+                <div className="overflow-hidden rounded-xl border border-rose-100 bg-white shadow-sm" data-testid="branch-lead-rnr-status">
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-rose-700">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-600"><PhoneOff className="h-4 w-4" /></span>
+                      RNR Status
+                    </p>
+                    {/* Only where there is a record to open. With no attempt logged the
+                        tab is an empty page, and offering it reads as a promise of one. */}
+                    {rnrCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("rnr")}
+                        className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-50"
+                        data-testid="branch-lead-rnr-status-open"
+                      >
+                        Record
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2 px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800">Client Not Answered</p>
+                        <p className="text-[11px] text-slate-500" data-testid="branch-lead-rnr-attempts">
+                          Attempts so far: <span className="font-bold text-rose-600">{rnrCount}</span>
+                        </p>
+                        {lead.rnr_last_attempt_at && (
+                          <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-slate-500" data-testid="branch-lead-rnr-lastcall">
+                            <Clock className="h-3 w-3" />
+                            Last call
+                            <span className="font-bold text-slate-700">{callTimeStamp(lead.rnr_last_attempt_at)}</span>
+                            <span className="text-slate-400">· {callDateStamp(lead.rnr_last_attempt_at)}</span>
+                          </p>
+                        )}
+                      </div>
+                      {/* Logging an attempt is only offered while the lead is actually
+                          parked at RNR. On one that has moved on, this card is a record of
+                          what happened rather than a desk to work from. */}
+                      {atRnrStage && (
+                        <Button
+                          size="sm"
+                          onClick={logRnrAttempt}
+                          className="h-8 shrink-0 bg-rose-600 text-white hover:bg-rose-700"
+                          data-testid="branch-lead-rnr-attempt"
+                        >
+                          <PhoneOff className="mr-1 h-3.5 w-3.5" /> +1 No Answer
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Between Contact and the pipeline, because on a lead sitting at Follow Up
                   the next call is the thing the popup is being opened to check. The
@@ -2293,37 +2369,6 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 </div>
               </div>
 
-              {lead.branch_stage === "RNR" && (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2" data-testid="branch-lead-rnr-tracker">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-600">
-                      <PhoneOff className="h-3.5 w-3.5" />
-                    </span>
-                    <div>
-                      <p className="text-xs font-semibold text-rose-700">Client Not Answered</p>
-                      <p className="text-[11px] text-rose-500">
-                        Attempts so far: <span className="font-bold">{lead.rnr_attempts || 0}</span>
-                      </p>
-                      {lead.rnr_last_attempt_at && (
-                        <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-rose-600" data-testid="branch-lead-rnr-lastcall">
-                          <Clock className="h-3 w-3" />
-                          Last call
-                          <span className="font-bold">{callTimeStamp(lead.rnr_last_attempt_at)}</span>
-                          <span className="text-rose-400">· {callDateStamp(lead.rnr_last_attempt_at)}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={logRnrAttempt}
-                    className="h-8 bg-rose-600 text-white hover:bg-rose-700"
-                    data-testid="branch-lead-rnr-attempt"
-                  >
-                    <PhoneOff className="mr-1 h-3.5 w-3.5" /> +1 No Answer
-                  </Button>
-                </div>
-              )}
             </div>
           )}
 
@@ -2401,6 +2446,64 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     <Button size="sm" onClick={submitReschedule} disabled={followUpBusy} className="bg-amber-600 text-white hover:bg-amber-700" data-testid="branch-followup-reschedule-save">Save</Button>
                   </div>
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* Every attempt, rather than the counter and the latest one the Overview card
+              carries. The two answer different questions: whether this lead is worth
+              ringing again, and what was actually done — which needs the dates and the
+              names beside them, because "8 attempts" says nothing about whether they were
+              eight days apart or eight in one afternoon.
+
+              Read off the same lead_activity log Timeline draws, filtered to the rows the
+              RNR endpoint writes. Nothing new is stored for this: every press of +1 No
+              Answer has always left a row, it simply had nowhere to be read except mixed
+              in with the rest of the history. */}
+          {activeTab === "rnr" && (
+            <div className="space-y-3" data-testid="branch-lead-rnr-record">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-100 bg-white px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-100 text-rose-600"><PhoneOff className="h-4 w-4" /></span>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-rose-700">Call Attempts</p>
+                    <p className="text-[11px] text-slate-500">
+                      {rnrCount === 0 ? "None logged yet" : `${rnrCount} logged`}
+                      {lead.rnr_last_attempt_at && ` · last ${callDateStamp(lead.rnr_last_attempt_at)}`}
+                    </p>
+                  </div>
+                </div>
+                {atRnrStage && (
+                  <Button
+                    size="sm"
+                    onClick={logRnrAttempt}
+                    className="h-8 bg-rose-600 text-white hover:bg-rose-700"
+                    data-testid="branch-lead-rnr-record-attempt"
+                  >
+                    <PhoneOff className="mr-1 h-3.5 w-3.5" /> +1 No Answer
+                  </Button>
+                )}
+              </div>
+
+              {rnrLog.length === 0 ? (
+                /* The counter can be ahead of the log on a lead whose attempts predate the
+                   activity row being written, so this says what it can see rather than
+                   claiming nobody ever rang. */
+                <p className="py-8 text-center text-sm text-slate-400" data-testid="branch-lead-rnr-record-empty">
+                  {rnrCount > 0 ? "No individual attempts on record for this lead." : "No call attempts logged yet."}
+                </p>
+              ) : (
+                <ol className="ml-3 space-y-4 border-l-2 border-rose-100 py-1 pl-6">
+                  {rnrLog.map((a) => (
+                    <li key={a.id} className="relative" data-testid={`branch-lead-rnr-entry-${a.id}`}>
+                      <span className="absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-white bg-rose-500" />
+                      <div className="rounded-lg border border-rose-100 bg-rose-50/50 p-3">
+                        <p className="text-sm text-slate-700">{a.details}</p>
+                        <p className="mt-1 text-[10px] text-slate-400">{a.created_by} · {a.created_at?.slice(0, 16).replace("T", " ")}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
               )}
             </div>
           )}
