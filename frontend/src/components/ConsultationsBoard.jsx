@@ -1069,16 +1069,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // drawn rather than discovered when it is pressed. Bumped by the uploader so the gate
   // opens on the upload rather than on a reload.
   const [leadDocCount, setLeadDocCount] = useState(null); // null = not counted yet
+  // The prescription is counted on its own, because it is the one the fee is gated on.
+  // Off the general count it could not be: that number goes up for a scheme letter or an
+  // old MRI report, so a patient with paperwork on file and no prescription would have
+  // opened the gate with somebody else's document.
+  const [leadRxCount, setLeadRxCount] = useState(null);
   const [docTick, setDocTick] = useState(0);
   useEffect(() => {
-    if (!selectedLead?.id) { setLeadDocCount(null); return; }
+    if (!selectedLead?.id) { setLeadDocCount(null); setLeadRxCount(null); return; }
     let cancelled = false;
     setLeadDocCount(null);
+    setLeadRxCount(null);
     leadDocuments(selectedLead.id)
       .then((r) => { if (!cancelled) setLeadDocCount((r?.documents || []).length); })
       // Counted as none rather than left unknown: an upload screen that cannot say whether
       // anything is there should ask for one, not quietly wave the patient through.
       .catch(() => { if (!cancelled) setLeadDocCount(0); });
+    leadDocuments(selectedLead.id, "prescription")
+      .then((r) => { if (!cancelled) setLeadRxCount((r?.documents || []).length); })
+      .catch(() => { if (!cancelled) setLeadRxCount(0); });
     return () => { cancelled = true; };
   }, [selectedLead?.id, docTick]);
   // Closed whenever a different patient is opened: a Diet card left standing would
@@ -1090,7 +1099,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // rendered inside a branch, and both the effect below and the tab row need the answer.
   const docsGateOpen = (
     selectedLead?.[stageField] === "Consultation Visit"
-    && (leadDocCount || 0) === 0
+    && (leadRxCount || 0) === 0
     && selectedLead?.package_paid == null
   );
 
@@ -1100,9 +1109,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // actually be done. Waits for the count to arrive — leadDocCount is null until then, and
   // jumping tabs on a guess would move somebody off a step they had already finished.
   useEffect(() => {
-    if (leadDocCount === null) return;
+    if (leadRxCount === null) return;
     if (docsGateOpen) setProgrammeDetail("documents");
-  }, [selectedLead?.id, leadDocCount, docsGateOpen]);
+  }, [selectedLead?.id, leadRxCount, docsGateOpen]);
   const [assignTrack, setAssignTrack] = useState("treatment"); // "treatment" | "rehab"
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
@@ -4167,25 +4176,54 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // Consultation Visit is the one stage that will not proceed without paperwork.
               // Everywhere else Documents is simply available.
               const docsRequired = stage === "Consultation Visit";
-              const hasDocs = (leadDocCount || 0) > 0;
+              // What the fee waits on. Not "has any document": that count goes up for a
+              // scheme letter or an old MRI report, so a patient with paperwork on file
+              // and no prescription would have opened the gate with somebody else's page.
+              const hasRx = (leadRxCount || 0) > 0;
 
               // Step one, and only step one. No fees on this screen: somebody filing a
               // scan is filing a scan, and the figures belong to the step that can act on
               // them. What it does carry is the way on to that step, once there is
               // something on file to carry them there.
               const DocumentsBody = (
-                <div data-testid="cons-documents-body">
-                  {docsRequired && !hasDocs && (
-                    <p className="mb-3 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                <div className="space-y-4" data-testid="cons-documents-body">
+                  {docsRequired && !hasRx && (
+                    <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
                       <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-                      <span>Upload the consultation paperwork before collecting the fee — the scan or photo is the record that the consultation happened.</span>
+                      <span>Upload the prescription before collecting the fee — the photo or scan is the record of what the Consultant prescribed.</span>
                     </p>
                   )}
-                  <LeadDocuments
-                    leadId={selectedLead.id}
-                    canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
-                    onChanged={(n) => setLeadDocCount(n)}
-                  />
+                  {/* Its own uploader above the general pile, not a row inside it. This is
+                      the document the fee waits on, so it is asked for by name: a panel
+                      that says "documents" and means one particular document is how a
+                      scheme letter gets filed and the gate stays shut with nothing on
+                      screen explaining why. */}
+                  <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-3" data-testid="cons-prescription-block">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-800">
+                        <FileText className="h-3.5 w-3.5" />Prescription
+                        {docsRequired && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-sky-700">Required to collect the fee</span>}
+                      </p>
+                      {hasRx && <span className="shrink-0 text-[11px] font-semibold text-emerald-600" data-testid="cons-prescription-done">On file</span>}
+                    </div>
+                    <LeadDocuments
+                      leadId={selectedLead.id}
+                      kind="prescription"
+                      fixedLabel="Prescription"
+                      canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                      onChanged={(count) => setLeadRxCount(count)}
+                    />
+                  </div>
+                  {/* Everything else the patient has on file — reports, scans, scheme
+                      letters. Unchanged, and deliberately not what the fee waits on. */}
+                  <div>
+                    <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Other documents</p>
+                    <LeadDocuments
+                      leadId={selectedLead.id}
+                      canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                      onChanged={(count) => setLeadDocCount(count)}
+                    />
+                  </div>
                 </div>
               );
 
@@ -4699,14 +4737,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             variant="outline"
                             className={`${programmeDetail === "documents"
                               ? TAB_ON
-                              : hasDocs
+                              : hasRx
                               ? "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
                               : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"} ${ACT_BTN}`}
                             onClick={() => openDetail("documents")}
                             data-testid="cons-open-documents"
                           >
                             <FileText className="mr-1 h-3.5 w-3.5" />
-                            <Lbl full={hasDocs ? `Documents (${leadDocCount})` : "Documents — required"} short="Docs" />
+                            {/* Amber until the prescription is in, whatever else is on
+                                file: the colour is about the step that is outstanding, and
+                                a scheme letter does not finish this one. */}
+                            <Lbl full={hasRx ? `Documents (${leadDocCount})` : "Prescription — required"} short="Docs" />
                           </Button>
                           {/* Always on screen, and shut until the scan is filed. This panel
                               is a sequence — paperwork, then money — so a step that
@@ -4718,8 +4759,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             short="Fees"
                             icon={IndianRupee}
                             active={TAB_ON}
-                            locked={docsRequired && !hasDocs && !consultationPaid}
-                            lockedTitle="Upload the consultation paperwork first"
+                            locked={docsRequired && !hasRx && !consultationPaid}
+                            lockedTitle="Upload the prescription first"
                           />
                           {DietDetailButton}
                           {RehabDetailButton}

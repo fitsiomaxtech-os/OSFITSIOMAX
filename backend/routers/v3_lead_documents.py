@@ -43,6 +43,12 @@ CHUNK = 1024 * 1024
 CONSULTATION_FORM = "consultation_form"
 GENERAL = "general"
 
+# What the Consultant wrote for this patient, photographed or scanned at the desk. Its own
+# kind rather than a general document because the Consultation Visit fee is gated on it:
+# "is there a prescription on file" has to be a question the OS can answer, and it cannot
+# be asked of a pile whose rows are only told apart by a label somebody typed.
+PRESCRIPTION = "prescription"
+
 # The Nutrition Coach's Diet Chart. A kind of its own because it is the one document in the
 # OS whose visibility to the patient is bought rather than granted: it is shown in the
 # Client Portal once the Diet Chart Fee is collected and not before, and that is a fact
@@ -69,6 +75,10 @@ PROGRESSION_KINDS = [
     ("progress_review", "Google Review", True, "text"),
 ]
 PROGRESSION_KEYS = [k for k, _, _, kind_input in PROGRESSION_KINDS if kind_input == "file"]
+
+# Every kind a document may actually be filed as. Anything outside this is somebody's typo
+# or an invented value, and becomes a general document rather than a row no screen queries.
+STORABLE_KINDS = {CONSULTATION_FORM, GENERAL, PRESCRIPTION, DIET_CHART, *PROGRESSION_KEYS}
 # Where the typed one lives on the lead.
 REVIEW_FIELD = "google_review"
 
@@ -277,6 +287,15 @@ async def upload_lead_document(
         )
         raise HTTPException(status_code=400, detail=detail)
 
+    # The kind is kept as sent when it is one this router knows, and only an unrecognised
+    # one falls back to general. It used to collapse everything that was not a consultation
+    # form, which threw away the very field the caller had gone to the trouble of setting:
+    # a progression clip was filed as a general document, so progression_status — which
+    # looks for kind in PROGRESSION_KEYS — never found it and a case sheet could not be
+    # completed. Whitelisted rather than passed straight through, so a typo or an invented
+    # value still lands somewhere the documents screen will show it.
+    stored_kind = kind if (kind or GENERAL) in STORABLE_KINDS else GENERAL
+
     doc_id = str(uuid.uuid4())
     stored_name, size = await store_upload(file, doc_id, ext)
 
@@ -286,8 +305,8 @@ async def upload_lead_document(
         "stored_name": stored_name,
         "original_name": os.path.basename(file.filename or "document")[:200],
         "label": (label or "").strip()[:120],
-        "kind": CONSULTATION_FORM if kind == CONSULTATION_FORM else GENERAL,
-        "shared_with_patient": default_shared_with_patient(CONSULTATION_FORM if kind == CONSULTATION_FORM else GENERAL),
+        "kind": stored_kind,
+        "shared_with_patient": default_shared_with_patient(stored_kind),
         "content_type": file.content_type or "application/octet-stream",
         "size_bytes": size,
         "uploaded_by": user.full_name,

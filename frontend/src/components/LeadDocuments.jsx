@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Eye, FileText, Image as ImageIcon, Trash2, Upload, X } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, Eye, FileText, Image as ImageIcon, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -112,6 +112,12 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
   const [pending, setPending] = useState(null);
   const [label, setLabel] = useState("");
   const fileRef = useRef(null);
+  // A second input rather than a `capture` attribute on the first. The attribute is a hint
+  // to the browser about which source to offer, and setting it on the only input takes the
+  // file picker away: a desk with a scanned PDF would have nowhere to put it. Two inputs
+  // means the same panel offers the camera to the phone at the front desk and the drive to
+  // the machine in the office, and neither is a detour through the other.
+  const cameraRef = useRef(null);
 
   // `onChanged` lets a caller react to what is on file — Consultation Visit will not take
   // a payment until there is something here, and a gate that only opened on a page reload
@@ -358,9 +364,34 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
               onChange={pick}
               data-testid="lead-doc-input"
             />
+            {/* capture="environment" asks for the rear camera, which is the one pointed at
+                a sheet of paper. A desktop browser has no camera to open and falls back to
+                its file picker, so the button is never a dead end — it is just the slower
+                of the two routes there. Images only: there is no such thing as
+                photographing a PDF. */}
+            <input
+              ref={cameraRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={pick}
+              data-testid="lead-doc-camera-input"
+            />
             <Button
               size="sm"
               className="bg-sky-600 hover:bg-sky-700"
+              disabled={busy}
+              onClick={() => cameraRef.current?.click()}
+              data-testid="lead-doc-camera"
+            >
+              <Camera className="mr-1.5 h-4 w-4" />
+              {busy ? "Uploading…" : "Camera"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-sky-200 text-sky-700 hover:bg-sky-50"
               disabled={busy}
               onClick={() => fileRef.current?.click()}
               data-testid="lead-doc-choose"
