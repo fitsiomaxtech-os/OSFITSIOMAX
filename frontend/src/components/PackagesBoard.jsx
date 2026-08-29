@@ -139,6 +139,147 @@ const uploadPackageImage = async (file) => {
   }
 };
 
+/**
+ * The artwork on a package, and the two things that can be done to one already there.
+ *
+ * Picking a file and taking the image off are different answers and have to stay different
+ * all the way to the payload: removed has to be written as null, where "left alone" has to
+ * send the stored URL back untouched. Reading it off the preview instead — an image if
+ * there is one, nothing if there is not — is what would make a package's artwork
+ * permanent, since a blank preview and an unchanged one look identical from there.
+ */
+const usePackageImage = (item) => {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(item?.image_url || null);
+  const [cleared, setCleared] = useState(false);
+  // Only previews this hook made are ours to revoke; the item's own URL belongs to the
+  // server and revoking it would blank the thumbnail everywhere else on the page.
+  const objectUrl = useRef(null);
+  useEffect(() => () => { if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); }, []);
+
+  const showPreview = (next) => {
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = next;
+    setPreview(next);
+  };
+
+  const pick = (e) => {
+    const chosen = e.target.files?.[0];
+    // Cancelling the file dialog is not a removal. It arrives here as an empty list, and
+    // treating that as "no image" would strip the artwork off a package by opening a
+    // picker and thinking better of it.
+    if (!chosen) return;
+    // Refused here rather than after a round trip: the server checks the extension and
+    // would only say the same thing a second later, having carried the file to say it.
+    if (!IMAGE_TYPES.test(chosen.name || "")) {
+      toast.error("Only JPG, PNG or WEBP images can be used here");
+      e.target.value = "";
+      return;
+    }
+    setFile(chosen);
+    setCleared(false);
+    showPreview(URL.createObjectURL(chosen));
+    // Cleared so that picking the same file twice still fires a change event — without it,
+    // removing an image and choosing it again leaves the field looking empty.
+    e.target.value = "";
+  };
+
+  const clear = () => {
+    setFile(null);
+    setCleared(true);
+    showPreview(null);
+  };
+
+  // What to save. Nothing is uploaded unless a file was actually chosen, so taking an
+  // image off costs no round trip, and neither does saving a package nobody retouched.
+  const resolve = async () => {
+    if (file) return (await uploadPackageImage(file)).url;
+    return cleared ? null : (item?.image_url || null);
+  };
+
+  return { preview, pick, clear, resolve };
+};
+
+/**
+ * The image field: the dropzone, and Change and Remove beside it once there is something
+ * to change or remove.
+ *
+ * Both controls sit outside the dropzone rather than on top of it. A button inside a
+ * button is not valid markup and the browser is entitled to fire either one, and on a
+ * 96px square an overlaid control is a target hit by accident about as often as on
+ * purpose — which on Remove means losing artwork while trying to replace it.
+ *
+ * One field for every popup that carries a picture, so a consultation and a session
+ * package cannot end up offering different things to do with the same picture.
+ */
+const PackageImageField = ({ image, testidPrefix }) => {
+  const fileInputRef = useRef(null);
+  const open = () => fileInputRef.current?.click();
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-semibold text-slate-600">
+        Image <span className="font-normal text-slate-400">(Square, 1080 x 1080px)</span>
+      </label>
+      <div className="flex items-end gap-3">
+        <button
+          type="button"
+          onClick={open}
+          className="relative aspect-square w-24 shrink-0 overflow-hidden rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-sky-400 hover:bg-sky-50/60"
+          title={image.preview ? "Choose a different image" : "Add an image"}
+          data-testid={`${testidPrefix}-image-dropzone`}
+        >
+          {image.preview ? (
+            <img src={image.preview} alt="preview" className="h-full w-full object-cover" data-testid={`${testidPrefix}-image-preview`} />
+          ) : (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+              <ImagePlus className="h-6 w-6 text-slate-400" />
+              <span className="text-[11px] font-semibold text-slate-500">1080 x 1080</span>
+              <span className="text-[10px] text-slate-400">(1:1 ratio)</span>
+            </div>
+          )}
+        </button>
+        {/* Nothing to act on until there is an image, and two buttons offering to change
+            and remove one that is not there is a pair of dead controls. */}
+        {image.preview && (
+          <div className="flex flex-col gap-1.5" data-testid={`${testidPrefix}-image-actions`}>
+            <button
+              type="button"
+              onClick={open}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
+              data-testid={`${testidPrefix}-image-change`}
+            >
+              <Pencil className="h-3 w-3" />Change
+            </button>
+            <button
+              type="button"
+              onClick={image.clear}
+              className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50"
+              data-testid={`${testidPrefix}-image-remove`}
+            >
+              <Trash2 className="h-3 w-3" />Remove
+            </button>
+          </div>
+        )}
+      </div>
+      {/* Removal takes effect on Save, like every other field in these forms. Said out
+          loud because the thumbnail disappears immediately and that reads as done. */}
+      {image.preview === null && (
+        <p className="mt-1.5 text-[10px] text-slate-400" data-testid={`${testidPrefix}-image-hint`}>
+          Saved without an image unless you pick one.
+        </p>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={image.pick}
+        data-testid={`${testidPrefix}-image`}
+        className="hidden"
+      />
+    </div>
+  );
+};
+
 /** What went wrong, in the words of whoever knows: the API's own message, else ours, else
     the status. Anything is better than a bare "Failed to update", which was what a 413 and
     a dropped connection both looked like. */
@@ -213,34 +354,14 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
   const [priceOnline, setPriceOnline] = useState(item?.price_online ?? DEFAULT_PRICE_ONLINE);
   const [priceOffline, setPriceOffline] = useState(item?.price_offline ?? DEFAULT_PRICE_OFFLINE);
   const [duration, setDuration] = useState(item?.duration_minutes ?? 30);
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(item?.image_url || null);
+  const image = usePackageImage(item);
   const [saving, setSaving] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const handleImageChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Refused here rather than after a round trip: the server checks the extension and
-    // would only say the same thing a second later, having carried the file to say it.
-    if (!IMAGE_TYPES.test(file.name || "")) {
-      toast.error("Only JPG, PNG or WEBP images can be used here");
-      e.target.value = "";
-      return;
-    }
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
-  };
 
   const submit = async () => {
     if (!name.trim()) { toast.error(`${cfg.noun} name is required`); return; }
     setSaving(true);
     try {
-      let image_url = item?.image_url || null;
-      if (imageFile) {
-        const uploaded = await uploadPackageImage(imageFile);
-        image_url = uploaded.url;
-      }
+      const image_url = await image.resolve();
       // Both prices carry the one figure when the kind is single-priced. Sending only
       // price_online would leave an offline booking reading zero.
       const online = Number(priceOnline) || 0;
@@ -296,35 +417,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
               data-testid="consultation-create-description"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">
-              Image <span className="font-normal text-slate-400">(Square, 1080 x 1080px)</span>
-            </label>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="relative aspect-square w-24 overflow-hidden rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-sky-400 hover:bg-sky-50/60"
-              data-testid="consultation-create-image-dropzone"
-            >
-              {imagePreview ? (
-                <img src={imagePreview} alt="preview" className="h-full w-full object-cover" data-testid="consultation-create-image-preview" />
-              ) : (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
-                  <ImagePlus className="h-6 w-6 text-slate-400" />
-                  <span className="text-[11px] font-semibold text-slate-500">1080 x 1080</span>
-                  <span className="text-[10px] text-slate-400">(1:1 ratio)</span>
-                </div>
-              )}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={handleImageChange}
-              data-testid="consultation-create-image"
-              className="hidden"
-            />
-          </div>
+          <PackageImageField image={image} testidPrefix="consultation-create" />
           {!cfg.noDuration && (
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600">{cfg.durationLabel}</label>
@@ -512,24 +605,8 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
     if (item) return packageTotal(item, "offline");
     return COURSE_TOTAL_DEFAULTS[category]?.offline ?? DEFAULT_PRICE_OFFLINE;
   });
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(item?.image_url || null);
+  const image = usePackageImage(item);
   const [saving, setSaving] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const handleImageChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Refused here rather than after a round trip: the server checks the extension and
-    // would only say the same thing a second later, having carried the file to say it.
-    if (!IMAGE_TYPES.test(file.name || "")) {
-      toast.error("Only JPG, PNG or WEBP images can be used here");
-      e.target.value = "";
-      return;
-    }
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
-  };
 
   // How many sessions the package contains. Seeded from the saved package when editing,
   // from the shelf's default when creating, and editable from there.
@@ -565,11 +642,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
     if (isZumba && !(Number(planPrice) > 0)) { toast.error("Plan amount must be more than 0"); return; }
     setSaving(true);
     try {
-      let image_url = item?.image_url || null;
-      if (imageFile) {
-        const uploaded = await uploadPackageImage(imageFile);
-        image_url = uploaded.url;
-      }
+      const image_url = await image.resolve();
       const payload = {
         item_type: "session",
         category,
@@ -633,35 +706,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
             />
             <p className="mt-0.5 text-right text-[10px] text-slate-400">{description.length}/250</p>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">
-              Image <span className="font-normal text-slate-400">(Square, 1080 x 1080px)</span>
-            </label>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="relative aspect-square w-24 overflow-hidden rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-sky-400 hover:bg-sky-50/60"
-              data-testid="session-create-image-dropzone"
-            >
-              {imagePreview ? (
-                <img src={imagePreview} alt="preview" className="h-full w-full object-cover" data-testid="session-create-image-preview" />
-              ) : (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
-                  <ImagePlus className="h-6 w-6 text-slate-400" />
-                  <span className="text-[11px] font-semibold text-slate-500">1080 x 1080</span>
-                  <span className="text-[10px] text-slate-400">(1:1 ratio)</span>
-                </div>
-              )}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={handleImageChange}
-              data-testid="session-create-image"
-              className="hidden"
-            />
-          </div>
+          <PackageImageField image={image} testidPrefix="session-create" />
 
           {isZumba ? (
           <div data-testid="zumba-plan-setup">
