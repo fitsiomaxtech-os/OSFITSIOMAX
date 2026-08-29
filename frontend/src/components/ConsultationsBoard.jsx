@@ -4236,16 +4236,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       onChanged={notePrescriptionCount}
                     />
                   </div>
-                  {/* Everything else the patient has on file — reports, scans, scheme
-                      letters. Unchanged, and deliberately not what the fee waits on. */}
-                  <div>
-                    <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Other documents</p>
-                    <LeadDocuments
-                      leadId={selectedLead.id}
-                      canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
-                      onChanged={(count) => setLeadDocCount(count)}
-                    />
-                  </div>
+                  {/* Only the prescription lives here. Everything else the patient has on
+                      file — reports, scans, scheme letters — is filed and read in the
+                      Documents tab at the top of the card: this panel exists to clear the
+                      one page the fee waits on, and a second uploader beside it invites
+                      the scheme letter that leaves the gate shut with nothing on screen
+                      explaining why. */}
                 </div>
               );
 
