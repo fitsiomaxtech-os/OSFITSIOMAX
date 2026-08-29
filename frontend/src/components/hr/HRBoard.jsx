@@ -564,12 +564,25 @@ const configuredDesignations = (meta, department) => {
   return dedupeNames(Object.values(groups).flat());
 };
 
+/**
+ * A filter pill, lit or not.
+ *
+ * The unlit ones are tinted rather than white. Against a white card a white pill with a
+ * grey hairline reads as a label somebody has written down, not as something to press —
+ * and these rows are almost entirely unlit, so the whole filter looked inert until the
+ * pointer happened to cross it. A wash of the same blue the lit one is filled with says
+ * they belong to one control and that pressing is what they are for.
+ *
+ * Still unmistakable which is which: the lit pill is solid sky-600 on white text, the
+ * rest a pale ground with the blue only in the border and the label. Tinting the unlit
+ * ones any harder is where a row of twenty starts competing with the one that is chosen.
+ */
 const TabPill = ({ active, onClick, children, testid }) => (
   <button
     type="button"
     onClick={onClick}
     className={`shrink-0 border px-3.5 py-1.5 text-sm font-medium transition ${
-      active ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+      active ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-400 hover:bg-sky-100 hover:text-sky-800"
     }`}
     data-testid={testid}
   >
