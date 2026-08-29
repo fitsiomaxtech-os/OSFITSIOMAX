@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { QuickDateFilterBar, intersectDateFilters } from "@/components/QuickDateFilterBar";
 import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
 import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
 import {
@@ -600,6 +601,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const [consultationsSubTab, setConsultationsSubTab] = useState("head_physio");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
+  // The Consultation tab's own horizontal range row — All / Today / This Week / This
+  // Month / Last 90 Days / Custom. Kept in its own state rather than sharing the one
+  // above so the toolbar's date filter is left exactly as it was: pressing a range here
+  // does not rewrite that control's label, and clearing that control does not undo the
+  // range picked here. The two combine below.
+  const [quickDate, setQuickDate] = useState(null); // same shape; null = All
+
   // Bumped by Refresh. loadBoard only reloads the branch leads; on a consultation stage
   // the rows on screen come from ConsultationsBoard, which needs telling separately.
   const [refreshTick, setRefreshTick] = useState(0);
@@ -768,11 +776,24 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView]);
 
+  // What the board is actually narrowed to. The toolbar's date filter and the
+  // Consultation tab's range row are two independent controls over one list, so they
+  // combine by overlap rather than one overwriting the other — each keeps showing its own
+  // state, and neither can quietly cancel the other out.
+  //
+  // Scoped to the Consultation tab because that is the only tab drawing the range row.
+  // Left global, a range picked there would go on narrowing Branch Leads with no control
+  // on screen naming it and no second click to clear it.
+  const effectiveDateFilter = useMemo(
+    () => (onConsultationTab ? intersectDateFilters(dateFilter, quickDate) : dateFilter),
+    [onConsultationTab, dateFilter, quickDate],
+  );
+
   const filteredLeads = useMemo(() => {
     let list = boardData.leads;
-    if (dateFilter) {
-      const from = dateFilter.from?.getTime();
-      const to = dateFilter.to?.getTime();
+    if (effectiveDateFilter) {
+      const from = effectiveDateFilter.from?.getTime();
+      const to = effectiveDateFilter.to?.getTime();
       list = list.filter((l) => {
         const ts = new Date(l.created_at || 0).getTime();
         if (!ts) return false;
@@ -797,7 +818,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     if (markFilter === "vip") list = list.filter((l) => l.is_vip);
     else if (markFilter === "attention") list = list.filter((l) => l.needs_attention);
     return list;
-  }, [boardData.leads, searchQuery, dateFilter, markFilter]);
+  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter]);
 
   // The rows the table is actually showing. Hoisted out of the table body because the
   // select-all box and the delete bar have to agree with it exactly — "select all" that
@@ -813,7 +834,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // Searching, filtering by date or switching stage replaces the list under the selection,
   // and a delete confirmed against rows the person can no longer see is one they cannot
   // check before agreeing to it.
-  useEffect(() => { setPicked(new Set()); }, [stageFilter, dateFilter, searchQuery, activeView, markFilter]);
+  useEffect(() => { setPicked(new Set()); }, [stageFilter, effectiveDateFilter, searchQuery, activeView, markFilter]);
 
   const pickedVisible = useMemo(
     () => visibleLeads.filter((l) => picked.has(l.id)),
@@ -1094,8 +1115,15 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               </button>
             )}
             {/* The desk's own field. min-w-0 so it can shrink: a flex item defaults to its
-                content's width, which would shove the buttons off the right edge. */}
-            <div className="relative hidden min-w-0 flex-1 sm:block">
+                content's width, which would shove the buttons off the right edge.
+
+                Capped rather than left to take the whole row. A search box stretched across
+                1400px is mostly empty runway — nobody types a patient name that long — and
+                the width is better spent leaving the toolbar's controls grouped where the
+                eye already is. The buttons keep their right edge via ml-auto below, so the
+                row still reads as one bar rather than a short field with the actions
+                drifting in to meet it. */}
+            <div className="relative hidden min-w-0 flex-1 sm:block sm:max-w-sm">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input
                 className="pl-9"
@@ -1131,7 +1159,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 than dropping to a line of their own. shrink-0 keeps them at full size and
                 lets the search give up the width instead; on the narrowest phones that
                 leaves the placeholder clipped, which costs less than a second row. */}
-            <div className={`${searchOpen ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5 sm:gap-3`}>
+            <div className={`${searchOpen ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-3`}>
             {/* Narrow the board to one mark, on every stage rather than on All Stages
                 alone. A branch that has just marked somebody on the stage they are being
                 worked on could not then ask to see only those, which is the question the
@@ -1201,6 +1229,29 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             </div>
           </div>
 
+          {/* A second date control, and deliberately not a replacement for the calendar
+              button in the toolbar above — that one still opens the shared popover with
+              Yesterday, Last Month and an exact day in it, unchanged.
+
+              This row is the fast path: the four ranges a branch actually asks for, one tap
+              each, with the same popover on the end for anything else. It sits under the
+              toolbar rather than in it because six more controls would not fit beside the
+              search, and because the ranges narrow the whole screen — the stage counts
+              above as well as the rows below — so they read better on a line of their own
+              spanning both.
+
+              Consultation tab only, and it reaches every stage: the range is folded into
+              effectiveDateFilter, which feeds both the stage counts on the bar above and
+              the ConsultationsBoard underneath, so a pill's number always describes the
+              list that pill opens. */}
+          {onConsultationTab && (
+            <QuickDateFilterBar
+              value={quickDate}
+              onChange={setQuickDate}
+              testid="branch-cons-quick-date"
+            />
+          )}
+
           {onConsultationTab ? (
             <ConsultationsBoard
               branchId={branchId}
@@ -1216,7 +1267,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               // Driven by the toolbar above: passing externalSearch hides this board's own
               // search row, which is also where its date filter and green refresh lived.
               externalSearch={searchQuery}
-              externalDateFilter={dateFilter}
+              externalDateFilter={effectiveDateFilter}
               // The mark filter above narrows this board's list the way the search and the
               // Date Filter beside it do. Without it the pills would count the VIPs and the
               // table under them would show everybody.
