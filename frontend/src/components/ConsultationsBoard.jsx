@@ -103,6 +103,9 @@ const receiptRows = (r) => [
   r.sessionsCovered ? ["Sessions Covered", r.sessionsCovered] : null,
   ["Payment Mode", r.modeLabel],
   r.reference ? ["Reference", r.reference] : null,
+  // Printed because the count is the half of a cash payment that can be checked against
+  // a till later; the figure on its own cannot be.
+  r.cashCounted ? ["Cash Counted", r.cashCounted] : null,
   r.originalAmount != null && r.originalAmount !== r.amount ? ["Original Price", `Rs.${r.originalAmount}`] : null,
   // The percentage alongside the rupees, so the receipt says how big the discount was and
   // not just how much came off. Omitted when there's no original price to measure against.
@@ -434,12 +437,163 @@ const round2 = (n) => Math.round(n * 100) / 100;
 // Admin's call to make; the popup's job is to make sure they meant it.
 const STEEP_DISCOUNT_PCT = 25;
 
+// The notes a branch desk actually takes, largest first. Kept in step with DENOMINATIONS
+// in backend/routers/v3_packages.py, which drops anything it does not list when a payment
+// settles -- so a count in a note this desk does not hold cannot quietly join the total.
+//
+// Goes down to the ten because a fee is not always round: a discount can land on Rs.1230,
+// and a ladder that stops at fifty could not count it out.
+const DENOMINATIONS = [500, 200, 100, 50, 20, 10];
+
+/** What a counted pile of notes comes to. Blanks and anything that is not a positive
+ *  whole number of notes count as none -- "3.5 x 500" is a typo, and reading it as 1750
+ *  would put a figure in the drawer nobody counted. */
+const noteTotal = (notes) => DENOMINATIONS.reduce((sum, d) => {
+  const n = Number(notes?.[d]);
+  return sum + (Number.isInteger(n) && n > 0 ? d * n : 0);
+}, 0);
+
+/** The count as it is sent and stored: only the notes actually seen, keyed by the note's
+ *  value as a string, because that is what survives a JSON round trip. Undefined when
+ *  nothing was counted -- an empty map would read as "counted nothing" rather than "did
+ *  not count". */
+const countedNotes = (notes) => {
+  const clean = {};
+  for (const d of DENOMINATIONS) {
+    const n = Number(notes?.[d]);
+    if (Number.isInteger(n) && n > 0) clean[String(d)] = n;
+  }
+  return Object.keys(clean).length ? clean : undefined;
+};
+
+/** A stored count written out for a receipt or a history line: "2xRs.500 + 1xRs.200".
+ *  Empty string when nothing was counted, so callers can drop the row entirely. */
+const notesLabel = (counted) => DENOMINATIONS
+  .filter((d) => Number(counted?.[d]) > 0)
+  .map((d) => `${counted[d]}xRs.${d}`)
+  .join(" + ");
+
+/** The fewest notes that make an amount, for the button that fills the grid in.
+ *  A remainder below the smallest note is left over rather than rounded away -- the
+ *  count then reads short, which is the truth, instead of claiming notes nobody held. */
+const noteBreakdown = (amount) => {
+  let left = Math.round(Number(amount) || 0);
+  const out = {};
+  for (const d of DENOMINATIONS) {
+    const n = Math.floor(left / d);
+    if (n > 0) { out[d] = n; left -= n * d; }
+  }
+  return out;
+};
+
+/** Whether a cash count is in a state that may be submitted: either nothing was counted
+ *  at all, or what was counted is exactly the cash being taken. A count that is short or
+ *  over means one of the two numbers is wrong, and banking either would bank a figure
+ *  nobody checked. */
+const notesSettled = (notes, amount) => {
+  const counted = noteTotal(notes);
+  if (counted === 0) return true;
+  const target = parseFloat(amount);
+  return Number.isFinite(target) && Math.abs(counted - target) < 0.01;
+};
+
 // What identifies a tender, per mode. Cash has nothing to quote, so it asks for nothing.
 const SPLIT_REFERENCE_LABEL = {
   upi: "UPI Transaction ID",
   card: "Card / Approval Reference",
   account_transfer: "Reference / UTR No.",
   cheque: "Cheque Number",
+};
+
+/**
+ * What the cash was actually made of.
+ *
+ * "Rs.1200 cash" cannot be checked against a till at the end of the day; "2x500, 1x200"
+ * can. The count is the thing somebody physically looked at, so it is worth keeping
+ * beside the figure -- and counting it out at the desk, with the patient still there, is
+ * when a wrong note is cheap to notice.
+ *
+ * Optional by design. A branch that is busy can leave it blank and record the amount
+ * alone, exactly as before. But a count that has been started has to finish: notes that
+ * are short of the fee, or over it, mean one of the two numbers is wrong, and the popup
+ * refuses to bank either rather than picking one.
+ *
+ * The amount stays the authority and is never driven from here. It is arrived at above,
+ * through the discount the Branch Admin agreed, and letting a mistyped note count rewrite
+ * it would move the fee being collected without anyone asking for it.
+ */
+const CashDenominations = ({ amount, notes, onChange, testPrefix }) => {
+  const counted = noteTotal(notes);
+  const target = parseFloat(amount);
+  const hasTarget = Number.isFinite(target) && target > 0;
+  const short = hasTarget ? round2(target - counted) : 0;
+  const settled = notesSettled(notes, amount);
+
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5" data-testid={`${testPrefix}-notes`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          Cash counted
+          <span className="ml-1 font-normal normal-case text-slate-400">— optional</span>
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          {hasTarget && (
+            <button
+              type="button"
+              onClick={() => onChange(noteBreakdown(target))}
+              className="text-[11px] font-medium text-sky-600 underline hover:text-sky-800"
+              data-testid={`${testPrefix}-notes-fill`}
+            >
+              Fill from amount
+            </button>
+          )}
+          {counted > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange({})}
+              className="text-[11px] font-medium text-slate-500 underline hover:text-slate-700"
+              data-testid={`${testPrefix}-notes-clear`}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+        {DENOMINATIONS.map((d) => (
+          <div key={d}>
+            <label className="mb-0.5 block text-center text-[10px] font-bold text-slate-500">Rs.{d}</label>
+            <Input
+              value={notes?.[d] ?? ""}
+              onChange={(e) => onChange({ ...notes, [d]: e.target.value.replace(/\D/g, "") })}
+              inputMode="numeric"
+              placeholder="0"
+              className="h-9 px-1 text-center text-xs"
+              data-testid={`${testPrefix}-notes-${d}`}
+            />
+          </div>
+        ))}
+      </div>
+
+      {counted > 0 && (
+        <div
+          className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[11px] font-semibold ${
+            settled ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+          }`}
+          data-testid={`${testPrefix}-notes-total`}
+        >
+          <span className="truncate">
+            {DENOMINATIONS.filter((d) => Number(notes?.[d]) > 0).map((d) => `${notes[d]}x${d}`).join(" + ")}
+          </span>
+          <span className="shrink-0">
+            Rs.{counted.toLocaleString("en-IN")}
+            {settled ? "" : short > 0 ? ` — short by Rs.${short.toLocaleString("en-IN")}` : ` — Rs.${Math.abs(short).toLocaleString("en-IN")} over`}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 };
 
 /**
@@ -455,8 +609,13 @@ const SPLIT_REFERENCE_LABEL = {
  * full block per line is more than anyone will fill in -- so a split records what each
  * tender was and what identifies it, and the bank's own details stay with the
  * single-payment flow that has room to ask for them.
+ *
+ * `countCash` opts a caller into counting the notes behind each cash line. Off by
+ * default: the fee flows that ask for a count are the ones whose money lands in the
+ * branch drawer today, and turning it on for every split would put a note grid under a
+ * cheque schedule that has nothing to count yet.
  */
-const SplitPaymentLines = ({ lines, modes, expected, onChange, testPrefix }) => {
+const SplitPaymentLines = ({ lines, modes, expected, onChange, testPrefix, countCash = false }) => {
   const total = lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0);
   const target = parseFloat(expected);
   const matches = Number.isFinite(target) && Math.abs(total - target) < 0.01;
@@ -481,7 +640,7 @@ const SplitPaymentLines = ({ lines, modes, expected, onChange, testPrefix }) => 
           <div className="flex items-center gap-1.5">
             <select
               value={line.mode}
-              onChange={(e) => setLine(i, { mode: e.target.value, reference: "" })}
+              onChange={(e) => setLine(i, { mode: e.target.value, reference: "", notes: {} })}
               className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-xs"
               data-testid={`${testPrefix}-split-mode-${i}`}
             >
@@ -516,6 +675,17 @@ const SplitPaymentLines = ({ lines, modes, expected, onChange, testPrefix }) => 
               placeholder={SPLIT_REFERENCE_LABEL[line.mode]}
               className="h-8 text-xs"
               data-testid={`${testPrefix}-split-reference-${i}`}
+            />
+          )}
+          {/* Counted against this line's own amount, not the whole fee: the cash half of
+              a Rs.600 cash + Rs.600 UPI split is Rs.600, and checking the notes against
+              Rs.1200 would call a correct count short every time. */}
+          {countCash && line.mode === "cash" && (
+            <CashDenominations
+              amount={line.amount}
+              notes={line.notes}
+              onChange={(notes) => setLine(i, { notes })}
+              testPrefix={`${testPrefix}-split-${i}`}
             />
           )}
         </div>
@@ -1001,6 +1171,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         : paymentReference(payload),
       collectedBy: "Branch Admin",
       isCash: splitLines ? splitLines.every((l) => l.mode === "cash") : payload.payment_mode === "cash",
+      // "2x500 + 1x200" — what was handed over, not just what it added up to. Blank
+      // whenever nobody counted, which is allowed.
+      cashCounted: splitLines
+        ? splitLines.map((l) => notesLabel(l.denominations)).filter(Boolean).join(" | ")
+        : notesLabel(payload.denominations),
     };
   };
 
@@ -1791,7 +1966,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // hasPendingInstallments is true.
   const openPartialScheduleDraft = () => {
     openTreatmentFeeDraft();
-    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", payment_lines: null });
+    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", payment_lines: null, cash_notes: {} });
   };
 
   // Partial Payment is split by session count, not a raw amount — each installment's
@@ -1886,7 +2061,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.error("Enter a valid Consultation Fee amount");
       return;
     }
-    setPackageConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null });
+    setPackageConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null, cash_notes: {} });
   };
 
   // Card and Account Transfer share the same four bank fields; Account Transfer also
@@ -1923,11 +2098,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         mode: l.mode,
         amount: parseFloat(l.amount),
         reference: (l.reference || "").trim(),
+        // Only for cash, and only what was actually counted. Left off entirely when the
+        // desk skipped the count, so "did not count" stays distinguishable from
+        // "counted, and it came to nothing".
+        denominations: l.mode === "cash" ? countedNotes(l.notes) : undefined,
       }));
       submitConsultationFee(payload);
       return;
     }
-    if (mode === "upi") {
+    if (mode === "cash") {
+      payload.denominations = countedNotes(packageConfirmDraft.cash_notes);
+    } else if (mode === "upi") {
       payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
       if (!attachBankDetails(payload, packageConfirmDraft, mode)) return;
@@ -1974,7 +2155,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // "Collect" step there, rather than sharing one form with a mode selector.
   const chooseTreatmentPaymentMode = (mode) => {
     setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: mode });
-    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null });
+    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null, cash_notes: {} });
   };
 
   // The dedicated popup's own submit button — dispatches to whichever path
@@ -2005,7 +2186,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         mode: l.mode,
         amount: parseFloat(l.amount),
         reference: (l.reference || "").trim(),
+        // Only for cash, and only what was actually counted -- left off entirely when
+        // the desk skipped it, so "did not count" stays distinguishable from "counted,
+        // and it came to nothing".
+        denominations: l.mode === "cash" ? countedNotes(l.notes) : undefined,
       }));
+    } else if (mode === "cash") {
+      payload.denominations = countedNotes(treatmentConfirmDraft.cash_notes);
     } else if (mode === "upi") {
       payload.upi_transaction_id = treatmentConfirmDraft.upi_transaction_id.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
@@ -2097,6 +2284,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
       cheque_number: "", transfer_reference: "",
       payment_lines: null,
+      cash_notes: {},
     });
   };
 
@@ -2122,7 +2310,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         mode: l.mode,
         amount: parseFloat(l.amount),
         reference: (l.reference || "").trim(),
+        denominations: l.mode === "cash" ? countedNotes(l.notes) : undefined,
       }));
+    } else if (mode === "cash") {
+      payload.denominations = countedNotes(draft.cash_notes);
     } else if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
@@ -5362,6 +5553,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       testPrefix="cons-collect-fee-confirm"
                     />
 
+                    {/* Cash chosen on the popup behind this one lands here: the fee is
+                        settled above, and this is where it gets counted out. Sits under
+                        the amount because the amount is what it is counted against, and
+                        it moves while the discount is still being agreed. */}
+                    {!packageConfirmDraft.payment_lines && mode === "cash" && (
+                      <CashDenominations
+                        amount={collectFeeDraft.amount}
+                        notes={packageConfirmDraft.cash_notes}
+                        onChange={(cash_notes) => setPackageConfirmDraft({ ...packageConfirmDraft, cash_notes })}
+                        testPrefix="cons-collect-fee-confirm"
+                      />
+                    )}
+
                     {/* Started from whatever was already chosen: the mode picked on the
                         popup behind this one becomes the first tender, carrying the full
                         amount, and the second opens empty for the rest. Nothing typed is
@@ -5373,8 +5577,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         onClick={() => setPackageConfirmDraft({
                           ...packageConfirmDraft,
                           payment_lines: [
-                            { mode, amount: collectFeeDraft.amount, reference: mode === "upi" ? packageConfirmDraft.upi_transaction_id : "" },
-                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "" },
+                            // Notes already counted come across with the mode that was
+                            // counted in. Pressing "Add another payment" is not a reason
+                            // to make somebody count the same drawer twice.
+                            { mode, amount: collectFeeDraft.amount, reference: mode === "upi" ? packageConfirmDraft.upi_transaction_id : "", notes: mode === "cash" ? packageConfirmDraft.cash_notes : {} },
+                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "", notes: {} },
                           ],
                         })}
                         className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-sky-400 hover:text-sky-700"
@@ -5392,12 +5599,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           expected={collectFeeDraft.amount}
                           onChange={(next) => setPackageConfirmDraft({ ...packageConfirmDraft, payment_lines: next })}
                           testPrefix="cons-collect-fee"
+                          countCash
                         />
                         <button
                           type="button"
                           onClick={() => setPackageConfirmDraft({
                             ...packageConfirmDraft,
-                            payment_lines: [...packageConfirmDraft.payment_lines, { mode: "cash", amount: "", reference: "" }],
+                            payment_lines: [...packageConfirmDraft.payment_lines, { mode: "cash", amount: "", reference: "", notes: {} }],
                           })}
                           className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-sky-400 hover:text-sky-700"
                           data-testid="cons-collect-fee-split-more"
@@ -5490,10 +5698,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           // A split answers for itself: every part above zero, and the
                           // parts adding up to the fee. The single-mode requirements
                           // below are not its to satisfy.
+                          // A count that was started has to come out right. Nothing
+                          // counted is still fine -- the grid is optional -- but notes
+                          // that are short of what is being taken, or over it, mean one
+                          // of the two figures is wrong and neither may be banked.
                           (packageConfirmDraft.payment_lines
                             ? (packageConfirmDraft.payment_lines.some((l) => !(parseFloat(l.amount) > 0)) ||
+                               packageConfirmDraft.payment_lines.some((l) => l.mode === "cash" && !notesSettled(l.notes, l.amount)) ||
                                Math.abs(packageConfirmDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(collectFeeDraft.amount)) > 0.01)
-                            : ((BANK_DETAIL_MODES.includes(mode) && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim())) ||
+                            : ((mode === "cash" && !notesSettled(packageConfirmDraft.cash_notes, collectFeeDraft.amount)) ||
+                               (BANK_DETAIL_MODES.includes(mode) && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim())) ||
                                (mode === "account_transfer" && !packageConfirmDraft.transfer_reference.trim())))
                         }
                         data-testid="cons-collect-fee-confirm-submit"
@@ -5633,6 +5847,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
+                    {/* Counted last, under the sessions fields rather than under the
+                        amount the way the Consultation Fee's is. The amount here is not
+                        settled until "Sessions Covered Now" is: a count entered above
+                        that box would be checked against a figure the next keystroke
+                        changes, and would read as short through no fault of the person
+                        counting. Cheque and Partial never reach this -- one clears at a
+                        bank and the other is a schedule, and neither is notes on a desk
+                        today. */}
+                    {mode === "cash" && !treatmentConfirmDraft.payment_lines && (
+                      <CashDenominations
+                        amount={treatmentFeeDraft.amount}
+                        notes={treatmentConfirmDraft.cash_notes}
+                        onChange={(cash_notes) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, cash_notes })}
+                        testPrefix="cons-treatment-fee-confirm"
+                      />
+                    )}
+
                     {/* Started from what was already chosen: the mode this popup opened
                         on becomes the first tender, carrying the whole amount, and the
                         second opens empty for the rest. Nothing typed is thrown away by
@@ -5643,8 +5874,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         onClick={() => setTreatmentConfirmDraft({
                           ...treatmentConfirmDraft,
                           payment_lines: [
-                            { mode, amount: treatmentFeeDraft.amount, reference: mode === "upi" ? treatmentConfirmDraft.upi_transaction_id : "" },
-                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "" },
+                            // Notes already counted come across with the mode they were
+                            // counted in. Pressing this is not a reason to make somebody
+                            // count the same drawer twice.
+                            { mode, amount: treatmentFeeDraft.amount, reference: mode === "upi" ? treatmentConfirmDraft.upi_transaction_id : "", notes: mode === "cash" ? treatmentConfirmDraft.cash_notes : {} },
+                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "", notes: {} },
                           ],
                         })}
                         className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-400 hover:text-indigo-700"
@@ -5662,12 +5896,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           expected={treatmentFeeDraft.amount}
                           onChange={(next) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, payment_lines: next })}
                           testPrefix="cons-treatment-fee"
+                          countCash
                         />
                         <button
                           type="button"
                           onClick={() => setTreatmentConfirmDraft({
                             ...treatmentConfirmDraft,
-                            payment_lines: [...treatmentConfirmDraft.payment_lines, { mode: "cash", amount: "", reference: "" }],
+                            payment_lines: [...treatmentConfirmDraft.payment_lines, { mode: "cash", amount: "", reference: "", notes: {} }],
                           })}
                           className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-400 hover:text-indigo-700"
                           data-testid="cons-treatment-fee-split-more"
@@ -5794,8 +6029,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         // to satisfy.
                         (treatmentConfirmDraft.payment_lines
                           ? (treatmentConfirmDraft.payment_lines.some((l) => !(parseFloat(l.amount) > 0)) ||
+                             // A count that was started has to be finished, per cash
+                             // line and against that line's own amount.
+                             treatmentConfirmDraft.payment_lines.some((l) => l.mode === "cash" && !notesSettled(l.notes, l.amount)) ||
                              Math.abs(treatmentConfirmDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(treatmentFeeDraft.amount)) > 0.01)
-                          : ((BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
+                          : ((mode === "cash" && !notesSettled(treatmentConfirmDraft.cash_notes, treatmentFeeDraft.amount)) ||
+                             (BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
                              (mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim())))
                       }
                       data-testid="cons-treatment-fee-confirm-submit"
@@ -5842,10 +6081,29 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <PaymentModeSelect
                           value={mode}
                           options={INSTALLMENT_PAYMENT_MODES}
-                          onChange={(v) => setPartialCollectDraft({ ...partialCollectDraft, payment_mode: v })}
+                          // The count goes with the mode that was counted in. Switching
+                          // away from Cash and back would otherwise leave the old notes
+                          // sitting under a tender nobody counted -- the same reason a
+                          // split line clears its own on a mode change. The Treatment Fee
+                          // popup gets this for free: choosing a mode there rebuilds the
+                          // whole confirm draft.
+                          onChange={(v) => setPartialCollectDraft({ ...partialCollectDraft, payment_mode: v, cash_notes: {} })}
                           testId="cons-partial-collect-mode"
                         />
                       </div>
+                    )}
+
+                    {/* An installment is the Treatment Fee arriving in pieces, and it
+                        crosses the same desk in the same notes -- so it is counted the
+                        same way. The amount here is typed directly rather than derived
+                        from sessions, so the count sits straight under it. */}
+                    {mode === "cash" && !partialCollectDraft.payment_lines && (
+                      <CashDenominations
+                        amount={partialCollectDraft.amount}
+                        notes={partialCollectDraft.cash_notes}
+                        onChange={(cash_notes) => setPartialCollectDraft({ ...partialCollectDraft, cash_notes })}
+                        testPrefix="cons-partial-collect"
+                      />
                     )}
 
                     {/* Started from what was already chosen: the mode this popup opened
@@ -5858,8 +6116,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         onClick={() => setPartialCollectDraft({
                           ...partialCollectDraft,
                           payment_lines: [
-                            { mode, amount: partialCollectDraft.amount, reference: mode === "upi" ? partialCollectDraft.upi_transaction_id : "" },
-                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "" },
+                            { mode, amount: partialCollectDraft.amount, reference: mode === "upi" ? partialCollectDraft.upi_transaction_id : "", notes: mode === "cash" ? partialCollectDraft.cash_notes : {} },
+                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "", notes: {} },
                           ],
                         })}
                         className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-400 hover:text-emerald-700"
@@ -5877,12 +6135,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           expected={partialCollectDraft.amount}
                           onChange={(next) => setPartialCollectDraft({ ...partialCollectDraft, payment_lines: next })}
                           testPrefix="cons-partial-collect"
+                          countCash
                         />
                         <button
                           type="button"
                           onClick={() => setPartialCollectDraft({
                             ...partialCollectDraft,
-                            payment_lines: [...partialCollectDraft.payment_lines, { mode: "cash", amount: "", reference: "" }],
+                            payment_lines: [...partialCollectDraft.payment_lines, { mode: "cash", amount: "", reference: "", notes: {} }],
                           })}
                           className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-400 hover:text-emerald-700"
                           data-testid="cons-partial-collect-split-more"
@@ -5987,8 +6246,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         !(parseFloat(partialCollectDraft.amount) > 0) ||
                         (partialCollectDraft.payment_lines
                           ? (partialCollectDraft.payment_lines.some((l) => !(parseFloat(l.amount) > 0)) ||
+                             partialCollectDraft.payment_lines.some((l) => l.mode === "cash" && !notesSettled(l.notes, l.amount)) ||
                              Math.abs(partialCollectDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(partialCollectDraft.amount)) > 0.01)
-                          : ((BANK_DETAIL_MODES.includes(mode) && (!partialCollectDraft.account_number.trim() || !partialCollectDraft.account_holder_name.trim() || !partialCollectDraft.bank_name.trim() || !partialCollectDraft.ifsc_code.trim())) ||
+                          : ((mode === "cash" && !notesSettled(partialCollectDraft.cash_notes, partialCollectDraft.amount)) ||
+                             (BANK_DETAIL_MODES.includes(mode) && (!partialCollectDraft.account_number.trim() || !partialCollectDraft.account_holder_name.trim() || !partialCollectDraft.bank_name.trim() || !partialCollectDraft.ifsc_code.trim())) ||
                              (mode === "account_transfer" && !partialCollectDraft.transfer_reference.trim()) ||
                              (mode === "cheque" && (!partialCollectDraft.bank_name.trim() || !partialCollectDraft.cheque_number.trim()))))
                       }

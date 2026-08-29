@@ -11,6 +11,11 @@ from deps import v3_require_roles, is_branch_admin_role, is_physio_role
 from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
 from stage_utils import entry_branch_stage_names
 from utils import generate_transaction_id
+# An installment is the Treatment Fee arriving in pieces, so it is counted under exactly
+# the rules the fee itself is -- imported rather than copied. v3_fitness.py and
+# v3_zumba.py already each carry their own copy of this counter; a fourth would be a
+# fourth place for the note list and the must-agree rule to drift apart.
+from routers.v3_packages import _notes_label, _settle_cash_count
 
 
 def _now():
@@ -1563,14 +1568,34 @@ async def mark_installment_paid(
         mode_fields = {}
         detail_suffix = ""
         if lines:
-            mode_fields = {"payment_lines": [
-                {"mode": ln.mode, "amount": ln.amount, "reference": (ln.reference or "").strip()}
+            # Counted against the tender's own amount, never the installment total --
+            # see the same zip in collect_treatment_fee.
+            line_notes = [
+                _settle_cash_count(ln.denominations, ln.amount, f" for the Rs.{ln.amount:g} cash payment") if ln.mode == "cash" else {}
                 for ln in lines
+            ]
+            mode_fields = {"payment_lines": [
+                {
+                    "mode": ln.mode,
+                    "amount": ln.amount,
+                    "reference": (ln.reference or "").strip(),
+                    "denominations": counted,
+                }
+                for ln, counted in zip(lines, line_notes)
             ]}
             detail_suffix = " · Split: " + ", ".join(
-                f"Rs.{ln.amount:g} {ln.mode}" + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
-                for ln in lines
+                f"Rs.{ln.amount:g} {ln.mode}"
+                + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
+                + (f" [{_notes_label(counted)}]" if counted else "")
+                for ln, counted in zip(lines, line_notes)
             )
+        elif mode == "cash":
+            # The installment's own notes. Optional, and refused when they disagree with
+            # the money -- the fee's rule, applied to the piece of it being collected.
+            counted = _settle_cash_count(payload.denominations, amount)
+            if counted:
+                mode_fields = {"denominations": counted}
+                detail_suffix = f" · Counted {_notes_label(counted)}"
         elif mode == "upi":
             # UTR is named in the log only when there is one. The Collect popups stopped
             # asking for it, so the old unconditional line wrote "UTR " with nothing after

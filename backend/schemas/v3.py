@@ -500,6 +500,10 @@ class V3PaymentLineInput(BaseModel):
     mode: str
     amount: float
     reference: Optional[str] = None
+    # Cash only: how many of each note this tender was made of, keyed by the note's value
+    # as a string, because that is what survives a JSON round trip. Optional -- a desk
+    # that did not count sends nothing, which is not the same as counting nothing.
+    denominations: Optional[dict] = None
 
 
 class V3CollectPackagePaymentInput(BaseModel):
@@ -513,6 +517,10 @@ class V3CollectPackagePaymentInput(BaseModel):
     # Branch Admin must explicitly tick a confirmation before this is accepted —
     # a deliberate double-check step, not just clicking Collect once.
     confirmed: bool = False
+    # Cash — the notes the fee was counted out in, when the desk counted them. Same shape
+    # and same optionality as V3PaymentLineInput.denominations above; this is the
+    # single-tender path's copy, since a lone cash payment has no lines to hang it on.
+    denominations: Optional[dict] = None
     # UPI
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
@@ -589,6 +597,11 @@ class V3CollectTreatmentFeeInput(BaseModel):
     # Branch Admin must explicitly tick a confirmation before Cash/UPI/Card is
     # accepted — a deliberate double-check step, not just clicking Collect once.
     confirmed: bool = False
+    # Cash -- the notes this fee was counted out in, when the desk counted them. Same
+    # shape, same optionality and the same must-agree rule as the Consultation Fee's copy
+    # above: a treatment fee is the larger of the two and the one more often paid in a
+    # bundle of notes, so it is the one worth being able to check a drawer against.
+    denominations: Optional[dict] = None
     # Set when the fee arrived in more than one tender -- Rs.4000 cash and Rs.4000 UPI
     # is one collection made of two, not a payment under a mode that is only half true.
     # Present, it settles both the amount (their sum) and the recorded mode ("split");
@@ -634,6 +647,9 @@ class V3MarkInstallmentPaidInput(BaseModel):
     # Collections / Accountant Manage), same as every other Treatment Fee mode.
     payment_mode: Optional[Literal["cash", "upi", "card", "cheque", "account_transfer"]] = None
     amount: Optional[float] = None
+    # One installment is collected across the same desk as the fee it belongs to, so it
+    # counts its cash the same way -- see V3PaymentLineInput.denominations.
+    denominations: Optional[dict] = None
     # One installment can arrive in more than one tender as readily as a whole fee can
     # -- same shape and the same rules as the split on the collection above.
     payment_lines: Optional[List[V3PaymentLineInput]] = None

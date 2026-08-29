@@ -182,6 +182,68 @@ SETTLED_NOW_MODES = ("cash", "upi", "card", "account_transfer")
 # and leave the rest as a scheduled balance. Partial Payment can't: it *is* the schedule.
 PART_SESSION_MODES = ("cash", "upi", "card", "cheque", "account_transfer")
 
+# The notes a branch desk takes, and the only ones a cash count may be entered in. Kept in
+# step with DENOMINATIONS in frontend/src/components/ConsultationsBoard.jsx.
+#
+# Anything not listed here is dropped rather than guessed at, so a count in a note this
+# desk does not hold cannot quietly become part of a total. A payment recorded before this
+# keeps whatever it was counted in — the list governs what may be entered, not what has
+# already happened.
+DENOMINATIONS = (500, 200, 100, 50, 20, 10)
+
+
+def _denomination_total(raw) -> tuple:
+    """What a counted pile of notes comes to, and the tidied count behind it.
+
+    Anything that is not a note this desk holds, or not a positive whole number of them, is
+    dropped: a "3.5 x 500" is a typo, and reading it as 1750 would put a figure in the
+    drawer nobody counted.
+
+    Returns (0.0, {}) for a payment that was never counted, which is the same answer as one
+    counted to nothing — the caller tells them apart by the empty dict, and only ever
+    stores a count that has something in it.
+    """
+    if not isinstance(raw, dict):
+        return 0.0, {}
+    clean: dict = {}
+    total = 0.0
+    for note in DENOMINATIONS:
+        for key in (str(note), note):
+            if key in raw:
+                try:
+                    count = int(raw[key])
+                except (TypeError, ValueError):
+                    count = 0
+                if count > 0:
+                    clean[str(note)] = count
+                    total += note * count
+                break
+    return round(total, 2), clean
+
+
+def _settle_cash_count(raw, amount: float, where: str = "") -> dict:
+    """The count to store against a cash payment of `amount`, or {} if none was taken.
+
+    Counting is optional — a busy desk records the figure alone, as it always could. But a
+    count that was taken has to agree with the money: notes short of the amount, or over
+    it, mean one of the two numbers is wrong, and banking either would bank a figure nobody
+    checked. So this refuses rather than choosing between them.
+    """
+    counted, clean = _denomination_total(raw)
+    if not clean:
+        return {}
+    if abs(counted - float(amount)) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The notes counted{where} come to Rs.{counted:g}, but the cash being collected is Rs.{float(amount):g}",
+        )
+    return clean
+
+
+def _notes_label(clean: dict) -> str:
+    """A stored count written out for an activity line: "2xRs.500 + 1xRs.200"."""
+    return " + ".join(f"{clean[str(d)]}xRs.{d}" for d in DENOMINATIONS if clean.get(str(d)))
+
 
 def build_payment_details(payload) -> tuple:
     """(details, human suffix) for whichever mode this payment used.
@@ -517,16 +579,38 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     payment_details = {}
     detail_suffix = ""
     if lines:
-        # Each tender kept whole, in the order it was entered, so a receipt or a query
-        # months later can say which half came in which way.
-        payment_details = {"payment_lines": [
-            {"mode": ln.mode, "amount": ln.amount, "reference": (ln.reference or "").strip()}
+        # Each cash tender counted against its own amount, not the whole fee: the cash
+        # half of a Rs.600 cash + Rs.600 UPI split is Rs.600, and checking those notes
+        # against Rs.1200 would reject a correct count every time.
+        line_notes = [
+            _settle_cash_count(ln.denominations, ln.amount, f" for the Rs.{ln.amount:g} cash payment") if ln.mode == "cash" else {}
             for ln in lines
+        ]
+        # Each tender kept whole, in the order it was entered, so a receipt or a query
+        # months later can say which half came in which way — and, for cash, what it was
+        # counted out in.
+        payment_details = {"payment_lines": [
+            {
+                "mode": ln.mode,
+                "amount": ln.amount,
+                "reference": (ln.reference or "").strip(),
+                "denominations": counted,
+            }
+            for ln, counted in zip(lines, line_notes)
         ]}
         detail_suffix = " · Split: " + ", ".join(
-            f"Rs.{ln.amount:g} {ln.mode}" + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
-            for ln in lines
+            f"Rs.{ln.amount:g} {ln.mode}"
+            + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
+            + (f" [{_notes_label(counted)}]" if counted else "")
+            for ln, counted in zip(lines, line_notes)
         )
+    elif payload.payment_mode == "cash":
+        # The only branch cash has ever needed here. Left empty when nobody counted, so
+        # the record says "not counted" rather than "counted, and it came to nothing".
+        counted = _settle_cash_count(payload.denominations, amount)
+        if counted:
+            payment_details = {"denominations": counted}
+            detail_suffix = f" · Counted {_notes_label(counted)}"
     elif payload.payment_mode == "upi":
         # Transaction id alone -- see the note in collect_treatment_fee below. The popup
         # that posts here stopped asking for a UTR, so requiring one would 400 every UPI
@@ -780,16 +864,41 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     detail_suffix = ""
     installments = []
     if lines:
-        # Each tender kept whole, in the order it was entered, so a receipt or a query
-        # months later can still say which part of the fee came in which way.
-        payment_details = {"payment_lines": [
-            {"mode": ln.mode, "amount": ln.amount, "reference": (ln.reference or "").strip()}
+        # Each cash tender counted against its own amount, not the whole fee -- the same
+        # rule the Consultation Fee's split is settled under, for the same reason: the
+        # cash half of a Rs.4000 cash + Rs.4000 UPI split is Rs.4000, and checking those
+        # notes against Rs.8000 would reject a correct count every time.
+        line_notes = [
+            _settle_cash_count(ln.denominations, ln.amount, f" for the Rs.{ln.amount:g} cash payment") if ln.mode == "cash" else {}
             for ln in lines
+        ]
+        # Each tender kept whole, in the order it was entered, so a receipt or a query
+        # months later can still say which part of the fee came in which way -- and, for
+        # cash, what it was counted out in.
+        payment_details = {"payment_lines": [
+            {
+                "mode": ln.mode,
+                "amount": ln.amount,
+                "reference": (ln.reference or "").strip(),
+                "denominations": counted,
+            }
+            for ln, counted in zip(lines, line_notes)
         ]}
         detail_suffix = " · Split: " + ", ".join(
-            f"Rs.{ln.amount:g} {ln.mode}" + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
-            for ln in lines
+            f"Rs.{ln.amount:g} {ln.mode}"
+            + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
+            + (f" [{_notes_label(counted)}]" if counted else "")
+            for ln, counted in zip(lines, line_notes)
         )
+    elif payload.payment_mode == "cash":
+        # Cash had no branch here at all until now -- it needed no fields. It has one
+        # thing to record: what the notes were, when somebody counted them. Left empty
+        # when nobody did, so the record says "not counted" rather than "counted, and it
+        # came to nothing".
+        counted = _settle_cash_count(payload.denominations, amount)
+        if counted:
+            payment_details = {"denominations": counted}
+            detail_suffix = f" · Counted {_notes_label(counted)}"
     elif payload.payment_mode == "upi":
         # Transaction id alone. The Treatment Fee's UPI popup stopped asking for a UTR,
         # and a required field the form can no longer supply is a 400 on every UPI
