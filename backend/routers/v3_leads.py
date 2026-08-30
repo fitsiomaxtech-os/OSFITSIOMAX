@@ -131,6 +131,14 @@ _LEAD_REFERENCING_COLLECTIONS = [
 ]
 
 
+async def _delete_lead_cascade(lead_ids: list[str]) -> None:
+    """Wipes every collection that keys a document off any of these leads. Shared by the
+    single hard-delete below and the bulk hard-delete further down, so the list of
+    collections to clean cannot drift between the two paths."""
+    for coll in _LEAD_REFERENCING_COLLECTIONS:
+        await v3_col(coll).delete_many({"lead_id": {"$in": lead_ids}})
+
+
 @router.delete("/leads/{lead_id}")
 async def v3_delete_lead(
     lead_id: str,
@@ -142,8 +150,7 @@ async def v3_delete_lead(
     res = await v3_col("leads").delete_one({"id": lead_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
-    for coll in _LEAD_REFERENCING_COLLECTIONS:
-        await v3_col(coll).delete_many({"lead_id": lead_id})
+    await _delete_lead_cascade([lead_id])
     return {"message": "Lead deleted", "lead_id": lead_id}
 
 
@@ -236,8 +243,7 @@ async def v3_bulk_delete_leads(
         await v3_col("leads").delete_many({"id": {"$in": deleted_ids}})
         # The same trail the single delete clears, so nothing is left pointing at a lead
         # that is gone.
-        for coll in ("lead_activity", "lead_followups", "appointments"):
-            await v3_col(coll).delete_many({"lead_id": {"$in": deleted_ids}})
+        await _delete_lead_cascade(deleted_ids)
 
     return {
         "deleted": len(deleted_ids),
@@ -245,6 +251,39 @@ async def v3_bulk_delete_leads(
         "blocked": blocked,
         "requested": len(ids),
     }
+
+
+class BulkHardDeleteLeadsInput(BaseModel):
+    lead_ids: list[str]
+    confirm: str
+
+
+@router.post("/leads/bulk-hard-delete")
+async def v3_bulk_hard_delete_leads(
+    payload: BulkHardDeleteLeadsInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Same permanent, no-guard delete as the single-lead DELETE above — every fee,
+    session and appointment on file included — for several patients picked at once, e.g.
+    clearing everyone currently listed on one Consultations view. Super Admin only: unlike
+    the safer bulk-delete above (kept open to a Branch Admin precisely because it refuses
+    anyone with paid-for history), this one has no such refusal to fall back on.
+    """
+    if (payload.confirm or "").strip().upper() != "DELETE":
+        raise HTTPException(status_code=400, detail="Type DELETE to confirm")
+
+    ids = [i for i in dict.fromkeys(payload.lead_ids or []) if i]
+    if not ids:
+        raise HTTPException(status_code=400, detail="No patients selected")
+    if len(ids) > MAX_BULK_DELETE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many at once — select {MAX_BULK_DELETE} or fewer (you picked {len(ids)})",
+        )
+
+    res = await v3_col("leads").delete_many({"id": {"$in": ids}})
+    await _delete_lead_cascade(ids)
+    return {"deleted": res.deleted_count, "lead_ids": ids}
 
 
 @router.put("/leads/{lead_id}", response_model=V3LeadOut)

@@ -21,9 +21,10 @@ import {
   getLeadRemarks, getLeadActivity, leadDocuments,
   saveConsultationDecision, markConsultationCompleted, getBranches,
   listTextPresets, addTextPreset, deleteTextPreset,
-  getTreatmentTypes,
+  getTreatmentTypes, bulkHardDeleteLeads,
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
+import { loadSession } from "@/lib/session";
 import { endTime12h, to12h } from "@/lib/time";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, openPrintable, downloadPrintable, sharePrintable } from "@/lib/printable";
 import { isCourseComplete } from "@/lib/leadStage";
@@ -427,7 +428,11 @@ const planPartTone = (part) => PLAN_PART_TONES.find(([label]) => part.startsWith
 // What this consultation decided, read off a saved lead for the row under their name.
 // Built from addonParts like everything else, so the line in the list cannot name a
 // different plan from the one the popup shows when you open it.
-const leadPlanParts = (lead) => addonParts({
+//
+// Exported so other boards showing the same leads -- the Head Physio's merged All list,
+// for one -- can print the identical line rather than inventing their own reading of the
+// same decision fields.
+export const leadPlanParts = (lead) => addonParts({
   treatment: lead.consultation_decision === "consultation_treatment",
   diet: !!lead.diet_recommended,
   dietConsultation: !!lead.diet_consultation,
@@ -437,6 +442,33 @@ const leadPlanParts = (lead) => addonParts({
   zumba: !!lead.zumba_recommended,
   sessions: lead.session_package_sessions || 0,
 });
+
+// The plan line itself, under a patient's name -- "Consultation | Treatment (4 Sessions)",
+// each part tinted by planPartTone. Pulled out so every board that lists these leads
+// renders it identically instead of each keeping its own copy of the markup.
+export const PlanLine = ({ parts, testId, className = "" }) => {
+  if (!parts || parts.length === 0) return null;
+  const plan = parts.join(" | ");
+  return (
+    <span
+      className={`mt-0.5 block truncate text-[10px] font-normal text-slate-400 ${className}`}
+      title={plan}
+      data-testid={testId}
+    >
+      {parts.map((part, n) => {
+        const tone = planPartTone(part);
+        return (
+          <span key={part}>
+            {n > 0 && <span className="px-1 text-slate-300">|</span>}
+            <span className="rounded-[3px] px-1 py-px font-semibold" style={{ background: `${tone}14`, color: tone }}>
+              {part}
+            </span>
+          </span>
+        );
+      })}
+    </span>
+  );
+};
 
 // What a confirmed treatment reads as, on screen and in a WhatsApp message. One shape
 // for both, so the message cannot say something the popup does not.
@@ -1231,6 +1263,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [rescheduleDraft, setRescheduleDraft] = useState(null); // { followupId, date, time, reason } | null
   const [loading, setLoading] = useState(false);
 
+  // Bulk hard-delete — Select mode swaps the row number for a checkbox rather than adding
+  // a column, so the table's hand-tuned widths (COLS_PLAIN/COLS_WITH_DISCOUNT, which must
+  // total 100%) don't need a slice carved out of them for something off most of the time.
+  // Scoped to whatever `filtered` is currently showing, so narrowing first with a stage
+  // pill/search/date filter is what narrows what "select all" can reach.
+  //
+  // Gated on the real signed-in session, not `viewerRole` — this board is mounted with
+  // viewerRole="branch_admin"/"head_physio" for a Super Admin browsing Operations just as
+  // much as for the real thing signed in as one, and the delete endpoint underneath this is
+  // super_admin-only. Reading the actual role is what keeps the button from ever appearing
+  // for someone the backend would just 403.
+  const isRealSuperAdmin = loadSession()?.user?.role === "super_admin";
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkDeleteConfirming, setBulkDeleteConfirming] = useState(false);
+  const [bulkDeleteTyped, setBulkDeleteTyped] = useState("");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Head Physio's own diagnosis report — separate from Pre-Sales' read-only `diagnosis`
   const [physioDiagDraft, setPhysioDiagDraft] = useState("");
   const [physioDiagEditing, setPhysioDiagEditing] = useState(false);
@@ -1584,6 +1634,39 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     }
   }, [branchId]);
 
+  const toggleSelectMode = () => {
+    setSelectMode((v) => !v);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelectOne = (leadId) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId); else next.add(leadId);
+      return next;
+    });
+  };
+
+  // Same "permanent, no-guard, everywhere" delete as the single-patient one — Branch
+  // Leads, appointments, sessions, fees, all of it — just for however many are checked.
+  const runBulkDelete = async () => {
+    if (bulkDeleteTyped.trim().toUpperCase() !== "DELETE") { toast.error('Type "DELETE" to confirm'); return; }
+    setBulkDeleting(true);
+    try {
+      const ids = [...selectedIds];
+      const res = await bulkHardDeleteLeads(ids, "DELETE");
+      toast.success(`${res.deleted ?? ids.length} patient${(res.deleted ?? ids.length) === 1 ? "" : "s"} deleted`);
+      setBulkDeleteConfirming(false);
+      setBulkDeleteTyped("");
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      await load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to delete patients");
+    }
+    setBulkDeleting(false);
+  };
+
   // Everything except the stage pill: the Date Filter, the search, and the VIP/attention
   // mark. Deliberately excludes the pill so this can also drive the per-stage counts below
   // — counting by stage after narrowing to "everyone in the date range", not after already
@@ -1630,6 +1713,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (!isConsultant && stageName === "Diet Consultation") {
       return lead.diet_fee_paid != null && !!lead.diet_coach_id;
     }
+    // Diet Chart, on the same footing as Diet Consultation beside it — a separate product
+    // with its own fee (see DIET_FEE_KINDS.chart), so a patient is on this pill because
+    // that fee is in, not because a coach was assigned or a consultation was booked.
+    if (!isConsultant && stageName === "Diet Chart") {
+      return lead.diet_chart_fee_paid != null;
+    }
     // Rehab reads off the fee for the same reason Diet reads off its own — nothing ever
     // writes the stage. Branch pipeline only: the Consultant's own board has no such stage.
     if (!isConsultant && stageName === "Rehab") return lead.rehab_fee_paid != null;
@@ -1644,9 +1733,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     // were counted in both places at once and the row's own chip contradicted the pill that
     // had just listed it: "moved to Completed, still in Fee Collected".
     //
-    // Above the two cross-cutting stages on purpose, not below them: Rehab and Diet
-    // Consultation are facts about a patient rather than positions, and they run alongside
-    // the pipeline by design -- see matchesConsultationStage in BranchAdminBoard.
+    // Above the three cross-cutting stages on purpose, not below them: Rehab, Diet
+    // Consultation and Diet Chart are facts about a patient rather than positions, and they
+    // run alongside the pipeline by design -- see matchesConsultationStage in BranchAdminBoard.
     //
     // Cancel keeps whatever it holds. Abandoning a course is not finishing one, and the
     // branch pipeline reads it the same way.
@@ -3434,7 +3523,93 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
         </Button>
+        {/* Super Admin only, same as the single-patient delete this bulk version shares
+            its endpoint's cascade with — a Branch Admin still has the safer bulk-delete
+            elsewhere, the one that refuses anyone with paid-for history. */}
+        {isRealSuperAdmin && (
+          <Button
+            onClick={toggleSelectMode}
+            variant={selectMode ? "default" : "outline"}
+            title={selectMode ? "Stop selecting" : "Select patients to delete"}
+            className={`h-8 shrink-0 px-2.5 text-xs ${selectMode ? "bg-rose-600 text-white hover:bg-rose-700" : ""}`}
+            data-testid="cons-select-toggle"
+          >
+            <Trash2 className="mr-1 h-3.5 w-3.5" /> {selectMode ? "Cancel" : "Select"}
+          </Button>
+        )}
       </div>
+
+      {/* Only while selecting — scoped to `filtered`, the same list the rows below render,
+          so "select all" only ever reaches what the current stage/date/search has left on
+          screen, not the whole branch. */}
+      {selectMode && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2" data-testid="cons-select-bar">
+          <label className="flex items-center gap-2 text-xs font-medium text-rose-700">
+            <input
+              type="checkbox"
+              checked={filtered.length > 0 && selectedIds.size === filtered.length}
+              onChange={(e) => setSelectedIds(e.target.checked ? new Set(filtered.map((l) => l.id)) : new Set())}
+              data-testid="cons-select-all"
+            />
+            Select all ({filtered.length})
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-rose-700">{selectedIds.size} selected</span>
+            <Button
+              size="sm"
+              className="h-7 bg-rose-600 text-xs text-white hover:bg-rose-700"
+              disabled={selectedIds.size === 0}
+              onClick={() => setBulkDeleteConfirming(true)}
+              data-testid="cons-bulk-delete-open"
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete Selected
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {bulkDeleteConfirming && (() => {
+        const picked = board.leads.filter((l) => selectedIds.has(l.id));
+        const feesAtStake = picked.reduce((sum, l) => sum + totalPaid(l), 0);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget && !bulkDeleting) setBulkDeleteConfirming(false); }}>
+            <div className="w-full max-w-md space-y-3 rounded-xl bg-white p-5 shadow-2xl" data-testid="cons-bulk-delete-modal">
+              <p className="text-sm font-semibold text-rose-700">Delete {picked.length} patient{picked.length === 1 ? "" : "s"} permanently?</p>
+              <p className="text-xs text-slate-600">
+                Erases every one of them and everything on file — appointments, sessions, fees, their spot on Branch Leads, the Consultant queue and Physio's board. This cannot be undone.
+                {feesAtStake > 0 && <> Rs.{feesAtStake.toLocaleString("en-IN")} on file across them will no longer trace back to a real record.</>}
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  autoFocus
+                  value={bulkDeleteTyped}
+                  onChange={(e) => setBulkDeleteTyped(e.target.value)}
+                  placeholder="Type DELETE"
+                  className="h-9 flex-1 text-sm"
+                  data-testid="cons-bulk-delete-input"
+                />
+                <Button
+                  className="h-9 bg-rose-600 text-xs text-white hover:bg-rose-700"
+                  onClick={runBulkDelete}
+                  disabled={bulkDeleting || bulkDeleteTyped.trim().toUpperCase() !== "DELETE"}
+                  data-testid="cons-bulk-delete-confirm"
+                >
+                  {bulkDeleting ? "Deleting..." : "Delete Permanently"}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-9 text-xs"
+                  onClick={() => { setBulkDeleteConfirming(false); setBulkDeleteTyped(""); }}
+                  disabled={bulkDeleting}
+                  data-testid="cons-bulk-delete-cancel"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Which fee the Fee Collected list is showing. Only here: this stage is the one
           place where a patient may have paid up to four separate things, and everywhere
@@ -3472,17 +3647,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 key={l.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => { setSelectedLead(l); setDetailTab("overview"); }}
+                onClick={() => { if (selectMode) toggleSelectOne(l.id); else { setSelectedLead(l); setDetailTab("overview"); } }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedLead(l); setDetailTab("overview"); }
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  e.preventDefault();
+                  if (selectMode) toggleSelectOne(l.id); else { setSelectedLead(l); setDetailTab("overview"); }
                 }}
-                className="w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-3 text-left active:bg-slate-50"
+                className={`w-full cursor-pointer rounded-xl border p-3 text-left active:bg-slate-50 ${selectMode && selectedIds.has(l.id) ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white"}`}
                 data-testid={`cons-card-${l.id}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-bold text-slate-800">
-                      <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" />
+                      {selectMode ? (
+                        <input type="checkbox" checked={selectedIds.has(l.id)} readOnly className="mr-1.5 align-middle" data-testid={`cons-card-select-${l.id}`} />
+                      ) : (
+                        <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>
+                      )}
+                      {l.name || "—"}<LeadMarks lead={l} className="ml-1.5" />
                     </p>
                     <p className="truncate text-xs text-slate-500">{l.phone || "—"}</p>
                   </div>
@@ -3575,8 +3757,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 const rowStage = rowStageName(l);
                 const hex = stageColor(rowStage);
                 return (
-                  <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
-                    <td className="px-3 py-3 align-middle text-slate-400">{i + 1}</td>
+                  <tr
+                    key={l.id}
+                    onClick={() => { if (selectMode) toggleSelectOne(l.id); else { setSelectedLead(l); setDetailTab("overview"); } }}
+                    className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 ${selectMode && selectedIds.has(l.id) ? "bg-rose-50" : ""}`}
+                    data-testid={`cons-row-${l.id}`}
+                  >
+                    <td className="px-3 py-3 align-middle text-slate-400">
+                      {selectMode ? (
+                        <input type="checkbox" checked={selectedIds.has(l.id)} readOnly data-testid={`cons-row-select-${l.id}`} />
+                      ) : (
+                        i + 1
+                      )}
+                    </td>
                     <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>
                       <span className="block truncate">{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" /></span>
                       {/* What they are going away with, under the name. Reading it meant
@@ -3584,35 +3777,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           got to, not what was decided, and those are different questions.
                           Truncated with the whole of it on hover — this column is a tenth
                           of the table, and a plan can run to four services. */}
-                      {(() => {
-                        const parts = leadPlanParts(l);
-                        const plan = parts.join(" | ");
-                        return (
-                          <span
-                            className="mt-0.5 block truncate text-[10px] font-normal text-slate-400"
-                            title={plan}
-                            data-testid={`cons-plan-${l.id}`}
-                          >
-                            {/* Each service tinted in its own colour, kept inline so the
-                                line still truncates as one string in a column this narrow —
-                                the hover title stays the plain "A | B" reading. */}
-                            {parts.map((part, n) => {
-                              const tone = planPartTone(part);
-                              return (
-                                <span key={part}>
-                                  {n > 0 && <span className="px-1 text-slate-300">|</span>}
-                                  <span
-                                    className="rounded-[3px] px-1 py-px font-semibold"
-                                    style={{ background: `${tone}14`, color: tone }}
-                                  >
-                                    {part}
-                                  </span>
-                                </span>
-                              );
-                            })}
-                          </span>
-                        );
-                      })()}
+                      <PlanLine parts={leadPlanParts(l)} testId={`cons-plan-${l.id}`} />
                     </td>
                     {/* Date and time each own a line rather than wrapping wherever the
                         column happens to run out — so the dates stack in a straight
@@ -5324,10 +5489,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   );
                 }
 
-                // Diet Consultation is the same kind of pill as Rehab — nothing writes it,
-                // a patient is under it because they are on a diet plan — so it opens the
-                // diet programme rather than whatever stage the lead happens to sit at.
-                if (stageFilter === "Diet Consultation" && selectedLead.diet_recommended) {
+                // Diet Consultation and Diet Chart are the same kind of pill as Rehab —
+                // nothing writes either, a patient is under one because they are on a diet
+                // plan — so both open the diet programme rather than whatever stage the
+                // lead happens to sit at. One panel because they are one programme with two
+                // fee lines, not two — see DietDetailBody below.
+                if ((stageFilter === "Diet Consultation" || stageFilter === "Diet Chart") && selectedLead.diet_recommended) {
                   return (
                     <StagePanel
                       tone={detailView && detailView.tone === "cyan" ? "cyan" : "orange"}

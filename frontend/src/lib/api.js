@@ -114,6 +114,9 @@ export const updateLead = async (leadId, payload) => (await api.put(`/leads/${le
 export const deleteLead = async (leadId) => (await api.delete(`/leads/${leadId}`)).data;
 // Clearing several at once. Returns what was deleted and what was refused, with reasons.
 export const bulkDeleteLeads = async (leadIds, confirm) => (await api.post("/branch/leads/bulk-delete", { lead_ids: leadIds, confirm })).data;
+// Same permanent, no-guard delete as deleteLead() above, for several patients at once —
+// no refusal for paid-for history, unlike bulkDeleteLeads. Super Admin only.
+export const bulkHardDeleteLeads = async (leadIds, confirm) => (await api.post("/leads/bulk-hard-delete", { lead_ids: leadIds, confirm })).data;
 export const getPortalAccountStatus = async (leadId) => (await api.get(`/leads/${leadId}/portal-account`)).data;
 export const createOrResetPortalAccount = async (leadId, payload) => (await api.post(`/leads/${leadId}/portal-account`, payload)).data;
 export const getClientPortalPreview = async (leadId) => (await api.get(`/leads/${leadId}/portal-preview`)).data;
