@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { ConsultationsBoard } from "@/components/ConsultationsBoard";
+import { ConsultationsBoard, leadPlanParts, PlanLine } from "@/components/ConsultationsBoard";
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
 import { WeekStrip, todayIso } from "@/components/WeekStrip";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
@@ -150,6 +150,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
         // 24-hour value, zero-padded, which compares correctly.
         at: `${l.appointment_date}T${l.appointment_time || "99:99"}`,
         who: l.assigned_physio_name || "",
+        // A review carries no decision fields of its own, so only a consult entry ever
+        // has a plan -- the group below reads whichever of its entries has one.
+        plan: leadPlanParts(l),
       };
     }),
     ...reviewRows.filter((r) => matches(r.lead_name, r.phone, r.patient_number)).map((r) => ({
@@ -221,7 +224,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       const key = String(r.patientNo || r.phone || r.name || "").trim().toLowerCase() || r.key;
       let g = byKey.get(key);
       if (!g) {
-        g = { key: `g-${key}`, name: r.name, patientNo: r.patientNo, phone: r.phone, entries: [] };
+        g = { key: `g-${key}`, name: r.name, patientNo: r.patientNo, phone: r.phone, plan: r.plan, entries: [] };
         byKey.set(key, g);
         groups.push(g);
       }
@@ -230,6 +233,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       // patient number and another not, and the row should show it either way.
       g.patientNo = g.patientNo || r.patientNo;
       g.phone = g.phone || r.phone;
+      // Only the consult entry carries a plan; a review entry's is always empty and
+      // must not overwrite one the consult entry already gave the group.
+      g.plan = (g.plan && g.plan.length) ? g.plan : r.plan;
       g.entries.push(r);
     }
     return groups;
@@ -519,6 +525,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                             <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">×{g.entries.length}</span>
                           )}
                         </p>
+                        <PlanLine parts={g.plan} testId={`hp-all-card-plan-${g.key}`} />
                         <p className="truncate text-xs text-slate-500">{g.phone || "—"}</p>
                       </div>
                       <span className={`shrink-0 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[st.tone]}`}>
@@ -572,6 +579,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                           {many && (
                             <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500" data-testid={`hp-all-count-${g.key}`}>×{g.entries.length}</span>
                           )}
+                          <PlanLine parts={g.plan} testId={`hp-all-plan-${g.key}`} />
                         </td>
                         <td className="px-4 py-3 text-center font-mono text-[11px] text-slate-400">{g.patientNo || "—"}</td>
                         <td className="px-4 py-3 text-center text-slate-600">{g.phone || "—"}</td>
