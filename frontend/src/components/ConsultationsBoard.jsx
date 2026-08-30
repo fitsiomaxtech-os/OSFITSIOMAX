@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2, Video } from "lucide-react";
+import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Salad, HeartPulse, Music2, Video } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1022,14 +1022,12 @@ const consultationDiscount = (l) => {
   return off > 0 ? { off, pct: (off / listed) * 100 } : null;
 };
 
-// The percentages below must total 100 under table-fixed, so the extra column cannot be
-// appended — it takes its 8% out of the six widest, and the min-width grows by the same
-// amount so nothing is squeezed to make room. Both sets are written out literally because
-// Tailwind reads the source for class names and would compile nothing from a template.
+// The percentages below must total 100 under table-fixed. Both sets are written out
+// literally because Tailwind reads the source for class names and would compile nothing
+// from a template.
 const COLS_WITH_DISCOUNT = {
-  sno: "w-[4%]", patient: "w-[16%]", pno: "w-[6%]", phone: "w-[8%]", email: "w-[4%]",
-  stage: "w-[10%]", expert: "w-[8%]", collected: "w-[8%]", discount: "w-[7%]",
-  appt: "w-[8%]", updated: "w-[7%]", total: "w-[8%]", action: "w-[6%]",
+  sno: "w-[4%]", patient: "w-[20%]", appt: "w-[9%]", expert: "w-[11%]", stage: "w-[12%]",
+  phone: "w-[8%]", pno: "w-[6%]", collected: "w-[11%]", discount: "w-[9%]", total: "w-[10%]",
 };
 
 /**
@@ -1102,8 +1100,8 @@ const totalPaid = (l) => FEE_TABS.reduce((sum, t) => sum + t.paid(l), 0);
 // These must still total 100 under table-fixed, and the two sets are written out literally
 // because Tailwind reads the source for class names and compiles nothing from a template.
 const COLS_PLAIN = {
-  sno: "w-[4%]", patient: "w-[22%]", pno: "w-[9%]", phone: "w-[11%]", email: "w-[6%]",
-  stage: "w-[13%]", expert: "w-[11%]", discount: "", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
+  sno: "w-[6%]", patient: "w-[24%]", appt: "w-[15%]", expert: "w-[17%]", stage: "w-[18%]",
+  phone: "w-[12%]", pno: "w-[8%]",
 };
 
 // The one shape every stage panel in the lead card takes: a header band naming what is on
@@ -3541,26 +3539,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             was no vertical scroll of its own to stick against and the header rode up the
             page with the rows. Same shape as the Branch Leads list. */}
         <CardContent className="max-h-[65vh] overflow-auto p-0">
-          {/* These percentages must add up to 100. They used to total 111, and a
-              table-fixed layout answers that by scaling every column down by the
-              overage — so no column was the width it declared, the ratios drifted,
-              and the trailing date columns ended up too narrow to hold a date,
-              breaking "2026-08-02" across two lines. The min-width is what lets the
-              wrapper scroll on a narrow screen instead of crushing them again. */}
-          {/* S.No took its 4% out of the four widest columns rather than being appended:
-              these percentages have to total 100 under table-fixed, and the min-width grew
-              by the same 40px so no column lost real estate to make room for it. */}
+          {/* These percentages must add up to 100 — table-fixed scales every column down
+              by any overage, so no column ends up the width it declared. The min-width is
+              what lets the wrapper scroll on a narrow screen instead of crushing them. */}
           {/* Fee Collected is the stage where a negotiated Consultation Fee has become a
-              fact, so the discount column is added there alone — on every earlier stage
-              there is no payment yet and the column would be a row of dashes. */}
-          <table className={`w-full table-fixed text-sm ${showDiscountColumn ? "min-w-[1240px]" : "min-w-[1040px]"}`}>
+              fact, so the discount and total columns are added there alone — on every
+              earlier stage there is no payment yet and they would be a row of dashes. */}
+          <table className={`w-full table-fixed text-sm ${showDiscountColumn ? "min-w-[900px]" : "min-w-[700px]"}`}>
             <thead className="sticky top-0 z-10 bg-slate-500 text-xs uppercase text-white">
               <tr>
                 <th className={`${cols.sno} px-3 py-2 text-left align-middle`}>S.No</th>
-                <th className={`${cols.patient} px-4 py-2 text-left align-middle`}>Patient</th>
-                <th className={`${cols.pno} px-4 py-2 text-left align-middle`}>Patient No.</th>
-                <th className={`${cols.phone} px-4 py-2 text-left align-middle`}>Phone</th>
-                <th className={`${cols.email} px-4 py-2 text-left align-middle`}>Email</th>
+                <th className={`${cols.patient} px-4 py-2 text-left align-middle`}>Patient Name</th>
+                <th className={`${cols.appt} px-3 py-2 text-left align-middle`}>Appointment</th>
+                <th className={`${cols.expert} px-4 py-2 text-left align-middle`}>
+                  {showDiscountColumn ? "Consultant" : "Consultant Name"}
+                </th>
                 {/* Shortened on Fee Collected alone: that list carries three more columns than any
                     other stage, and the words the headings lose there — Consultation, Expert,
                     Applied — are the ones the column below already makes obvious. Every other
@@ -3568,17 +3561,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <th className={`${cols.stage} px-4 py-2 text-left align-middle`}>
                   {isConsultant ? "Live Stage" : showDiscountColumn ? "Stage" : "Consultation Stage"}
                 </th>
-                <th className={`${cols.expert} px-4 py-2 text-left align-middle`}>
-                  {showDiscountColumn ? "Assigned" : "Assigned Expert"}
-                </th>
+                <th className={`${cols.phone} px-4 py-2 text-left align-middle`}>Phone</th>
+                <th className={`${cols.pno} px-4 py-2 text-left align-middle`}>Patient No.</th>
                 {/* Named for the tab rather than a bare "Collected": three tabs showing a
                     column of the same name is three lists that look identical. */}
                 {showDiscountColumn && <th className={`${cols.collected} px-3 py-2 text-left align-middle`}>{activeFee.label} Fee</th>}
                 {showDiscountColumn && <th className={`${cols.discount} px-3 py-2 text-left align-middle`}>Discount</th>}
-                <th className={`${cols.appt} px-3 py-2 text-left align-middle`}>Appointment</th>
-                <th className={`${cols.updated} px-3 py-2 text-left align-middle`}>Updated</th>
                 {showDiscountColumn && <th className={`${cols.total} px-3 py-2 text-left align-middle`}>Total Amount</th>}
-                <th className={`${cols.action} px-3 py-2 text-center align-middle`}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -3625,9 +3614,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         );
                       })()}
                     </td>
-                    <td className="truncate px-4 py-3 align-middle font-mono text-xs text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
-                    <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.phone}>{l.phone || "—"}</td>
-                    <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.email}>{l.email || "—"}</td>
+                    {/* Date and time each own a line rather than wrapping wherever the
+                        column happens to run out — so the dates stack in a straight
+                        edge down the column instead of breaking at a different word
+                        on every row. */}
+                    <td className="whitespace-nowrap px-3 py-3 align-middle text-xs">
+                      {l.appointment_date ? (
+                        <span
+                          className={`inline-flex max-w-full flex-col items-start rounded-md border px-2 py-1 font-semibold ${appointmentTone(l.appointment_date)}`}
+                          data-testid={`cons-appt-${l.id}`}
+                        >
+                          {/* Stacked, because this column is a narrow slice of a
+                              fixed-layout table and the two on one line ran the chip
+                              past its edge. The width is what the stacked pair was
+                              sized for. */}
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3 shrink-0" />
+                            {l.appointment_date}
+                          </span>
+                          {l.appointment_time && (
+                            <span className="pl-4 text-[11px] font-bold opacity-90">{to12h(l.appointment_time)}</span>
+                          )}
+                        </span>
+                      ) : <span className="text-slate-400">—</span>}
+                    </td>
+                    <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
                     <td className="px-4 py-3 align-middle">
                       <span
                         className="inline-flex max-w-full items-center gap-1 truncate rounded-[5px] px-2 py-0.5 text-xs font-semibold"
@@ -3637,7 +3648,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         {rowStage || "—"}
                       </span>
                     </td>
-                    <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
+                    <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.phone}>{l.phone || "—"}</td>
+                    <td className="truncate px-4 py-3 align-middle font-mono text-xs text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
                     {showDiscountColumn && (
                       // The amount this row contributes to the tab's total, with what it
                       // bought under it — a column of figures with no idea what was sold
@@ -3671,55 +3683,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </td>
                       );
                     })()}
-                    {/* Date and time each own a line rather than wrapping wherever the
-                        column happens to run out — so the dates stack in a straight
-                        edge down the column instead of breaking at a different word
-                        on every row. */}
-                    <td className="whitespace-nowrap px-3 py-3 align-middle text-xs">
-                      {l.appointment_date ? (
-                        <span
-                          className={`inline-flex max-w-full flex-col items-start rounded-md border px-2 py-1 font-semibold ${appointmentTone(l.appointment_date)}`}
-                          data-testid={`cons-appt-${l.id}`}
-                        >
-                          {/* Stacked, because this column is 8% of a fixed-layout table
-                              and the two on one line ran the chip out over Updated beside
-                              it. The width is what the stacked pair was sized for. */}
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3 shrink-0" />
-                            {l.appointment_date}
-                          </span>
-                          {l.appointment_time && (
-                            <span className="pl-4 text-[11px] font-bold opacity-90">{to12h(l.appointment_time)}</span>
-                          )}
-                        </span>
-                      ) : <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 align-middle text-xs text-slate-400">{(l.updated_at || "").slice(0, 10) || "—"}</td>
                     {showDiscountColumn && (
                       <td className="whitespace-nowrap px-3 py-3 align-middle text-xs font-semibold text-slate-700" data-testid={`cons-total-${l.id}`}>
                         {rupees(totalPaid(l))}
                       </td>
                     )}
-                    {/* The whole row already opens the detail dialog, but nothing on screen
-                        said so. This is the same action made visible — stopPropagation so
-                        the row's own handler doesn't fire a second time behind it. */}
-                    <td className="px-3 py-3 text-center align-middle">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setSelectedLead(l); setDetailTab("overview"); }}
-                        title="View details"
-                        aria-label={`View ${l.name || "patient"} details`}
-                        className="rounded p-1.5 text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
-                        data-testid={`cons-row-view-${l.id}`}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
-                    </td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={showDiscountColumn ? 13 : 10} className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan={showDiscountColumn ? 10 : 7} className="px-4 py-8 text-center text-sm text-slate-400">
                   {loading
                     ? "Loading…"
                     // An empty tab is not an empty stage: saying "no leads in consultations"
