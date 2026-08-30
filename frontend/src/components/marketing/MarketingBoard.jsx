@@ -18,6 +18,20 @@ import {
 import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
 
+// Extract spreadsheet ID from any Google Sheets URL: /spreadsheets/d/{ID}/...
+// Shared by SourcesTab, EditSourceDialog, and SheetEntriesEditor rather than each keeping
+// its own copy.
+const extractSheetId = (url) => {
+  if (!url) return "";
+  const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : "";
+};
+
+const emptySheetEntry = () => ({
+  id: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"],
+});
+
 // "offline_physiotherapy" -> "Offline Physiotherapy". The stored name stays snake_case
 // (matched against branches.vertical/verticals.name elsewhere); only the label is prettied.
 const prettyVertical = (v) => String(v || "")
@@ -80,7 +94,11 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
   const [showSync, setShowSync] = useState(null);
   const [showMap, setShowMap] = useState(null);
   const [showEdit, setShowEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"], source_type: "google_sheets", headers: "", branchIds: [] });
+  const [form, setForm] = useState({ name: "", sheet_url: "", sheetEntries: [emptySheetEntry()], source_type: "google_sheets", headers: "", branchIds: [] });
+  // Which half of the Add popup is showing — Details (name/type/branches/headers) or the
+  // list of sheets being added this round. Only meaningful while source_type is
+  // google_sheets; other types have nothing to put in a Sources tab.
+  const [addTab, setAddTab] = useState("details");
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
@@ -139,17 +157,6 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
     setManageBusy(false);
   };
 
-  // Extract spreadsheet ID from any Google Sheets URL: /spreadsheets/d/{ID}/...
-  const extractSheetId = (url) => {
-    if (!url) return "";
-    const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-    return m ? m[1] : "";
-  };
-
-  const onSheetUrlChange = (url) => {
-    setForm({ ...form, sheet_url: url, spreadsheet_id: extractSheetId(url) || form.spreadsheet_id });
-  };
-
   const pullNow = async (s) => {
     setPullResult(null);
     setPullingId(s.id);
@@ -165,16 +172,32 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
 
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Source name required"); return; }
-    const sheetId = form.spreadsheet_id || extractSheetId(form.sheet_url);
-    if (form.source_type === "google_sheets" && !sheetId) {
-      toast.error("Paste a valid Google Sheet URL (must contain /spreadsheets/d/<ID>/)");
-      return;
-    }
     const headers = form.headers.split(",").map((h) => h.trim()).filter(Boolean);
     try {
-      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_names: form.sheet_names.length ? form.sheet_names : ["Sheet1"], branch_ids: form.branchIds, verticals: [] });
-      toast.success("Source added");
-      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"], source_type: "google_sheets", headers: "", branchIds: [] });
+      if (form.source_type === "google_sheets") {
+        // Every sheet entered — one popup save can create several sibling sources at
+        // once, same name/branches, each its own sheet (see plan: batch-create, not a
+        // nested data model, so gsPull/auto-sync need no changes).
+        const entries = form.sheetEntries.filter((e) => e.spreadsheet_id);
+        if (entries.length === 0) {
+          toast.error("Paste a valid Google Sheet URL (must contain /spreadsheets/d/<ID>/)");
+          return;
+        }
+        for (const entry of entries) {
+          await mkCreateSource({
+            name: form.name, sheet_url: entry.sheet_url, source_type: form.source_type, headers,
+            spreadsheet_id: entry.spreadsheet_id,
+            sheet_names: entry.sheet_names.length ? entry.sheet_names : ["Sheet1"],
+            branch_ids: form.branchIds, verticals: [],
+          });
+        }
+        toast.success(entries.length > 1 ? `${entries.length} sources created` : "Source added");
+      } else {
+        await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, branch_ids: form.branchIds, verticals: [] });
+        toast.success("Source added");
+      }
+      setForm({ name: "", sheet_url: "", sheetEntries: [emptySheetEntry()], source_type: "google_sheets", headers: "", branchIds: [] });
+      setAddTab("details");
       setShowAdd(false);
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Create failed"); }
@@ -368,21 +391,34 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
             </select>
             {form.source_type === "google_sheets" ? (
               <>
-                <Input className="sm:col-span-2" placeholder="Paste Google Sheet URL (https://docs.google.com/spreadsheets/d/...)" value={form.sheet_url} onChange={(e) => onSheetUrlChange(e.target.value)} data-testid="mk-add-source-url" />
-                {form.spreadsheet_id && (
-                  <p className="sm:col-span-2 text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{form.spreadsheet_id.slice(0, 24)}…</code></p>
+                <div className="flex items-center gap-2 sm:col-span-2" data-testid="mk-add-source-innertabs">
+                  <button type="button" onClick={() => setAddTab("details")} className={`rounded-md px-3 py-1.5 text-xs font-medium ${addTab === "details" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-add-source-tab-details">Details</button>
+                  <button type="button" onClick={() => setAddTab("sources")} className={`rounded-md px-3 py-1.5 text-xs font-medium ${addTab === "sources" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-add-source-tab-sources">
+                    Sources ({form.sheetEntries.filter((e) => e.spreadsheet_id).length})
+                  </button>
+                </div>
+                {addTab === "sources" ? (
+                  <div className="sm:col-span-2">
+                    <SheetEntriesEditor
+                      entries={form.sheetEntries}
+                      onChange={(v) => setForm({ ...form, sheetEntries: v.length ? v : [emptySheetEntry()] })}
+                      testid="mk-add-source-sheets"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <TargetPicker
+                      branches={branches}
+                      branchIds={form.branchIds}
+                      onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
+                      testid="mk-add-source-target"
+                    />
+                    <Input placeholder="Headers (comma separated) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
+                    <p className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 rounded p-2">
+                      <strong>Important:</strong> every sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
+                    </p>
+                  </>
                 )}
-                <SheetTabPicker spreadsheetId={form.spreadsheet_id} values={form.sheet_names} onChange={(v) => setForm({ ...form, sheet_names: v })} testid="mk-add-source-sheetname" />
-                <TargetPicker
-                  branches={branches}
-                  branchIds={form.branchIds}
-                  onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
-                  testid="mk-add-source-target"
-                />
-                <p className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 rounded p-2">
-                  <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
-                </p>
-                <Input placeholder="Headers (comma separated) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
               </>
             ) : (
               <>
@@ -532,6 +568,94 @@ const SheetTabPicker = ({ spreadsheetId, values, onChange, testid }) => {
 };
 
 /**
+ * Several Google Sheets connected from one popup, listed as rows. Each entry here is the
+ * exact shape a source's own sheet fields already were (sheet_url/spreadsheet_id/
+ * sheet_names) before this existed — on Save, the first becomes the source being created/
+ * edited and any rest become new sibling sources (see submit()/save() in the two dialogs
+ * below). Nothing is created here just by adding a row; only Save calls the API.
+ */
+const SheetEntriesEditor = ({ entries, onChange, testid }) => {
+  const [editingId, setEditingId] = useState(entries[0]?.id ?? null);
+
+  const updateEntry = (id, patch) => onChange(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  const removeEntry = (id) => onChange(entries.filter((e) => e.id !== id));
+  const addEntry = () => {
+    const next = emptySheetEntry();
+    onChange([...entries, next]);
+    setEditingId(next.id);
+  };
+  const onUrlChange = (id, url) => {
+    const current = entries.find((e) => e.id === id);
+    updateEntry(id, { sheet_url: url, spreadsheet_id: extractSheetId(url) || current?.spreadsheet_id || "" });
+  };
+
+  return (
+    <div className="space-y-2" data-testid={testid}>
+      {entries.map((entry) => {
+        const isEditing = editingId === entry.id || !entry.spreadsheet_id;
+        if (!isEditing) {
+          // Collapsed row view — the "row view" the popup lists once a sheet resolves.
+          return (
+            <div key={entry.id} className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2" data-testid={`${testid}-row-${entry.id}`}>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium text-slate-700">{entry.sheet_url}</p>
+                <p className="text-[10px] text-slate-400">{entry.sheet_names.length} tab{entry.sheet_names.length === 1 ? "" : "s"} selected</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button type="button" onClick={() => setEditingId(entry.id)} className="text-slate-400 hover:text-sky-600" title="Edit this sheet" data-testid={`${testid}-edit-${entry.id}`}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                {entries.length > 1 && (
+                  <button type="button" onClick={() => removeEntry(entry.id)} className="text-slate-400 hover:text-rose-600" title="Remove this sheet" data-testid={`${testid}-remove-${entry.id}`}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        }
+        // Expanded "normal view" — today's exact single-sheet URL + tab-picker form.
+        return (
+          <div key={entry.id} className="space-y-2 rounded-md border border-sky-200 bg-sky-50/50 p-2" data-testid={`${testid}-editor-${entry.id}`}>
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="Paste Google Sheet URL (https://docs.google.com/spreadsheets/d/...)"
+                value={entry.sheet_url}
+                onChange={(e) => onUrlChange(entry.id, e.target.value)}
+                className="flex-1"
+                data-testid={`${testid}-url-${entry.id}`}
+              />
+              {entries.length > 1 && (
+                <button type="button" onClick={() => removeEntry(entry.id)} className="shrink-0 text-slate-400 hover:text-rose-600" title="Remove this sheet" data-testid={`${testid}-remove-${entry.id}`}>
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            {entry.spreadsheet_id && (
+              <>
+                <p className="text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{entry.spreadsheet_id.slice(0, 24)}…</code></p>
+                <SheetTabPicker
+                  spreadsheetId={entry.spreadsheet_id}
+                  values={entry.sheet_names}
+                  onChange={(v) => updateEntry(entry.id, { sheet_names: v })}
+                  testid={`${testid}-tabs-${entry.id}`}
+                />
+                <Button type="button" size="sm" variant="outline" className="text-xs" onClick={() => setEditingId(null)} data-testid={`${testid}-done-${entry.id}`}>
+                  Done
+                </Button>
+              </>
+            )}
+          </div>
+        );
+      })}
+      <Button type="button" size="sm" variant="outline" onClick={addEntry} className="text-xs" data-testid={`${testid}-add`}>
+        <Plus className="mr-1 h-3.5 w-3.5" /> Add Sheet
+      </Button>
+    </div>
+  );
+};
+
+/**
  * Which branches a source is tagged to. Several can be picked on one card — with more
  * than one branch there's no single branch a row obviously belongs to, so beyond exactly
  * one selected branch this is a tag for organizing/filtering only (see the backend's
@@ -582,9 +706,18 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   const initialHeaders = (source.headers_detected || []).join(", ");
   const [name, setName] = useState(source.name || "");
   const [sourceType, setSourceType] = useState(source.source_type || "google_sheets");
+  // Non-google types only: a plain reference URL, unrelated to sheet parsing.
   const [sheetUrl, setSheetUrl] = useState(source.sheet_url || "");
-  const [spreadsheetId, setSpreadsheetId] = useState(source.spreadsheet_id || "");
-  const [sheetNames, setSheetNames] = useState(source.sheet_names || (source.sheet_name ? [source.sheet_name] : ["Sheet1"]));
+  // Google Sheets: this source's own sheet is the first row, seeded with today's exact
+  // values — saving without touching Sources updates it byte-for-byte as before. Any row
+  // added after it becomes a brand-new sibling source on save (see save() below).
+  const [sheetEntries, setSheetEntries] = useState([{
+    id: source.id,
+    sheet_url: source.sheet_url || "",
+    spreadsheet_id: source.spreadsheet_id || "",
+    sheet_names: source.sheet_names || (source.sheet_name ? [source.sheet_name] : ["Sheet1"]),
+  }]);
+  const [editTab, setEditTab] = useState("details");
   const [headers, setHeaders] = useState(initialHeaders);
   const [branchIds, setBranchIds] = useState(source.branch_ids || (source.branch_id ? [source.branch_id] : []));
   // No longer editable here — carried through unchanged so a save doesn't wipe whatever
@@ -593,31 +726,25 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(!!source.auto_sync_enabled);
   const [autoSyncInterval, setAutoSyncInterval] = useState(String(source.auto_sync_interval_minutes || 60));
 
-  const extractSheetId = (url) => {
-    if (!url) return "";
-    const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-    return m ? m[1] : "";
-  };
-
-  const onUrlChange = (url) => {
-    setSheetUrl(url);
-    setSpreadsheetId(extractSheetId(url) || spreadsheetId);
-  };
-
   const save = async () => {
     if (!name.trim()) { toast.error("Source name required"); return; }
+    const validEntries = sourceType === "google_sheets" ? sheetEntries.filter((e) => e.spreadsheet_id) : [];
+    if (sourceType === "google_sheets" && validEntries.length === 0) {
+      toast.error("Paste a valid Google Sheet URL (must contain /spreadsheets/d/<ID>/)");
+      return;
+    }
     const payload = {
       name: name.trim(),
       source_type: sourceType,
-      sheet_url: sheetUrl,
+      sheet_url: sourceType === "google_sheets" ? validEntries[0].sheet_url : sheetUrl,
       branch_ids: branchIds,
       verticals: sourceVerticals,
       auto_sync_enabled: autoSyncEnabled,
       auto_sync_interval_minutes: Number(autoSyncInterval) || 60,
     };
     if (sourceType === "google_sheets") {
-      payload.spreadsheet_id = spreadsheetId || extractSheetId(sheetUrl);
-      payload.sheet_names = sheetNames.length ? sheetNames : ["Sheet1"];
+      payload.spreadsheet_id = validEntries[0].spreadsheet_id;
+      payload.sheet_names = validEntries[0].sheet_names.length ? validEntries[0].sheet_names : ["Sheet1"];
     }
     // Only touch headers/mapping if the user actually changed them — avoids
     // silently wiping any manual "Edit Mapping" customization on every save.
@@ -626,7 +753,20 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
     }
     try {
       await mkUpdateSource(source.id, payload);
-      toast.success("Source updated");
+      // Any sheet beyond the first becomes a brand-new sibling source, not folded into
+      // this one — gsPull/auto-sync (per-source, one spreadsheet_id each) need no
+      // changes. mkCreateSource takes no auto-sync fields, matching how Add always worked.
+      const newHeaders = headers.split(",").map((h) => h.trim()).filter(Boolean);
+      for (const entry of validEntries.slice(1)) {
+        await mkCreateSource({
+          name: name.trim(), sheet_url: entry.sheet_url, source_type: sourceType, headers: newHeaders,
+          spreadsheet_id: entry.spreadsheet_id,
+          sheet_names: entry.sheet_names.length ? entry.sheet_names : ["Sheet1"],
+          branch_ids: branchIds, verticals: sourceVerticals,
+        });
+      }
+      const createdCount = Math.max(0, validEntries.length - 1);
+      toast.success(createdCount > 0 ? `Source updated · ${createdCount} new source${createdCount === 1 ? "" : "s"} created` : "Source updated");
       onSaved();
     } catch (e) { toast.error(e?.response?.data?.detail || "Update failed"); }
   };
@@ -643,31 +783,44 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
         </select>
         {sourceType === "google_sheets" ? (
           <>
-            <Input className="sm:col-span-2" placeholder="Paste Google Sheet URL (https://docs.google.com/spreadsheets/d/...)" value={sheetUrl} onChange={(e) => onUrlChange(e.target.value)} data-testid="mk-edit-source-url" />
-            {spreadsheetId && (
-              <p className="sm:col-span-2 text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{spreadsheetId.slice(0, 24)}…</code></p>
-            )}
-            <SheetTabPicker spreadsheetId={spreadsheetId} values={sheetNames} onChange={setSheetNames} testid="mk-edit-source-sheetname" />
-            <TargetPicker
-              branches={branches}
-              branchIds={branchIds}
-              onBranchIdsChange={setBranchIds}
-              testid="mk-edit-source-target"
-            />
-            <p className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 rounded p-2">
-              <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
-            </p>
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-              <input type="checkbox" checked={autoSyncEnabled} onChange={(e) => setAutoSyncEnabled(e.target.checked)} data-testid="mk-edit-source-autosync" />
-              Auto-sync this sheet
-            </label>
-            <Input placeholder="Headers (comma separated) — optional" value={headers} onChange={(e) => setHeaders(e.target.value)} data-testid="mk-edit-source-headers" />
-            {autoSyncEnabled && (
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-slate-600">Every</label>
-                <Input type="number" min="5" className="w-24" value={autoSyncInterval} onChange={(e) => setAutoSyncInterval(e.target.value)} data-testid="mk-edit-source-interval" />
-                <span className="text-xs text-slate-500">minutes</span>
+            <div className="flex items-center gap-2 sm:col-span-2" data-testid="mk-edit-source-innertabs">
+              <button type="button" onClick={() => setEditTab("details")} className={`rounded-md px-3 py-1.5 text-xs font-medium ${editTab === "details" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-edit-source-tab-details">Details</button>
+              <button type="button" onClick={() => setEditTab("sources")} className={`rounded-md px-3 py-1.5 text-xs font-medium ${editTab === "sources" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-edit-source-tab-sources">
+                Sources ({sheetEntries.filter((e) => e.spreadsheet_id).length})
+              </button>
+            </div>
+            {editTab === "sources" ? (
+              <div className="sm:col-span-2">
+                <SheetEntriesEditor
+                  entries={sheetEntries}
+                  onChange={(v) => setSheetEntries(v.length ? v : [emptySheetEntry()])}
+                  testid="mk-edit-source-sheets"
+                />
               </div>
+            ) : (
+              <>
+                <TargetPicker
+                  branches={branches}
+                  branchIds={branchIds}
+                  onBranchIdsChange={setBranchIds}
+                  testid="mk-edit-source-target"
+                />
+                <Input placeholder="Headers (comma separated) — optional" value={headers} onChange={(e) => setHeaders(e.target.value)} data-testid="mk-edit-source-headers" />
+                <p className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 rounded p-2">
+                  <strong>Important:</strong> every sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
+                </p>
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                  <input type="checkbox" checked={autoSyncEnabled} onChange={(e) => setAutoSyncEnabled(e.target.checked)} data-testid="mk-edit-source-autosync" />
+                  Auto-sync this sheet
+                </label>
+                {autoSyncEnabled && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-slate-600">Every</label>
+                    <Input type="number" min="5" className="w-24" value={autoSyncInterval} onChange={(e) => setAutoSyncInterval(e.target.value)} data-testid="mk-edit-source-interval" />
+                    <span className="text-xs text-slate-500">minutes</span>
+                  </div>
+                )}
+              </>
             )}
           </>
         ) : (
