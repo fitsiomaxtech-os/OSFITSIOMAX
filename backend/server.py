@@ -5,7 +5,7 @@ import os
 import logging
 
 from database import client
-from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages, migrate_consultation_stages, migrate_head_consultation_stages, deactivate_legacy_demo_admin, migrate_consultant_roles, migrate_branch_admin_roles, backfill_consultant_branches_from_employees, migrate_designation_roles, retire_aliased_designation_roles, ensure_structure_departments, dedupe_department_designations, sync_head_physio_doctors, consolidate_head_physio_doctors, retire_experts_without_a_login, backfill_login_history_from_sessions, normalize_session_item_prices, normalize_lead_session_package_prices, migrate_course_prices_to_totals, ensure_fitness_packages, backfill_branch_codes, backfill_patient_numbers, backfill_zumba_package_sessions, ensure_rnr_stage, ensure_branch_admin_stages, ensure_rehab_stage, ensure_diet_and_completed_stages, retire_consultation_completed_stage, undo_branch_leads_stage
+from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages, migrate_consultation_stages, migrate_head_consultation_stages, deactivate_legacy_demo_admin, migrate_consultant_roles, migrate_branch_admin_roles, backfill_consultant_branches_from_employees, migrate_designation_roles, retire_aliased_designation_roles, ensure_structure_departments, dedupe_department_designations, sync_head_physio_doctors, consolidate_head_physio_doctors, retire_experts_without_a_login, backfill_login_history_from_sessions, normalize_session_item_prices, normalize_lead_session_package_prices, migrate_course_prices_to_totals, ensure_fitness_packages, backfill_branch_codes, backfill_patient_numbers, backfill_zumba_package_sessions, ensure_rnr_stage, ensure_branch_admin_stages, ensure_rehab_stage, ensure_diet_and_completed_stages, ensure_diet_chart_stage, retire_consultation_completed_stage, undo_branch_leads_stage, ensure_branch_lead_sources
 from routers.v3_google_sheets import start_auto_sync_scheduler
 from routers import v1, v2, v3_auth, v3_config, v3_leads, v3_branch_admin, v3_appointments, v3_sheets, v3_dashboard, v3_head_physio, v3_finance, v3_head_physio_board, v3_physio_board, v3_session_assign, v3_patient_view, v3_marketing, v3_stages, v3_hr, v3_lead_fields, v3_branch_mgmt, v3_google_sheets, v3_packages, v3_public_super_admin, v3_password_reset, v3_store, v3_consult_appointments, v3_reviews, v3_patient_portal, v3_testimonials, v3_recruitment, v3_diet, v3_lead_documents, v3_inventory, v3_text_presets, v3_shifts, v3_zumba, v3_rehab, v3_fitness, v3_feedback
 
@@ -82,6 +82,8 @@ async def startup_seed_data():
     # After the consultation stages exist, since it inserts itself relative to one of them.
     await ensure_rehab_stage()
     await ensure_diet_and_completed_stages()
+    # After Diet Consultation exists, since it inserts itself right after it.
+    await ensure_diet_chart_stage()
     await retire_consultation_completed_stage()
     await migrate_head_consultation_stages()
     # Before the flat-rate pass below, which skips Rehab entirely — but ordering it first
@@ -91,6 +93,9 @@ async def startup_seed_data():
     await normalize_session_item_prices()
     await normalize_lead_session_package_prices()
     await backfill_branch_codes()
+    # Reconciles Lead Sources against the current branch list every startup — see its own
+    # docstring for why that has to be safe to run repeatedly rather than a one-shot.
+    await ensure_branch_lead_sources()
     await backfill_patient_numbers()
     await backfill_zumba_package_sessions()
     # Every job title in the structure becomes a role somebody can be given, which is what

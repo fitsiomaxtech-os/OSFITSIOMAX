@@ -254,6 +254,202 @@ async def ensure_diet_and_completed_stages() -> None:
         })
 
 
+async def ensure_diet_chart_stage() -> None:
+    """Give the Branch consultation pipeline its Diet Chart pill, right after Diet Consultation.
+
+    A stage nothing ever writes, exactly like Diet Consultation and Rehab beside it: a lead
+    belongs under it because their Diet Chart Fee has been collected, not because anyone
+    moved them there — see matchesConsultationStage on the frontend. Diet Consultation and
+    Diet Chart are two different products a patient can be sold on the same visit (see
+    DIET_FEE_KINDS on the frontend), each with its own fee, so they get two separate pills
+    rather than one shared between them.
+
+    Positioned against Diet Consultation rather than a fixed index, since Pipeline Stage
+    Management may have moved things.
+
+    Seeded here rather than added by hand in Pipeline Stage Management so every branch gets
+    it without a setup step. Idempotent, and a no-op until Diet Consultation exists.
+    """
+    existing = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": "Diet Chart"}, {"_id": 0, "id": 1}
+    )
+    if existing:
+        return
+    after = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": "Diet Consultation"}, {"_id": 0, "order": 1}
+    )
+    if not after:
+        return
+    insert_order = after["order"] + 1
+    await v3_col("pipeline_stages").update_many(
+        {"type": "consultation", "order": {"$gte": insert_order}},
+        {"$inc": {"order": 1}},
+    )
+    await v3_col("pipeline_stages").insert_one({
+        "id": str(uuid.uuid4()),
+        "name": "Diet Chart",
+        # A lighter orange than Diet Consultation's #f97316, so the two read as the same
+        # diet family while still standing apart on the bar.
+        "color": "#fb923c",
+        "type": "consultation",
+        "order": insert_order,
+        "is_final": False,
+        "created_at": now_iso(),
+    })
+
+
+# Words that show up in a lead source's free-typed name purely as decoration ("Physio
+# Parrys", "Anna Nagar _ Physiotherphy") and would otherwise stop it from being recognised
+# as belonging to "Parrys Branch" / "Anna Nagar Branch". Stripped from both sides before
+# comparing, so only the part that actually names the place is left to match on. Includes
+# the misspellings already living in the data (Physiotherphy, Physiotheraphy) rather than
+# correcting them — this is read-only matching, not a spellcheck.
+_LEAD_SOURCE_NAME_FILLER = {"branch", "physio", "physiotherapy", "physiotherphy", "physiotheraphy", "online"}
+
+
+def _lead_source_core_tokens(name: str) -> set:
+    words = re.findall(r"[a-z]{2,}", str(name or "").lower().replace("_", " "))
+    return {w for w in words if w not in _LEAD_SOURCE_NAME_FILLER}
+
+
+def _lead_source_branch_ids(source: dict) -> list:
+    ids = source.get("branch_ids")
+    if ids is not None:
+        return ids
+    legacy = source.get("branch_id")
+    return [legacy] if legacy else []
+
+
+def _default_lead_source_doc(branch_id: str, branch_name: str) -> dict:
+    return {
+        "id": str(uuid.uuid4()),
+        "name": branch_name,
+        "source_type": "google_sheets",
+        "sheet_url": "",
+        "spreadsheet_id": "",
+        "sheet_name": "Sheet1",
+        "sheet_names": ["Sheet1"],
+        "column_mapping": {},
+        "custom_fields": [],
+        "headers_detected": [],
+        "branch_ids": [branch_id],
+        "verticals": [],
+        "row_count": 0,
+        "last_synced": None,
+        "is_active": True,
+        "is_archived": False,
+        "created_at": now_iso(),
+    }
+
+
+async def create_default_lead_source(branch_id: str, branch_name: str) -> None:
+    """Give a brand-new branch its own Lead Source card the moment it's created.
+
+    Called from every branch-creation route (v3_config.v3_create_branch,
+    v3_branch_mgmt.create_branch_with_existing_admin) rather than left for the next
+    server restart to pick up via ensure_branch_lead_sources below — a branch opened this
+    afternoon should show up on Marketing > Lead Sources this afternoon, not after the next
+    deploy. Unlinked until someone pastes its Google Sheet into Edit Source; nothing here
+    invents a spreadsheet that doesn't exist yet.
+
+    Idempotent: a branch id can only reach this twice if something calls it twice, and the
+    check below makes the second call a no-op instead of a duplicate card.
+    """
+    exists = await v3_col("marketing_sources").find_one({"branch_ids": [branch_id]}, {"_id": 0, "id": 1})
+    if exists:
+        return
+    await v3_col("marketing_sources").insert_one(_default_lead_source_doc(branch_id, branch_name))
+
+
+async def sync_lead_source_branch_name(branch_id: str, branch_name: str) -> None:
+    """Keep a branch's Lead Source card's name in step when the branch itself is renamed.
+
+    Called from v3_config.v3_update_branch whenever branch_name is part of the update.
+    The card's name is never editable on its own (see update_source in v3_marketing,
+    which drops "name" from every PATCH) specifically so that Branch Manager stays the
+    one place a rename actually happens — this is the other half of that: the rename
+    still has to reach the card somehow.
+    """
+    await v3_col("marketing_sources").update_one(
+        {"branch_ids": [branch_id]}, {"$set": {"name": branch_name}}
+    )
+
+
+async def ensure_branch_lead_sources() -> None:
+    """One Lead Source card per branch, named after the branch and tagged to it.
+
+    Branch Manager (Operations > Branch) is what drives which cards exist on
+    Marketing > Lead Sources now, not a Super Admin picking a name and ticking branch
+    boxes by hand in an Add Source popup — see MarketingBoard's SourcesTab, which no
+    longer offers one. This is the startup half of that: it reconciles whatever the
+    marketing_sources collection already holds against the current branch list, every
+    time the server starts (deploys happen on every push here, so this runs often and
+    has to be safe to run every time).
+
+    Three passes:
+      1. A branch already tied to exactly one source (branch_ids == [branch.id]) just
+         gets that source's name straightened to match — everything else it carries
+         (its Google Sheet, column mapping, auto-sync settings) is untouched.
+      2. A branch still unmatched is checked against every source that isn't tied to any
+         branch, by name (see _lead_source_core_tokens) — this is what turns "Physio
+         Parrys" into Parrys Branch's own card, sheet and all, on the very first run
+         instead of leaving it an orphan beside a freshly-created empty one.
+      3. Any source nobody claimed — including one tagged to several branches or a
+         vertical, which no longer fits a one-card-per-branch model — is archived, not
+         deleted: still there under Archived if the branch/sheet pairing needs sorting
+         out by hand. A branch nothing claimed gets a fresh, unlinked card.
+    """
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    sources = await v3_col("marketing_sources").find({}, {"_id": 0}).to_list(500)
+
+    claimed_source_ids = set()
+    branch_to_source = {}
+
+    for branch in branches:
+        match = next((s for s in sources if _lead_source_branch_ids(s) == [branch["id"]]), None)
+        if match:
+            branch_to_source[branch["id"]] = match
+            claimed_source_ids.add(match["id"])
+
+    for branch in branches:
+        if branch["id"] in branch_to_source:
+            continue
+        branch_tokens = _lead_source_core_tokens(branch["branch_name"])
+        if not branch_tokens:
+            continue
+        candidate = next(
+            (
+                s for s in sources
+                if s["id"] not in claimed_source_ids
+                and not _lead_source_branch_ids(s)
+                and _lead_source_core_tokens(s.get("name")) & branch_tokens
+            ),
+            None,
+        )
+        if candidate:
+            branch_to_source[branch["id"]] = candidate
+            claimed_source_ids.add(candidate["id"])
+
+    for branch in branches:
+        match = branch_to_source.get(branch["id"])
+        if not match:
+            await v3_col("marketing_sources").insert_one(_default_lead_source_doc(branch["id"], branch["branch_name"]))
+            continue
+        updates = {}
+        if match.get("name") != branch["branch_name"]:
+            updates["name"] = branch["branch_name"]
+        if _lead_source_branch_ids(match) != [branch["id"]]:
+            updates["branch_ids"] = [branch["id"]]
+        if match.get("is_archived"):
+            updates["is_archived"] = False
+        if updates:
+            await v3_col("marketing_sources").update_one({"id": match["id"]}, {"$set": updates})
+
+    for s in sources:
+        if s["id"] not in claimed_source_ids and not s.get("is_archived"):
+            await v3_col("marketing_sources").update_one({"id": s["id"]}, {"$set": {"is_archived": True}})
+
+
 async def retire_consultation_completed_stage() -> None:
     """Take the Consultation Completed pill off the Branch consultation pipeline.
 

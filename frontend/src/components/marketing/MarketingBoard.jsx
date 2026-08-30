@@ -90,15 +90,9 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
   // grouped by whichever branch(es)/vertical(s) it's actually tagged to.
   const [sourceModeFilter, setSourceModeFilter] = useState("all"); // "all" | "offline" | "online"
   const [gs, setGs] = useState({ connected: false });
-  const [showAdd, setShowAdd] = useState(false);
   const [showSync, setShowSync] = useState(null);
   const [showMap, setShowMap] = useState(null);
   const [showEdit, setShowEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", sheet_url: "", sheetEntries: [emptySheetEntry()], source_type: "google_sheets", headers: "", branchIds: [] });
-  // Which half of the Add popup is showing — Details (name/type/branches/headers) or the
-  // list of sheets being added this round. Only meaningful while source_type is
-  // google_sheets; other types have nothing to put in a Sources tab.
-  const [addTab, setAddTab] = useState("details");
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
@@ -168,39 +162,6 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Pull failed"); }
     setPullingId(null);
-  };
-
-  const submit = async () => {
-    if (!form.name.trim()) { toast.error("Source name required"); return; }
-    const headers = form.headers.split(",").map((h) => h.trim()).filter(Boolean);
-    try {
-      if (form.source_type === "google_sheets") {
-        // Every sheet entered — one popup save can create several sibling sources at
-        // once, same name/branches, each its own sheet (see plan: batch-create, not a
-        // nested data model, so gsPull/auto-sync need no changes).
-        const entries = form.sheetEntries.filter((e) => e.spreadsheet_id);
-        if (entries.length === 0) {
-          toast.error("Paste a valid Google Sheet URL (must contain /spreadsheets/d/<ID>/)");
-          return;
-        }
-        for (const entry of entries) {
-          await mkCreateSource({
-            name: form.name, sheet_url: entry.sheet_url, source_type: form.source_type, headers,
-            spreadsheet_id: entry.spreadsheet_id,
-            sheet_names: entry.sheet_names.length ? entry.sheet_names : ["Sheet1"],
-            branch_ids: form.branchIds, verticals: [],
-          });
-        }
-        toast.success(entries.length > 1 ? `${entries.length} sources created` : "Source added");
-      } else {
-        await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, branch_ids: form.branchIds, verticals: [] });
-        toast.success("Source added");
-      }
-      setForm({ name: "", sheet_url: "", sheetEntries: [emptySheetEntry()], source_type: "google_sheets", headers: "", branchIds: [] });
-      setAddTab("details");
-      setShowAdd(false);
-      load();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Create failed"); }
   };
 
   const runSync = async () => {
@@ -276,10 +237,11 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-slate-600">Connect data feeds. Paste sheet headers to auto-detect column mappings.</p>
-        <Button onClick={() => setShowAdd(true)} data-testid="mk-add-source-btn"><Plus className="mr-1 h-4 w-4" />Add Source</Button>
-      </div>
+      {/* No Add Source here any more — a card exists for every branch in Branch Manager
+          the moment that branch does (see seed.ensure_branch_lead_sources), so there is
+          nothing left to add by hand. Paste a sheet URL into an existing branch's card via
+          Edit Source, or open a new branch in Operations > Branch > Branch Manager. */}
+      <p className="text-sm text-slate-600">Connect data feeds. Paste sheet headers to auto-detect column mappings.</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => setSourceView("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${sourceView === "active" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-source-tab-active">
@@ -374,72 +336,10 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
           <p className="col-span-full text-sm text-slate-400">
             {sourceModeFilter !== "all"
               ? "No sources match this filter."
-              : sourceView === "archived" ? "No archived sources." : <>No sources yet. Click <span className="font-semibold">Add Source</span> to begin.</>}
+              : sourceView === "archived" ? "No archived sources." : "No branches yet — add one in Operations > Branch > Branch Manager."}
           </p>
         )}
       </div>
-
-      {showAdd && (
-        <DialogShell title="Add Lead Source" onClose={() => setShowAdd(false)} testid="mk-add-source-dialog" maxWidth="max-w-2xl">
-          {/* Two columns on a wider dialog rather than one long stack — the tab and branch
-              checklists side by side are what actually saved the height; everything else
-              just rides along in the same grid. Single column again below sm. */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Input placeholder="Source name (e.g. Meta Ads, Walk-ins)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="mk-add-source-name" />
-            <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.source_type} onChange={(e) => setForm({ ...form, source_type: e.target.value })} data-testid="mk-add-source-type">
-              {["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"].map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            {form.source_type === "google_sheets" ? (
-              <>
-                <div className="flex items-center gap-2 sm:col-span-2" data-testid="mk-add-source-innertabs">
-                  <button type="button" onClick={() => setAddTab("details")} className={`rounded-md px-3 py-1.5 text-xs font-medium ${addTab === "details" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-add-source-tab-details">Details</button>
-                  <button type="button" onClick={() => setAddTab("sources")} className={`rounded-md px-3 py-1.5 text-xs font-medium ${addTab === "sources" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-add-source-tab-sources">
-                    Sources ({form.sheetEntries.filter((e) => e.spreadsheet_id).length})
-                  </button>
-                </div>
-                {addTab === "sources" ? (
-                  <div className="sm:col-span-2">
-                    <SheetEntriesEditor
-                      entries={form.sheetEntries}
-                      onChange={(v) => setForm({ ...form, sheetEntries: v.length ? v : [emptySheetEntry()] })}
-                      testid="mk-add-source-sheets"
-                    />
-                  </div>
-                ) : (
-                  <>
-                    <TargetPicker
-                      branches={branches}
-                      branchIds={form.branchIds}
-                      onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
-                      testid="mk-add-source-target"
-                    />
-                    <Input placeholder="Headers (comma separated) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
-                    <p className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 rounded p-2">
-                      <strong>Important:</strong> every sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
-                    </p>
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                <Input className="sm:col-span-2" placeholder="Source URL (optional, for reference)" value={form.sheet_url} onChange={(e) => setForm({ ...form, sheet_url: e.target.value })} data-testid="mk-add-source-url" />
-                <TargetPicker
-                  branches={branches}
-                  branchIds={form.branchIds}
-                  onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
-                  testid="mk-add-source-target"
-                />
-                <Input placeholder="Headers (comma separated) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
-              </>
-            )}
-            <p className="sm:col-span-2 text-xs text-slate-400">Headers auto-map to: name, phone, email, vertical, condition, age, preferred_branch, budget, notes.</p>
-            <p className="sm:col-span-2 text-xs text-slate-400">
-              Leave empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several just tags this source for filtering — leads still land in the general Pre-Sales pool.
-            </p>
-            <Button onClick={submit} className="sm:col-span-2 w-full" data-testid="mk-add-source-submit">Create Source</Button>
-          </div>
-        </DialogShell>
-      )}
 
       {showSync && (
         <DialogShell title={`Sync: ${showSync.name}`} onClose={() => { setShowSync(null); setSyncResult(null); }} testid="mk-sync-dialog">
@@ -704,7 +604,10 @@ const TargetPicker = ({ branches, branchIds, onBranchIdsChange, testid }) => (
 
 const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   const initialHeaders = (source.headers_detected || []).join(", ");
-  const [name, setName] = useState(source.name || "");
+  // Not editable here, or anywhere in this dialog — a card is named after the branch it
+  // belongs to (see seed.ensure_branch_lead_sources on the backend), and the only place
+  // that name ever changes is renaming the branch itself in Branch Manager.
+  const name = source.name || "";
   const [sourceType, setSourceType] = useState(source.source_type || "google_sheets");
   // Non-google types only: a plain reference URL, unrelated to sheet parsing.
   const [sheetUrl, setSheetUrl] = useState(source.sheet_url || "");
@@ -727,14 +630,12 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   const [autoSyncInterval, setAutoSyncInterval] = useState(String(source.auto_sync_interval_minutes || 60));
 
   const save = async () => {
-    if (!name.trim()) { toast.error("Source name required"); return; }
     const validEntries = sourceType === "google_sheets" ? sheetEntries.filter((e) => e.spreadsheet_id) : [];
     if (sourceType === "google_sheets" && validEntries.length === 0) {
       toast.error("Paste a valid Google Sheet URL (must contain /spreadsheets/d/<ID>/)");
       return;
     }
     const payload = {
-      name: name.trim(),
       source_type: sourceType,
       sheet_url: sourceType === "google_sheets" ? validEntries[0].sheet_url : sheetUrl,
       branch_ids: branchIds,
@@ -777,7 +678,10 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
           checklists side by side are what actually saved the height; everything else
           just rides along in the same grid. Single column again below sm. */}
       <div className="grid gap-3 sm:grid-cols-2">
-        <Input placeholder="Source name (e.g. Meta Ads, Walk-ins)" value={name} onChange={(e) => setName(e.target.value)} data-testid="mk-edit-source-name" />
+        <div>
+          <div className="flex h-9 w-full items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700" data-testid="mk-edit-source-name">{name}</div>
+          <p className="mt-1 text-[11px] text-slate-400">Named after the branch — rename the branch in Branch Manager to change this.</p>
+        </div>
         <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={sourceType} onChange={(e) => setSourceType(e.target.value)} data-testid="mk-edit-source-type">
           {["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"].map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
@@ -838,6 +742,7 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
         <p className="sm:col-span-2 text-xs text-slate-400">Changing headers re-detects the column mapping. Leave as-is to keep your current mapping.</p>
         <p className="sm:col-span-2 text-xs text-slate-400">
           Leave empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several just tags this source for filtering — leads still land in the general Pre-Sales pool.
+          {" "}This card started tagged to its own branch — untick it and the next server restart retags it back and archives this card in favour of a fresh one, since Branch Manager is what keeps one card per branch in step.
         </p>
         <Button onClick={save} className="sm:col-span-2 w-full" data-testid="mk-edit-source-save">Save Changes</Button>
       </div>

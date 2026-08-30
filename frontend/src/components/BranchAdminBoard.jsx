@@ -408,6 +408,10 @@ export const matchesConsultationStage = (lead, stageName) => {
   // Nutrition Coach has them. Reading the flag alone filled this stage with everybody who
   // had ever been offered it, which is a list nobody can work.
   if (stageName === "Diet Consultation") return lead.diet_fee_paid != null && !!lead.diet_coach_id;
+  // Diet Chart, beside it: a separate product with its own fee (see DIET_FEE_KINDS.chart
+  // in ConsultationsBoard), so a patient is on this pill because that fee is in, not
+  // because a coach was assigned or a consultation was booked.
+  if (stageName === "Diet Chart") return lead.diet_chart_fee_paid != null;
   // Rehab, on the same footing: a stage nothing writes. A patient is on the rehab list
   // because their Rehab Fee is in, and they keep whatever position they actually hold in
   // the physio pipeline — rehab runs beside it, not inside it.
@@ -420,8 +424,9 @@ export const matchesConsultationStage = (lead, stageName) => {
   // Physio Assign for a patient with nothing left to attend — counted under both, with the
   // two counts along one bar adding up to more patients than the branch has.
   //
-  // Below the cross-cutting pair above it on purpose: Rehab and Diet Consultation are facts
-  // about a patient rather than positions, and are meant to hold whoever they describe.
+  // Below the cross-cutting trio above it on purpose: Rehab, Diet Consultation and Diet
+  // Chart are facts about a patient rather than positions, and are meant to hold whoever
+  // they describe.
   //
   // Cancel keeps whatever it holds: abandoning a course is not finishing one, the same rule
   // matchesBranchStage follows.

@@ -12,6 +12,7 @@ from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_head
 from routers.v3_hr import is_multi_branch_role, holds_calendar_per_branch, expert_profile_type
 from security import verify_password
 import lead_control
+from seed import create_default_lead_source
 from schemas.v3 import V3UserOut
 
 
@@ -143,6 +144,10 @@ async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3
     await v3_col("branches").insert_one(branch.copy())
     # Update user.branch_id
     await v3_col("users").update_one({"id": payload.admin_user_id}, {"$set": {"branch_id": branch_id}})
+    # Every branch gets its own Lead Source card the moment it exists — see
+    # seed.ensure_branch_lead_sources for why Marketing > Lead Sources no longer has its
+    # own Add Source button.
+    await create_default_lead_source(branch_id, payload.branch_name)
     return branch
 
 

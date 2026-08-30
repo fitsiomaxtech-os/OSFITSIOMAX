@@ -565,7 +565,12 @@ async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v
 @router.patch("/sources/{source_id}")
 async def update_source(source_id: str, payload: MarketingSourceUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     await _validate_targets(payload.branch_ids, payload.verticals)
-    updates = {k: v for k, v in payload.model_dump().items() if v is not None and k != "headers"}
+    # Name is never taken from here: a source's card is named after the branch it belongs
+    # to (see seed.ensure_branch_lead_sources), and letting an edit rename it away from
+    # that would put Lead Sources and Branch Manager out of step again — the whole thing
+    # this endpoint used to allow. It reasserts on the next startup reconciliation anyway,
+    # so a stray "name" in the payload is silently dropped rather than rejected.
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None and k not in ("headers", "name")}
     if payload.sheet_url and not payload.spreadsheet_id:
         extracted = extract_spreadsheet_id(payload.sheet_url)
         if extracted:

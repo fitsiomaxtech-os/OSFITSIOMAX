@@ -15,6 +15,7 @@ from deps import (
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
 import lead_control
+from seed import create_default_lead_source, sync_lead_source_branch_name
 from schemas.v3 import (
     V3UserOut, V3VerticalCreate, V3VerticalOut,
     V3BranchCreate, V3BranchOut, V3BranchUpdate,
@@ -435,6 +436,11 @@ async def v3_create_branch(payload: V3BranchCreate, _: V3UserOut = Depends(v3_re
         {"$set": {"branch_id": branch_id}},
     )
 
+    # Every branch gets its own Lead Source card the moment it exists — see
+    # seed.ensure_branch_lead_sources for why Marketing > Lead Sources no longer has its
+    # own Add Source button.
+    await create_default_lead_source(branch_id, payload.branch_name)
+
     return V3BranchOut(**branch)
 
 
@@ -474,6 +480,11 @@ async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, user: V3User
         if not assignee:
             raise HTTPException(status_code=400, detail="That Pre-Sales member is not attached to this branch")
     await v3_col("branches").update_one({"id": branch_id}, {"$set": updates})
+    # The branch's own Lead Source card is named after it, not editable on its own (see
+    # update_source in v3_marketing) — so a rename here is the only way that name ever
+    # changes, and it has to happen in the same request as the rename itself.
+    if "branch_name" in updates:
+        await sync_lead_source_branch_name(branch_id, updates["branch_name"])
     # The two modes open on different stages — Branch Assign + RNR for a branch running its
     # own leads, New Appointment for one fed by Pre-Sales. Leads already sitting on the old
     # mode's stages are rehomed now, in the same request as the flip, so the board the admin
