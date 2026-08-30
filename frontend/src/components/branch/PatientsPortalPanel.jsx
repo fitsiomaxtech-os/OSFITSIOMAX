@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Copy, Phone, PhoneCall, RefreshCw, User, X } from "lucide-react";
+import { Copy, Phone, PhoneCall, RefreshCw, Trash2, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import {
-  getBranchBoard, updateLead,
+  getBranchBoard, updateLead, deleteLead,
   getPortalAccountStatus, createOrResetPortalAccount,
 } from "@/lib/api";
 // Was a local copy of waNumber, identical to the three still inlined elsewhere. Now that
@@ -223,13 +223,17 @@ export const PatientsPortalPanel = ({ branchId }) => {
             setLeads((prev) => prev.map((l) => (l.id === updated.id ? { ...l, ...updated } : l)));
             setSelected((prev) => (prev ? { ...prev, ...updated } : prev));
           }}
+          onDeleted={(id) => {
+            setLeads((prev) => prev.filter((l) => l.id !== id));
+            setSelected(null);
+          }}
         />
       )}
     </div>
   );
 };
 
-function PatientPortalDetailModal({ lead, onClose, onSaved }) {
+function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
   const [name, setName] = useState(lead.name || "");
   const [phone, setPhone] = useState(lead.phone || "");
   const [savingProfile, setSavingProfile] = useState(false);
@@ -238,6 +242,27 @@ function PatientPortalDetailModal({ lead, onClose, onSaved }) {
   const [emailInput, setEmailInput] = useState(lead.email || "");
   const [creating, setCreating] = useState(false);
   const [justCreated, setJustCreated] = useState(null); // { email, password } | null
+
+  // Typed, not a window.confirm — this is a real hard delete with no undo, wiping the
+  // patient's whole history (Branch Leads, Consultant, Physio, Diet, portal access, every
+  // payment on file) and no longer keeping any of it in a past finance report. A click is
+  // too little friction for that.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteTyped, setDeleteTyped] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (deleteTyped.trim().toUpperCase() !== "DELETE") { toast.error('Type "DELETE" to confirm'); return; }
+    setDeleting(true);
+    try {
+      await deleteLead(lead.id);
+      toast.success(`${lead.name || "Patient"} deleted`);
+      onDeleted(lead.id);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to delete patient");
+      setDeleting(false);
+    }
+  };
 
   const loadAccount = useCallback(async () => {
     try { setAccount(await getPortalAccountStatus(lead.id)); } catch { setAccount({ exists: false }); }
@@ -411,6 +436,65 @@ function PatientPortalDetailModal({ lead, onClose, onSaved }) {
                   </div>
                 )}
               </>
+            )}
+          </div>
+
+          {/* Real delete, not archive — permanently removes this patient and every record
+              that points back at them (Branch Leads, Consultant, Physio, Diet, Zumba, the
+              client portal, every fee on file), no undo. Set apart at the bottom of the
+              popup, past everything else, so it can't be the thing a scroll lands on. */}
+          <div className="space-y-2 rounded-lg border border-rose-200 bg-rose-50/50 p-3" data-testid="branch-patient-danger-zone">
+            <p className="text-xs font-semibold uppercase tracking-wide text-rose-600">Delete Patient</p>
+            {!confirmingDelete ? (
+              <>
+                <p className="text-xs text-rose-700">
+                  Permanently erases {lead.name || "this patient"} and everything on file for them — every fee collected, treatment session, and their spot on Branch Leads, the Consultant queue and Physio's board. This cannot be undone.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-rose-300 text-xs text-rose-700 hover:bg-rose-100"
+                  onClick={() => setConfirmingDelete(true)}
+                  data-testid="branch-patient-delete-open"
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Patient
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-rose-700">
+                  Rs.{feesPaid(lead)} on file for this patient will no longer trace back to a real record. Type DELETE to confirm.
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    autoFocus
+                    value={deleteTyped}
+                    onChange={(e) => setDeleteTyped(e.target.value)}
+                    placeholder="Type DELETE"
+                    className="h-9 flex-1 bg-white text-sm"
+                    data-testid="branch-patient-delete-input"
+                  />
+                  <Button
+                    size="sm"
+                    className="bg-rose-600 text-xs text-white hover:bg-rose-700"
+                    onClick={confirmDelete}
+                    disabled={deleting || deleteTyped.trim().toUpperCase() !== "DELETE"}
+                    data-testid="branch-patient-delete-confirm"
+                  >
+                    {deleting ? "Deleting..." : "Delete Permanently"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs"
+                    onClick={() => { setConfirmingDelete(false); setDeleteTyped(""); }}
+                    disabled={deleting}
+                    data-testid="branch-patient-delete-cancel"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>

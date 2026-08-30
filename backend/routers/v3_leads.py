@@ -118,18 +118,32 @@ async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_requir
     return V3LeadOut(**lead)
 
 
+# Every collection that keys a document off a lead — Branch Leads, Consultant/Head Physio,
+# Physio, Diet and Zumba each write their own trail here, all under the same lead_id. Unlike
+# the bulk-delete above, this endpoint carries no "has paid-for history" guard: it is the one
+# place a Super Admin can remove a patient outright, treatment sessions and collected
+# payments included, when that is genuinely what is wanted rather than clearing a bad import.
+_LEAD_REFERENCING_COLLECTIONS = [
+    "lead_activity", "lead_followups", "lead_remarks", "lead_documents",
+    "appointments", "sessions", "reviews", "package_recommendations",
+    "diet_sessions", "rehab_sessions", "weekly_assessments", "zumba_registrations",
+    "patient_portal_accounts", "patient_portal_sessions",
+]
+
+
 @router.delete("/leads/{lead_id}")
 async def v3_delete_lead(
     lead_id: str,
     user: V3UserOut = Depends(v3_require_roles("super_admin")),
 ):
-    """Permanently delete a lead and its activity history. Super Admin only."""
+    """Permanently delete a lead/patient and every record that points back at them —
+    Branch Leads, the Consultant queue, Physio's board, Diet, Zumba, the client portal —
+    so nothing is left showing a patient this just erased. Super Admin only."""
     res = await v3_col("leads").delete_one({"id": lead_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
-    # Clean up related records
-    await v3_col("lead_activity").delete_many({"lead_id": lead_id})
-    await v3_col("lead_followups").delete_many({"lead_id": lead_id})
+    for coll in _LEAD_REFERENCING_COLLECTIONS:
+        await v3_col(coll).delete_many({"lead_id": lead_id})
     return {"message": "Lead deleted", "lead_id": lead_id}
 
 
