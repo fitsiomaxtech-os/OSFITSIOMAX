@@ -778,17 +778,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView]);
 
-  // What the board is actually narrowed to. The toolbar's date filter and the
-  // Consultation tab's range row are two independent controls over one list, so they
-  // combine by overlap rather than one overwriting the other — each keeps showing its own
-  // state, and neither can quietly cancel the other out.
+  // What the board is actually narrowed to. The toolbar's date filter and the range row's
+  // quick pick are two independent controls over one list, so they combine by overlap
+  // rather than one overwriting the other — each keeps showing its own state, and neither
+  // can quietly cancel the other out.
   //
-  // Scoped to the Consultation tab because that is the only tab drawing the range row.
-  // Left global, a range picked there would go on narrowing Branch Leads with no control
-  // on screen naming it and no second click to clear it.
+  // Both tabs draw the range row now, so this no longer needs to branch on which one is
+  // active: quickDate simply stays null wherever the row isn't mounted, and
+  // intersectDateFilters(dateFilter, null) is just dateFilter.
   const effectiveDateFilter = useMemo(
-    () => (onConsultationTab ? intersectDateFilters(dateFilter, quickDate) : dateFilter),
-    [onConsultationTab, dateFilter, quickDate],
+    () => intersectDateFilters(dateFilter, quickDate),
+    [dateFilter, quickDate],
   );
 
   const filteredLeads = useMemo(() => {
@@ -1145,17 +1145,18 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 below instead. The same instance would have had to be two anyway — one
                 row cannot be both in the toolbar and under it.
 
-                shrink-0 so the search is what gives way when the row gets tighter. */}
-            {onConsultationTab && (
-              <div className="hidden shrink-0 xl:block">
-                <QuickDateFilterBar
-                  value={quickDate}
-                  onChange={setQuickDate}
-                  testid="branch-cons-quick-date-inline"
-                  inline
-                />
-              </div>
-            )}
+                shrink-0 so the search is what gives way when the row gets tighter. Shared
+                by both tabs now — Branch Leads had no range row before, only the calendar
+                icon further along, which is why the toolbar comment below still calls out
+                that history. */}
+            <div className="hidden shrink-0 xl:block">
+              <QuickDateFilterBar
+                value={quickDate}
+                onChange={setQuickDate}
+                testid="branch-quick-date-inline"
+                inline
+              />
+            </div>
             {/* Branch Wise's own picker, handed down so it sits in this row rather than in
                 a bar of its own above it. Nothing renders here on a real Branch Admin's
                 board — they have one branch and never pick.
@@ -1214,15 +1215,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                   <AlertCircle className={`h-4 w-4 ${markFilter === "attention" ? "fill-rose-500 text-white" : "text-slate-400"}`} />
                 </button>
             </div>
-            {/* Off the Consultation toolbar. The range row beside it ends in this exact
-                popover — Custom is a DateFilterPopover — so keeping both put two calendars
-                on one line asking the same question, and the row the branch asked for has
-                five buttons on the end, not six.
+            {/* This icon is its own control (Today/Yesterday/Last Month/This Month/exact
+                day/custom range) and stays visible on Branch Leads exactly as before —
+                the range row beside it is an addition, not a replacement, and its own
+                Custom button already reaches a DateFilterPopover of its own for anything
+                the five one-tap presets don't cover.
 
-                It returns the moment it actually holds a range. This filter is kept across
-                tabs, so one set over Branch Leads would otherwise go on narrowing the
-                consultation list from off-screen with nothing left to clear it. Branch
-                Leads, which has no range row, always shows it. */}
+                On the Consultation tab, though, this icon is the SAME component the row's
+                own Custom button already opens — showing both is two calendars on one
+                line asking the same question, so it only surfaces there once it already
+                holds a range, which in practice (nothing else ever sets dateFilter on that
+                tab) means never: the row's own Custom is what that tab actually uses. */}
             {(!onConsultationTab || dateFilter) && (
               <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
             )}
@@ -1256,28 +1259,25 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 
           {/* The same range row as the one in the toolbar, for the widths where it will
               not fit up there — below xl this is the only copy on screen, and above it
-              this one is the one that goes.
+              this one is the one that goes. Shared by both tabs now, same as the inline
+              copy above.
 
-              A second date control, and deliberately not a replacement for the calendar
-              button the toolbar keeps on Branch Leads — that one still opens the shared
+              A second date control on Branch Leads, and deliberately not a replacement for
+              the calendar button the toolbar keeps there — that one still opens the shared
               popover with Yesterday, Last Month and an exact day in it, unchanged.
 
-              The fast path: the four ranges a branch actually asks for, one tap each, with
-              the same popover on the end for anything else.
-
-              Consultation tab only, and it reaches every stage: the range is folded into
-              effectiveDateFilter, which feeds both the stage counts on the bar above and
-              the ConsultationsBoard underneath, so a pill's number always describes the
-              list that pill opens. */}
-          {onConsultationTab && (
-            <div className="xl:hidden">
-              <QuickDateFilterBar
-                value={quickDate}
-                onChange={setQuickDate}
-                testid="branch-cons-quick-date"
-              />
-            </div>
-          )}
+              The fast path: the one-tap ranges a branch actually asks for, with the same
+              popover on the end for anything else. Folded into effectiveDateFilter either
+              way, which feeds the stage counts on the bar above and, on the Consultation
+              tab, the ConsultationsBoard underneath too — so a pill's number always
+              describes the list that pill opens. */}
+          <div className="xl:hidden">
+            <QuickDateFilterBar
+              value={quickDate}
+              onChange={setQuickDate}
+              testid="branch-quick-date"
+            />
+          </div>
 
           {onConsultationTab ? (
             <ConsultationsBoard
