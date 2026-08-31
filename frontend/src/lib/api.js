@@ -573,6 +573,9 @@ export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/
 export const collectPackagePayment = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-package-payment`, payload)).data;
 export const collectTreatmentFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-treatment-fee`, payload)).data;
 export const assignPhysioWithSessions = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-physio-sessions`, payload)).data;
+// Who has delivered this patient's treatment days and how far each of them got — the
+// physios the patient has been through, oldest first, then the one they are with now.
+export const getLeadPhysioProgress = async (leadId) => (await api.get(`/leads/${leadId}/physio-progress`)).data;
 // Rehab — a parallel course on the same physio's calendar. Its own endpoint and its own
 // collection: a rehab day is not a day of the treatment package (see backend/v3_rehab).
 export const assignRehab = async (payload) => (await api.post("/branch/assign-rehab", payload)).data;

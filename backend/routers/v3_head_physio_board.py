@@ -541,6 +541,42 @@ async def hp_consultation_decision(
     return {"message": "Saved & moved", "lead": V3LeadOut(**updated).model_dump()}
 
 
+def _physio_handover(lead: dict, new_physio_id: str, user: V3UserOut, now: str) -> dict:
+    """The `$push` that closes the outgoing physio's spell with this patient.
+
+    A reassignment is not a correction — the physio being replaced ran real treatment days,
+    and the card that shows the new one has to be able to show what the last one got
+    through first. The days themselves stay in `sessions` under the physio_id of whoever
+    ran them, so the progress is still derived; what cannot be derived is a physio replaced
+    before completing anything, whose upcoming days are deleted on the way out. This entry
+    is what keeps that spell on the record.
+
+    Empty when nothing changed hands — a first assignment, or a re-book with the same
+    physio, which is a reschedule rather than a handover.
+
+    The stage is what says whether there was anything to hand over. assigned_physio_id is
+    written when the consultation appointment is booked, long before anyone picks who will
+    deliver the treatment, so on its own it would read every first assignment as a
+    reassignment away from the physio who merely took the consultation. Only a lead already
+    at Physio Assign has a treatment physio to replace — see the note on the Fee Collected
+    panel's Assign Physio button, which draws its label off the same test.
+    """
+    if lead.get("consultation_stage") != "Physio Assign":
+        return {}
+    previous_id = lead.get("assigned_physio_id")
+    if not previous_id or previous_id == new_physio_id:
+        return {}
+    return {"$push": {"physio_assignment_history": {
+        "physio_id": previous_id,
+        "physio_name": lead.get("assigned_physio_name") or "",
+        "assigned_at": lead.get("physio_assigned_at"),
+        "ended_at": now,
+        "replaced_by_id": new_physio_id,
+        "handed_over_by": user.full_name,
+        "handed_over_by_role": user.role,
+    }}}
+
+
 @router.post("/leads/{lead_id}/assign-consultation-physio")
 async def hp_assign_consultation_physio(
     lead_id: str,
@@ -563,18 +599,27 @@ async def hp_assign_consultation_physio(
     if not physio:
         raise HTTPException(status_code=404, detail="Physio not found")
 
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
-        "assigned_physio_id": physio["id"],
-        "assigned_physio_name": physio["full_name"],
-        "physio_assigned_at": now_iso(),
-        "consultation_stage": "Physio Assign",
-        "updated_at": now_iso(),
-    }})
+    now = now_iso()
+    handover = _physio_handover(lead, physio["id"], user, now)
+    await v3_col("leads").update_one({"id": lead_id}, {
+        "$set": {
+            "assigned_physio_id": physio["id"],
+            "assigned_physio_name": physio["full_name"],
+            "physio_assigned_at": now,
+            "consultation_stage": "Physio Assign",
+            "updated_at": now,
+        },
+        **handover,
+    })
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "consultation_physio_assigned",
-        "details": f"Assigned {physio['full_name']} to deliver treatment sessions",
+        "details": (
+            f"Reassigned from {lead.get('assigned_physio_name')} to {physio['full_name']}"
+            if handover else
+            f"Assigned {physio['full_name']} to deliver treatment sessions"
+        ),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),
@@ -604,11 +649,30 @@ async def hp_assign_physio_with_sessions(
     if not total_sessions:
         raise HTTPException(status_code=400, detail="This lead has no session package to schedule")
 
+    # Days already worked are neither re-bookable nor gone. A mid-course reassignment has
+    # only the rest of the course left to place: this asked for the whole package again
+    # while the completed days stayed on file under the physio who ran them, so a
+    # 12-session patient moved after day 5 came out of it holding 17 treatment days — and
+    # the progress the boards read off those rows said "5 of 17".
+    done = await v3_col("sessions").count_documents({"lead_id": lead_id, "status": "completed"})
+    to_book = total_sessions - done
+    if to_book <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"All {total_sessions} treatment days are already completed — there is nothing left to book",
+        )
+
     sorted_slots = sorted(set(payload.slot_times))
     if len(sorted_slots) != len(payload.slot_times):
         raise HTTPException(status_code=400, detail="Duplicate session slot times were submitted")
-    if len(sorted_slots) != total_sessions:
-        raise HTTPException(status_code=400, detail=f"Pick exactly {total_sessions} session slots (got {len(sorted_slots)})")
+    if len(sorted_slots) != to_book:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Pick exactly {to_book} session slots (got {len(sorted_slots)})"
+                + (f" — {done} of {total_sessions} days are already completed" if done else "")
+            ),
+        )
 
     physio = await v3_col("doctors").find_one({"id": payload.physio_id, "profile_type": "physio"}, {"_id": 0})
     if not physio:
@@ -654,6 +718,17 @@ async def hp_assign_physio_with_sessions(
     # Past every refusal: the old set can go now, and the new one replaces it.
     await v3_col("sessions").delete_many({"lead_id": lead_id, "status": "upcoming"})
 
+    # Where the course left off, so what is booked now carries on from it instead of
+    # restarting. Day numbers drive the in-order completion guard and the "Day 3 of 9" the
+    # physio's board reads; week numbers key the weekly assessments, and a second week 1
+    # would land the new physio's first review on top of the old one's.
+    prior_weeks = 0
+    if done:
+        last_done = await v3_col("sessions").find(
+            {"lead_id": lead_id, "status": "completed"}, {"_id": 0, "week_number": 1},
+        ).sort("week_number", -1).limit(1).to_list(1)
+        prior_weeks = (last_done[0].get("week_number") or 0) if last_done else 0
+
     now = now_iso()
     first_date = date.fromisoformat(sorted_slots[0].split("T")[0])
     session_docs = []
@@ -663,28 +738,45 @@ async def hp_assign_physio_with_sessions(
             "id": str(uuid.uuid4()),
             "lead_id": lead_id,
             "lead_name": lead.get("name", "Unknown"),
+            "branch_id": lead.get("branch_id") or user.branch_id,
             "physio_id": physio["id"],
-            "session_number": i + 1,
+            # Written down, not only pointed at. The Physio Assign card lists every physio a
+            # patient has been through, and a name resolved per row out of `doctors` is a
+            # lookup per spell for something that cannot change after the day it was booked.
+            "physio_name": physio["full_name"],
+            "session_number": done + i + 1,
             "total_sessions": total_sessions,
-            "week_number": (this_date - first_date).days // 7 + 1,
+            "week_number": prior_weeks + (this_date - first_date).days // 7 + 1,
             "slot_time": slot_time,
             "status": "upcoming",
             "created_at": now,
         })
     await v3_col("sessions").insert_many([d.copy() for d in session_docs])
 
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
-        "assigned_physio_id": physio["id"],
-        "assigned_physio_name": physio["full_name"],
-        "physio_assigned_at": now,
-        "consultation_stage": "Physio Assign",
-        "updated_at": now,
-    }})
+    handover = _physio_handover(lead, physio["id"], user, now)
+    await v3_col("leads").update_one({"id": lead_id}, {
+        "$set": {
+            "assigned_physio_id": physio["id"],
+            "assigned_physio_name": physio["full_name"],
+            "physio_assigned_at": now,
+            "consultation_stage": "Physio Assign",
+            "updated_at": now,
+        },
+        **handover,
+    })
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "consultation_physio_assigned",
-        "details": f"Assigned {physio['full_name']} and booked all {total_sessions} sessions",
+        "details": (
+            f"Reassigned from {lead.get('assigned_physio_name')} to {physio['full_name']} — "
+            f"{done} of {total_sessions} days already completed, {len(session_docs)} rebooked"
+            if handover else
+            "Assigned " + physio["full_name"] + " and booked " + (
+                f"all {total_sessions} sessions" if not done
+                else f"the remaining {len(session_docs)} of {total_sessions} sessions"
+            )
+        ),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now,
@@ -694,4 +786,173 @@ async def hp_assign_physio_with_sessions(
         "message": "Physio assigned and sessions booked",
         "lead": V3LeadOut(**updated).model_dump(),
         "sessions_booked": len(session_docs),
+        "sessions_already_completed": done,
+    }
+
+
+def _blank_spell(physio_id: str) -> dict:
+    """A spell nobody completed a day in. Zeroes rather than absence: the physio held the
+    patient, they just have nothing to show for it, and a card that dropped them would tell
+    the branch the handover never happened."""
+    return {
+        "physio_id": physio_id,
+        "physio_name": "",
+        "sessions_assigned": 0,
+        "sessions_completed": 0,
+        "sessions_upcoming": 0,
+        "first_day": None,
+        "last_day": None,
+        "first_session_at": None,
+        "last_session_at": None,
+        "last_completed_at": None,
+    }
+
+
+@router.get("/leads/{lead_id}/physio-progress")
+async def hp_lead_physio_progress(
+    lead_id: str,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Every physio this patient's treatment has been through, and how far each one got.
+
+    What the Physio Assign card reads. `previous` is oldest first and `current` is the
+    physio the patient is with now, so the card shows the spell that ended before the spell
+    that is running — a reassignment mid-course leaves real completed days behind it, and
+    the branch has to see those before it reads the new physio's.
+
+    The counts are derived from the days themselves rather than kept on the lead: a
+    completed day keeps the physio_id of whoever ran it, so grouping the collection by that
+    field is the honest answer to how many each of them did. `physio_assignment_history`
+    supplies only the chronology, and the physios whose spell ended with nothing completed
+    — their upcoming days are deleted on handover and would otherwise leave no trace.
+
+    One row per physio, not per spell: a patient handed back to someone they were already
+    with reads as one spell spanning both, because their completed days cannot be told
+    apart afterwards anyway.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    rows = await v3_col("sessions").find(
+        {"lead_id": lead_id},
+        {"_id": 0, "physio_id": 1, "physio_name": 1, "session_number": 1, "slot_time": 1,
+         "status": 1, "completed_at": 1, "week_number": 1},
+    ).sort("session_number", 1).to_list(1000)
+
+    by_physio: dict = {}
+    for row in rows:
+        physio_id = row.get("physio_id") or ""
+        if not physio_id:
+            continue
+        spell = by_physio.get(physio_id) or _blank_spell(physio_id)
+        by_physio[physio_id] = spell
+        spell["physio_name"] = spell["physio_name"] or (row.get("physio_name") or "")
+        spell["sessions_assigned"] += 1
+        completed = row.get("status") == "completed"
+        spell["sessions_completed" if completed else "sessions_upcoming"] += 1
+
+        number = row.get("session_number")
+        if number:
+            spell["first_day"] = number if spell["first_day"] is None else min(spell["first_day"], number)
+            spell["last_day"] = number if spell["last_day"] is None else max(spell["last_day"], number)
+        # A day still waiting on a date from the Branch Admin carries no slot_time, and the
+        # empty string would sort ahead of every real date as this spell's first day.
+        slot = (row.get("slot_time") or "").strip()
+        if slot:
+            spell["first_session_at"] = slot if not spell["first_session_at"] else min(spell["first_session_at"], slot)
+            spell["last_session_at"] = slot if not spell["last_session_at"] else max(spell["last_session_at"], slot)
+        if completed and row.get("completed_at"):
+            spell["last_completed_at"] = max(spell["last_completed_at"] or "", row["completed_at"])
+
+    # The chronology, deduplicated to one entry per physio: earliest start, latest end.
+    history_by_physio: dict = {}
+    order: list = []
+    for entry in (lead.get("physio_assignment_history") or []):
+        physio_id = entry.get("physio_id")
+        if not physio_id:
+            continue
+        held = history_by_physio.get(physio_id)
+        if held is None:
+            history_by_physio[physio_id] = dict(entry)
+            order.append(physio_id)
+            continue
+        if (entry.get("assigned_at") or "") and (not held.get("assigned_at") or entry["assigned_at"] < held["assigned_at"]):
+            held["assigned_at"] = entry["assigned_at"]
+        if (entry.get("ended_at") or "") > (held.get("ended_at") or ""):
+            held["ended_at"] = entry["ended_at"]
+            held["handed_over_by"] = entry.get("handed_over_by") or held.get("handed_over_by")
+
+    # Same test as the handover above: before Physio Assign, assigned_physio_id is the
+    # physio who took the consultation, not one who owes this patient any treatment days.
+    current_id = (lead.get("assigned_physio_id") or "") if lead.get("consultation_stage") == "Physio Assign" else ""
+    # Days belonging to a physio the history never recorded — a lead assigned before this
+    # was kept, or one whose sessions were written by the older branch assign path. They
+    # come after the recorded spells and before the current physio, in day order.
+    unrecorded = sorted(
+        (pid for pid in by_physio if pid not in history_by_physio and pid != current_id),
+        key=lambda pid: by_physio[pid]["first_day"] or 0,
+    )
+
+    previous = []
+    for physio_id in [*order, *unrecorded]:
+        if physio_id == current_id:
+            continue
+        entry = history_by_physio.get(physio_id, {})
+        spell = by_physio.get(physio_id) or _blank_spell(physio_id)
+        previous.append({
+            **spell,
+            "physio_name": spell["physio_name"] or entry.get("physio_name") or "",
+            "assigned_at": entry.get("assigned_at"),
+            "ended_at": entry.get("ended_at"),
+            "handed_over_by": entry.get("handed_over_by") or "",
+            "is_current": False,
+        })
+
+    current = None
+    if current_id:
+        spell = by_physio.get(current_id) or _blank_spell(current_id)
+        current = {
+            **spell,
+            "physio_name": spell["physio_name"] or lead.get("assigned_physio_name") or "",
+            "assigned_at": lead.get("physio_assigned_at"),
+            "ended_at": None,
+            "handed_over_by": "",
+            "is_current": True,
+        }
+
+    # Rows booked before physio_name was written onto them have only an id. One lookup for
+    # all of them rather than one per spell.
+    nameless = [s["physio_id"] for s in [*previous, *([current] if current else [])] if not s["physio_name"]]
+    if nameless:
+        found = await v3_col("doctors").find(
+            {"id": {"$in": nameless}}, {"_id": 0, "id": 1, "full_name": 1},
+        ).to_list(50)
+        names = {d["id"]: d.get("full_name") or "" for d in found}
+        for spell in [*previous, *([current] if current else [])]:
+            spell["physio_name"] = spell["physio_name"] or names.get(spell["physio_id"]) or "Unknown physio"
+
+    completed_sessions = sum(1 for r in rows if r.get("status") == "completed")
+    # The last week the patient actually worked, so a picker placing the rest of the course
+    # can go on numbering from it rather than opening a second Week 1 beside the first.
+    weeks_completed = max(
+        (r.get("week_number") or 0 for r in rows if r.get("status") == "completed"),
+        default=0,
+    )
+    # What was sold and what is on the calendar are two different numbers, and they only
+    # agree while the course is intact. Both are returned rather than one reconciled guess:
+    # a patient reassigned before this booked the rest of their course instead of all of it
+    # can hold more days than the package sold, and the card has to be able to say so.
+    package_sessions = lead.get("session_package_sessions") or 0
+    return {
+        "lead_id": lead_id,
+        "package_name": lead.get("session_package_name") or "",
+        "package_sessions": package_sessions,
+        "booked_sessions": len(rows),
+        "completed_sessions": completed_sessions,
+        "weeks_completed": weeks_completed,
+        "remaining_sessions": max(0, (package_sessions or len(rows)) - completed_sessions),
+        "reassigned": len(previous) > 0,
+        "current": current,
+        "previous": previous,
     }
