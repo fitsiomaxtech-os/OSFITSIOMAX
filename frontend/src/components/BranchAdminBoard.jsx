@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   CheckCircle2,
@@ -2025,7 +2025,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           lead={selectedLead}
           branchId={branchId}
           stages={stages}
-          consultationStages={consultationStages}
           // Which of the two entry stages this lead's pipeline should open on. The strip
           // above now shows only the mirrored one (see leadPillStages), so a lead standing
           // at the branch's opening opens on Leads however it was reached — from the Leads
@@ -2197,7 +2196,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 // appointment about to be confirmed. At a branch it is nothing — the consultation is held
 // in a room, the field that would set a link is not offered on that board at all, and an
 // amber panel naming a gap nobody there can fill is noise on every booking they make.
-function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage, openedFromMirror = false, onlineArm = false }) {
+function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, onOpenConsultationStage, openedFromMirror = false, onlineArm = false }) {
   // The board offers two entry stages — the mirrored Pre-Sales "Leads" pill and the branch's
   // own first stage — but a single lead only ever came in through one of them, so its
   // pipeline shows that one and drops the other. Everything from RNR onwards is shared.
@@ -2210,10 +2209,29 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
       : s.name === realEntryStageName ? !openedFromMirror
         : true
   ));
-  // Same merge as the main Branch Leads stage bar — one continuous pipeline covering both
-  // branch_stage and consultation_stage, with shared names (e.g. "Follow Up") kept to a
-  // single pill backed by the sales-side field.
-  const pipelineStages = [...entryStages, ...consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name))];
+  // Branch Leads' own stages, and not one pill further.
+  //
+  // This used to run the branch stages straight into the Consultation ones -- one
+  // continuous pipeline from the branch's opening through Consultation Visit, Fee
+  // Collected, Physio Assign, Rehab and the diet stages to Completed -- on the reasoning
+  // that the card is the one place a patient's whole journey is laid out. That is a true
+  // picture of where a patient goes and the wrong set of controls for this popup, which
+  // is opened off Branch Leads: a list of leads, whose question is whether this one is
+  // reachable, coming in, or gone quiet. The stages after Appointment answer a different
+  // question, and every board that owns one of them has its own popup for it -- the
+  // handoff comment further down says as much, in the code that used to send the reader
+  // there.
+  //
+  // Cancelled goes with them. It is a branch stage rather than a consultation one, but it
+  // is the end of the pipeline and not a step along it, and the four that remain are the
+  // ones a lead moves between while it is still a lead.
+  //
+  // Nothing about the patient's actual pipeline changes here. A lead still enters the
+  // Consultation stages the way it always did -- by having an appointment booked, which
+  // seeds consultation_stage server-side -- and the Consultant still drives it from their
+  // own board. This is which stages this card offers to move a lead to, not which stages
+  // exist.
+  const pipelineStages = entryStages.filter((s) => s.name !== BRANCH_CANCELLED_STAGE);
   // A lead whose appointment is booked and not yet consulted. From here the branch has
   // four things it can do, and none of them is moving the patient forward: forward is the
   // consultation happening, which the Consultant drives from their own board.
@@ -2956,9 +2974,13 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       }
                       moveStage(stage);
                     };
+                    // One button per stage. The Fragment that used to wrap this held the
+                    // Reschedule pill beside Appointment as well; with that gone there is
+                    // one child, and a fragment around one child is a wrapper around
+                    // nothing.
                     return (
-                      <Fragment key={s.id}>
                       <button
+                        key={s.id}
                         type="button"
                         disabled={isActive || notYetReached || isMirror || blockedFromAppointment}
                         onClick={handleClick}
@@ -2969,37 +2991,6 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       >
                         {stageDisplayLabel(stage)}
                       </button>
-                      {/* Reschedule rides beside Appointment rather than being a stage of
-                          its own. Nothing about the patient changes when a booking moves —
-                          they are still in Appointment, still waiting for the same
-                          consultation — so a stage would have been a place the lead sat
-                          until somebody remembered to move it back.
-
-                          It opens the same booking popup Appointment does, prefilled with
-                          the slot currently held. The backend treats a rebooking onto a
-                          different slot as the reschedule and stamps the tag itself; there
-                          is no separate endpoint and nothing here says which it was. */}
-                      {stage === APPOINTMENT_STAGE && inAppointmentStage && (
-                        <button
-                          type="button"
-                          onClick={() => setApptDraft({
-                            appointment_date: lead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-                            // Blank, like the first booking: the new time has to come off
-                            // the expert's published slots, and carrying the old one over
-                            // would offer back the very slot being moved away from.
-                            appointment_time: "",
-                            physio_id: lead.assigned_physio_id || "",
-                            notes: "",
-                            duration: null,
-                            final_stage: APPOINTMENT_STAGE,
-                          })}
-                          className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition-all hover:bg-amber-100 hover:shadow-md"
-                          data-testid="branch-stage-btn-Reschedule"
-                        >
-                          Reschedule
-                        </button>
-                      )}
-                      </Fragment>
                     );
                   })}
                 </div>
