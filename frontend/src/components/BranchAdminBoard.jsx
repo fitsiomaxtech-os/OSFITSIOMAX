@@ -138,6 +138,26 @@ const formAnswer = (lead, questionKey, fallback, formatFallback) => {
   return formatFallback ? formatFallback(own) : String(own).trim();
 };
 
+/**
+ * The three intake-form questions the Branch Leads list gives a column to, and the
+ * toolbar a filter on.
+ *
+ * One definition rather than two. The columns read these through formAnswer and so does
+ * every dropdown above them, so a filter cannot come to disagree with the column it sits
+ * over -- which is the failure that matters here, because a filter that reads the question
+ * a little differently from the column silently returns nothing and looks like a branch
+ * with no such patients.
+ *
+ * `fallback` and `formatFallback` are formAnswer's: where the sheet mapped this column
+ * onto a field of the lead's own, the answer is read back off that field with its unit
+ * put back on.
+ */
+const INTAKE_QUESTIONS = [
+  { key: "pain_type", label: "Pain Type", question: "what_type_of_pain_are_you_experiencing?", fallback: "condition", formatFallback: null },
+  { key: "pain_duration", label: "Pain Duration", question: "how_long_have_you_had_this_pain?", fallback: "months_of_pain", formatFallback: (n) => `${n} month${Number(n) === 1 ? "" : "s"}` },
+  { key: "consultation_type", label: "Consultation Type", question: "preferred_consultation_type?", fallback: null, formatFallback: null },
+];
+
 /** "offline_physio" -> "Offline Physio", and whatever it already said where the dropdown
  *  has no label for it: department is not a controlled field on an imported lead. */
 const departmentLabel = (value) =>
@@ -712,6 +732,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // does not rewrite that control's label, and clearing that control does not undo the
   // range picked here. The two combine below.
   const [quickDate, setQuickDate] = useState(null); // same shape; null = All
+  // The three intake-form dropdowns, as { pain_type, pain_duration, consultation_type },
+  // each holding the lowercased answer to match on or "" for the whole list. Lowercased
+  // because a sheet is not a controlled vocabulary: the same answer arrives as "Online"
+  // from one form and "online" from the next, and matching on what was typed would make
+  // those two different filters.
+  const [intakeFilters, setIntakeFilters] = useState({});
 
   // Bumped by Refresh. loadBoard only reloads the branch leads; on a consultation stage
   // the rows on screen come from ConsultationsBoard, which needs telling separately.
@@ -955,8 +981,49 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // ask "which of my VIPs are in Fee Collected" on the stage where that is worked.
     if (markFilter === "vip") list = list.filter((l) => l.is_vip);
     else if (markFilter === "attention") list = list.filter((l) => l.needs_attention);
+    // The intake dropdowns, in the same memo as everything else above them for the reason
+    // the marks were moved into it: the stage counts are drawn from this list, so a
+    // narrowing applied anywhere else would leave every pill on the bar standing over the
+    // table saying a number that is no longer in it.
+    for (const q of INTAKE_QUESTIONS) {
+      const wanted = intakeFilters[q.key];
+      if (!wanted) continue;
+      list = list.filter((l) => formAnswer(l, q.question, q.fallback, q.formatFallback).toLowerCase() === wanted);
+    }
     return list;
-  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter]);
+  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter, intakeFilters]);
+
+  /**
+   * What each dropdown offers: the answers this branch has actually given, not a list
+   * written in advance.
+   *
+   * These are sheet columns. Nothing validates them, every branch words its own form, and
+   * a hard-coded set of options would go quietly empty on the first branch that asks
+   * "How long have you had this pain?" with different words in the answers.
+   *
+   * Read off the whole board rather than off the filtered list, so choosing one option
+   * does not empty the other two dropdowns of everything the reader might switch to next.
+   *
+   * Answers differing only in case are one option, keeping the first spelling seen as the
+   * label — otherwise "Online" and "online" sit in the list twice, and picking either one
+   * hides the patients who arrived under the other.
+   */
+  const intakeOptions = useMemo(() => {
+    const out = {};
+    for (const q of INTAKE_QUESTIONS) {
+      const seen = new Map();
+      for (const lead of boardData.leads) {
+        const answer = formAnswer(lead, q.question, q.fallback, q.formatFallback);
+        if (!answer) continue;
+        const k = answer.toLowerCase();
+        if (!seen.has(k)) seen.set(k, answer);
+      }
+      // numeric so "3 months" sorts before "12 months" rather than after it, which is what
+      // a plain string compare does and what makes a duration list read as shuffled.
+      out[q.key] = [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: "base" }));
+    }
+    return out;
+  }, [boardData.leads]);
 
   // The rows the table is actually showing. Hoisted out of the table body because the
   // select-all box and the delete bar have to agree with it exactly — "select all" that
@@ -972,7 +1039,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // Searching, filtering by date or switching stage replaces the list under the selection,
   // and a delete confirmed against rows the person can no longer see is one they cannot
   // check before agreeing to it.
-  useEffect(() => { setPicked(new Set()); }, [stageFilter, effectiveDateFilter, searchQuery, activeView, markFilter]);
+  useEffect(() => { setPicked(new Set()); }, [stageFilter, effectiveDateFilter, searchQuery, activeView, markFilter, intakeFilters]);
 
   const pickedVisible = useMemo(
     () => visibleLeads.filter((l) => picked.has(l.id)),
@@ -1281,7 +1348,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 by both tabs now — Branch Leads had no range row before, only the calendar
                 icon further along, which is why the toolbar comment below still calls out
                 that history. */}
-            <div className="hidden shrink-0 xl:block">
+            {/* From 2xl rather than xl. The three intake dropdowns below want ~400px of the
+                same row, and at 1280 the ranges (~570), the search (~384) and the actions
+                (~240) had already spent all of it — adding the dropdowns there would have
+                pushed the row into exactly the overflow this breakpoint exists to prevent.
+                Between xl and 2xl the ranges fall back to their own row below, which is
+                already there and already the only copy on screen at every smaller width. */}
+            <div className="hidden shrink-0 2xl:block">
               <QuickDateFilterBar
                 value={quickDate}
                 onChange={setQuickDate}
@@ -1289,6 +1362,55 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 inline
               />
             </div>
+            {/* Pain Type, Pain Duration and Consultation Type — the three columns the list
+                grew, now askable rather than only readable. In this row beside the search
+                and the ranges rather than on a strip of their own: a second line of filters
+                over a table is a second thing to scan before reaching the table, and this
+                row is where every other narrowing on this board already lives.
+
+                Branch Leads only. The Consultation tab renders its own board underneath and
+                these read a lead's intake answers, which is not what that tab lists.
+
+                Each is hidden until the branch has at least one answer to it. A dropdown
+                offering only "All Pain Types" is a control that cannot do anything, and
+                three of them is most of the toolbar spent saying nothing — which is the
+                state every branch is in until its sheet carries these columns.
+
+                From lg. The three want ~400px that no narrower width has spare: at sm the
+                search field has only just reappeared beside the actions, and adding these
+                there would drive the row into overflow rather than shrink the search,
+                which is the failure the collapse-to-an-icon was built to avoid. Under lg
+                the columns are still readable in the list; it is only asking that waits
+                for the width. */}
+            {!onConsultationTab && (
+              <div className="hidden shrink-0 items-center gap-1.5 lg:flex" data-testid="branch-intake-filters">
+                {INTAKE_QUESTIONS.map((q) => {
+                  const options = intakeOptions[q.key] || [];
+                  if (options.length === 0) return null;
+                  const active = !!intakeFilters[q.key];
+                  return (
+                    <select
+                      key={q.key}
+                      value={intakeFilters[q.key] || ""}
+                      onChange={(e) => setIntakeFilters((p) => ({ ...p, [q.key]: e.target.value }))}
+                      title={q.label}
+                      aria-label={q.label}
+                      className={`h-10 w-32 shrink-0 truncate rounded-md border px-2 text-xs font-medium transition-colors ${
+                        active ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                      data-testid={`branch-intake-filter-${q.key}`}
+                    >
+                      {/* Plural of the column heading, so the empty state names the thing
+                          being filtered rather than saying "All" three times in a row. */}
+                      <option value="">{`All ${q.label}s`}</option>
+                      {options.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  );
+                })}
+              </div>
+            )}
             {/* Branch Wise's own picker, handed down so it sits in this row rather than in
                 a bar of its own above it. Nothing renders here on a real Branch Admin's
                 board — they have one branch and never pick.
@@ -1398,7 +1520,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           </div>
 
           {/* The same range row as the one in the toolbar, for the widths where it will
-              not fit up there — below xl this is the only copy on screen, and above it
+              not fit up there — below 2xl this is the only copy on screen, and above it
               this one is the one that goes. Shared by both tabs now, same as the inline
               copy above.
 
@@ -1411,7 +1533,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               way, which feeds the stage counts on the bar above and, on the Consultation
               tab, the ConsultationsBoard underneath too — so a pill's number always
               describes the list that pill opens. */}
-          <div className="xl:hidden">
+          <div className="2xl:hidden">
             <QuickDateFilterBar
               value={quickDate}
               onChange={setQuickDate}
@@ -1710,15 +1832,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                         </td>
                         <td className="truncate px-4 py-3 text-slate-600" title={lead.phone}>{lead.phone || "—"}</td>
                         {/* The intake form's three questions. Each falls back to the lead's
-                            own field where it has one — see formAnswer. */}
-                        {[
-                          ["what_type_of_pain_are_you_experiencing?", "condition", null],
-                          ["how_long_have_you_had_this_pain?", "months_of_pain", (n) => `${n} month${Number(n) === 1 ? "" : "s"}`],
-                          ["preferred_consultation_type?", null, null],
-                        ].map(([question, fallback, formatFallback]) => {
-                          const answer = formAnswer(lead, question, fallback, formatFallback);
+                            own field where it has one — see formAnswer. Read from the same
+                            INTAKE_QUESTIONS the toolbar filters are built from, so a column
+                            and the dropdown above it cannot drift apart. */}
+                        {INTAKE_QUESTIONS.map((q) => {
+                          const answer = formAnswer(lead, q.question, q.fallback, q.formatFallback);
                           return (
-                            <td key={question} className="truncate px-4 py-3 text-slate-600" title={answer || undefined}>
+                            <td key={q.key} className="truncate px-4 py-3 text-slate-600" title={answer || undefined}>
                               {answer || <span className="text-slate-400">—</span>}
                             </td>
                           );
