@@ -786,6 +786,41 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
 
 
 
+async def _expert_photos(experts: list) -> Dict[str, str]:
+    """{ doctors.id: headshot URL } for the experts given, empty string where there is none.
+
+    The picture is three documents away from the calendar record the booking popup lists:
+    a `doctors` row names a login through user_id, the login names an employee through
+    employee_id, and only the employee carries photo_url (see _employee_photo in
+    v3_auth.py, which walks the last hop for the signed-in user).
+
+    Two batched queries rather than a lookup per expert -- a branch with a dozen
+    Consultants would otherwise pay two dozen round trips to draw one column of faces.
+    An expert with no login, no employee behind the login, or no photo on the employee is
+    simply absent from the result, which the avatar renders as their initial.
+    """
+    user_ids = [u for u in {e.get("user_id") for e in experts} if u]
+    if not user_ids:
+        return {}
+    users = await v3_col("users").find(
+        {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "employee_id": 1},
+    ).to_list(len(user_ids))
+    emp_by_user = {u["id"]: u.get("employee_id") for u in users if u.get("employee_id")}
+    emp_ids = list({v for v in emp_by_user.values() if v})
+    if not emp_ids:
+        return {}
+    employees = await v3_col("employees").find(
+        {"id": {"$in": emp_ids}}, {"_id": 0, "id": 1, "photo_url": 1},
+    ).to_list(len(emp_ids))
+    photo_by_emp = {e["id"]: e.get("photo_url") or "" for e in employees}
+    out = {}
+    for e in experts:
+        photo = photo_by_emp.get(emp_by_user.get(e.get("user_id")), "")
+        if photo:
+            out[e.get("id")] = photo
+    return out
+
+
 @router.get("/branch-admin/available-experts/{branch_id}")
 async def v3_available_experts(
     branch_id: str,
@@ -838,6 +873,10 @@ async def v3_available_experts(
         if r.get("lead_name"):
             booked_names[(r.get("doctor_id"), r.get("slot_time"))] = r.get("lead_name")
 
+    # Faces for the picker's Consultant column, resolved once for the whole branch list
+    # rather than per row. See _expert_photos.
+    photo_by_expert = await _expert_photos(branch_experts)
+
     available = []
     for d in branch_experts:
         published = {s for s in (d.get("slots") or []) if isinstance(s, str) and s.startswith(f"{date}T")}
@@ -855,6 +894,10 @@ async def v3_available_experts(
         detail_by_slot = {x.get("slot_time"): x for x in (d.get("slot_details") or [])}
         available.append({
             **d,
+            # The expert's own headshot where HR has one on file, "" where they do not --
+            # the picker draws their initial in the same circle either way, so this never
+            # has to be present for the row to render.
+            "photo_url": photo_by_expert.get(d.get("id"), ""),
             "free_slot_count": len(free),
             "published_slot_count": len(published),
             "free_slots": [

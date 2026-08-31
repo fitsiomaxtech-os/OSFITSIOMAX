@@ -65,6 +65,7 @@ import {
   rnrAttempt,
 } from "@/lib/api";
 import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
+import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
@@ -2745,9 +2746,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition disabled:opacity-60 ${mine ? "bg-slate-50" : "hover:bg-sky-50"}`}
                     data-testid={`appt-handover-pick-${doc.id}`}
                   >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
-                      {(doc.full_name || "?").charAt(0).toUpperCase()}
-                    </span>
+                    {/* Same faces the booking popup's CONSULTANT column shows — this is
+                        the same list of experts off the same call, and a photo in one of
+                        them and an initial in the other reads as two different people. */}
+                    <EmployeeAvatar employee={doc} size={32} className="text-xs" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-slate-800">{doc.full_name}</span>
                       <span className="block truncate text-[11px] text-slate-500">
@@ -2901,14 +2903,44 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                           className={`flex w-full items-center gap-3 rounded-lg border-2 p-3.5 text-left transition ${active ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"}`}
                           data-testid={`branch-appt-expert-${doc.id}`}
                         >
-                          <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-base font-bold ${active ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"}`}>
-                            {doc.full_name?.charAt(0) || "E"}
-                          </div>
+                          {/* The consultant's own face where HR has one on file, their
+                              initial in the column's teal where they do not — the same
+                              component the directory and the signed-in header use, so a
+                              photo cannot appear on some boards and not others. The ring
+                              carries the picked state a solid fill used to, which a
+                              photograph has no room for. */}
+                          <EmployeeAvatar
+                            employee={doc}
+                            size={44}
+                            fallbackClassName={active ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"}
+                            className={active ? "ring-2 ring-teal-500" : ""}
+                          />
                           <div className="min-w-0">
                             <p className="truncate text-sm font-bold text-slate-800">{doc.full_name}</p>
-                            <p className={`truncate text-xs ${open > 0 ? "text-slate-400" : "text-amber-600"}`}>
-                              {open > 0 ? `${open} slot${open === 1 ? "" : "s"} open` : "Nothing published"}
-                            </p>
+                            {/* How much of this consultant's day is actually free is the
+                                one number this column is picked on, so it is a badge with
+                                the count carrying the weight rather than a grey line of
+                                text under the name. Sky, matching the calendar beside it,
+                                where sky-200 already means "slots open" — one colour for
+                                availability across both steps. Amber where there are none,
+                                as before: that is a different message, not a smaller count. */}
+                            <span
+                              className={`mt-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${
+                                open > 0
+                                  ? "bg-sky-100 text-sky-800 ring-sky-200"
+                                  : "bg-amber-50 text-amber-700 ring-amber-200"
+                              }`}
+                              data-testid={`branch-appt-expert-open-${doc.id}`}
+                            >
+                              {open > 0 ? (
+                                <>
+                                  <span className="text-sm font-extrabold tabular-nums">{open}</span>
+                                  slot{open === 1 ? "" : "s"} open
+                                </>
+                              ) : (
+                                "Nothing published"
+                              )}
+                            </span>
                           </div>
                           {active && <CheckCircle2 className="ml-auto h-5 w-5 shrink-0 text-teal-600" />}
                         </button>
