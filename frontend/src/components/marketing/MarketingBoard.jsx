@@ -11,7 +11,7 @@ import {
   mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkUnassignedCount, mkDistributeUnassigned,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
-  mkGetSources, mkCreateSource, mkUpdateSource, mkSyncSource,
+  mkGetSources, mkLeadFieldCatalogue, gsSheetHeaders, leadFieldsCreate, mkCreateSource, mkUpdateSource, mkSyncSource,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull, gsListTabs,
   getBranches,
 } from "@/lib/api";
@@ -30,6 +30,10 @@ const extractSheetId = (url) => {
 const emptySheetEntry = () => ({
   id: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"],
+  // {lead field key: sheet column}. Held on the row rather than on the dialog because a
+  // row that is not the first becomes its own source on Save, and its mapping has to
+  // travel with it — otherwise every sheet added in one go would land unmapped.
+  column_mapping: {},
 });
 
 // "offline_physiotherapy" -> "Offline Physiotherapy". The stored name stays snake_case
@@ -369,7 +373,24 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
       )}
 
       {showMap && (
-        <MappingEditor source={showMap} onClose={() => setShowMap(null)} onSaved={() => { setShowMap(null); load(); }} />
+        <SheetMappingDialog
+          title={`Mapping: ${showMap.name}`}
+          spreadsheetId={showMap.spreadsheet_id}
+          tabs={showMap.sheet_names || (showMap.sheet_name ? [showMap.sheet_name] : [])}
+          fallbackHeaders={showMap.headers_detected || []}
+          value={showMap.column_mapping || {}}
+          onClose={() => setShowMap(null)}
+          // Straight to the server here: this one is opened against a saved source from
+          // its own card, where there is no enclosing Save for it to wait on.
+          onSave={async (m) => {
+            try {
+              await mkUpdateSource(showMap.id, { column_mapping: m });
+              toast.success("Mapping saved");
+              setShowMap(null);
+              load();
+            } catch (e) { toast.error(e?.response?.data?.detail || "Save failed"); }
+          }}
+        />
       )}
 
       {showEdit && (
@@ -474,8 +495,11 @@ const SheetTabPicker = ({ spreadsheetId, values, onChange, testid }) => {
  * edited and any rest become new sibling sources (see submit()/save() in the two dialogs
  * below). Nothing is created here just by adding a row; only Save calls the API.
  */
-const SheetEntriesEditor = ({ entries, onChange, testid }) => {
+const SheetEntriesEditor = ({ entries, onChange, testid, fallbackHeaders = [] }) => {
   const [editingId, setEditingId] = useState(entries[0]?.id ?? null);
+  // Which row's mapping is open. A row can only be mapped once its sheet resolves —
+  // there are no columns to show before that.
+  const [mappingFor, setMappingFor] = useState(null);
 
   const updateEntry = (id, patch) => onChange(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   const removeEntry = (id) => onChange(entries.filter((e) => e.id !== id));
@@ -488,6 +512,23 @@ const SheetEntriesEditor = ({ entries, onChange, testid }) => {
     const current = entries.find((e) => e.id === id);
     updateEntry(id, { sheet_url: url, spreadsheet_id: extractSheetId(url) || current?.spreadsheet_id || "" });
   };
+
+  const mappedCount = (entry) => Object.keys(entry.column_mapping || {}).length;
+
+  // Shared by the collapsed row and the expanded editor so a sheet is mapped the same way
+  // whichever state its row happens to be in.
+  const MapButton = ({ entry }) => (
+    <Button
+      type="button" size="sm" variant="outline" className="h-7 shrink-0 text-xs"
+      disabled={!entry.spreadsheet_id}
+      title={entry.spreadsheet_id ? "Map this sheet's columns onto lead fields" : "Paste a sheet URL first"}
+      onClick={() => setMappingFor(entry.id)}
+      data-testid={`${testid}-map-${entry.id}`}
+    >
+      <ArrowRightLeft className="mr-1 h-3 w-3" />
+      Edit Mapping{mappedCount(entry) > 0 ? ` (${mappedCount(entry)})` : ""}
+    </Button>
+  );
 
   return (
     <div className="space-y-2" data-testid={testid}>
@@ -502,6 +543,7 @@ const SheetEntriesEditor = ({ entries, onChange, testid }) => {
                 <p className="text-[10px] text-slate-400">{entry.sheet_names.length} tab{entry.sheet_names.length === 1 ? "" : "s"} selected</p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <MapButton entry={entry} />
                 <button type="button" onClick={() => setEditingId(entry.id)} className="text-slate-400 hover:text-sky-600" title="Edit this sheet" data-testid={`${testid}-edit-${entry.id}`}>
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -540,9 +582,12 @@ const SheetEntriesEditor = ({ entries, onChange, testid }) => {
                   onChange={(v) => updateEntry(entry.id, { sheet_names: v })}
                   testid={`${testid}-tabs-${entry.id}`}
                 />
-                <Button type="button" size="sm" variant="outline" className="text-xs" onClick={() => setEditingId(null)} data-testid={`${testid}-done-${entry.id}`}>
-                  Done
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button type="button" size="sm" variant="outline" className="text-xs" onClick={() => setEditingId(null)} data-testid={`${testid}-done-${entry.id}`}>
+                    Done
+                  </Button>
+                  <MapButton entry={entry} />
+                </div>
               </>
             )}
           </div>
@@ -551,6 +596,26 @@ const SheetEntriesEditor = ({ entries, onChange, testid }) => {
       <Button type="button" size="sm" variant="outline" onClick={addEntry} className="text-xs" data-testid={`${testid}-add`}>
         <Plus className="mr-1 h-3.5 w-3.5" /> Add Sheet
       </Button>
+
+      {mappingFor && (() => {
+        const entry = entries.find((e) => e.id === mappingFor);
+        if (!entry) return null;
+        return (
+          <SheetMappingDialog
+            title="Edit Mapping"
+            spreadsheetId={entry.spreadsheet_id}
+            tabs={entry.sheet_names}
+            fallbackHeaders={fallbackHeaders}
+            value={entry.column_mapping || {}}
+            onClose={() => setMappingFor(null)}
+            // Kept on the row, not saved to the server here. This row may not be a source
+            // yet, and even where it is, the popup's own Save is what the user is
+            // expecting to commit — mapping behind its back would be a second, invisible
+            // save with different rules.
+            onSave={(m) => { updateEntry(entry.id, { column_mapping: m }); setMappingFor(null); toast.success("Mapping set — Save Changes to apply it"); }}
+          />
+        );
+      })()}
     </div>
   );
 };
@@ -619,6 +684,7 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
     sheet_url: source.sheet_url || "",
     spreadsheet_id: source.spreadsheet_id || "",
     sheet_names: source.sheet_names || (source.sheet_name ? [source.sheet_name] : ["Sheet1"]),
+    column_mapping: source.column_mapping || {},
   }]);
   const [editTab, setEditTab] = useState("details");
   const [headers, setHeaders] = useState(initialHeaders);
@@ -646,6 +712,7 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
     if (sourceType === "google_sheets") {
       payload.spreadsheet_id = validEntries[0].spreadsheet_id;
       payload.sheet_names = validEntries[0].sheet_names.length ? validEntries[0].sheet_names : ["Sheet1"];
+      payload.column_mapping = validEntries[0].column_mapping || {};
     }
     // Only touch headers/mapping if the user actually changed them — avoids
     // silently wiping any manual "Edit Mapping" customization on every save.
@@ -663,6 +730,9 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
           name: name.trim(), sheet_url: entry.sheet_url, source_type: sourceType, headers: newHeaders,
           spreadsheet_id: entry.spreadsheet_id,
           sheet_names: entry.sheet_names.length ? entry.sheet_names : ["Sheet1"],
+          // Each added sheet keeps the mapping it was given in the popup. Without this a
+          // sheet mapped before Save would arrive with nothing but auto-detection.
+          column_mapping: entry.column_mapping || {},
           branch_ids: branchIds, verticals: sourceVerticals,
         });
       }
@@ -697,6 +767,7 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
               <div className="sm:col-span-2">
                 <SheetEntriesEditor
                   entries={sheetEntries}
+                  fallbackHeaders={source.headers_detected || []}
                   onChange={(v) => setSheetEntries(v.length ? v : [emptySheetEntry()])}
                   testid="mk-edit-source-sheets"
                 />
@@ -750,44 +821,210 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   );
 };
 
-const STANDARD_FIELDS = ["name", "phone", "email", "vertical", "condition", "age", "preferred_branch", "budget", "notes"];
+const SKIP = "__skip__";
+const ADD_QUESTION = "__add_question__";
 
-const MappingEditor = ({ source, onClose, onSaved }) => {
-  const [mapping, setMapping] = useState(source.column_mapping || {});
-  const headers = source.headers_detected || [];
+/**
+ * Edit Mapping: this sheet's columns down the left, what each one becomes down the right.
+ *
+ * Column-first, which is the way round somebody reads a sheet — you go through the
+ * questions the form asked and say where each answer goes. The old dialog listed nine
+ * fields and asked which column filled each, which cannot express "this column is a
+ * question nobody has a field for yet" and silently hid every column it had no field for.
+ *
+ * Stored the other way round, {field: column}, because that is the shape column_mapping
+ * has always had and inverting it would orphan every mapping already saved. One field can
+ * therefore hold one column: picking a field that is already spoken for moves it.
+ *
+ * Persistence is the caller's — a saved source PATCHes, a row in the Add/Edit popup keeps
+ * it on the row until that popup saves.
+ */
+const SheetMappingDialog = ({ title, spreadsheetId, tabs, fallbackHeaders = [], value, onClose, onSave }) => {
+  const tabList = (tabs && tabs.length ? tabs : ["Sheet1"]);
+  const [tab, setTab] = useState(tabList[0]);
+  // Seeded from the last sync so a source with no spreadsheet behind it — a CSV or a Meta
+  // source — still has columns to map. The live read below replaces these when there is a
+  // sheet to read them from.
+  const [headers, setHeaders] = useState(fallbackHeaders);
+  const [loading, setLoading] = useState(false);
+  const [headerError, setHeaderError] = useState("");
+  const [groups, setGroups] = useState([]);
+  const [mapping, setMapping] = useState(value || {});
+  // The column waiting on a new question, and the label being typed for it.
+  const [newQuestionFor, setNewQuestionFor] = useState(null);
+  const [newQuestionLabel, setNewQuestionLabel] = useState("");
 
-  const setStd = (std, header) => {
-    const next = { ...mapping };
-    if (header === "__skip__") delete next[std]; else next[std] = header;
-    setMapping(next);
+  const loadCatalogue = useCallback(
+    () => mkLeadFieldCatalogue().then((d) => setGroups(d.groups || [])).catch((e) => console.warn("[catalogue]", e?.message || e)),
+    [],
+  );
+  useEffect(() => { loadCatalogue(); }, [loadCatalogue]);
+
+  useEffect(() => {
+    if (!spreadsheetId || !tab) return undefined;
+    let alive = true;
+    setLoading(true); setHeaderError("");
+    gsSheetHeaders(spreadsheetId, tab)
+      .then((d) => { if (alive) { setHeaders(d.headers || []); setLoading(false); } })
+      .catch((e) => {
+        if (!alive) return;
+        // Falling back to whatever the last sync recorded rather than showing an empty
+        // dialog: stale columns are still worth mapping, and the banner says they are stale.
+        setHeaders(fallbackHeaders);
+        setHeaderError(e?.response?.data?.detail || "Couldn't read this tab's columns live.");
+        setLoading(false);
+      });
+    return () => { alive = false; };
+    // fallbackHeaders is a fresh array each render from the caller; depending on it would refetch forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spreadsheetId, tab]);
+
+  // {column: field}, the direction this dialog reads in.
+  const fieldFor = useMemo(() => {
+    const out = {};
+    Object.entries(mapping || {}).forEach(([field, column]) => { out[column] = field; });
+    return out;
+  }, [mapping]);
+
+  const labelFor = useMemo(() => {
+    const out = {};
+    groups.forEach((g) => (g.fields || []).forEach((f) => { out[f.key] = f.label; }));
+    return out;
+  }, [groups]);
+
+  const setColumn = (column, fieldKey) => {
+    setMapping((prev) => {
+      const next = {};
+      Object.entries(prev || {}).forEach(([f, c]) => {
+        if (c === column) return;   // this column is being reassigned
+        if (f === fieldKey) return; // this field is being taken by this column
+        next[f] = c;
+      });
+      if (fieldKey && fieldKey !== SKIP) next[fieldKey] = column;
+      return next;
+    });
   };
 
-  const save = async () => {
+  const onPick = (column, chosen) => {
+    if (chosen === ADD_QUESTION) {
+      setNewQuestionFor(column);
+      setNewQuestionLabel(column);
+      return;
+    }
+    setColumn(column, chosen);
+  };
+
+  const createQuestion = async () => {
+    const label = newQuestionLabel.trim();
+    if (!label) { toast.error("Give the question a name"); return; }
     try {
-      await mkUpdateSource(source.id, { column_mapping: mapping });
-      toast.success("Mapping saved");
-      onSaved();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Save failed"); }
+      const created = await leadFieldsCreate({ label, type: "text" });
+      await loadCatalogue();
+      setColumn(newQuestionFor, `custom.${created.key}`);
+      setNewQuestionFor(null);
+      toast.success(`"${label}" added — it appears on the Create Lead form too`);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Could not add that question"); }
   };
+
+  // A mapping can point at a column this tab does not have — a renamed question, or a
+  // mapping made against another tab. Shown rather than dropped, because silently losing
+  // it is how a mapping becomes wrong without anyone being told.
+  const orphaned = Object.entries(mapping || {}).filter(([, c]) => !headers.includes(c));
+  const mappedCount = Object.keys(mapping || {}).length;
 
   return (
-    <DialogShell title={`Mapping: ${source.name}`} onClose={onClose} testid="mk-map-dialog">
-      {headers.length === 0 && <p className="text-xs text-amber-600">No headers detected — add them when creating the source.</p>}
-      {STANDARD_FIELDS.map((std) => (
-        <div key={std} className="flex items-center gap-2">
-          <label className="w-32 text-xs font-medium text-slate-600">{std}</label>
-          <select
-            className="h-9 flex-1 rounded-md border border-slate-200 px-3 text-sm"
-            value={mapping[std] || "__skip__"}
-            onChange={(e) => setStd(std, e.target.value)}
-            data-testid={`mk-map-${std}`}
-          >
-            <option value="__skip__">— Skip —</option>
-            {headers.map((h) => <option key={h} value={h}>{h}</option>)}
-          </select>
+    <DialogShell title={title} onClose={onClose} testid="mk-sheet-map-dialog" maxWidth="max-w-3xl">
+      {tabList.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1" data-testid="mk-map-tabpicker">
+          <span className="mr-1 text-xs text-slate-500">Tab:</span>
+          {tabList.map((t) => (
+            <button
+              key={t} type="button" onClick={() => setTab(t)}
+              className={`rounded-md px-2 py-1 text-xs ${t === tab ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+              data-testid={`mk-map-tab-${t}`}
+            >{t}</button>
+          ))}
         </div>
-      ))}
-      <Button onClick={save} className="w-full" data-testid="mk-map-save">Save Mapping</Button>
+      )}
+
+      {loading && <p className="text-xs text-slate-400">Reading this tab's columns…</p>}
+      {headerError && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700">{headerError} Showing the columns from the last sync instead.</p>}
+
+      {!loading && headers.length === 0 && (
+        <p className="rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-500">No columns found in this tab's first row.</p>
+      )}
+
+      {headers.length > 0 && (
+        <>
+          <div className="flex items-center justify-between text-[11px] text-slate-500">
+            <span>{headers.length} column{headers.length === 1 ? "" : "s"} · {mappedCount} mapped</span>
+            <span>Anything left on Skip is still stored against the lead as extra detail.</span>
+          </div>
+          <div className="flex gap-3 px-1">
+            <p className="flex-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Sheet column</p>
+            <p className="flex-[1.2] text-[10px] font-semibold uppercase tracking-wide text-slate-400">Becomes</p>
+          </div>
+          <div className="space-y-1.5">
+            {headers.map((h) => (
+              <div key={h} className="flex items-start gap-3">
+                <div className="flex min-w-0 flex-1 items-center self-stretch rounded-md bg-slate-50 px-2 py-1.5" title={h}>
+                  <span className="truncate text-xs text-slate-700">{h}</span>
+                </div>
+                <div className="flex-[1.2]">
+                  <select
+                    className="h-9 w-full rounded-md border border-slate-200 px-2 text-sm"
+                    value={fieldFor[h] || SKIP}
+                    onChange={(e) => onPick(h, e.target.value)}
+                    data-testid={`mk-map-col-${h}`}
+                  >
+                    <option value={SKIP}>— Skip —</option>
+                    {groups.map((g) => (
+                      <optgroup key={g.group} label={g.group}>
+                        {(g.fields || []).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                      </optgroup>
+                    ))}
+                    <optgroup label="—">
+                      <option value={ADD_QUESTION}>+ Add a custom question…</option>
+                    </optgroup>
+                  </select>
+                  {newQuestionFor === h && (
+                    <div className="mt-1 flex items-center gap-1 rounded-md border border-sky-200 bg-sky-50 p-1.5" data-testid="mk-map-newquestion">
+                      <Input
+                        value={newQuestionLabel}
+                        onChange={(e) => setNewQuestionLabel(e.target.value)}
+                        placeholder="Question name"
+                        className="h-7 flex-1 text-xs"
+                        data-testid="mk-map-newquestion-label"
+                      />
+                      <Button size="sm" className="h-7 text-xs" onClick={createQuestion} data-testid="mk-map-newquestion-save">Add</Button>
+                      <button type="button" onClick={() => setNewQuestionFor(null)} className="text-slate-400 hover:text-slate-600" data-testid="mk-map-newquestion-cancel"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {orphaned.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-2" data-testid="mk-map-orphaned">
+          <p className="text-[11px] font-medium text-amber-800">Mapped to columns this tab doesn't have</p>
+          {orphaned.map(([field, column]) => (
+            <div key={field} className="mt-1 flex items-center justify-between gap-2 text-[11px] text-amber-700">
+              <span className="truncate">{labelFor[field] || field} ← <code className="rounded bg-amber-100 px-1">{column}</code></span>
+              <button
+                type="button"
+                onClick={() => setMapping((prev) => { const n = { ...prev }; delete n[field]; return n; })}
+                className="shrink-0 underline hover:text-amber-900"
+                data-testid={`mk-map-drop-${field}`}
+              >Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Button onClick={() => onSave(mapping)} className="w-full" data-testid="mk-map-save">Save Mapping</Button>
     </DialogShell>
   );
 };

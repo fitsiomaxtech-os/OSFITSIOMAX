@@ -29,6 +29,7 @@ from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
 from stage_utils import first_branch_stage_for
 import lead_control
+import lead_mapping
 from routers.v3_marketing import (
     auto_map_columns, normalize_phone, STANDARD_FIELDS, round_robin_assign, normalize_source,
 )
@@ -223,6 +224,38 @@ async def list_tabs(spreadsheet_id: str = Query(...), _: V3UserOut = Depends(v3_
     return {"tabs": tabs}
 
 
+@router.get("/headers")
+async def list_headers(
+    spreadsheet_id: str = Query(...),
+    tab: str = Query(...),
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """The column names in one tab -- its first row, and nothing else.
+
+    The left-hand side of Edit Mapping. Read live rather than from the source's stored
+    headers_detected, because that field is only written by a sync: a sheet connected but
+    never pulled has none, and a sheet whose form gained a question still has yesterday's.
+    Mapping against either is mapping against columns that are not there.
+
+    One row is fetched, not the sheet -- this is called every time the dialog opens.
+    """
+    creds = await _get_creds()
+    if not creds:
+        raise HTTPException(status_code=400, detail="Not connected to Google. Click 'Continue with Google' first.")
+    try:
+        svc = await asyncio.to_thread(lambda: build("sheets", "v4", credentials=creds))
+        resp = await asyncio.to_thread(lambda: svc.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id, range=f"'{tab}'!1:1",
+        ).execute())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not read that tab: {str(e)[:200]}")
+    values = resp.get("values", [])
+    # Blank cells in the header row are dropped rather than offered as a column with no
+    # name -- a sheet's used range often runs wider than its questions do.
+    headers = [str(h).strip() for h in (values[0] if values else []) if str(h).strip()]
+    return {"headers": headers, "tab": tab}
+
+
 # ---------- Auto-sync settings (lightweight — accessible to pre_sales too) ----------
 
 class AutoSyncToggle(BaseModel):
@@ -377,16 +410,20 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             if exists:
                 skipped_duplicate += 1
                 continue
-            std_payload = {}
-            for std in STANDARD_FIELDS:
-                src_key = mapping.get(std)
-                if src_key and src_key in row:
-                    std_payload[std] = row[src_key]
-            custom_payload = {}
+            # Every field the mapping dialog can offer, written where it actually lives:
+            # the lead's own columns, the ad record, or extra detail. This used to walk
+            # STANDARD_FIELDS -- nine fields -- and put all but five of them into
+            # extra_fields, so a column mapped to Condition or Age never reached the
+            # Condition or Age the branch reads. See backend/lead_mapping.py.
+            lead_columns, ad_record, mapped_extras = lead_mapping.split_mapping(row, mapping)
+            std_payload = lead_columns
+            custom_payload = dict(mapped_extras)
             mapped_values = set(mapping.values())
+            # An unmapped column is still worth keeping -- it is a question somebody asked
+            # and an answer the patient gave, and nobody has said where to file it yet.
             for key, value in row.items():
                 if key not in mapped_values and value not in (None, ""):
-                    custom_payload[key] = value
+                    custom_payload.setdefault(key, value)
 
             # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
             assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
@@ -394,7 +431,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             lead = {
                 "id": str(uuid.uuid4()),
                 "patient_number": patient_number,
-                "name": (std_payload.get("name") or "").strip() or "Unknown",
+                "name": (str(std_payload.get("name") or "")).strip() or "Unknown",
                 "phone": phone_raw,
                 "phone_normalized": phone_norm,
                 "email": std_payload.get("email", ""),
@@ -408,7 +445,15 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
                 "branch_id": source_branch_id,
                 "branch_stage": first_branch_stage if source_branch_id else None,
                 "notes": std_payload.get("notes", ""),
-                "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
+                # The lead's own columns, straight across. Coercion already happened in
+                # split_mapping -- a sheet is typed by whoever fills it in, and an age of
+                # "35 years" landing in an int field makes the whole patient unparseable
+                # on every board that lists them.
+                **{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")},
+                # Written whether or not it is empty, so the field is shaped the same for
+                # everyone entitled to read it -- same as the manual create path.
+                "lead_data": ad_record,
+                "extra_fields": custom_payload,
                 "assigned_user_id": assigned["id"] if assigned else None,
                 "assigned_user_name": assigned["full_name"] if assigned else None,
                 "assigned_user_role": "pre_sales" if assigned else None,

@@ -402,6 +402,10 @@ export const mkAllLeads = async (params = {}) => {
 export const mkAssignLead = async (leadId, assignedTo) => (await api.post(`/marketing/assign-lead/${leadId}?assigned_to=${assignedTo}`)).data;
 export const mkDeleteLead = async (leadId) => (await api.delete(`/marketing/leads/${leadId}`)).data;
 export const mkBulkDelete = async (lead_ids) => (await api.post("/marketing/leads/bulk-delete", { lead_ids })).data;
+// What a sheet column can be mapped onto, grouped as the Create Lead form is tabbed —
+// Lead Details, Lead Data, and any custom questions. Served rather than listed in the
+// popup so the dropdown and the importer cannot drift apart.
+export const mkLeadFieldCatalogue = async () => (await api.get("/marketing/lead-field-catalogue")).data;
 export const mkGetSources = async () => (await api.get("/marketing/sources")).data;
 export const mkCreateSource = async (payload) => (await api.post("/marketing/sources", payload)).data;
 export const mkUpdateSource = async (sourceId, payload) => (await api.patch(`/marketing/sources/${sourceId}`, payload)).data;
@@ -465,6 +469,11 @@ export const gsAuthUrl = async () => (await api.get("/marketing/google-sheets/au
 export const gsDisconnect = async () => (await api.post("/marketing/google-sheets/disconnect", {})).data;
 export const gsListSpreadsheets = async (nameContains) => (await api.get(`/marketing/google-sheets/spreadsheets${nameContains ? `?name_contains=${encodeURIComponent(nameContains)}` : ""}`)).data;
 export const gsListTabs = async (spreadsheetId) => (await api.get("/marketing/google-sheets/tabs", { params: { spreadsheet_id: spreadsheetId } })).data;
+// One tab's column names — its first row, read live. Edit Mapping's left-hand side.
+// Not taken from the source's stored headers_detected: that is only written by a sync, so
+// a sheet connected but never pulled has none and a sheet that gained a question has stale
+// ones, and mapping against either is mapping against columns that are not there.
+export const gsSheetHeaders = async (spreadsheetId, tab) => (await api.get("/marketing/google-sheets/headers", { params: { spreadsheet_id: spreadsheetId, tab } })).data;
 export const gsPull = async (sourceId) => (await api.post(`/marketing/google-sheets/pull/${sourceId}`)).data;
 export const gsAutoSyncSources = async () => (await api.get("/marketing/google-sheets/auto-sync/sources")).data;
 export const gsAutoSyncToggle = async (sourceId, payload) => (await api.patch(`/marketing/google-sheets/auto-sync/sources/${sourceId}`, payload)).data;

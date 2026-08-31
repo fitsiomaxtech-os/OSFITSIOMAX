@@ -13,6 +13,9 @@ from security import hash_password
 from schemas.v3 import V3UserOut
 from stage_utils import first_branch_stage_for
 import lead_control
+# What a sheet column may be mapped onto, and how a mapped row is written. Shared with
+# the importer so the dropdown cannot offer a field the import would ignore.
+import lead_mapping
 from pydantic import BaseModel
 from typing import Literal
 
@@ -37,7 +40,6 @@ FIELD_ALIASES = {
 }
 
 SOURCE_TYPES = ["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"]
-
 
 def normalize_phone(value: str) -> str:
     digits = re.sub(r"\D", "", value or "")
@@ -117,6 +119,10 @@ class MarketingSourceCreate(BaseModel):
     spreadsheet_id: Optional[str] = ""
     source_type: Literal["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"] = "google_sheets"
     headers: Optional[List[str]] = None
+    # A mapping chosen by hand in the Edit Mapping dialog, which the popup can now do for
+    # a sheet that does not exist yet. Without this the mapping would be detected from the
+    # headers on create and the user's choices thrown away on the way in.
+    column_mapping: Optional[Dict[str, str]] = None
     # Every lead pulled from this source auto-assigns to the branch when exactly one is
     # given. With zero or several, there's no single branch to route a row to, so they're
     # tags only (see _normalize_source / _internal_pull_source).
@@ -527,6 +533,18 @@ async def _validate_targets(branch_ids: Optional[List[str]], verticals: Optional
             raise HTTPException(status_code=404, detail=f"Vertical not found: {name}")
 
 
+@router.get("/lead-field-catalogue")
+async def lead_field_catalogue(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """The fields a sheet column can be mapped onto, grouped as the Create Lead form is.
+
+    Served rather than hard-coded in the popup so the dropdown and the importer are the
+    same list: this is the list the import knows how to write, and the custom questions
+    are read live so one added from the dialog is mappable in the same breath.
+    """
+    customs = await v3_col("custom_lead_fields").find({}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    return {"groups": lead_mapping.catalogue(customs)}
+
+
 @router.get("/sources")
 async def list_sources(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
     rows = await v3_col("marketing_sources").find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
@@ -537,7 +555,9 @@ async def list_sources(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
 async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     await _validate_targets(payload.branch_ids, payload.verticals)
     spreadsheet_id = payload.spreadsheet_id or (extract_spreadsheet_id(payload.sheet_url) if payload.sheet_url else "")
-    column_mapping = auto_map_columns(payload.headers or []) if payload.headers else {}
+    # A hand-made mapping wins over detection; detection is the fallback for a source
+    # created without anyone having opened the dialog.
+    column_mapping = dict(payload.column_mapping or {}) or (auto_map_columns(payload.headers or []) if payload.headers else {})
     detected_custom = [h for h in (payload.headers or []) if h not in column_mapping.values()]
     source = {
         "id": str(uuid.uuid4()),
@@ -638,17 +658,17 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
                 sample_errors.append(f"row {idx + 1}: duplicate phone {phone_raw}")
             continue
 
-        std_payload: Dict[str, Any] = {}
-        for std in STANDARD_FIELDS:
-            src_key = mapping.get(std)
-            if src_key and src_key in row:
-                std_payload[std] = row[src_key]
-
-        custom_payload: Dict[str, Any] = {}
+        # The same split the Google Sheets pull does, against the same stored mapping.
+        # Both buttons on a source card read one column_mapping, so if only one of them
+        # understood the whole catalogue, Manual Sync and Pull from Sheet would file the
+        # same sheet two different ways.
+        lead_columns, ad_record, mapped_extras = lead_mapping.split_mapping(row, mapping)
+        std_payload: Dict[str, Any] = lead_columns
+        custom_payload: Dict[str, Any] = dict(mapped_extras)
         mapped_values = set(mapping.values())
         for key, value in row.items():
             if key not in mapped_values and value not in (None, ""):
-                custom_payload[key] = value
+                custom_payload.setdefault(key, value)
 
         # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
         assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
@@ -657,7 +677,7 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
         lead = {
             "id": str(uuid.uuid4()),
             "patient_number": patient_number,
-            "name": (std_payload.get("name") or "").strip() or "Unknown",
+            "name": (str(std_payload.get("name") or "")).strip() or "Unknown",
             "phone": phone_raw,
             "phone_normalized": phone_norm,
             "email": std_payload.get("email", ""),
@@ -671,7 +691,9 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             "branch_id": source_branch_id,
             "branch_stage": first_branch_stage if source_branch_id else None,
             "notes": std_payload.get("notes", ""),
-            "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
+            **{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")},
+            "lead_data": ad_record,
+            "extra_fields": custom_payload,
             "assigned_user_id": assigned["id"] if assigned else None,
             "assigned_user_name": assigned["full_name"] if assigned else None,
             "assigned_user_role": "pre_sales" if assigned else None,
