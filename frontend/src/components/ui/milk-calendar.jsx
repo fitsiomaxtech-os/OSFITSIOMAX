@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -308,6 +309,12 @@ export const MilkDateTextInput = ({
 
   const handle = (e) => setText(maskDmy(e.target.value));
 
+  // The class list is merged rather than concatenated. `w-full` here and a caller's
+  // `w-[7.25rem]` are two classes of equal specificity, so which one wins is decided by the
+  // order Tailwind emits them in, not the order they are written — and w-full was winning.
+  // A caller asking for a narrow field got a full-width one, which is how a from/to pair in
+  // a filter row came to stack instead of sitting side by side. cn() drops the class being
+  // overridden, so an override means what it says.
   return (
     <input
       type="text"
@@ -319,9 +326,11 @@ export const MilkDateTextInput = ({
       onChange={handle}
       placeholder={placeholder}
       aria-invalid={invalid || undefined}
-      className={`h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
-        invalid ? "border-red-400 text-red-600 focus:border-red-500" : "border-input text-slate-800 focus:border-sky-500"
-      } ${className}`}
+      className={cn(
+        "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+        invalid ? "border-red-400 text-red-600 focus:border-red-500" : "border-input text-slate-800 focus:border-sky-500",
+        className,
+      )}
       {...rest}
     />
   );

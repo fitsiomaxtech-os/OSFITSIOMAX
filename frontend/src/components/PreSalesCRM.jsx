@@ -559,9 +559,15 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handle
       <SegmentedPillGroup options={PRESALES_ANALYTICS_DATE_PRESETS} active={activeKey} onPick={pick} testid={testid} />
       {/* Kept next to the presets it belongs to, ahead of the Handled By group, so the
           range and the dates it resolves to read as one thing. */}
+      {/* One line, from and to and the word between them. nowrap rather than the wrap this
+          group carried: the trio comes to roughly 290px against a phone's 336px content
+          column, so it fits everywhere, and breaking it put "to" on a line of its own,
+          reading as a label for the field under it rather than as the join between two. The
+          outer row still wraps, so on a narrow screen the whole group drops below the
+          presets together instead of being torn in half. */}
       {activeKey === "custom" && (
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-          <CalendarDays className="h-3.5 w-3.5" />
+        <div className="flex flex-nowrap items-center gap-1.5 text-xs text-slate-500">
+          <CalendarDays className="h-3.5 w-3.5 shrink-0" />
           {/* Typed, not picked. Whoever pulls this range already knows both dates — the
               month grid made them navigate to two days they could simply have keyed in,
               and a range a quarter back cost several taps of the arrow per field. */}
@@ -571,7 +577,7 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handle
             className="h-8 w-[7.25rem] rounded-md border-slate-200 px-2 text-xs"
             data-testid={`${testid}-custom-from`}
           />
-          <span>to</span>
+          <span className="shrink-0">to</span>
           {/* Bounded by the other field, so a backwards range is refused as it is typed
               rather than quietly returning nothing from the table below. */}
           <MilkDateTextInput
