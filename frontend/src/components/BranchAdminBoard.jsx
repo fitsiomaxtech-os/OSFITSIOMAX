@@ -106,6 +106,38 @@ const BRANCH_PORTFOLIO_STAGE = "Portfolio";
 // to PDF, saved or shared — same branding, styles and mechanics the payment receipt uses,
 // from lib/printable.js.
 
+/**
+ * One of the intake form's own questions, read back off a lead.
+ *
+ * These are sheet columns, so they arrive keyed by whatever the form called them --
+ * "what_type_of_pain_are_you_experiencing?" on one branch's sheet, "What type of pain are
+ * you experiencing" on the next. Compared on letters and digits alone so a form that
+ * gains a capital, loses its question mark or swaps underscores for spaces keeps filling
+ * its column instead of quietly going blank, which is a failure nobody can see.
+ *
+ * Falls back to the lead's own field where the question has one. A source whose mapping
+ * sends this column to Condition or Months of Pain has no extra_fields entry left to read
+ * -- the answer moved to the field it was mapped onto -- and the column would empty out
+ * for exactly the sources that mapped themselves most carefully.
+ */
+const squashKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const formAnswer = (lead, questionKey, fallback, formatFallback) => {
+  const wanted = squashKey(questionKey);
+  const extras = lead?.extra_fields || {};
+  for (const [key, value] of Object.entries(extras)) {
+    if (squashKey(key) === wanted && value !== null && value !== undefined && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+  const own = fallback ? lead?.[fallback] : null;
+  if (own === null || own === undefined || String(own).trim() === "") return "";
+  // The field's own value needs its unit put back on. The sheet answer reads "3-6 months"
+  // because that is what the patient ticked; months_of_pain is the bare number 6, and a
+  // column headed Pain Duration showing "6" is not an answer to it.
+  return formatFallback ? formatFallback(own) : String(own).trim();
+};
+
 /** "offline_physio" -> "Offline Physio", and whatever it already said where the dropdown
  *  has no label for it: department is not a controlled field on an imported lead. */
 const departmentLabel = (value) =>
@@ -947,14 +979,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     [visibleLeads, picked],
   );
 
-  const togglePicked = useCallback((id) => {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }, []);
-
+  // No per-row tick any more, so nothing calls a toggle. The rest of the selection is
+  // left standing: pickedVisible, the count bar and the bulk-delete dialog are whole and
+  // correct, and want only a control to set the selection from. Deleting them would be
+  // throwing away a working feature to tidy up after removing its only button.
   // Summary card counts follow the Date Filter (and search) too, instead of always
   // reflecting the branch's all-time totals — so the cards actually describe what's in
   // the table below them right now.
@@ -1560,44 +1588,34 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
-                  {/* Ticks every row the table is currently showing, and only those. The
-                      percentages below drop by 4 to pay for this column, so they still
-                      total 100 — table-fixed divides by the stated widths, and a set that
-                      overshoots quietly squeezes the last column instead. */}
-                  <th className="w-[4%] px-3 py-3">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 cursor-pointer accent-rose-600 align-middle"
-                      checked={visibleLeads.length > 0 && pickedVisible.length === visibleLeads.length}
-                      // Some but not all: neither ticked nor empty, so it reads as a partial
-                      // selection rather than as "nothing is selected".
-                      ref={(el) => { if (el) el.indeterminate = pickedVisible.length > 0 && pickedVisible.length < visibleLeads.length; }}
-                      onChange={(e) => setPicked(e.target.checked ? new Set(visibleLeads.map((l) => l.id)) : new Set())}
-                      title={`Select all ${visibleLeads.length} shown`}
-                      aria-label="Select all shown"
-                      data-testid="branch-select-all"
-                    />
-                  </th>
                   {/* A lead at either entry stage hasn't had a physio assigned yet, so that
-                      column is dropped there — every other view keeps it. */}
+                      column is dropped there — every other view keeps it.
+
+                      The three between Phone and the pipeline columns are the intake form's
+                      own questions, which is what the branch is actually reading this list
+                      to find out. Widths total 100 either way: table-fixed divides by the
+                      stated widths, and a set that overshoots quietly squeezes the last
+                      column instead. */}
                   {entryStageNames.includes(stageFilter) ? (
                     <>
-                      <th className="w-[22%] px-4 py-3">Patient</th>
-                      <th className="w-[13%] px-4 py-3">Phone</th>
-                      <th className="w-[21%] px-4 py-3">Email</th>
-                      <th className="w-[15%] px-4 py-3">Stage</th>
-                      <th className="w-[15%] px-4 py-3">Appointment</th>
-                      <th className="w-[10%] px-4 py-3 text-right">Updated</th>
+                      <th className="w-[20%] px-4 py-3">Patient</th>
+                      <th className="w-[12%] px-4 py-3">Phone</th>
+                      <th className="w-[14%] px-4 py-3">Pain Type</th>
+                      <th className="w-[14%] px-4 py-3">Pain Duration</th>
+                      <th className="w-[14%] px-4 py-3">Consultation Type</th>
+                      <th className="w-[13%] px-4 py-3">Appointment</th>
+                      <th className="w-[13%] px-4 py-3">Stage</th>
                     </>
                   ) : (
                     <>
-                      <th className="w-[19%] px-4 py-3">Patient</th>
+                      <th className="w-[18%] px-4 py-3">Patient</th>
                       <th className="w-[11%] px-4 py-3">Phone</th>
-                      <th className="w-[17%] px-4 py-3">Email</th>
-                      <th className="w-[13%] px-4 py-3">Stage</th>
-                      <th className="w-[13%] px-4 py-3">Assigned Physio</th>
-                      <th className="w-[13%] px-4 py-3">Appointment</th>
-                      <th className="w-[10%] px-4 py-3 text-right">Updated</th>
+                      <th className="w-[13%] px-4 py-3">Pain Type</th>
+                      <th className="w-[12%] px-4 py-3">Pain Duration</th>
+                      <th className="w-[13%] px-4 py-3">Consultation Type</th>
+                      <th className="w-[12%] px-4 py-3">Assigned Physio</th>
+                      <th className="w-[11%] px-4 py-3">Appointment</th>
+                      <th className="w-[10%] px-4 py-3">Stage</th>
                     </>
                   )}
                 </tr>
@@ -1625,19 +1643,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                         className={`cursor-pointer transition-colors ${picked.has(lead.id) ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-slate-50"}`}
                         data-testid={`branch-row-${lead.id}`}
                       >
-                        {/* stopPropagation on the cell as well as the box: the whole row
-                            opens the patient, and ticking a box should not also open them. */}
-                        <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 cursor-pointer accent-rose-600 align-middle"
-                            checked={picked.has(lead.id)}
-                            onChange={() => togglePicked(lead.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label={`Select ${lead.name || "patient"}`}
-                            data-testid={`branch-pick-${lead.id}`}
-                          />
-                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
@@ -1704,15 +1709,20 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                           </div>
                         </td>
                         <td className="truncate px-4 py-3 text-slate-600" title={lead.phone}>{lead.phone || "—"}</td>
-                        <td className="truncate px-4 py-3 text-slate-600" title={lead.email}>{lead.email || "—"}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
-                            style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
-                          >
-                            {rowStage ? stageDisplayLabel(rowStage) : "—"}
-                          </span>
-                        </td>
+                        {/* The intake form's three questions. Each falls back to the lead's
+                            own field where it has one — see formAnswer. */}
+                        {[
+                          ["what_type_of_pain_are_you_experiencing?", "condition", null],
+                          ["how_long_have_you_had_this_pain?", "months_of_pain", (n) => `${n} month${Number(n) === 1 ? "" : "s"}`],
+                          ["preferred_consultation_type?", null, null],
+                        ].map(([question, fallback, formatFallback]) => {
+                          const answer = formAnswer(lead, question, fallback, formatFallback);
+                          return (
+                            <td key={question} className="truncate px-4 py-3 text-slate-600" title={answer || undefined}>
+                              {answer || <span className="text-slate-400">—</span>}
+                            </td>
+                          );
+                        })}
                         {showAssignedPhysio && (
                           <td className="truncate px-4 py-3 text-slate-600" title={lead.assigned_physio_name}>{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
                         )}
@@ -1734,7 +1744,14 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             );
                           })()}
                         </td>
-                        <td className="px-4 py-3 text-right text-xs text-slate-400">{(lead.updated_at || "").slice(0, 10)}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
+                            style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
+                          >
+                            {rowStage ? stageDisplayLabel(rowStage) : "—"}
+                          </span>
+                        </td>
                       </tr>
                     );
                   });
