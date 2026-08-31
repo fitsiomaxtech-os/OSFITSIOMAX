@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    # A push that only touches markdown cannot break the build, and proving that
+    # costs a full verify run. Skipping the workflow outright -- deploy included
+    # -- leaves the VPS one commit behind on a README until the next real push.
+    # Nothing served at runtime reads these files, so that lag costs nothing.
+    # Drop this filter if a .md ever becomes a runtime input.
+    paths-ignore:
+      - '**.md'
 
 jobs:
   # Nothing in this pipeline used to look at the code before it reached the
@@ -25,20 +32,52 @@ jobs:
         with:
           node-version: '20'
 
-      # `npm install` rather than `npm ci`: package-lock.json is not tracked in
-      # this repo, and `ci` refuses to run without one. If the lockfile is ever
-      # committed, switch this to `npm ci` -- it is faster and it pins.
+      # node_modules restored whole and keyed on the lockfile, so the install
+      # below only runs when a dependency actually changed. `.cache` is carved
+      # out of this entry because the next step owns that directory, and two
+      # cache entries writing the same path race with one silently winning.
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            frontend/node_modules
+            !frontend/node_modules/.cache
+          key: node-modules-${{ runner.os }}-node20-${{ hashFiles('frontend/package-lock.json') }}
+
+      # `npm ci`, not `npm install`. The comment that used to sit here said
+      # package-lock.json was untracked and so `ci` could not run -- that stopped
+      # being true three minutes after it was written, when the lockfile landed
+      # in 882c5ef. `ci` installs the lockfile rather than re-resolving ranges,
+      # so what this job verifies is what the lockfile pins.
       #
-      # --legacy-peer-deps because this project does not install without it. The
-      # tree declares date-fns ^4.1.0 while react-day-picker 8.10.1 peer-requires
-      # date-fns ^2.28.0 || ^3.0.0, so npm 7+ refuses with ERESOLVE. The two have
-      # been coexisting in every working install here -- 4.4.0 alongside 8.10.1 --
-      # so this flag describes what the project has always done rather than
-      # loosening anything. The real fix is to reconcile those two versions; until
-      # someone does, dropping this flag breaks every run.
+      # --legacy-peer-deps stays. The tree declares date-fns ^4.1.0 while
+      # react-day-picker 8.10.1 peer-requires ^2.28.0 || ^3.0.0, so npm refuses
+      # with ERESOLVE without it. The two have coexisted in every working install
+      # here -- 4.4.0 alongside 8.10.1. The real fix is to reconcile those two
+      # versions; until someone does, dropping this flag breaks every run.
       - name: Install frontend dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
         working-directory: frontend
-        run: npm install --no-audit --no-fund --legacy-peer-deps
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
+
+      # The build was ~55s of the ~85s this job took, nearly all of it webpack
+      # recompiling modules that had not changed. CRA 5 already writes a
+      # filesystem cache to node_modules/.cache -- react-scripts' webpack.config
+      # sets cache.type to 'filesystem' -- it just had nowhere to persist between
+      # runs. Restored AFTER the install, because `npm ci` deletes node_modules
+      # wholesale and would take the cache down with it.
+      #
+      # The key carries the sha so each run writes a fresh entry; the fallbacks
+      # take the newest entry built against the same lockfile.
+      - name: Restore webpack build cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules/.cache
+          key: webpack-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            webpack-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
+            webpack-${{ runner.os }}-
 
       # CI is forced false because create-react-app promotes warnings to errors
       # when it is set, and this tree carries pre-existing exhaustive-deps
