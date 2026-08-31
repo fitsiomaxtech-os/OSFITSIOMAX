@@ -1582,7 +1582,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [dietPickerDate, setDietPickerDate] = useState(null); // "YYYY-MM-DD"
   const [dietMinutes, setDietMinutes] = useState(FALLBACK_SESSION_MINUTES);
 
-  // Treatment (Head Physio only) — "Save & Move": Diagnosis Report + Treatment Summary
+  // Treatment (Head Physio only) — "Move to Admin": Diagnosis Report + Treatment Summary
   // have to be written first, but no add-on has to be picked — every toggle starts off,
   // which submits as a plain Consultation, the same as a patient who needs nothing else.
   // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
@@ -1949,15 +1949,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     }
   };
 
-  // ---- Consultation Decision (Head Physio) — "Save & Move" ----
+  // ---- Consultation Decision (Head Physio) — "Move to Admin" ----
   const submitConsultationDecision = async () => {
     if (!(selectedLead.physio_diagnosis_report || "").trim()) { toast.error("Write the Diagnosis Report first"); return; }
     if (!(selectedLead.treatment_summary || "").trim()) { toast.error("Write the Treatment Summary first"); return; }
 
-    // No add-on picked submits as a plain Consultation — that's a valid, common outcome
-    // (the patient needs nothing further today), not an incomplete form. Only Treatment
-    // demands anything more: its package.
-    const decision = decisionDraft.treatment ? "consultation_treatment" : "consultation_only";
+    if (!decisionDraft.treatment) { toast.error("Pick Treatment before moving to Admin"); return; }
+
+    // Always a treatment now. "consultation_only" is a legacy value some already-saved
+    // leads still carry — the server still accepts it, and Edit on one of those reopens
+    // this form with nothing ticked — but nothing written from here takes it any more.
+    const decision = "consultation_treatment";
     let payload = {
       decision,
       // A Diet referral is a referral to the Nutritionist's consultation and nothing else,
@@ -1985,7 +1987,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setSavingDecision(true);
     try {
       const res = await saveConsultationDecision(selectedLead.id, payload);
-      toast.success(decisionDraft.rehab ? "Saved — patient moved to Rehab" : "Saved & moved to Branch Admin");
+      toast.success(decisionDraft.rehab ? "Moved to Branch Admin — with a Rehab referral" : "Moved to Branch Admin");
       // The lead stays open behind the confirmation rather than the board closing it. The
       // popup's three actions all act on this patient, and two of them — Edit and Share —
       // have nothing to work with once the record underneath has gone.
@@ -2190,7 +2192,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // ---- Collect Treatment Fee (Branch Admin) — for "Consultation + Treatment"
   // patients only. The Treatment Package and its price are locked in from what the
-  // Head Physio already chose at Save & Move — neither is editable here. Normally
+  // Head Physio already chose at Move to Admin — neither is editable here. Normally
   // opened together with the Consultation Fee draft above; also independently
   // reachable from the Fee Collected panel as a fallback if it wasn't collected
   // together the first time.
@@ -4034,7 +4036,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               </div>
             )}
 
-            {/* Treatment — Head Physio's own "Save & Move". Requires Diagnosis Report +
+            {/* Treatment — Head Physio's own "Move to Admin". Requires Diagnosis Report +
                 Treatment Summary to already be written (that's what marks the consultation
                 itself done and ready for Branch Admin to collect the Consultation Fee).
                 Every patient goes on to a Treatment Package here — "Consultation Only" is a
@@ -4052,20 +4054,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const summaryReady = !!(selectedLead.treatment_summary || "").trim();
               const selectedPackage = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
               const selectedPackageWeeks = selectedPackage ? weeksFromPackageName(selectedPackage.name) : null;
-              const needsPackage = decisionDraft.treatment;
-              const packageReady = !needsPackage
-                || (!!decisionDraft.item_id && !!selectedPackageWeeks && !!parseInt(decisionDraft.sessionsPerWeek, 10));
-              // No add-on is a valid, completed choice on its own — a plain Consultation —
-              // so nothing here requires at least one to be picked. Diet asks nothing
-              // either: the referral is to the Nutritionist's consultation, which is the
-              // whole of what a Consultant decides on that side.
+              // Treatment is not one of five optional add-ons any more. What leaves this
+              // form for Branch Admin is a treatment plan — sessions to book and a package
+              // to collect against — so the tick, its package and its sessions/week are as
+              // required as the two reports above. Ticked with no package, or a package
+              // with no sessions/week, is the same gap as never having ticked it: the
+              // branch gets a patient with nothing to book.
+              const treatmentReady = !!decisionDraft.treatment
+                && !!decisionDraft.item_id
+                && !!selectedPackageWeeks
+                && !!parseInt(decisionDraft.sessionsPerWeek, 10);
+              // Diet asks nothing: the referral is to the Nutritionist's consultation,
+              // which is the whole of what a Consultant decides on that side.
               //
               // Rehab does ask. It is a course of a named length at a named price, so a
               // patient referred to it with no package chosen reaches the branch with
-              // nothing to book and nothing to collect -- the same gap Confirm is held
-              // open for on the Treatment package above, held here the same way.
+              // nothing to book and nothing to collect -- the same gap Move to Admin is
+              // held open for on the Treatment package above, held here the same way.
               const rehabReady = !decisionDraft.rehab || !!decisionDraft.rehab_item_id;
-              const canSave = diagnosisReady && summaryReady && packageReady && rehabReady;
+              const canSave = diagnosisReady && summaryReady && treatmentReady && rehabReady;
 
               // What the Consultant has ticked, in the shelf's own order. The detail column
               // is built from this rather than from five separate conditionals, so a card
@@ -4442,17 +4449,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       stops the eye rather than a coloured line of text among other lines.
                       Rose over amber for the same reason: amber is the colour half this
                       panel already uses for asides nobody has to act on. */}
-                  {(!diagnosisReady || !summaryReady) && (
+                  {(!diagnosisReady || !summaryReady || !treatmentReady) && (
                     <p
                       className="mb-3 rounded-md border-l-4 border-rose-500 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700"
                       data-testid="cons-decision-required-hint"
                     >
-                      Write the Diagnosis Report and Treatment Summary above before Save & Move.
+                      {/* One thing at a time, in the order the form is worked down: the two
+                          reports are above this panel, Treatment is inside it, and naming
+                          both at once sends the eye to the wrong half of the screen. */}
+                      {!diagnosisReady || !summaryReady
+                        ? "Write the Diagnosis Report and Treatment Summary above before Move to Admin."
+                        : "Pick Treatment, its package and its sessions/week before Move to Admin."}
                     </p>
                   )}
                   {/* Consultation itself needs no toggle — writing this form up is the
-                      consultation. These five are what else the patient is going away
-                      with, and any combination is valid, including none of them.
+                      consultation. Treatment is required: a consultation reaches Branch
+                      Admin as a plan to book and collect against, so it is picked here and
+                      cannot then be taken off. The other four are what else the patient is
+                      going away with, and any combination of those is valid, including
+                      none of them.
 
                       Two columns: the shelf on the left, what has actually been chosen on
                       the right, and the pickers themselves over the form in a popup. They
@@ -4485,6 +4500,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             >
                               <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
                               <span className="truncate">{p.label}</span>
+                              {/* The one service that has to be picked says so on the chip
+                                  itself, where the choice is made. The hint at the top of
+                                  the panel names the reports first while they are unwritten,
+                                  so on a fresh consultation it is not saying this yet.
+                                  Gone once Treatment is on — the tick says the rest. */}
+                              {p.key === "treatment" && !selected && (
+                                <span className="ml-auto shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-600">
+                                  Required
+                                </span>
+                              )}
                               {selected && <CheckCircle2 aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0" />}
                             </button>
                           );
@@ -4495,19 +4520,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     {/* The answers, one row per ticked service, in the shelf's own order so
                         the rows read down in the order the services read down opposite. A
                         row is the way back into its picker; the × beside it is the only way
-                        a service comes off, which puts removing one next to the choice
-                        being thrown away rather than on the chip that turned it on. */}
+                        an optional service comes off, which puts removing one next to the
+                        choice being thrown away rather than on the chip that turned it on.
+
+                        Treatment's row has no ×. It is required, so the only thing its row
+                        offers is the way back into the picker to change the package — a
+                        cross there would be a button whose only outcome is a form that
+                        cannot be submitted. */}
                     <div>
                       <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Selected Services</label>
                       {selectedAddons.length === 0 ? (
-                        /* No add-on is a complete, valid choice — a plain Consultation —
-                           so this says what saving now would do rather than reading as a
-                           panel still waiting to be filled. */
+                        /* Nothing picked is not a valid outcome any more — Treatment is
+                           required — so this column reads as the gap it is rather than as
+                           a note about what saving now would do. Rose to match the hint at
+                           the top of the panel: they are the same missing thing. */
                         <p
-                          className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-[11px] text-slate-400"
+                          className="rounded-lg border border-dashed border-rose-200 bg-rose-50/40 px-3 py-3 text-[11px] font-medium text-rose-600"
                           data-testid="cons-decision-selected-empty"
                         >
-                          Nothing else picked — saves as a plain Consultation.
+                          Pick Treatment to move this patient to Admin.
                         </p>
                       ) : (
                         <div className="space-y-1.5" data-testid="cons-decision-details">
@@ -4535,15 +4566,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                     {summary.text}
                                   </span>
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => clearAddon(a.key)}
-                                  className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
-                                  title={`Remove ${a.label}`}
-                                  data-testid={`cons-decision-remove-${a.key}`}
-                                >
-                                  <X aria-hidden className="h-3.5 w-3.5" />
-                                </button>
+                                {a.key === "treatment" ? (
+                                  /* A pencil where every other row has its ×. Treatment
+                                     cannot come off, so the only thing this row does is
+                                     reopen the picker — and a row that ends in nothing
+                                     reads as a row that does nothing. Decorative: the press
+                                     target is the whole row beside it. */
+                                  <Pencil aria-hidden className="mr-1.5 h-3 w-3 shrink-0 text-slate-400" />
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => clearAddon(a.key)}
+                                    className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+                                    title={`Remove ${a.label}`}
+                                    data-testid={`cons-decision-remove-${a.key}`}
+                                  >
+                                    <X aria-hidden className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
                               </div>
                             );
                           })}
@@ -4587,15 +4627,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               ids, drawn here instead of down the form. */}
                           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{addonDetail(addonPicker)}</div>
                           <div className="flex shrink-0 justify-between gap-2 border-t border-slate-100 px-4 py-3">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-8 border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
-                              onClick={() => clearAddon(addonPicker)}
-                              data-testid="cons-decision-picker-remove"
-                            >
-                              Remove {a.label}
-                            </Button>
+                            {/* Required, so there is nothing to remove it with — the same
+                                reason its row in Selected carries no ×. The empty span
+                                holds Done on the right, where it is on every other
+                                service's picker. */}
+                            {addonPicker === "treatment" ? <span /> : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
+                                onClick={() => clearAddon(addonPicker)}
+                                data-testid="cons-decision-picker-remove"
+                              >
+                                Remove {a.label}
+                              </Button>
+                            )}
                             {/* Shut while the open picker is still missing something, so
                                 the popup cannot be dismissed by the one button that reads
                                 like the choice was made. The X and the backdrop still
@@ -4623,15 +4669,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     disabled={savingDecision || !canSave}
                     data-testid="cons-decision-save"
                   >
-                    {savingDecision
-                      ? "Saving..."
-                      // The label names what the button will actually do. Treatment needs
-                      // a package still to review, so it says only "Confirm"; Rehab with
-                      // no Treatment names where the patient is headed; anything else is
-                      // simply done.
-                      : needsPackage ? "Confirm"
-                      : decisionDraft.rehab ? "Confirm & Move to Rehab"
-                      : "Confirm & Save"}
+                    {/* One label now, because there is one outcome. This branched three
+                        ways over which services were ticked, back when a consultation
+                        could leave here with no Treatment on it; with Treatment required,
+                        every save hands the patient to Branch Admin — to collect the fees
+                        and book the sessions — whatever else is ticked beside it. So the
+                        button names the desk the patient lands on. */}
+                    {savingDecision ? "Saving..." : "Move to Admin"}
                   </Button>
                 </div>
               );
@@ -9095,7 +9139,7 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
 
       {/* What is selected, under the bar rather than inside it, one per line. Stacked
           rather than wrapped into chips so a long name reads whole and the list can be
-          counted down at a glance — which is what someone about to Confirm & Save is
+          counted down at a glance — which is what someone about to Move to Admin is
           doing. Every one of them shows: with a row each there is no need to hide the
           fourth behind a "+N", and it scrolls past eight rather than growing the card. */}
       {picked.length > 0 ? (
@@ -9151,7 +9195,7 @@ function LockableTextBox({
       {showEditor ? (
         <>
           {/* Tick-list when a catalogue exists, free text when it does not. The fallback is
-              load-bearing rather than tidy: Confirm & Save refuses an empty Treatment
+              load-bearing rather than tidy: Move to Admin refuses an empty Treatment
               Summary, so a clinic that has not filled Super Admin > Treatment yet would be
               unable to finish any consultation if the box had no other way to be written. */}
           {hasChoices ? (
