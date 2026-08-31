@@ -193,6 +193,18 @@ const adFieldValue = (field, value) => {
   return String(value);
 };
 
+/**
+ * An ad-record field looked up by key, and the loose form a key is matched in.
+ *
+ * The keys in lead_data are Meta's own and exact. The same fields turning up in
+ * extra_fields came off a sheet header instead, so they arrive spelled however the column
+ * was typed — "Ad Name", "ad-id", "Campaign ID ". Both are flattened to the same shape
+ * before the lookup, so one field is recognised however it was written.
+ */
+const AD_FIELD_BY_KEY = new Map(LEAD_DATA_FIELDS.map((field) => [field.key, field]));
+const normaliseAdKey = (key) =>
+  String(key || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+
 /** Whether a lead actually carries an answer. Explicit rather than falsiness, because 0 is
  *  one: "months_of_pain: 0" is somebody who started hurting this month. */
 const hasValue = (v) => v !== null && v !== undefined && String(v).trim() !== "";
@@ -2435,19 +2447,45 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // the wire and nothing validates what a sheet puts in it, so a nested value is possible —
   // and String() would draw that as the literal "[object Object]", which is worse than not
   // drawing the row at all.
-  const formAnswers = Object.entries(lead.extra_fields || {}).filter(
+  const rawFormAnswers = Object.entries(lead.extra_fields || {}).filter(
     ([, value]) => ["string", "number", "boolean"].includes(typeof value) && hasValue(value),
   );
 
-  // The advert behind the lead, and only the fields that were filled: V3LeadData is twelve
-  // optionals and a walk-in has none of them.
+  // The ad record does not always arrive in the block built for it. A sheet whose Meta
+  // columns were mapped as custom questions — or synced before lead_data existed to map
+  // onto — stores "ad_name", "campaign_id" and the rest in extra_fields, and the popup
+  // then read them back under Enquiry Form: eight lines of ad plumbing filed as answers
+  // the patient gave, above the question they actually came in with.
   //
-  // Nothing here gates on the reader. The block is withheld from everyone but Super Admin on
-  // the way out of the API (lead_as_read_by in backend/deps.py), so a Branch Admin is handed
-  // null and the card simply never draws — the same lock the create form leans on, rather
-  // than a second one that could come to disagree with it.
+  // So the split is made on what a key means rather than on where it happens to sit. Keys
+  // are matched loosely because a sheet header is written by a person: "Ad Name", "ad-id"
+  // and "ad_id" are one field, whatever the column said. Anything that is not a Meta field
+  // stays where it is — a question is a question.
+  const strayAdAnswers = new Map();
+  const formAnswers = [];
+  rawFormAnswers.forEach(([key, value]) => {
+    const field = AD_FIELD_BY_KEY.get(normaliseAdKey(key));
+    if (!field) formAnswers.push([key, value]);
+    else if (!strayAdAnswers.has(field.key)) strayAdAnswers.set(field.key, value);
+  });
+
+  // The advert behind the lead, and only the fields that were filled: V3LeadData is twelve
+  // optionals and a walk-in has none of them. The block is read first and the stray
+  // extra_fields copy stands in only where it is empty — where both hold the same field,
+  // lead_data is the one the create form and the importer write, and the loose copy is the
+  // one that got there by a header's spelling.
+  //
+  // Nothing here gates on the reader. lead_data is withheld from everyone but Super Admin on
+  // the way out of the API (lead_as_read_by in backend/deps.py) — the same lock the create
+  // form leans on, rather than a second one here that could come to disagree with it. What
+  // came in through extra_fields was never behind that lock and is not put behind one now:
+  // this moves it out of Enquiry Form, it does not hide it from anyone who could already
+  // read it there.
   const adRows = LEAD_DATA_FIELDS
-    .map((field) => [field.label, adFieldValue(field, lead.lead_data?.[field.key])])
+    .map((field) => {
+      const stored = lead.lead_data?.[field.key];
+      return [field.label, adFieldValue(field, hasValue(stored) ? stored : strayAdAnswers.get(field.key))];
+    })
     .filter(([, value]) => hasValue(value));
 
   return (
@@ -2873,7 +2911,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 </div>
               )}
 
-              {/* Which advert bought this lead. Super Admin alone sees it — see adRows. */}
+              {/* Which advert bought this lead, whichever way it reached us — the lead_data
+                  block Super Admin alone is served, or the Meta columns an older sheet left
+                  in extra_fields. Either way it reads as the ad record it is, under its own
+                  heading, rather than as more of the patient's answers. See adRows. */}
               {adRows.length > 0 && (
                 <div className="overflow-hidden rounded-xl border border-fuchsia-100 bg-white shadow-sm" data-testid="branch-lead-data">
                   <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
