@@ -576,6 +576,10 @@ export const assignPhysioWithSessions = async (leadId, payload) => (await api.po
 // Who has delivered this patient's treatment days and how far each of them got — the
 // physios the patient has been through, oldest first, then the one they are with now.
 export const getLeadPhysioProgress = async (leadId) => (await api.get(`/leads/${leadId}/physio-progress`)).data;
+// Branch Transfer (Super Admin). Eligibility is asked first so the dialog can show what
+// the move would cost -- days released, money staying behind -- before it is made.
+export const getLeadTransferEligibility = async (leadId) => (await api.get(`/leads/${leadId}/transfer-eligibility`)).data;
+export const transferLeadBranch = async (leadId, payload) => (await api.post(`/leads/${leadId}/transfer-branch`, payload)).data;
 // Rehab — a parallel course on the same physio's calendar. Its own endpoint and its own
 // collection: a rehab day is not a day of the treatment package (see backend/v3_rehab).
 export const assignRehab = async (payload) => (await api.post("/branch/assign-rehab", payload)).data;

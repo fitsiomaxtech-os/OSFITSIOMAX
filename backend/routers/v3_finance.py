@@ -37,6 +37,56 @@ SPLIT_TENDER_MODES = ("cash", "upi", "card", "account_transfer")
 router = APIRouter(prefix="/api/v3")
 
 
+def _revenue_by_branch(lead: dict) -> list:
+    """One row per branch that has taken money from this patient, oldest first.
+
+    A patient who has never moved yields exactly one row — their branch, their whole total
+    — which is what every reader of this file saw before transfers existed. A transferred
+    one yields the branch they left holding what it had taken by the day they left, and
+    their current branch holding whatever has come in since.
+
+    `revenue_branch_splits` records running totals as they stood at each transfer, not the
+    amount that branch took, so each row is the difference from the one before it. Storing
+    the running total is what makes it safe against a fee corrected after the fact: the
+    next split still knows where the previous one ended.
+
+    Clamped at zero because a refund or a correction can lower a total below what an
+    earlier split recorded, and a negative row would quietly credit it to the wrong branch.
+    """
+    splits = lead.get("revenue_branch_splits") or []
+    rows = []
+    seen_consultation = 0.0
+    seen_package = 0.0
+    for split in splits:
+        at_consultation = split.get("consultation_fee") or 0
+        at_package = split.get("package_paid") or 0
+        rows.append({
+            "branch_id": split.get("branch_id"),
+            "consultation_fee": max(0.0, at_consultation - seen_consultation),
+            "package_paid": max(0.0, at_package - seen_package),
+        })
+        seen_consultation = at_consultation
+        seen_package = at_package
+    rows.append({
+        "branch_id": lead.get("branch_id"),
+        "consultation_fee": max(0.0, (lead.get("consultation_fee") or 0) - seen_consultation),
+        "package_paid": max(0.0, (lead.get("package_paid") or 0) - seen_package),
+    })
+    return [r for r in rows if r["branch_id"]]
+
+
+def _branch_at(lead: dict, when: str) -> str:
+    """Which branch this patient was at on a given date.
+
+    For putting a collection on the right branch's row in the transactions list. Walks the
+    transfer history rather than reading branch_id, which only ever answers "now".
+    """
+    for move in (lead.get("branch_transfer_history") or []):
+        if when and move.get("at") and when < move["at"]:
+            return move.get("from_branch_id") or ""
+    return lead.get("branch_id") or ""
+
+
 @router.get("/branch/finance")
 async def get_branch_finance(
     fee_type: Optional[str] = None,
@@ -60,62 +110,96 @@ async def get_branch_finance(
         if not branch_id:
             return {"summary": {}, "transactions": []}
 
-    base_query = {"branch_id": branch_id} if branch_id else {}
+    # A branch's book has to keep the patients it no longer has. Money is attributed to
+    # the branch that collected it (see _revenue_by_branch), so a patient transferred away
+    # still belongs in the accounts of the branch that treated and charged them — and a
+    # query reading branch_id alone would have dropped them the moment they moved.
+    base_query = {"$or": [
+        {"branch_id": branch_id},
+        {"revenue_branch_splits.branch_id": branch_id},
+    ]} if branch_id else {}
     if mode in ("online", "offline"):
         base_query["vertical"] = {"$regex": f"^{mode}_"}
-
-    consultation_query = {**base_query, "consultation_fee": {"$gt": 0}}
-    package_query = {**base_query, "package_paid": {"$gt": 0}}
-
-    consultation_leads = await v3_col("leads").find(consultation_query, {"_id": 0}).to_list(2000)
-    package_leads = await v3_col("leads").find(package_query, {"_id": 0}).to_list(2000)
-
-    total_consultation = sum(l.get("consultation_fee", 0) for l in consultation_leads)
-    total_package = sum(l.get("package_paid", 0) for l in package_leads)
 
     all_branch_leads = await v3_col("leads").find(base_query, {"_id": 0}).to_list(2000)
     # Both modes' entry stages, since this list spans branches under either Lead Control —
     # a lead still sitting where it landed hasn't been worked yet and owes nothing.
     untouched_stages = {None} | await entry_branch_stage_names()
-    leads_with_no_fee = [l for l in all_branch_leads if (l.get("consultation_fee") or 0) == 0 and l.get("branch_stage") not in untouched_stages]
+    # Current patients only. A patient this branch transferred away still owes it nothing
+    # — whatever they have not paid is the receiving branch's to collect.
+    here_now = [l for l in all_branch_leads if not branch_id or l.get("branch_id") == branch_id]
+    leads_with_no_fee = [l for l in here_now if (l.get("consultation_fee") or 0) == 0 and l.get("branch_stage") not in untouched_stages]
     pending_count = len(leads_with_no_fee)
 
     # Per-branch breakdown — only meaningfully populated when viewing more than one
     # branch at once (Accountant's default, or Super Admin leaving branch_id unset),
     # but cheap to compute always since all_branch_leads is already in memory.
-    branch_ids = list({l["branch_id"] for l in all_branch_leads if l.get("branch_id")})
+    # Every branch either holding one of these patients now or having taken money from
+    # one of them before — both need a name for the rows below.
+    lead_revenue = {l["id"]: _revenue_by_branch(l) for l in all_branch_leads}
+    branch_ids = list(
+        {l["branch_id"] for l in all_branch_leads if l.get("branch_id")}
+        | {row["branch_id"] for rows in lead_revenue.values() for row in rows}
+    )
     branch_docs = await v3_col("branches").find(
         {"id": {"$in": branch_ids}}, {"_id": 0, "id": 1, "branch_name": 1}
     ).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
 
     by_branch_acc = {}
-    for l in all_branch_leads:
-        bid = l.get("branch_id")
-        if not bid:
-            continue
-        acc = by_branch_acc.setdefault(bid, {
+
+    def _acc(bid):
+        return by_branch_acc.setdefault(bid, {
             "branch_id": bid,
             "branch_name": branch_name_map.get(bid, "Unknown"),
             "consultation_total": 0.0,
             "package_total": 0.0,
+            "consultation_count": 0,
+            "package_count": 0,
             "total_patients": 0,
         })
-        acc["consultation_total"] += l.get("consultation_fee") or 0
-        acc["package_total"] += l.get("package_paid") or 0
-        acc["total_patients"] += 1
+
+    for l in all_branch_leads:
+        # Patients are counted where they are; money is counted where it was taken. The two
+        # part company the moment somebody is transferred, and conflating them is how a
+        # branch's revenue follows a patient out of the door.
+        if l.get("branch_id"):
+            _acc(l["branch_id"])["total_patients"] += 1
+        for row in lead_revenue[l["id"]]:
+            acc = _acc(row["branch_id"])
+            acc["consultation_total"] += row["consultation_fee"]
+            acc["package_total"] += row["package_paid"]
+            if row["consultation_fee"] > 0:
+                acc["consultation_count"] += 1
+            if row["package_paid"] > 0:
+                acc["package_count"] += 1
     by_branch = sorted(by_branch_acc.values(), key=lambda r: -(r["consultation_total"] + r["package_total"]))
     for r in by_branch:
         r["total_revenue"] = r["consultation_total"] + r["package_total"]
 
+    # The cards at the top are this scope's own row, or every row added up when no branch
+    # was asked for. Taken from the same accumulation as the breakdown rather than summed
+    # separately, so the two can never disagree about what a branch earned.
+    if branch_id:
+        scope = by_branch_acc.get(branch_id) or _acc(branch_id)
+        total_consultation = scope["consultation_total"]
+        total_package = scope["package_total"]
+        consultation_count = scope["consultation_count"]
+        package_count = scope["package_count"]
+    else:
+        total_consultation = sum(r["consultation_total"] for r in by_branch)
+        total_package = sum(r["package_total"] for r in by_branch)
+        consultation_count = sum(r["consultation_count"] for r in by_branch)
+        package_count = sum(r["package_count"] for r in by_branch)
+
     summary = {
         "total_revenue": total_consultation + total_package,
         "consultation_total": total_consultation,
-        "consultation_count": len(consultation_leads),
+        "consultation_count": consultation_count,
         "package_total": total_package,
-        "package_count": len(package_leads),
+        "package_count": package_count,
         "pending_count": pending_count,
-        "total_patients": len(all_branch_leads),
+        "total_patients": len(here_now),
         "by_branch": by_branch,
     }
 
@@ -141,6 +225,13 @@ async def get_branch_finance(
     for act in activities:
         lead = lead_map.get(act.get("lead_id"), {})
         details = act.get("details", "")
+
+        # A transferred patient is in this list for the money they paid here, not for the
+        # money they have paid since. Their later collections belong to the branch that
+        # took them, and without this every branch a patient has ever passed through would
+        # show every receipt they ever got.
+        if branch_id and _branch_at(lead, act.get("created_at", "")) != branch_id:
+            continue
 
         is_consultation = "consultation" in details.lower()
         is_package = "package" in details.lower()
@@ -190,7 +281,10 @@ async def get_branch_finance(
             "collected_by": act.get("created_by", ""),
             "collected_at": act.get("created_at", ""),
             "branch_stage": lead.get("branch_stage", ""),
-            "branch_name": branch_name_map.get(lead.get("branch_id"), ""),
+            # The branch this patient was at on the day the money came in, not the one
+            # they are at now — a transferred patient's old receipts belong to the branch
+            # that issued them.
+            "branch_name": branch_name_map.get(_branch_at(lead, act.get("created_at", "")), ""),
             "vertical": lead.get("vertical", ""),
             # Whether the Accountant has cleared this collection — set only via
             # POST /finance/transactions/{id}/approve, never at collection time, so a

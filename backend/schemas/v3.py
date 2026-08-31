@@ -469,6 +469,10 @@ class V3LeadOut(BaseModel):
     # ever booked, which is not zero: nobody sold that patient treatment.
     total_sessions: Optional[int] = None
     completed_sessions: Optional[int] = None
+    # Every branch this patient has been moved between, oldest first. Declared for the same
+    # reason as the two above -- a board that cannot see it cannot mark a transferred
+    # patient as one, and the branch receiving them has no way to say where they came from.
+    branch_transfer_history: Optional[List[Dict[str, Any]]] = None
     location: Optional[str] = None
     expected_consultation_date: Optional[str] = None
     months_of_pain: Optional[int] = None
