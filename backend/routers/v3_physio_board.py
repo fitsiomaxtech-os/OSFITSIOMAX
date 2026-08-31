@@ -445,6 +445,40 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
     }
 
 
+async def _resolve_physio_treatments(names) -> list:
+    """The picked treatments, resolved to the catalogue's own spelling of each name.
+
+    Super Admin > Services and Products > Physiotherapy Treatment is the only source, so a
+    name that is not on it is refused rather than written through: the whole point of
+    tagging a day is that the tags across every day are the same handful of words, and one
+    typo'd "Ultrsound" would sit in the records forever looking like a treatment of its own.
+
+    Matched case-insensitively and stored as the catalogue spells it, the way the catalogue
+    itself de-duplicates on create — a client sending "ift" gets "IFT" back, not a second
+    variant of the same treatment.
+
+    Order follows the catalogue, not the order the boxes were ticked, so two days treated
+    with the same three things read identically.
+    """
+    picked = [str(n or "").strip() for n in (names or [])]
+    picked = [n for n in picked if n]
+    if not picked:
+        return []
+    catalogue = await v3_col("physio_types").find({}, {"_id": 0, "name": 1}).sort("name", 1).to_list(500)
+    by_lower = {(row.get("name") or "").strip().lower(): (row.get("name") or "").strip() for row in catalogue}
+    unknown = [n for n in picked if n.lower() not in by_lower]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Not a Physiotherapy Treatment in Services and Products: {', '.join(unknown)}"
+            ),
+        )
+    # Deduped as well as ordered: the same treatment ticked twice is one treatment.
+    chosen = {by_lower[n.lower()] for n in picked}
+    return [row["name"].strip() for row in catalogue if row.get("name", "").strip() in chosen]
+
+
 async def _first_incomplete_before(session: dict):
     """The lowest day number before this one that is still not completed, or None.
 
@@ -655,11 +689,19 @@ async def physio_complete_session(
     if not is_rehab and not treatment_remarks and not rehab_remarks:
         raise HTTPException(status_code=400, detail="Treatment Remarks or Rehab Remarks is required")
 
+    # What was actually given on the day, off the Super Admin catalogue. Not required —
+    # see the field's note on V3CompleteSessionInput — but checked against the catalogue
+    # when it is sent, so the tags stay a fixed vocabulary rather than free text.
+    physio_treatments = await _resolve_physio_treatments(payload.physio_treatments)
+
     await v3_col(collection).update_one(
         {"id": session_id},
         {"$set": {
             "status": "completed",
             "jr_physio_remarks": treatment_remarks,
+            # Stored on both tracks. A rehab day is still a day of hands-on physiotherapy
+            # and is worth the same record of what was done on it.
+            "physio_treatments": physio_treatments,
             # Kept beside the treatment note rather than folded into it: the Consultant
             # reads the two for different reasons, and one field would make that a
             # matter of how the physio happened to punctuate.
@@ -676,6 +718,8 @@ async def physio_complete_session(
     # Only what was written gets a label in the log; an empty half would otherwise read
     # as "Rehab remarks:" with nothing after it.
     log_parts = []
+    if physio_treatments:
+        log_parts.append(f"Treatments: {', '.join(physio_treatments)}")
     if treatment_remarks:
         log_parts.append(f"Remarks: {treatment_remarks}")
     if rehab_remarks:

@@ -70,6 +70,8 @@ async def assign_sessions(
             "status": "upcoming",
             "jr_physio_remarks": "",
             "rehab_remarks": "",
+            # Filled in when the physio signs the day off, from the Super Admin catalogue.
+            "physio_treatments": [],
             "created_at": now_iso(),
             "updated_at": now_iso(),
         }

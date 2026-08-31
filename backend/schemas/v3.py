@@ -903,6 +903,27 @@ class V3CompleteSessionInput(BaseModel):
     # with nothing to say about one of them is not made to type into it.
     remarks: Optional[str] = ""
     rehab_remarks: Optional[str] = ""
+    # Which of the clinic's physiotherapy treatments were given on the day, by name from
+    # the Super Admin catalogue (Services and Products > Physiotherapy Treatment).
+    #
+    # A list because a session is rarely one modality -- IFT and ultrasound and manual
+    # therapy in the same hour is an ordinary day, and one field would make recording that
+    # a matter of how the physio punctuated it.
+    #
+    # Names and not ids, matching how a doctor's service_type is stored: what a day was
+    # treated with is read far more often than it is joined back to a catalogue row.
+    #
+    # Unlike a doctor's service_type, a rename in the catalogue does NOT write through to
+    # days already signed off -- v3_update_physio_type touches doctors and nothing else,
+    # and deliberately so. A completed day is a clinical record of what was done on it, and
+    # correcting a spelling in Services and Products is not licence to edit it, which is
+    # the same line the Treatment catalogue draws over a written Treatment Summary. It
+    # follows that a treatment deleted from the catalogue still reads back on the days it
+    # was given on; it just stops being offered on the next one.
+    #
+    # Optional. A day is a real day whether or not the physio tagged it, and every session
+    # completed before this field existed carries none.
+    physio_treatments: Optional[List[str]] = None
 
 
 class V3AbsentSessionInput(BaseModel):

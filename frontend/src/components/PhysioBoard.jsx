@@ -1,11 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  Activity,
   AlertCircle,
   ArrowLeft,
   Calendar,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -43,6 +45,7 @@ import {
   physioRaiseReview,
   leadDocuments,
   openLeadDocument,
+  getPhysioTypes,
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
@@ -1968,6 +1971,11 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                               ? "Missed class — Branch Admin to give this day a date"
                               : "—"}
                         </p>
+                        {(s.physio_treatments || []).length > 0 && (
+                          <div className="mt-1">
+                            <PhysioTreatmentChips names={s.physio_treatments} testid={`physio-day-treatments-${s.id}`} />
+                          </div>
+                        )}
                         {(s.jr_physio_remarks || s.rehab_remarks) && (
                           <p className="mt-0.5 text-[10px] text-emerald-600">Remarks: {s.jr_physio_remarks || s.rehab_remarks}</p>
                         )}
@@ -2594,6 +2602,11 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
                             : `Session #${s.session_number}${s.week_number ? ` · Week ${s.week_number}` : ""}`}
                         </p>
                         <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
+                        {done && (s.physio_treatments || []).length > 0 && (
+                          <p className="mt-0.5 truncate text-[10px] font-medium text-sky-700" data-testid={`physio-session-treatments-${s.id}`}>
+                            {s.physio_treatments.join(" · ")}
+                          </p>
+                        )}
                         {done && (s.jr_physio_remarks || s.rehab_remarks) && (
                           <p className="mt-0.5 truncate text-[10px] text-emerald-600">{s.jr_physio_remarks || s.rehab_remarks}</p>
                         )}
@@ -2712,12 +2725,222 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
   );
 }
 
+/**
+ * The physiotherapy treatments given on one day, ticked off Super Admin's catalogue.
+ *
+ * The options are Services and Products > Physiotherapy Treatment and nothing else — the
+ * same list a physio's calendar is published under. A typed-in treatment is deliberately
+ * not offered: the tags are only worth something if every day across every patient uses
+ * the same handful of words, and one free-text box would end that within a week. The
+ * server holds the same line and refuses a name that is not on the catalogue.
+ *
+ * Several per day, because a session is rarely one modality — IFT and ultrasound and
+ * manual therapy inside the same hour is an ordinary day.
+ *
+ * Ticks are written back in catalogue order rather than click order, so two days treated
+ * with the same three things read identically and re-opening one does not look edited.
+ *
+ * The panel expands inline rather than floating. This sits inside a fixed, centred popup
+ * no wider than a phone, so a measured dropdown would have to be pinned to the viewport
+ * to escape it for no gain; the popup body scrolls, which is what makes a panel opening
+ * below the search bar reachable on a short screen.
+ */
+function PhysioTreatmentPicker({ options, value, onChange, testPrefix }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const names = options.map((o) => o.name);
+  const known = new Set(names);
+  // Anything held that is no longer on the catalogue is dropped from the ticks: a
+  // treatment Super Admin has deleted is not one to offer on today's day.
+  const checked = new Set((value || []).filter((n) => known.has(n)));
+  const picked = names.filter((n) => checked.has(n));
+
+  // Cleared on close rather than inside each thing that closes it, so the field cannot
+  // come back holding last time's filter with the full list hidden behind it.
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
+
+  const commit = (next) => onChange(names.filter((n) => next.has(n)));
+
+  const toggle = (name) => {
+    const next = new Set(checked);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    commit(next);
+  };
+
+  // Numbered off the catalogue, not off the filtered view, so "3. Dry Needling" is still
+  // number 3 once a search has narrowed the list to it. Display only — what is stored is
+  // the plain name, which is what the server matches against.
+  const numbered = options.map((o, i) => ({ ...o, n: i + 1 }));
+  const q = query.trim().toLowerCase();
+  const shown = q ? numbered.filter((o) => (o.name || "").toLowerCase().includes(q)) : numbered;
+  const numberOf = (name) => (numbered.find((o) => o.name === name)?.n) || "";
+
+  // Operates on what is on screen: with no search that is the whole catalogue, with one
+  // it is the matches, which is what "select all" means while a filter is showing.
+  const allShownChecked = shown.length > 0 && shown.every((o) => checked.has(o.name));
+  const toggleAll = () => {
+    const next = new Set(checked);
+    if (allShownChecked) shown.forEach((o) => next.delete(o.name));
+    else shown.forEach((o) => next.add(o.name));
+    commit(next);
+  };
+
+  if (options.length === 0) {
+    // Says where they come from rather than showing an empty box. A physio cannot add one
+    // — the catalogue is Super Admin's — so the only useful thing here is who to ask.
+    return (
+      <p
+        className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-[11px] text-slate-400"
+        data-testid={`${testPrefix}-empty`}
+      >
+        No physiotherapy treatments on the catalogue yet — Super Admin adds them in Services and Products &gt; Physiotherapy Treatment.
+      </p>
+    );
+  }
+
+  return (
+    <div data-testid={`${testPrefix}-picker`}>
+      {/* The bar is a search field. The chevron behind the divider on the right is what
+          closes the list; the field itself only ever opens it, since typing into a box
+          that closes the list it is filtering helps nobody. */}
+      <div className={`flex items-center gap-2 rounded-lg border bg-white px-2 py-1.5 transition ${open ? "border-sky-400 ring-1 ring-sky-100" : "border-slate-200"}`}>
+        <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); if (!open) setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+          placeholder="Search physio treatments..."
+          className="min-w-0 flex-1 border-0 bg-transparent py-0.5 text-xs text-slate-700 outline-none placeholder:text-slate-400"
+          data-testid={`${testPrefix}-search`}
+        />
+        <div className="shrink-0 border-l border-slate-200 pl-2">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            aria-label={open ? "Hide physio treatments" : "Show physio treatments"}
+            data-testid={`${testPrefix}-trigger`}
+          >
+            <ChevronDown className={`h-4 w-4 transition ${open ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-1.5 overflow-hidden rounded-lg border border-slate-200 bg-white" data-testid={`${testPrefix}-panel`}>
+          {/* Select All on the left, the running count on the right. The count is of the
+              whole selection and not of what the search is showing — it is what gets
+              saved, and a number that dropped every time you typed would be alarming. */}
+          <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700" data-testid={`${testPrefix}-select-all`}>
+              <input
+                type="checkbox"
+                checked={allShownChecked}
+                onChange={toggleAll}
+                disabled={shown.length === 0}
+                className="h-3.5 w-3.5 shrink-0 accent-sky-600"
+              />
+              Select All
+            </label>
+            <span className="text-[11px] font-semibold text-teal-600" data-testid={`${testPrefix}-count`}>
+              {picked.length} Selected
+            </span>
+          </div>
+
+          <div className="max-h-52 overflow-y-auto p-1">
+            {shown.length === 0 ? (
+              <p className="px-3 py-6 text-center text-[11px] text-slate-400" data-testid={`${testPrefix}-no-match`}>
+                No physio treatment matches "{query.trim()}".
+              </p>
+            ) : (
+              shown.map((o) => {
+                const on = checked.has(o.name);
+                return (
+                  <label
+                    key={o.id}
+                    className={`flex cursor-pointer items-center gap-2.5 rounded px-2 py-1.5 text-xs transition ${on ? "bg-sky-50 font-semibold text-sky-800" : "text-slate-700 hover:bg-slate-50"}`}
+                    data-testid={`${testPrefix}-option-${o.id}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggle(o.name)}
+                      className="h-3.5 w-3.5 shrink-0 accent-sky-600"
+                    />
+                    <span className="min-w-0 flex-1 truncate">{o.n}. {o.name}</span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* What is ticked, under the bar rather than inside it, one per line — a long name
+          reads whole, and the day's treatments can be counted down at a glance, which is
+          what someone about to sign the day off is doing. */}
+      {picked.length > 0 ? (
+        <div className="mt-2 max-h-36 space-y-1 overflow-y-auto" data-testid={`${testPrefix}-selected`}>
+          {picked.map((n) => (
+            <div key={n} className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5">
+              <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-sky-800">{numberOf(n)}. {n}</span>
+              <button
+                type="button"
+                onClick={() => toggle(n)}
+                className="shrink-0 text-sky-400 transition hover:text-rose-600"
+                aria-label={`Remove ${n}`}
+                data-testid={`${testPrefix}-remove-${n}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-1.5 text-[11px] text-slate-400">Tick every treatment given in this session. Optional.</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What a finished day was treated with, read back.
+ *
+ * Renders nothing at all when there is nothing to show, rather than a heading over an
+ * empty row: a day completed before this field existed, and a day the physio chose not to
+ * tag, are both real days and neither should read as a record with a hole in it.
+ */
+function PhysioTreatmentChips({ names, testid }) {
+  const list = (names || []).filter(Boolean);
+  if (list.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1" data-testid={testid}>
+      {list.map((n) => (
+        <span key={n} className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+          <Activity className="h-2.5 w-2.5" /> {n}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // Doubles as a read-only "view summary" for an already-completed session — any
 // session, in any stage, can be opened here; only an upcoming one gets an editable
 // textarea and a submit button.
 function CompleteSessionModal({ session, onClose, onDone }) {
   const [remarks, setRemarks] = useState(session.jr_physio_remarks || "");
   const [rehabRemarks, setRehabRemarks] = useState(session.rehab_remarks || "");
+  // What was given on the day, off Super Admin's catalogue. A day already signed off
+  // opens holding what it was tagged with, so this doubles as the read-back.
+  const [treatments, setTreatments] = useState(session.physio_treatments || []);
+  // Services and Products > Physiotherapy Treatment. Fetched per open rather than held on
+  // the board: this popup is opened once a session, and a treatment added by Super Admin
+  // mid-shift should be on the list the next time a physio signs a day off, not after a
+  // reload of the whole board.
+  const [physioTypes, setPhysioTypes] = useState([]);
   // A rehab day is written up as rehab and nothing else. The two boxes exist because a
   // treatment day can carry a note about the rehab plan worked alongside it — that is a
   // treatment session with rehab in it. A rehab day has no treatment half to write about,
@@ -2727,6 +2950,16 @@ function CompleteSessionModal({ session, onClose, onDone }) {
   const [remarkTab, setRemarkTab] = useState(session.track === "rehab" ? "rehab" : "treatment");
   const [submitting, setSubmitting] = useState(false);
   const isDone = session.status === "completed";
+
+  // Silent on failure, and only for a day still to be signed off: the tick-list is not
+  // what this popup is for, and a toast about a picklist over a physio trying to write up
+  // a session is noise. A finished day reads its tags off the session itself and needs no
+  // catalogue at all.
+  useEffect(() => {
+    if (isDone) return;
+    getPhysioTypes().then(setPhysioTypes).catch(() => setPhysioTypes([]));
+  }, [isDone]);
+
   // Either one on its own is a report on a treatment day — a day of hands-on work with
   // nothing to add about the rehab plan is a real day, and so is the reverse. On a rehab
   // day only the rehab note counts, because it is the only one being asked for.
@@ -2736,7 +2969,11 @@ function CompleteSessionModal({ session, onClose, onDone }) {
     if (!hasReport) { toast.error(isRehab ? "Add Rehab Remarks" : "Add Treatment Remarks or Rehab Remarks"); return; }
     setSubmitting(true);
     try {
-      await physioCompleteSession(session.id, { remarks, rehab_remarks: rehabRemarks });
+      await physioCompleteSession(session.id, {
+        remarks,
+        rehab_remarks: rehabRemarks,
+        physio_treatments: treatments,
+      });
       toast.success("Session completed");
       onDone();
     } catch (err) {
@@ -2747,7 +2984,7 @@ function CompleteSessionModal({ session, onClose, onDone }) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="complete-session-modal">
+      <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white shadow-2xl" data-testid="complete-session-modal">
         <div className="border-b p-5">
           {/* A rehab day is named as one here too, so the heading matches the row that was
               clicked and the only field underneath it. */}
@@ -2758,12 +2995,23 @@ function CompleteSessionModal({ session, onClose, onDone }) {
           </h3>
           <p className="text-[10px] text-slate-400">{session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}</p>
         </div>
-        <div className="space-y-4 p-5">
+        {/* Scrolls, and the header and footer do not. The tick-list expands inside this
+            popup, so on a phone the Mark Complete button used to walk off the bottom of
+            the screen the moment the list was opened. */}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
           {isDone ? (
             // A finished day reads back as what was written, with nothing standing in for
             // the half that was not -- an empty box under a heading says a note is missing
             // when the physio simply had none to make.
             <>
+              {/* Above the notes, the same way the editor puts it above them: what was
+                  done is read before what was written about it. */}
+              {(session.physio_treatments || []).length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-600">Physio Treatment</p>
+                  <PhysioTreatmentChips names={session.physio_treatments} testid="session-summary-physio-treatments" />
+                </div>
+              )}
               {remarks.trim() && (
                 <div>
                   <p className="mb-1 text-xs font-medium text-slate-600">Treatment Remarks</p>
@@ -2782,6 +3030,21 @@ function CompleteSessionModal({ session, onClose, onDone }) {
             </>
           ) : (
             <>
+              {/* First, above the notes: what was done comes before what is written about
+                  it, and a tick-list is quicker to answer than a paragraph. Not required
+                  -- see the picker's own note -- so nothing here gates the button. */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Physio Treatment <span className="font-normal text-slate-400">(from Services and Products)</span>
+                </label>
+                <PhysioTreatmentPicker
+                  options={physioTypes}
+                  value={treatments}
+                  onChange={setTreatments}
+                  testPrefix="session-physio-treatment"
+                />
+              </div>
+
               {/* One note at a time. Both textareas stacked made the popup a scroll on a
                   phone, and a physio writing up a day is only ever in one of them. Neither
                   is unmounted -- what has been typed into the other is state, not markup,
@@ -2847,7 +3110,7 @@ function CompleteSessionModal({ session, onClose, onDone }) {
             </>
           )}
         </div>
-        <div className="flex justify-end gap-2 border-t p-4">
+        <div className="flex shrink-0 justify-end gap-2 border-t p-4">
           <Button variant="outline" size="sm" onClick={onClose}>{isDone ? "Close" : "Cancel"}</Button>
           {!isDone && (
             <Button size="sm" onClick={handleSubmit} disabled={submitting || !hasReport} className="bg-sky-600 hover:bg-sky-700 text-white" data-testid="session-complete-submit">

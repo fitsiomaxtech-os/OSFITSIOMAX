@@ -141,6 +141,8 @@ async def assign_rehab(
         "slot_time": slot_time,
         "status": "upcoming",
         "physio_remarks": "",
+        # Filled in when the physio signs the day off, from the Super Admin catalogue.
+        "physio_treatments": [],
         "created_at": now,
         "updated_at": now,
     } for i, slot_time in enumerate(slots)]
