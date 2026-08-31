@@ -27,6 +27,13 @@ router = APIRouter(prefix="/api/v3/marketing")
 
 STANDARD_FIELDS = ["name", "phone", "email", "vertical", "condition", "age", "preferred_branch", "budget", "notes"]
 
+# Header spellings a sheet column is recognised by, keyed by the field it is written to.
+# The keys are lead_mapping's keys, so whatever is matched here reaches the field the
+# Create Lead form shows -- see split_mapping.
+#
+# Order matters: auto_map_columns walks this top to bottom and the first field to claim a
+# header keeps it, so a spelling two fields could both want belongs to the one listed
+# first. That is why City sits above Preferred Branch rather than beside it.
 FIELD_ALIASES = {
     "name": ["name", "lead name", "full name", "fullname", "customer name", "patient name"],
     "phone": ["phone", "phone number", "mobile", "mobile number", "contact", "contact number", "whatsapp"],
@@ -34,12 +41,37 @@ FIELD_ALIASES = {
     "vertical": ["vertical", "service", "service type", "category", "product"],
     "condition": ["condition", "issue", "ailment", "problem", "concern"],
     "age": ["age", "patient age"],
-    "preferred_branch": ["branch", "preferred branch", "city", "location"],
+    # A City column is the patient's own city and belongs on the lead's City field, which
+    # is what the Create Lead form, the patient popup and Branch Leads' City column all
+    # read. It used to be claimed by Preferred Branch below -- a legacy extra field -- so
+    # every sheet with a City column filed "Coimbatore" or "salem" under a branch name
+    # nobody had a branch by, and the lead's own City stayed empty. A sheet that really
+    # does ask which branch somebody wants says so: "branch" and "preferred branch" are
+    # still Preferred Branch's, and they are the honest spellings for that question.
+    "city": ["city", "town", "city/town", "town/city", "city / town"],
+    "preferred_branch": ["branch", "preferred branch", "location"],
     "budget": ["budget", "amount", "price range"],
     "notes": ["notes", "remarks", "comments", "message"],
 }
 
 SOURCE_TYPES = ["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"]
+
+
+def squash_header(value: str) -> str:
+    """A sheet header down to its letters and digits, for comparing spellings.
+
+    "City / Town", "city_town" and "CityTown" are one column asked three ways, and a sheet
+    is headed by whoever built the form.
+    """
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+# The squashed spellings that mean the patient's own city. Used only to recognise a
+# mapping saved against the old alias table (see normalize_source) -- new sheets are
+# matched by FIELD_ALIASES above, which is the list that has to stay in step with the
+# mapping dialog.
+CITY_HEADERS = {squash_header(a) for a in FIELD_ALIASES["city"]}
+
 
 def normalize_phone(value: str) -> str:
     digits = re.sub(r"\D", "", value or "")
@@ -519,6 +551,24 @@ def normalize_source(doc: Dict[str, Any]) -> Dict[str, Any]:
         doc["sheet_names"] = [legacy_tab] if legacy_tab else ["Sheet1"]
     doc.setdefault("verticals", [])
     doc.setdefault("is_archived", False)
+
+    # A mapping saved while "city" was one of Preferred Branch's aliases still points the
+    # sheet's City column there, and a stored mapping is reused ahead of auto_map_columns
+    # -- so fixing the alias table alone would leave every source already configured
+    # filing cities under a branch name nobody has a branch by, until somebody happened to
+    # reopen the mapping dialog and save it again.
+    #
+    # Re-pointed on read, like the branch_ids backfill above, so the dropdown shows the
+    # mapping the importer is actually going to use. Only where the header itself says
+    # city: a sheet that asks "preferred branch" and means it keeps its mapping, and a
+    # source that has been re-mapped onto City properly is left alone.
+    mapping = doc.get("column_mapping")
+    if isinstance(mapping, dict) and not mapping.get("city"):
+        column = mapping.get("preferred_branch")
+        if column and squash_header(column) in CITY_HEADERS:
+            mapping = dict(mapping)
+            mapping["city"] = mapping.pop("preferred_branch")
+            doc["column_mapping"] = mapping
     return doc
 
 
@@ -621,6 +671,9 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
     source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
+    # Normalized here for the same reason the sheet pull does it: both buttons on a source
+    # card have to read the source the same way, and the City re-point lives in there.
+    source = normalize_source(source)
     mapping = dict(source.get("column_mapping", {}) or {})
     # If mapping is missing entries, auto-map from the FIRST row's keys
     if payload.rows and not all(k in mapping for k in ("name", "phone")):
