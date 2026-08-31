@@ -123,10 +123,14 @@ const BRANCH_PORTFOLIO_STAGE = "Portfolio";
 const squashKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const formAnswer = (lead, questionKey, fallback, formatFallback) => {
-  const wanted = squashKey(questionKey);
+  // A list, because one field is not always one header. The intake questions each have a
+  // single exact spelling and pass a string; a plain field like City is written whichever
+  // way the sheet that carries it felt like writing it, and passes every spelling worth
+  // recognising. Same walk either way.
+  const wanted = new Set((Array.isArray(questionKey) ? questionKey : [questionKey]).map(squashKey));
   const extras = lead?.extra_fields || {};
   for (const [key, value] of Object.entries(extras)) {
-    if (squashKey(key) === wanted && value !== null && value !== undefined && String(value).trim() !== "") {
+    if (wanted.has(squashKey(key)) && value !== null && value !== undefined && String(value).trim() !== "") {
       return String(value).trim();
     }
   }
@@ -157,6 +161,30 @@ const INTAKE_QUESTIONS = [
   { key: "pain_duration", label: "Pain Duration", question: "how_long_have_you_had_this_pain?", fallback: "months_of_pain", formatFallback: (n) => `${n} month${Number(n) === 1 ? "" : "s"}` },
   { key: "consultation_type", label: "Consultation Type", question: "preferred_consultation_type?", fallback: null, formatFallback: null },
 ];
+
+/**
+ * Where the patient is, read however their sheet happened to carry it.
+ *
+ * City is a mappable lead column (LEAD_COLUMN_FIELDS in backend/lead_mapping.py), so a
+ * source whose City column is mapped writes it straight onto the lead and `fallback`
+ * finds it there. But a sheet nobody has mapped that column on still brings the answer
+ * across: the importer keeps every unmapped column as extra detail, keyed by whatever the
+ * header said (see v3_google_sheets.py — "An unmapped column is still worth keeping").
+ * Those leads carry their city in extra_fields under "City", "city", "Town" and the rest.
+ *
+ * Reading both is what lets one column show the city for every branch's leads instead of
+ * only for the sources somebody has been through the mapping dialog for. It does not
+ * replace mapping the column — a mapped source still writes the real field, which is what
+ * the Create Lead form and every other board read — it stops an unmapped one showing a
+ * dash where the sheet plainly has an answer.
+ *
+ * The spellings are listed rather than matched loosely on purpose. "city" as a substring
+ * matches "capacity", and a column that quietly fills with somebody's slot capacity is
+ * worse than one that occasionally reads "—".
+ */
+const CITY_KEYS = ["city", "town", "city/town", "town/city", "city_town", "hometown", "native"];
+
+const cityAnswer = (lead) => formAnswer(lead, CITY_KEYS, "city", null);
 
 /** "offline_physio" -> "Offline Physio", and whatever it already said where the dropdown
  *  has no label for it: department is not a controlled field on an imported lead. */
@@ -1657,7 +1685,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                           </span>
                         </div>
                         {lead.patient_number && <p className="truncate font-mono text-[10px] text-slate-400">{lead.patient_number}</p>}
-                        <p className="mt-1 truncate text-xs text-slate-600">{lead.phone || "—"}</p>
+                        <p className="mt-1 truncate text-xs text-slate-600">
+                          {lead.phone || "—"}
+                          {/* Beside the phone, not under it. The card already runs five
+                              rows deep and a city is two words — its own line would push
+                              the appointment, which is what this card is opened for, off
+                              the bottom of a phone's first screenful. */}
+                          {(() => {
+                            const city = cityAnswer(lead);
+                            return city ? <span className="text-slate-400"> · {city}</span> : null;
+                          })()}
+                        </p>
                         {lead.email && <p className="truncate text-xs text-slate-500">{lead.email}</p>}
                         {(() => {
                           const slot = apptSlotLabel(lead);
@@ -1737,37 +1775,40 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               instead of guessing the page header's pixel height, which was colliding with
               the stat cards row as it scrolled past. */}
           <div className="hidden w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white md:block" data-testid="branch-list">
-            <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200 text-sm">
+            <table className="w-full min-w-[760px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
                   {/* A lead at either entry stage hasn't had a physio assigned yet, so that
                       column is dropped there — every other view keeps it.
 
-                      The three between Phone and the pipeline columns are the intake form's
-                      own questions, which is what the branch is actually reading this list
-                      to find out. Widths total 100 either way: table-fixed divides by the
-                      stated widths, and a set that overshoots quietly squeezes the last
-                      column instead. */}
+                      City sits with Phone rather than among the three that follow it:
+                      where the patient is is part of who they are, and the three after it
+                      are the intake form's own questions, which is what the branch is
+                      actually reading this list to find out. Widths total 100 either way:
+                      table-fixed divides by the stated widths, and a set that overshoots
+                      quietly squeezes the last column instead. */}
                   {entryStageNames.includes(stageFilter) ? (
-                    <>
-                      <th className="w-[20%] px-4 py-3">Patient</th>
-                      <th className="w-[12%] px-4 py-3">Phone</th>
-                      <th className="w-[14%] px-4 py-3">Pain Type</th>
-                      <th className="w-[14%] px-4 py-3">Pain Duration</th>
-                      <th className="w-[14%] px-4 py-3">Consultation Type</th>
-                      <th className="w-[13%] px-4 py-3">Appointment</th>
-                      <th className="w-[13%] px-4 py-3">Stage</th>
-                    </>
-                  ) : (
                     <>
                       <th className="w-[18%] px-4 py-3">Patient</th>
                       <th className="w-[11%] px-4 py-3">Phone</th>
+                      <th className="w-[10%] px-4 py-3">City</th>
                       <th className="w-[13%] px-4 py-3">Pain Type</th>
                       <th className="w-[12%] px-4 py-3">Pain Duration</th>
                       <th className="w-[13%] px-4 py-3">Consultation Type</th>
-                      <th className="w-[12%] px-4 py-3">Assigned Physio</th>
-                      <th className="w-[11%] px-4 py-3">Appointment</th>
-                      <th className="w-[10%] px-4 py-3">Stage</th>
+                      <th className="w-[12%] px-4 py-3">Appointment</th>
+                      <th className="w-[11%] px-4 py-3">Stage</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="w-[17%] px-4 py-3">Patient</th>
+                      <th className="w-[10%] px-4 py-3">Phone</th>
+                      <th className="w-[9%] px-4 py-3">City</th>
+                      <th className="w-[12%] px-4 py-3">Pain Type</th>
+                      <th className="w-[11%] px-4 py-3">Pain Duration</th>
+                      <th className="w-[12%] px-4 py-3">Consultation Type</th>
+                      <th className="w-[11%] px-4 py-3">Assigned Physio</th>
+                      <th className="w-[10%] px-4 py-3">Appointment</th>
+                      <th className="w-[8%] px-4 py-3">Stage</th>
                     </>
                   )}
                 </tr>
@@ -1779,7 +1820,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                   if (visible.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={showAssignedPhysio ? 8 : 7} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        <td colSpan={showAssignedPhysio ? 9 : 8} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
                         </td>
                       </tr>
@@ -1861,6 +1902,16 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                           </div>
                         </td>
                         <td className="truncate px-4 py-3 text-slate-600" title={lead.phone}>{lead.phone || "—"}</td>
+                        {/* Read through cityAnswer, so a lead whose sheet mapped the column
+                            and one whose sheet did not both show the same thing here. */}
+                        {(() => {
+                          const city = cityAnswer(lead);
+                          return (
+                            <td className="truncate px-4 py-3 text-slate-600" title={city || undefined} data-testid={`branch-row-city-${lead.id}`}>
+                              {city || <span className="text-slate-400">—</span>}
+                            </td>
+                          );
+                        })()}
                         {/* The intake form's three questions. Each falls back to the lead's
                             own field where it has one — see formAnswer. Read from the same
                             INTAKE_QUESTIONS the toolbar filters are built from, so a column
@@ -2445,7 +2496,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     ["Expected Consultation", hasValue(lead.expected_consultation_date) ? weekdayLabel(lead.expected_consultation_date) : ""],
     ["Location", lead.location],
     ["Address", lead.address],
-    ["City", lead.city],
+    // cityAnswer, not lead.city: the list column reads both the mapped field and the
+    // unmapped sheet header, and a city shown in the list that disappeared on opening the
+    // patient would read as the popup being wrong about them.
+    ["City", cityAnswer(lead)],
     ["State", lead.state],
     ["Assigned To", lead.assigned_user_name],
     // Last, and the one row every lead has: created_at is required on the record, so the
@@ -2479,9 +2533,20 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // are matched loosely because a sheet header is written by a person: "Ad Name", "ad-id"
   // and "ad_id" are one field, whatever the column said. Anything that is not a Meta field
   // stays where it is — a question is a question.
+  //
+  // City is held out of the list for a narrower reason. The rows above name it already —
+  // and now name it whether it was mapped or not, since that is what the list column
+  // reads — so leaving the extra_fields copy here prints one answer twice under one word,
+  // a few lines apart. That is not two stored answers worth reading, it is the same
+  // answer said twice.
+  //
+  // Only the copy the City row is actually showing is withheld: the keys here are the
+  // ones cityAnswer reads, so nothing is dropped that the popup does not print elsewhere.
+  const cityKeys = new Set(CITY_KEYS.map(squashKey));
   const strayAdAnswers = new Map();
   const formAnswers = [];
   rawFormAnswers.forEach(([key, value]) => {
+    if (cityKeys.has(squashKey(key))) return;
     const field = AD_FIELD_BY_KEY.get(normaliseAdKey(key));
     if (!field) formAnswers.push([key, value]);
     else if (!strayAdAnswers.has(field.key)) strayAdAnswers.set(field.key, value);
