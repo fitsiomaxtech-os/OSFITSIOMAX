@@ -70,6 +70,21 @@ const PART_SESSION_MODES = ["cash", "upi", "card", "cheque", "account_transfer"]
 // is money settled at the desk today, so Cheque (which clears when it clears) and
 // Partial Payment (a plan, not a payment) are not pieces of one.
 const TREATMENT_SPLIT_MODES = TREATMENT_FEE_PAYMENT_MODES.filter((m) => SETTLED_NOW_MODES.includes(m.value));
+// The per-tender half of the Treatment Fee's Collect popup: the fields that belong to
+// the one payment being entered, and nothing that belongs to the collection as a whole.
+//
+// A collection can now be made of several tenders (Rs.5000 cash, then Rs.2000 UPI), and
+// each of them starts from these. Cleared between tenders on purpose -- a UPI
+// transaction id left over from the last one would be filed against this one.
+const BLANK_TREATMENT_TENDER = {
+  upi_transaction_id: "",
+  account_number: "",
+  account_holder_name: "",
+  bank_name: "",
+  ifsc_code: "",
+  transfer_reference: "",
+  cash_notes: {},
+};
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
 
@@ -1495,6 +1510,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // on the Treatment Fee. Cheque and Partial Payment keep their existing single-popup
   // flow (locked amount, no manual override, no confirm step).
   const [treatmentConfirmDraft, setTreatmentConfirmDraft] = useState(null);
+  // The "Balance Amount" fork. Raised when the desk presses Collect with less money on
+  // the popup than the sessions being bought cost -- Rs.5000 cash against a Rs.10000
+  // fee -- because that gap is two completely different facts and only the person at
+  // the desk knows which one it is:
+  //
+  //   - the rest of the money is here, in another form (the patient is paying the
+  //     remaining Rs.5000 by UPI), which is one collection made of several tenders; or
+  //   - the rest of the money is not here at all, and the patient is coming back with
+  //     it, which is a balance with a due date on it.
+  //
+  // Guessing between them is how a part payment gets banked as a completed one, or a
+  // second tender gets written off as a debt. So it is asked, once, with both figures
+  // on screen. { collected, balance } | null.
+  const [treatmentBalanceChoice, setTreatmentBalanceChoice] = useState(null);
 
   // Partial Payment schedule's own per-row Collect popup — collecting one specific
   // installment is a real payment in its own right (amount, mode, UTR/cheque number),
@@ -2020,6 +2049,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
+    setTreatmentConfirmDraft(null);
+    setTreatmentBalanceChoice(null);
     setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
     setDecisionReceipt(null);
     setEditingDecision(false);
@@ -2368,7 +2399,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // hasPendingInstallments is true.
   const openPartialScheduleDraft = () => {
     openTreatmentFeeDraft();
-    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", payment_lines: null, cash_notes: {} });
+    setTreatmentConfirmDraft({ ...BLANK_TREATMENT_TENDER, tenders: [], balance_partial: false, picking_mode: false });
   };
 
   // Partial Payment is split by session count, not a raw amount — each installment's
@@ -2469,17 +2500,46 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // What these sessions actually cost once that discount is off it. The amount being
   // collected is measured against this, never against the undiscounted price.
   const treatmentNetPayable = round2(treatmentComputedAmount - treatmentDiscount);
+  // The tenders already accepted on this collection: Rs.5000 in cash, then Rs.2000 by
+  // UPI, each committed as it was taken. Empty for the ordinary collection that arrives
+  // in one piece, which is still most of them.
+  //
+  // They are money the desk has said it has, not money that is banked -- nothing is
+  // sent until the popup is submitted -- so a tender can still be taken back off the
+  // list if it was entered against the wrong patient or in the wrong mode.
+  const treatmentTenders = treatmentConfirmDraft?.tenders || [];
+  const treatmentTendersTotal = round2(treatmentTenders.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0));
   // Cheque never edits its amount -- it pays for the sessions covered, at the locked
   // price -- so read it from the same figure the popup displays rather than from a
   // draft another mode may have left short.
-  const treatmentAmountNow = treatmentFeeDraft?.payment_mode === "cheque"
+  const treatmentTenderAmount = treatmentFeeDraft?.payment_mode === "cheque"
     ? treatmentComputedAmount
     : (parseFloat(treatmentFeeDraft?.amount) || 0);
+  // Every rupee this collection is taking, across every tender -- the figure the receipt
+  // prints and the server is sent. The amount box holds only the tender being typed
+  // right now, so on its own it understates a collection paid in two or three pieces.
+  const treatmentAmountNow = treatmentConfirmDraft?.picking_mode
+    // Between tenders there is no tender being typed, and the stale amount left in the
+    // box is the previous one -- counting it again would double it.
+    ? treatmentTendersTotal
+    : round2(treatmentTendersTotal + treatmentTenderAmount);
+  // What is left of the bill for the sessions being bought today, once every tender on
+  // the popup is counted. This is the gap the Balance Amount fork asks about: it is the
+  // money that has not been tendered, and it is the whole of what the patient could
+  // still hand over right now.
+  const treatmentOutstanding = round2(treatmentNetPayable - treatmentAmountNow);
   // Everything still owed once this money is in: the whole package, less the discount
   // that was agreed, less what is being handed over now. Short by sessions, short by
   // amount, or both -- it is one balance either way, and it is never a discount.
   const treatmentBalanceDue = round2(treatmentFeeTotal - treatmentDiscount - treatmentAmountNow);
   const treatmentHasBalance = treatmentFeeDraft?.payment_mode !== "partial" && treatmentBalanceDue > 0.009;
+  // Whether the balance is settled enough to ask for its due date. A shortfall the desk
+  // has not answered for yet is not a balance -- it is a question -- and putting a date
+  // field under it invites an answer to a question that was never asked. Two ways it
+  // becomes a real balance: the desk chose to leave it as one at the fork, or there is
+  // no fork to reach because every rupee of today's bill is tendered and what remains
+  // is simply the sessions this collection did not buy.
+  const treatmentBalanceSettled = !!treatmentConfirmDraft?.balance_partial || treatmentOutstanding <= 0.009;
 
   // Changing "Sessions Covered Now" re-computes the Treatment Fee amount to match, less
   // whatever discount has been agreed on those sessions. Still hand-editable afterward
@@ -2658,12 +2718,74 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // "Collect" step there, rather than sharing one form with a mode selector.
   const chooseTreatmentPaymentMode = (mode) => {
     setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: mode });
-    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null, cash_notes: {} });
+    setTreatmentConfirmDraft({ ...BLANK_TREATMENT_TENDER, tenders: [], balance_partial: false, picking_mode: false });
+  };
+
+  // What identifies the tender currently on the popup, per mode -- the one string a
+  // payment line can carry (see V3PaymentLineInput on the server, which takes one
+  // reference rather than a bank block per line). Cash identifies itself by the notes
+  // that were counted, which travel separately, so it quotes nothing.
+  const treatmentTenderReference = (mode, draft) => {
+    if (mode === "upi") return (draft.upi_transaction_id || "").trim();
+    if (mode === "account_transfer") return (draft.transfer_reference || "").trim();
+    if (mode === "card") return (draft.account_number || "").trim();
+    return "";
+  };
+
+  /**
+   * The tender as it stands on the popup right now, or null (after a toast) if it is
+   * not yet fit to accept.
+   *
+   * Checked against exactly what the single-payment Collect button already checks, so
+   * taking a payment as one of several is held to the same standard as taking it alone
+   * -- no more, so the desk is not asked for new fields halfway through a collection,
+   * and no less, so a second tender cannot slip past a count the first would have had
+   * to finish.
+   */
+  const buildTreatmentTender = () => {
+    const mode = treatmentFeeDraft.payment_mode;
+    const amount = round2(parseFloat(treatmentFeeDraft.amount) || 0);
+    if (!(amount > 0)) {
+      toast.error("Enter the amount being paid");
+      return null;
+    }
+    if (mode === "cash" && !notesSettled(treatmentConfirmDraft.cash_notes, amount)) {
+      toast.error("The cash counted does not match the amount being taken");
+      return null;
+    }
+    if (BANK_DETAIL_MODES.includes(mode)
+      && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim()
+        || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) {
+      toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
+      return null;
+    }
+    if (mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim()) {
+      toast.error("Reference / UTR No. is required");
+      return null;
+    }
+    return {
+      mode,
+      amount,
+      reference: treatmentTenderReference(mode, treatmentConfirmDraft),
+      notes: mode === "cash" ? treatmentConfirmDraft.cash_notes : {},
+      // The whole form as it was filled in, kept with the tender rather than thrown away
+      // when the popup is reset for the next one. A collection that turns out to have
+      // only one tender after all -- the desk accepted a Rs.5000 cash payment, went to
+      // pick a second method, then decided the rest is coming later -- goes in as that
+      // single payment, and a single payment records its full bank block and its cash
+      // count. Reading those off a popup that has since been cleared would file the
+      // payment with neither.
+      detail: Object.fromEntries(Object.keys(BLANK_TREATMENT_TENDER).map((k) => [k, treatmentConfirmDraft[k]])),
+    };
   };
 
   // The dedicated popup's own submit button — dispatches to whichever path
   // already handles that mode (Cheque/Partial build their own payload directly;
   // Cash/UPI/Card go through the shared confirm-and-collect path).
+  //
+  // With one stop in front of it: a settle-now collection that is short of what today's
+  // sessions cost does not go anywhere until the desk has said which kind of short it
+  // is. See treatmentBalanceChoice.
   const submitTreatmentModePopup = () => {
     const mode = treatmentFeeDraft.payment_mode;
     if (mode === "cheque" || mode === "partial") {
@@ -2672,34 +2794,121 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       submitTreatmentFee(payload);
       return;
     }
+    if (!treatmentConfirmDraft.picking_mode && treatmentOutstanding > 0.009 && !treatmentConfirmDraft.balance_partial) {
+      // Held to the same checks the Collect button applies, before the fork rather than
+      // after it: a tender that cannot be accepted is not a tender the desk should be
+      // choosing what to do about the rest of.
+      const tender = buildTreatmentTender();
+      if (!tender) return;
+      setTreatmentBalanceChoice({ collected: treatmentAmountNow, balance: treatmentOutstanding });
+      return;
+    }
     confirmCollectTreatmentFee();
+  };
+
+  // "Collect by another payment method" at the fork. The tender on screen is accepted
+  // onto the list and the popup goes back to the mode buttons for the next one, with
+  // the balance already worked out and the running total in view.
+  const addTreatmentTenderAndPickNext = () => {
+    const tender = buildTreatmentTender();
+    if (!tender) return;
+    setTreatmentConfirmDraft({
+      ...BLANK_TREATMENT_TENDER,
+      tenders: [...treatmentTenders, tender],
+      balance_partial: false,
+      // What the next tender is paid by is the patient's to say, so nothing is
+      // preselected — the mode buttons come back and the desk picks from them.
+      picking_mode: true,
+    });
+    setTreatmentBalanceChoice(null);
+  };
+
+  // "Leave the balance as a Partial Payment" at the fork. Nothing more is being taken
+  // today, so the shortfall becomes a real balance and BalanceDueBlock appears to date
+  // it. The money already on the popup stays exactly where it is.
+  const leaveTreatmentBalanceAsPartial = () => {
+    setTreatmentConfirmDraft({ ...treatmentConfirmDraft, balance_partial: true });
+    setTreatmentBalanceChoice(null);
+  };
+
+  // Choosing the next tender's mode, back on the mode buttons. Its amount starts at the
+  // whole of what is left, because settling the balance in one go is what usually
+  // happens — typing it down to Rs.2000 raises the fork again for the Rs.3000 that
+  // leaves, which is the loop the desk is already in.
+  const pickNextTreatmentTenderMode = (mode) => {
+    setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: mode, amount: String(treatmentOutstanding) });
+    setTreatmentConfirmDraft({ ...treatmentConfirmDraft, ...BLANK_TREATMENT_TENDER, picking_mode: false });
+  };
+
+  // Taking an accepted tender back off the list — the wrong mode, the wrong patient, or
+  // the patient changing their mind at the desk. Safe because nothing has been sent:
+  // every tender here is still only on the popup until it is submitted.
+  const removeTreatmentTender = (idx) => {
+    const next = treatmentTenders.filter((_, n) => n !== idx);
+    // Nothing accepted and nothing on the popup is not a state the form can be in, so
+    // taking the last tender back off starts the collection over: the whole fee in the
+    // amount box, the mode buttons behind it, exactly as it opened.
+    if (!next.length && treatmentConfirmDraft.picking_mode) {
+      setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: String(treatmentNetPayable) });
+      setTreatmentConfirmDraft({ ...BLANK_TREATMENT_TENDER, tenders: [], balance_partial: false, picking_mode: false });
+      return;
+    }
+    setTreatmentConfirmDraft({
+      ...treatmentConfirmDraft,
+      tenders: next,
+      // The balance it left is no longer the balance that was agreed to, so the fork is
+      // asked again rather than answered with a stale yes.
+      balance_partial: false,
+    });
   };
 
   // Confirm button inside the second "Confirm Payment" popup — validates
   // UPI/Card's own fields (Cash just needed the mismatch acknowledged).
   function confirmCollectTreatmentFee() {
-    const amount = parseFloat(treatmentFeeDraft.amount);
-    const mode = treatmentFeeDraft.payment_mode;
-    const payload = { payment_mode: mode, amount, confirmed: true };
-    // A split carries its own modes, so none of the single-mode detail blocks below
-    // apply to it. amount still rides along: the server sums the parts and refuses them
-    // when they disagree with the fee this popup was collecting.
-    if (treatmentConfirmDraft.payment_lines) {
-      payload.payment_lines = treatmentConfirmDraft.payment_lines.map((l) => ({
-        mode: l.mode,
-        amount: parseFloat(l.amount),
-        reference: (l.reference || "").trim(),
+    // Everything being taken, in the order it was taken: the tenders already accepted,
+    // plus whatever is on the popup now. Between tenders (picking_mode) there is
+    // nothing on the popup, so the list is the accepted ones alone.
+    const current = treatmentConfirmDraft.picking_mode ? null : buildTreatmentTender();
+    if (!treatmentConfirmDraft.picking_mode && !current) return;
+    const tenders = current ? [...treatmentTenders, current] : treatmentTenders;
+    if (!tenders.length) {
+      toast.error("Enter the amount being paid");
+      return;
+    }
+    const amount = round2(tenders.reduce((sum, t) => sum + t.amount, 0));
+    // One tender is a single payment, not a split of one, and goes in under its own mode
+    // with its own full bank block. Only a collection that actually arrived in pieces
+    // becomes payment_lines, because that is the only shape that can say so.
+    const isSplit = tenders.length > 1;
+    const only = isSplit ? null : tenders[0];
+    // The headline mode of a split is the mode it started in -- the first money through
+    // the door. The parts carry the truth; this is what the row reads as at a glance.
+    const payload = { payment_mode: isSplit ? tenders[0].mode : only.mode, amount, confirmed: true };
+    if (isSplit) {
+      // A split carries its own modes, so none of the single-mode detail blocks below
+      // apply to it. amount still rides along: the server sums the parts and refuses them
+      // when they disagree with the fee this popup was collecting.
+      payload.payment_lines = tenders.map((t) => ({
+        mode: t.mode,
+        amount: t.amount,
+        reference: t.reference || "",
         // Only for cash, and only what was actually counted -- left off entirely when
         // the desk skipped it, so "did not count" stays distinguishable from "counted,
         // and it came to nothing".
-        denominations: l.mode === "cash" ? countedNotes(l.notes) : undefined,
+        denominations: t.mode === "cash" ? countedNotes(t.notes) : undefined,
       }));
-    } else if (mode === "cash") {
-      payload.denominations = countedNotes(treatmentConfirmDraft.cash_notes);
-    } else if (mode === "upi") {
-      payload.upi_transaction_id = treatmentConfirmDraft.upi_transaction_id.trim();
-    } else if (BANK_DETAIL_MODES.includes(mode)) {
-      if (!attachBankDetails(payload, treatmentConfirmDraft, mode)) return;
+    } else {
+      // Off the tender's own kept copy of the form -- see buildTreatmentTender. It is
+      // the same object the popup is showing when the tender is still on it, and the
+      // only surviving copy when it is not.
+      const detail = only.detail;
+      if (only.mode === "cash") {
+        payload.denominations = countedNotes(detail.cash_notes);
+      } else if (only.mode === "upi") {
+        payload.upi_transaction_id = (detail.upi_transaction_id || "").trim();
+      } else if (BANK_DETAIL_MODES.includes(only.mode)) {
+        if (!attachBankDetails(payload, detail, only.mode)) return;
+      }
     }
     const splitPayload = attachSessionsSplit(payload);
     if (!splitPayload) return;
@@ -2730,6 +2939,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     toast.success(selectedLead.treatment_fee_paid != null ? "Treatment Fee payment updated" : "Treatment Fee collected");
     setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     setTreatmentConfirmDraft(null);
+    setTreatmentBalanceChoice(null);
 
     const totalSessions = selectedLead.session_package_sessions || 0;
     const savedInst = res.lead?.treatment_fee_payment_details?.installments || [];
@@ -6821,33 +7031,153 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 : selectedLead.session_package_price;
               const mode = treatmentFeeDraft.payment_mode;
               const modeLabel = TREATMENT_FEE_PAYMENT_MODES.find((m) => m.value === mode)?.label || "";
+              // Between tenders: the last payment is accepted, the next one has no mode
+              // yet, and the popup is showing the mode buttons rather than a form.
+              const picking = !!treatmentConfirmDraft.picking_mode;
+              // Second tender onward. The discount was agreed once, on the whole fee, and
+              // the boxes for it do not come back — what is being typed now is one more
+              // payment against a bill that is already settled.
+              const continuing = treatmentTenders.length > 0;
+              const outstandingLabel = Math.max(0, treatmentOutstanding).toLocaleString("en-IN");
+              // How many payments this collection is actually made of: the tenders already
+              // accepted, plus the one still on the popup if the desk is typing one.
+              const tenderCount = treatmentTenders.length + (picking ? 0 : 1);
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-treatment-fee-confirm-modal">
                   <div className="max-h-[85dvh] w-full max-w-xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:max-h-[90vh]">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">{mode === "partial" ? "Partial Payment Schedule" : treatmentConfirmDraft.payment_lines ? "Collect Split Payment" : `Collect ${modeLabel} Payment`}</p>
-                      <button onClick={() => setTreatmentConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-confirm-close"><X className="h-4 w-4" /></button>
+                      <p className="text-sm font-semibold text-slate-800">
+                        {mode === "partial"
+                          ? "Partial Payment Schedule"
+                          : picking
+                          ? "Choose a Payment Method for the Balance"
+                          : continuing
+                          ? `Collect Balance by ${modeLabel}`
+                          : `Collect ${modeLabel} Payment`}
+                      </p>
+                      <button onClick={() => { setTreatmentConfirmDraft(null); setTreatmentBalanceChoice(null); }} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
                     <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="cons-treatment-fee-confirm-package">
                       {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
                     </div>
 
-                    {mode !== "partial" && (
+                    {/* What has been taken so far, and what is left of today's bill.
+                        Shown from the second tender on, because up to then there is
+                        nothing to keep track of — one payment against one fee needs no
+                        running total. Every figure the desk has to say out loud to the
+                        patient ("that's Rs.10,000, you've given me Rs.5,000, so Rs.5,000
+                        left") is on it, in that order. */}
+                    {continuing && mode !== "partial" && (
+                      <div className="space-y-1.5 rounded-lg border border-indigo-200 bg-indigo-50/60 p-2.5" data-testid="cons-treatment-fee-tenders">
+                        <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+                          <span>Collection so far</span>
+                          <span>Total Rs.{treatmentNetPayable.toLocaleString("en-IN")}</span>
+                        </div>
+                        {treatmentTenders.map((t, i) => (
+                          <div key={i} className="flex items-center gap-2 rounded-md border border-indigo-100 bg-white px-2 py-1.5 text-xs" data-testid={`cons-treatment-fee-tender-${i}`}>
+                            <span
+                              className="h-2 w-2 shrink-0 rounded-full"
+                              style={{ backgroundColor: PAYMENT_MODE_COLORS[t.mode] || "#64748b" }}
+                            />
+                            <span className="font-semibold text-slate-700">{ALL_PAYMENT_MODE_LABELS[t.mode] || t.mode}</span>
+                            {t.reference && <span className="min-w-0 truncate text-[11px] text-slate-400">{t.reference}</span>}
+                            <span className="ml-auto font-semibold text-slate-800">Rs.{t.amount.toLocaleString("en-IN")}</span>
+                            {/* Nothing here has been sent yet, so a tender entered in the
+                                wrong mode is taken back off rather than corrected after
+                                the fact in Accountant Manage. */}
+                            <button
+                              type="button"
+                              onClick={() => removeTreatmentTender(i)}
+                              className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                              title="Remove this payment"
+                              data-testid={`cons-treatment-fee-tender-remove-${i}`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                        <div
+                          className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs font-semibold ${
+                            treatmentOutstanding > 0.009 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+                          }`}
+                          data-testid="cons-treatment-fee-tender-balance"
+                        >
+                          <span>{treatmentOutstanding > 0.009 ? "Balance to collect" : "Fully collected"}</span>
+                          <span>Rs.{outstandingLabel}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* The next tender's mode. The same buttons the first one was chosen
+                        from, minus Cheque and Partial Payment: a split is money settling
+                        at the desk today, and neither of those is (see
+                        TREATMENT_SPLIT_MODES). The way out of the loop without taking any
+                        more money is the link underneath. */}
+                    {picking && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Method for the Rs.{outstandingLabel} balance</label>
+                          <PaymentModeSelect
+                            value=""
+                            options={TREATMENT_SPLIT_MODES}
+                            onChange={pickNextTreatmentTenderMode}
+                            testId="cons-treatment-fee-next-mode"
+                          />
+                        </div>
+                        {/* Stays on this screen rather than dropping back into the last
+                            tender's form: that tender is already accepted, and putting
+                            its amount back in the box would count the same money twice.
+                            What changes is that the balance is now a real one, so the
+                            due date and the Collect button appear underneath. */}
+                        {!treatmentConfirmDraft.balance_partial && (
+                          <button
+                            type="button"
+                            onClick={() => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, balance_partial: true })}
+                            className="w-full rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-rose-400 hover:text-rose-700"
+                            data-testid="cons-treatment-fee-next-partial"
+                          >
+                            Nothing more today — leave Rs.{outstandingLabel} as a Partial Payment
+                          </button>
+                        )}
+                      </>
+                    )}
+
+                    {!picking && mode !== "partial" && (
                       <div>
                         {SETTLED_NOW_MODES.includes(mode) ? (
-                          // Discount is measured against what *these* sessions cost, not the
-                          // whole package — collecting for fewer sessions is not a discount.
-                          // Neither is collecting less than they cost: that is the balance
-                          // below, and only the Discount boxes reduce what is owed.
-                          <FeeAmountEntry
-                            assignedPrice={expectedForSessionsNow}
-                            discount={treatmentFeeDraft.discount}
-                            amount={treatmentFeeDraft.amount}
-                            onChange={(patch) => setTreatmentFeeDraft({ ...treatmentFeeDraft, ...patch })}
-                            label={`${modeLabel} Amount (₹)`}
-                            testPrefix="cons-treatment-fee"
-                          />
+                          continuing ? (
+                            // No discount boxes on a continuing tender — see `continuing`
+                            // above. What is left of the bill is the figure this payment is
+                            // measured against, and it is already on the strip.
+                            <>
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">{modeLabel} Amount (₹)</label>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={treatmentFeeDraft.amount}
+                                onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: e.target.value })}
+                                className="h-9"
+                                data-testid="cons-treatment-fee-amount"
+                              />
+                              <p className="mt-1 text-[11px] text-slate-400" data-testid="cons-treatment-fee-amount-hint">
+                                Rs.{Math.max(0, round2(treatmentNetPayable - treatmentTendersTotal)).toLocaleString("en-IN")} of this fee is still to be collected. Less than that leaves a balance again.
+                              </p>
+                            </>
+                          ) : (
+                            // Discount is measured against what *these* sessions cost, not the
+                            // whole package — collecting for fewer sessions is not a discount.
+                            // Neither is collecting less than they cost: that is the balance
+                            // below, and only the Discount boxes reduce what is owed.
+                            <FeeAmountEntry
+                              assignedPrice={expectedForSessionsNow}
+                              discount={treatmentFeeDraft.discount}
+                              amount={treatmentFeeDraft.amount}
+                              onChange={(patch) => setTreatmentFeeDraft({ ...treatmentFeeDraft, ...patch })}
+                              label={`${modeLabel} Amount (₹)`}
+                              testPrefix="cons-treatment-fee"
+                            />
+                          )
                         ) : (
                           // Cheque keeps the locked price — nothing to discount, so no
                           // calculator, but it still needs its own label.
@@ -6858,7 +7188,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             </div>
                           </>
                         )}
-                        {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
+                        {!continuing && selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
                           <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
                             {treatmentIsPartialSessions
                               ? `Collect Now = ${treatmentSessionsNow} of ${treatmentFeeTotalSessions} sessions × Rs.${Math.round(perSessionRate * 100) / 100}/session = Rs.${treatmentComputedAmount}`
@@ -6868,7 +7198,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
-                    {mode !== "partial" && treatmentFeeTotalSessions > 0 && (
+                    {/* How many of the package's sessions this collection is buying —
+                        settled once, on the first tender. A second tender is more money
+                        against the same sessions, not a second purchase, so the box does
+                        not come back to be re-answered. */}
+                    {!picking && !continuing && mode !== "partial" && treatmentFeeTotalSessions > 0 && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions Covered Now *</label>
                         <Input
@@ -6883,7 +7217,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
-                    {mode !== "partial" && (
+                    {/* Only once the shortfall has an answer — see treatmentBalanceSettled.
+                        A gap the desk has not been asked about yet is a question, not a
+                        debt, and a due-date field under it asks them to date something they
+                        may be about to collect in full a moment later. */}
+                    {mode !== "partial" && treatmentBalanceSettled && (
                       <BalanceDueBlock
                         balance={treatmentBalanceDue}
                         dueDate={treatmentFeeDraft.balance_due_date}
@@ -6906,7 +7244,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         counting. Cheque and Partial never reach this -- one clears at a
                         bank and the other is a schedule, and neither is notes on a desk
                         today. */}
-                    {mode === "cash" && !treatmentConfirmDraft.payment_lines && (
+                    {!picking && mode === "cash" && (
                       <CashDenominations
                         amount={treatmentFeeDraft.amount}
                         notes={treatmentConfirmDraft.cash_notes}
@@ -6915,59 +7253,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       />
                     )}
 
-                    {/* Started from what was already chosen: the mode this popup opened
-                        on becomes the first tender, carrying the whole amount, and the
-                        second opens empty for the rest. Nothing typed is thrown away by
-                        pressing it, and "Single payment" inside comes straight back. */}
-                    {SETTLED_NOW_MODES.includes(mode) && !treatmentConfirmDraft.payment_lines && (
-                      <button
-                        type="button"
-                        onClick={() => setTreatmentConfirmDraft({
-                          ...treatmentConfirmDraft,
-                          payment_lines: [
-                            // Notes already counted come across with the mode they were
-                            // counted in. Pressing this is not a reason to make somebody
-                            // count the same drawer twice.
-                            { mode, amount: treatmentFeeDraft.amount, reference: mode === "upi" ? treatmentConfirmDraft.upi_transaction_id : "", notes: mode === "cash" ? treatmentConfirmDraft.cash_notes : {} },
-                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "", notes: {} },
-                          ],
-                        })}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-400 hover:text-indigo-700"
-                        data-testid="cons-treatment-fee-split-add"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Add another payment
-                      </button>
-                    )}
-
-                    {treatmentConfirmDraft.payment_lines && (
-                      <>
-                        <SplitPaymentLines
-                          lines={treatmentConfirmDraft.payment_lines}
-                          modes={TREATMENT_SPLIT_MODES}
-                          expected={treatmentFeeDraft.amount}
-                          onChange={(next) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, payment_lines: next })}
-                          testPrefix="cons-treatment-fee"
-                          countCash
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setTreatmentConfirmDraft({
-                            ...treatmentConfirmDraft,
-                            payment_lines: [...treatmentConfirmDraft.payment_lines, { mode: "cash", amount: "", reference: "", notes: {} }],
-                          })}
-                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-400 hover:text-indigo-700"
-                          data-testid="cons-treatment-fee-split-more"
-                        >
-                          <Plus className="h-3.5 w-3.5" /> Add another payment
-                        </button>
-                      </>
-                    )}
-
                     {/* Transaction ID alone. A UPI payment was asking for its UTR as
                         well -- a second reference for the same transfer, typed off the
                         same receipt, on the popup a Branch Admin fills at the desk with
                         the patient waiting. */}
-                    {!treatmentConfirmDraft.payment_lines && mode === "upi" && (
+                    {!picking && mode === "upi" && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
                         <Input
@@ -6979,7 +7269,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
-                    {!treatmentConfirmDraft.payment_lines && BANK_DETAIL_MODES.includes(mode) && (
+                    {!picking && BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
@@ -7065,39 +7355,133 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       />
                     )}
 
-                    <Button
-                      className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
-                      onClick={submitTreatmentModePopup}
-                      disabled={
-                        collectingTreatmentFee ||
-                        selectedLead.session_package_price == null ||
-                        (SETTLED_NOW_MODES.includes(mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
-                        (mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
-                        (mode === "partial" && (!partialAllFilled || partialMismatch)) ||
-                        (PART_SESSION_MODES.includes(mode) && treatmentHasBalance && !treatmentFeeDraft.balance_due_date) ||
-                        // A discount bigger than the fee it comes off is a typo, not a gift.
-                        (SETTLED_NOW_MODES.includes(mode) && treatmentNetPayable < 0) ||
-                        // A split answers for itself: every part above zero, and the parts
-                        // adding up to the fee. The single-mode requirements are not its
-                        // to satisfy.
-                        (treatmentConfirmDraft.payment_lines
-                          ? (treatmentConfirmDraft.payment_lines.some((l) => !(parseFloat(l.amount) > 0)) ||
-                             // A count that was started has to be finished, per cash
-                             // line and against that line's own amount.
-                             treatmentConfirmDraft.payment_lines.some((l) => l.mode === "cash" && !notesSettled(l.notes, l.amount)) ||
-                             Math.abs(treatmentConfirmDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(treatmentFeeDraft.amount)) > 0.01)
-                          : ((mode === "cash" && !notesSettled(treatmentConfirmDraft.cash_notes, treatmentFeeDraft.amount)) ||
-                             (BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
-                             (mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim())))
-                      }
-                      data-testid="cons-treatment-fee-confirm-submit"
-                    >
-                      {collectingTreatmentFee ? "Saving..." : mode === "partial" ? "Save Payment Schedule" : treatmentConfirmDraft.payment_lines ? "Collect Split Payment" : `Collect ${modeLabel} Payment`}
-                    </Button>
+                    {/* Hidden while a mode is still being chosen for the balance: there is
+                        no payment on the popup to collect, and the buttons above are the
+                        only thing to press. It comes back the moment the desk says the
+                        rest is coming later, because then what is on the popup — every
+                        tender already accepted — is the whole collection. */}
+                    {(!picking || treatmentConfirmDraft.balance_partial) && (
+                      <Button
+                        className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
+                        onClick={submitTreatmentModePopup}
+                        disabled={
+                          collectingTreatmentFee ||
+                          selectedLead.session_package_price == null ||
+                          // Everything from here to the discount check belongs to the tender
+                          // being typed, and there isn't one while `picking` — the accepted
+                          // ones passed these on their way onto the list.
+                          (!picking && SETTLED_NOW_MODES.includes(mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
+                          (mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
+                          (mode === "partial" && (!partialAllFilled || partialMismatch)) ||
+                          // Only once the shortfall is settled as a balance — until then the
+                          // button's job is to raise the fork, and it cannot ask for a date
+                          // on a debt nobody has agreed exists yet.
+                          (PART_SESSION_MODES.includes(mode) && treatmentHasBalance && treatmentBalanceSettled && !treatmentFeeDraft.balance_due_date) ||
+                          // A discount bigger than the fee it comes off is a typo, not a gift.
+                          (SETTLED_NOW_MODES.includes(mode) && treatmentNetPayable < 0) ||
+                          // A count that was started has to be finished, against the amount
+                          // of this tender rather than the fee it is a part of.
+                          (!picking && mode === "cash" && !notesSettled(treatmentConfirmDraft.cash_notes, treatmentFeeDraft.amount)) ||
+                          (!picking && BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
+                          (!picking && mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim())
+                        }
+                        data-testid="cons-treatment-fee-confirm-submit"
+                      >
+                        {collectingTreatmentFee
+                          ? "Saving..."
+                          : mode === "partial"
+                          ? "Save Payment Schedule"
+                          // Says what pressing it does. Short of the fee and unanswered, it
+                          // opens the fork rather than banking anything, and a button that
+                          // said "Collect Cash Payment" there would be promising to finish a
+                          // collection it is about to ask a question about.
+                          : treatmentOutstanding > 0.009 && !treatmentConfirmDraft.balance_partial
+                          ? `Continue — Rs.${outstandingLabel} balance`
+                          : continuing
+                          ? `Collect Rs.${treatmentAmountNow.toLocaleString("en-IN")}${tenderCount > 1 ? ` (${tenderCount} payments)` : ""}`
+                          : `Collect ${modeLabel} Payment`}
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
             })()}
+
+
+            {/* Balance Amount — the fork. Raised by submitTreatmentModePopup when the
+                money on the Collect popup is short of what today's sessions cost, and
+                the only thing standing between a part payment and being banked as a
+                whole one. See treatmentBalanceChoice for why it is asked rather than
+                guessed. Above the Collect popup it interrupts (z-[90] > z-[70]). */}
+            {treatmentBalanceChoice && treatmentFeeDraft && (
+              <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" data-testid="cons-treatment-fee-balance-modal">
+                <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-800">Balance Amount</p>
+                    <button
+                      onClick={() => setTreatmentBalanceChoice(null)}
+                      className="rounded p-1 text-slate-400 hover:bg-slate-100"
+                      data-testid="cons-treatment-fee-balance-close"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {/* The three figures, in the order they are said at the desk. Every
+                      tender is named by its own mode rather than lumped into one "paid"
+                      line -- "paid via Cash Rs.5,000" is what the patient can check
+                      against what they actually handed over. */}
+                  <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs" data-testid="cons-treatment-fee-balance-summary">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Total Payable</span>
+                      <span className="font-semibold text-slate-800">Rs.{treatmentNetPayable.toLocaleString("en-IN")}</span>
+                    </div>
+                    {[...treatmentTenders, { mode: treatmentFeeDraft.payment_mode, amount: round2(parseFloat(treatmentFeeDraft.amount) || 0) }].map((t, i) => (
+                      <div key={i} className="flex items-center justify-between" data-testid={`cons-treatment-fee-balance-paid-${i}`}>
+                        <span className="text-slate-500">Paid via {ALL_PAYMENT_MODE_LABELS[t.mode] || t.mode}</span>
+                        <span className="font-semibold text-emerald-700">Rs.{t.amount.toLocaleString("en-IN")}</span>
+                      </div>
+                    ))}
+                    <div className="mt-1 flex items-center justify-between border-t border-slate-200 pt-1.5">
+                      <span className="font-semibold text-slate-600">Balance</span>
+                      <span className="font-semibold text-amber-700" data-testid="cons-treatment-fee-balance-amount">Rs.{treatmentBalanceChoice.balance.toLocaleString("en-IN")}</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500">How is the Rs.{treatmentBalanceChoice.balance.toLocaleString("en-IN")} balance being settled?</p>
+
+                  {/* The money is here, in another form. Takes the tender on the popup
+                      onto the list and comes back for the next one. */}
+                  <Button
+                    className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
+                    onClick={addTreatmentTenderAndPickNext}
+                    data-testid="cons-treatment-fee-balance-another"
+                  >
+                    Paying now by another method
+                  </Button>
+
+                  {/* The money is not here. The shortfall becomes a dated balance the
+                      patient can settle later under any mode -- see BalanceDueBlock. */}
+                  <Button
+                    variant="outline"
+                    className="w-full text-xs"
+                    onClick={leaveTreatmentBalanceAsPartial}
+                    data-testid="cons-treatment-fee-balance-partial"
+                  >
+                    Partial payment — collect the balance later
+                  </Button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTreatmentBalanceChoice(null)}
+                    className="w-full text-center text-[11px] font-medium text-slate-500 underline hover:text-slate-700"
+                    data-testid="cons-treatment-fee-balance-back"
+                  >
+                    Back — change the amount
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Collect Payment #N — the Partial Payment schedule's own per-row Collect
                 popup, opened from PartialInstallmentsEditor above. Layered above the
