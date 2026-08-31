@@ -27,6 +27,10 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
  *            what lets the six of them join a row they previously could not fit in.
  *            Standing on its own line the row has the width to itself and keeps full
  *            desktop sizing, so nothing changes for the boards using it that way.
+ *  - showCustom: false drops the Custom trigger and leaves the five presets. Only for a
+ *            board that reaches a DateFilterPopover some other way — with it false this
+ *            row can express nothing but its own five ranges, so a board without a second
+ *            control would lose arbitrary ranges altogether rather than relocate them.
  */
 
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
@@ -83,7 +87,7 @@ export const intersectDateFilters = (a, b) => {
   return { key: `${a.key}+${b.key}`, label: `${a.label} · ${b.label}`, from, to };
 };
 
-export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inline = false }) => {
+export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inline = false, showCustom = true }) => {
   // What lights up. All is the resting state, so a cleared filter lights All rather than
   // leaving the row with nothing selected and no way to tell it apart from a custom range.
   const activeKey = value?.key || "all";
@@ -126,7 +130,12 @@ export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inl
           a control six other boards share.
 
           Handed null while a preset above is lit, so it reads "Custom" instead of naming
-          the same range the lit button already names. */}
+          the same range the lit button already names.
+
+          Withheld where the board already carries the same popover elsewhere in the row —
+          see showCustom. Two triggers for one calendar side by side is the duplication,
+          not the calendar. */}
+      {showCustom && (
       <span className={`min-w-0 flex-1 sm:flex-none [&_button]:h-10 [&_button]:w-full [&_button]:justify-center [&_button]:px-1 [&_button]:text-[11px] [&_svg]:hidden sm:[&_button]:w-auto sm:[&_svg]:inline-block ${
         inline ? "sm:[&_button]:px-3 sm:[&_button]:text-[13px]" : "sm:[&_button]:px-4 sm:[&_button]:text-sm"
       }`}>
@@ -138,6 +147,7 @@ export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inl
           centered
         />
       </span>
+      )}
     </div>
   );
 };

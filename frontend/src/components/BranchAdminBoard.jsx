@@ -738,8 +738,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const [consultationsSubTab, setConsultationsSubTab] = useState("head_physio");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
-  // The Consultation tab's own horizontal range row — All / Today / This Week / This
-  // Month / Last 90 Days / Custom. Kept in its own state rather than sharing the one
+  // The board's own horizontal range row — All / Today / This Week / This Month / Last
+  // 90 Days. Kept in its own state rather than sharing the one
   // above so the toolbar's date filter is left exactly as it was: pressing a range here
   // does not rewrite that control's label, and clearing that control does not undo the
   // range picked here. The two combine below.
@@ -1365,18 +1365,24 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 1440-and-1520 desktop, which is exactly where the row was being read as
                 broken: everything on one line and the ranges stranded on a second.
 
-                The ~90px the inline bar now saves by tightening (see QuickDateFilterBar's
-                `inline`) plus the ~48px the dropdowns give back at this width brings the
-                fixed part to ~1180px, so 1440 leaves the search around 200px — enough for
-                its placeholder — and anything wider only gives it more. Below 1440 the
-                arithmetic still doesn't work and the ranges keep their own row underneath,
-                which is where every narrower width has always had them. */}
+                The ~90px the inline bar saves by tightening (see QuickDateFilterBar's
+                `inline`), the ~48px the dropdowns give back at this width, and the ~96px
+                freed by dropping the row's Custom trigger bring the fixed part to ~1085px,
+                so 1440 leaves the search around 290px and anything wider gives it more.
+                Below 1440 the arithmetic still doesn't work and the ranges keep their own
+                row underneath, which is where every narrower width has always had them.
+
+                There is now enough slack that this could come down further — around 1366
+                the search would still hold ~220px. Left at 1440 until somebody is actually
+                reading the board at that width, rather than moved on the arithmetic
+                alone. */}
             <div className="hidden shrink-0 min-[1440px]:block">
               <QuickDateFilterBar
                 value={quickDate}
                 onChange={setQuickDate}
                 testid="branch-quick-date-inline"
                 inline
+                showCustom={false}
               />
             </div>
             {/* Pain Type, Pain Duration and Consultation Type — the three columns the list
@@ -1491,20 +1497,20 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                   <AlertCircle className={`h-4 w-4 ${markFilter === "attention" ? "fill-rose-500 text-white" : "text-slate-400"}`} />
                 </button>
             </div>
-            {/* This icon is its own control (Today/Yesterday/Last Month/This Month/exact
-                day/custom range) and stays visible on Branch Leads exactly as before —
-                the range row beside it is an addition, not a replacement, and its own
-                Custom button already reaches a DateFilterPopover of its own for anything
-                the five one-tap presets don't cover.
+            {/* The one calendar on the row, and now the only one. The range strip used to
+                end in a Custom button that opened this same DateFilterPopover, so the
+                toolbar offered two triggers for one control — the icon here, and a button
+                four inches to the left of it saying the same thing.
 
-                On the Consultation tab, though, this icon is the SAME component the row's
-                own Custom button already opens — showing both is two calendars on one
-                line asking the same question, so it only surfaces there once it already
-                holds a range, which in practice (nothing else ever sets dateFilter on that
-                tab) means never: the row's own Custom is what that tab actually uses. */}
-            {(!onConsultationTab || dateFilter) && (
-              <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
-            )}
+                The strip keeps its five one-tap ranges and this keeps everything else:
+                Yesterday, Last Month, an exact day, a typed range. Nothing was dropped,
+                the second door was.
+
+                Which is why this is no longer conditional. It used to hide on the
+                Consultation tab, where the row's own Custom was the copy that tab actually
+                used; with that gone, hiding it here would leave that tab unable to ask for
+                a range at all. */}
+            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
             <Button
               onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
               disabled={loading}
@@ -1546,20 +1552,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               there up this one is the one that goes. Shared by both tabs now, same as the
               inline copy above.
 
-              A second date control on Branch Leads, and deliberately not a replacement for
-              the calendar button the toolbar keeps there — that one still opens the shared
-              popover with Yesterday, Last Month and an exact day in it, unchanged.
+              A second date control, and deliberately not a replacement for the calendar
+              button in the toolbar — that one still opens the shared popover with
+              Yesterday, Last Month and an exact day in it, unchanged, and since this row
+              gave up its own Custom trigger it is the only thing that does.
 
-              The fast path: the one-tap ranges a branch actually asks for, with the same
-              popover on the end for anything else. Folded into effectiveDateFilter either
-              way, which feeds the stage counts on the bar above and, on the Consultation
-              tab, the ConsultationsBoard underneath too — so a pill's number always
-              describes the list that pill opens. */}
+              So the two divide the work rather than repeating it: the fast path here, the
+              five ranges a branch actually asks for; everything else on the calendar.
+              Folded into effectiveDateFilter either way, which feeds the stage counts on
+              the bar above and, on the Consultation tab, the ConsultationsBoard underneath
+              too — so a pill's number always describes the list that pill opens. */}
           <div className="min-[1440px]:hidden">
             <QuickDateFilterBar
               value={quickDate}
               onChange={setQuickDate}
               testid="branch-quick-date"
+              showCustom={false}
             />
           </div>
 
