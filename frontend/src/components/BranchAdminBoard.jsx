@@ -37,6 +37,8 @@ import {
   Dumbbell,
   Video,
   HeartPulse,
+  IdCard,
+  Megaphone,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -64,7 +66,7 @@ import {
   setLeadFlags,
   rnrAttempt,
 } from "@/lib/api";
-import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
+import { to12h, endTime12h, callTimeStamp, callDateStamp, dateStampFull } from "@/lib/time";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
@@ -80,7 +82,7 @@ import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { ZumbaPanel } from "@/components/branch/ZumbaPanel";
 import { FitnessPanel } from "@/components/branch/FitnessPanel";
-import { CreateLeadModal } from "@/components/CreateLeadModal";
+import { CreateLeadModal, DEPARTMENT_OPTIONS, LEAD_DATA_FIELDS } from "@/components/CreateLeadModal";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 import { isCourseComplete } from "@/lib/leadStage";
@@ -103,6 +105,55 @@ const BRANCH_PORTFOLIO_STAGE = "Portfolio";
 // What the client walks away with. Built as its own document so it can be opened, printed
 // to PDF, saved or shared — same branding, styles and mechanics the payment receipt uses,
 // from lib/printable.js.
+
+/** "offline_physio" -> "Offline Physio", and whatever it already said where the dropdown
+ *  has no label for it: department is not a controlled field on an imported lead. */
+const departmentLabel = (value) =>
+  DEPARTMENT_OPTIONS.find((d) => d.value === value)?.label || value || "";
+
+/**
+ * A sheet column's key, said the way a person would say it.
+ *
+ * extra_fields is keyed by whatever the intake form called the question, which arrives as
+ * "what_type_of_pain_are_you_experiencing?". Printed verbatim that reads as a database row
+ * rather than as the answer somebody actually gave, so the underscores come out and the
+ * first letter goes up. Nothing else is touched — the question mark is part of the
+ * question, and re-casing the words would turn a sentence into a headline.
+ */
+const humanKey = (key) => {
+  const words = String(key || "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+};
+
+/**
+ * One ad-record field, said the way the form that set it says it.
+ *
+ * "fb" is Facebook, and is_organic comes back as a real boolean rather than as the
+ * "true"/"false" strings its select submitted — so the lookup is made on the stringified
+ * value, which is the one form both of them share.
+ */
+const adFieldValue = (field, value) => {
+  if (value === null || value === undefined || value === "") return "";
+  if (field.options) {
+    const match = field.options.find(([option]) => option === String(value));
+    return match ? match[1] : String(value);
+  }
+  return String(value);
+};
+
+/** Whether a lead actually carries an answer. Explicit rather than falsiness, because 0 is
+ *  one: "months_of_pain: 0" is somebody who started hurting this month. */
+const hasValue = (v) => v !== null && v !== undefined && String(v).trim() !== "";
+
+/** A label and its value hard against the other edge, for the read-only cards below.
+ *  Aligned to the top rather than centred so the label stays level with the first line of
+ *  an address that wraps, and break-words so an ad id with nowhere to break still does. */
+const DetailRow = ({ label, value }) => (
+  <div className="flex items-start justify-between gap-3 text-sm" data-testid={`branch-lead-row-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+    <span className="shrink-0 text-xs font-medium text-slate-500">{label}</span>
+    <span className="break-words text-right font-medium text-slate-800">{value}</span>
+  </div>
+);
 
 /** "2026-08-05" -> "05 - 08 - 2026" */
 const dmyLabel = (d) => {
@@ -2203,6 +2254,60 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // Drawn for a lead that has been called and not answered even after it has moved on:
   // the attempts are the reason it sits where it does, and they do not stop being true.
   const showRnrCard = atRnrStage || rnrCount > 0;
+  // What the lead itself says about the patient, as against what the pipeline says about
+  // them. This popup could show neither: it opened on a phone number, a stage strip and
+  // nothing else, so a lead somebody had filled a whole intake form for read as blank as a
+  // name typed in at the desk.
+  //
+  // Empty fields are dropped rather than drawn as em-dashes. A walk-in carries three of
+  // these and a sheet import carries fifteen, and a fixed list would show the first as a
+  // page of dashes — which is close to how the popup already read.
+  const leadDetailRows = [
+    ["Source", lead.source_tab || lead.source_type],
+    ["Department", departmentLabel(lead.department)],
+    ["Alternative Phone", lead.alternative_phone],
+    ["Age", lead.age],
+    ["Gender", lead.gender],
+    ["Occupation", lead.occupation],
+    ["Condition", lead.condition],
+    ["Months of Pain", hasValue(lead.months_of_pain) ? `${lead.months_of_pain} ${Number(lead.months_of_pain) === 1 ? "month" : "months"}` : ""],
+    ["Expected Consultation", hasValue(lead.expected_consultation_date) ? weekdayLabel(lead.expected_consultation_date) : ""],
+    ["Location", lead.location],
+    ["Address", lead.address],
+    ["City", lead.city],
+    ["State", lead.state],
+    ["Assigned To", lead.assigned_user_name],
+    // Last, and the one row every lead has: created_at is required on the record, so the
+    // card can never come out empty however little else was filled in.
+    ["Added", dateStampFull(lead.created_at)],
+  ].filter(([, value]) => hasValue(value));
+
+  // Every answer the intake form collected, keyed by the question as that sheet asked it.
+  // However long the form was: a branch that asks nine questions has nine rows here, and no
+  // board can know their names in advance.
+  //
+  // A column mapped onto one of the lead's own fields leaves no extra_fields entry behind,
+  // so the two lists do not repeat each other — and where both hold an answer to the same
+  // question they are genuinely two stored answers, both worth reading.
+  //
+  // Held to the three types a form field can honestly be. extra_fields is Dict[str, Any] on
+  // the wire and nothing validates what a sheet puts in it, so a nested value is possible —
+  // and String() would draw that as the literal "[object Object]", which is worse than not
+  // drawing the row at all.
+  const formAnswers = Object.entries(lead.extra_fields || {}).filter(
+    ([, value]) => ["string", "number", "boolean"].includes(typeof value) && hasValue(value),
+  );
+
+  // The advert behind the lead, and only the fields that were filled: V3LeadData is twelve
+  // optionals and a walk-in has none of them.
+  //
+  // Nothing here gates on the reader. The block is withheld from everyone but Super Admin on
+  // the way out of the API (lead_as_read_by in backend/deps.py), so a Branch Admin is handed
+  // null and the card simply never draws — the same lock the create form leans on, rather
+  // than a second one that could come to disagree with it.
+  const adRows = LEAD_DATA_FIELDS
+    .map((field) => [field.label, adFieldValue(field, lead.lead_data?.[field.key])])
+    .filter(([, value]) => hasValue(value));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
@@ -2451,6 +2556,60 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                         <ArrowLeftRight className="mr-1 h-3 w-3" /> Change
                       </Button>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Who the patient is and what they came in saying, read back off the record.
+
+                  Under the working cards on purpose: a lead parked at RNR is opened to find
+                  out how many times somebody has rung, and this is the reference sitting
+                  beneath that. It costs nothing on the lead this was missing from most — one
+                  still at the opening, where none of RNR, Follow-Up, Appointment or the
+                  physio card draws at all, so this lands directly under Contact, which is
+                  exactly where it belongs for a lead nobody has worked yet. */}
+              {(leadDetailRows.length > 0 || formAnswers.length > 0) && (
+                <div className="overflow-hidden rounded-xl border border-indigo-100 bg-white shadow-sm" data-testid="branch-lead-details">
+                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700"><IdCard className="h-4 w-4" /></span>
+                    <p className="text-xs font-bold uppercase tracking-wider text-indigo-700">Lead Details</p>
+                  </div>
+                  <div className="space-y-2 px-4 py-3">
+                    {leadDetailRows.map(([label, value]) => (
+                      <DetailRow key={label} label={label} value={String(value)} />
+                    ))}
+                    {formAnswers.length > 0 && (
+                      <div className="space-y-2 border-t border-slate-100 pt-2.5" data-testid="branch-lead-form-answers">
+                        {/* Named for where they came from rather than "Custom Fields": on
+                            this board they are the questions the patient answered, not
+                            columns somebody added to a form. */}
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Enquiry Form</p>
+                        {/* Stacked, unlike the rows above. These labels are whole questions
+                            — "What type of pain are you experiencing?" — and a label beside
+                            its value would leave each of them a couple of words wide. */}
+                        {formAnswers.map(([key, value]) => (
+                          <div key={key}>
+                            <p className="text-[11px] font-medium text-slate-500">{humanKey(key)}</p>
+                            <p className="break-words text-sm font-medium text-slate-800">{String(value)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Which advert bought this lead. Super Admin alone sees it — see adRows. */}
+              {adRows.length > 0 && (
+                <div className="overflow-hidden rounded-xl border border-fuchsia-100 bg-white shadow-sm" data-testid="branch-lead-data">
+                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-fuchsia-100 text-fuchsia-700"><Megaphone className="h-4 w-4" /></span>
+                    <p className="text-xs font-bold uppercase tracking-wider text-fuchsia-700">Lead Data</p>
+                  </div>
+                  <div className="space-y-2 px-4 py-3">
+                    {adRows.map(([label, value]) => (
+                      <DetailRow key={label} label={label} value={value} />
+                    ))}
                   </div>
                 </div>
               )}

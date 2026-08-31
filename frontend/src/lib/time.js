@@ -86,6 +86,21 @@ export const callTimeStamp = (value) => {
   return `${hh}:${mm} ${pick("dayPeriod").toLowerCase()} ${callDayPart(d)}`;
 };
 
+/** "2026-08-02T08:55:00Z" -> "02 Aug 2026" — callDateStamp carrying the year.
+ *
+ * The call log drops it on purpose: an attempt worth reading is one from this week, and
+ * "02 Aug" is how somebody would say it out loud. A lead's own dates are not like that —
+ * one can sit in a stage for a season — so a stamp read off the record rather than off
+ * the log spells the year out.
+ */
+export const dateStampFull = (value) => {
+  const d = toDate(value);
+  if (!d) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: CALL_TZ, day: "2-digit", month: "short", year: "numeric",
+  }).format(d);
+};
+
 /** "2026-08-02T08:55:00Z" -> "02 Aug" — the day a stamp belongs to, in IST. */
 export const callDateStamp = (value) => {
   const d = toDate(value);
