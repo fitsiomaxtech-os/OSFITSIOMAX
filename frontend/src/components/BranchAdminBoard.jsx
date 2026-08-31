@@ -186,6 +186,48 @@ const CITY_KEYS = ["city", "town", "city/town", "town/city", "city_town", "homet
 
 const cityAnswer = (lead) => formAnswer(lead, CITY_KEYS, "city", null);
 
+/**
+ * The toolbar's dropdowns, in the order they sit in the row.
+ *
+ * One list rather than the three intake questions plus a fourth control written out
+ * beside them: the filter row, the narrowing and the option-gathering all walk this, so a
+ * dropdown cannot come to disagree with the list it filters -- the same reason
+ * INTAKE_QUESTIONS is one list and not three copies of a select.
+ *
+ * `answer` is what the filter compares and what the options are gathered from. Each
+ * intake question passes formAnswer its own question text; City passes cityAnswer, which
+ * reads the lead's own City field and the spellings an unmapped sheet uses. The dropdown
+ * is thereby offering exactly what the City column shows, which is what stops a branch
+ * picking a city out of the list and getting an empty table back.
+ *
+ * `allLabel` is written out rather than pluralised from the label. "All Pain Types" is
+ * the label with an s on it and "All Cities" is not, and a control reading "All Citys" is
+ * the sort of thing nobody reports and everybody notices.
+ */
+const TOOLBAR_FILTERS = [
+  ...INTAKE_QUESTIONS.map((q) => ({
+    key: q.key,
+    label: q.label,
+    // Plural of the column heading, so the empty state names the thing being filtered
+    // rather than saying "All" three times in a row.
+    allLabel: `All ${q.label}s`,
+    width: "w-28 2xl:w-32",
+    answer: (lead) => formAnswer(lead, q.question, q.fallback, q.formatFallback),
+  })),
+  {
+    key: "city",
+    label: "City",
+    allLabel: "All Cities",
+    // Narrower than the three before it, on what it holds rather than on what is left
+    // over. A city is one short word and "All Cities" is half the length of "All
+    // Consultation Types"; at the intake width the box would be mostly empty, and the
+    // ~100px it gives back is what keeps the four of them, the ranges and the search on
+    // one line at 1440 -- see the arithmetic in the toolbar note further down.
+    width: "w-24 2xl:w-28",
+    answer: cityAnswer,
+  },
+];
+
 /** "offline_physio" -> "Offline Physio", and whatever it already said where the dropdown
  *  has no label for it: department is not a controlled field on an imported lead. */
 const departmentLabel = (value) =>
@@ -772,12 +814,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // does not rewrite that control's label, and clearing that control does not undo the
   // range picked here. The two combine below.
   const [quickDate, setQuickDate] = useState(null); // same shape; null = All
-  // The three intake-form dropdowns, as { pain_type, pain_duration, consultation_type },
-  // each holding the lowercased answer to match on or "" for the whole list. Lowercased
-  // because a sheet is not a controlled vocabulary: the same answer arrives as "Online"
-  // from one form and "online" from the next, and matching on what was typed would make
-  // those two different filters.
-  const [intakeFilters, setIntakeFilters] = useState({});
+  // The toolbar's dropdowns, keyed as TOOLBAR_FILTERS is -- { pain_type, pain_duration,
+  // consultation_type, city } -- each holding the lowercased answer to match on or "" for
+  // the whole list. Lowercased because a sheet is not a controlled vocabulary: the same
+  // answer arrives as "Online" from one form and "online" from the next, and matching on
+  // what was typed would make those two different filters. City needs this as much as any
+  // of them: "chennai" and "Chennai" are one town written by two people.
+  const [listFilters, setListFilters] = useState({});
 
   // Bumped by Refresh. loadBoard only reloads the branch leads; on a consultation stage
   // the rows on screen come from ConsultationsBoard, which needs telling separately.
@@ -1021,17 +1064,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // ask "which of my VIPs are in Fee Collected" on the stage where that is worked.
     if (markFilter === "vip") list = list.filter((l) => l.is_vip);
     else if (markFilter === "attention") list = list.filter((l) => l.needs_attention);
-    // The intake dropdowns, in the same memo as everything else above them for the reason
+    // The toolbar dropdowns, in the same memo as everything else above them for the reason
     // the marks were moved into it: the stage counts are drawn from this list, so a
     // narrowing applied anywhere else would leave every pill on the bar standing over the
     // table saying a number that is no longer in it.
-    for (const q of INTAKE_QUESTIONS) {
-      const wanted = intakeFilters[q.key];
+    for (const f of TOOLBAR_FILTERS) {
+      const wanted = listFilters[f.key];
       if (!wanted) continue;
-      list = list.filter((l) => formAnswer(l, q.question, q.fallback, q.formatFallback).toLowerCase() === wanted);
+      list = list.filter((l) => f.answer(l).toLowerCase() === wanted);
     }
     return list;
-  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter, intakeFilters]);
+  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter, listFilters]);
 
   /**
    * What each dropdown offers: the answers this branch has actually given, not a list
@@ -1042,25 +1085,25 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
    * "How long have you had this pain?" with different words in the answers.
    *
    * Read off the whole board rather than off the filtered list, so choosing one option
-   * does not empty the other two dropdowns of everything the reader might switch to next.
+   * does not empty the others of everything the reader might switch to next.
    *
    * Answers differing only in case are one option, keeping the first spelling seen as the
    * label — otherwise "Online" and "online" sit in the list twice, and picking either one
    * hides the patients who arrived under the other.
    */
-  const intakeOptions = useMemo(() => {
+  const listFilterOptions = useMemo(() => {
     const out = {};
-    for (const q of INTAKE_QUESTIONS) {
+    for (const f of TOOLBAR_FILTERS) {
       const seen = new Map();
       for (const lead of boardData.leads) {
-        const answer = formAnswer(lead, q.question, q.fallback, q.formatFallback);
+        const answer = f.answer(lead);
         if (!answer) continue;
         const k = answer.toLowerCase();
         if (!seen.has(k)) seen.set(k, answer);
       }
       // numeric so "3 months" sorts before "12 months" rather than after it, which is what
       // a plain string compare does and what makes a duration list read as shuffled.
-      out[q.key] = [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: "base" }));
+      out[f.key] = [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: "base" }));
     }
     return out;
   }, [boardData.leads]);
@@ -1079,7 +1122,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // Searching, filtering by date or switching stage replaces the list under the selection,
   // and a delete confirmed against rows the person can no longer see is one they cannot
   // check before agreeing to it.
-  useEffect(() => { setPicked(new Set()); }, [stageFilter, effectiveDateFilter, searchQuery, activeView, markFilter, intakeFilters]);
+  useEffect(() => { setPicked(new Set()); }, [stageFilter, effectiveDateFilter, searchQuery, activeView, markFilter, listFilters]);
 
   const pickedVisible = useMemo(
     () => visibleLeads.filter((l) => picked.has(l.id)),
@@ -1413,52 +1456,67 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 showCustom={false}
               />
             </div>
-            {/* Pain Type, Pain Duration and Consultation Type — the three columns the list
+            {/* Pain Type, Pain Duration, Consultation Type and City — the columns the list
                 grew, now askable rather than only readable. In this row beside the search
                 and the ranges rather than on a strip of their own: a second line of filters
                 over a table is a second thing to scan before reaching the table, and this
                 row is where every other narrowing on this board already lives.
+
+                City sits last, after the three intake questions, rather than beside Phone
+                the way its column does. The column order is how a row reads — who, where,
+                then what they came in with. The filter order is the order these arrived
+                in, and re-cutting the row to match the table would move three controls a
+                branch already knows the position of to place one.
+
+                It was left out when the column landed, on the grounds that a fourth control
+                would not fit the toolbar the three commits before it were spent fitting.
+                It fits: see the width note below, and it turns out a city is a shorter
+                word than a consultation type.
 
                 Branch Leads only. The Consultation tab renders its own board underneath and
                 these read a lead's intake answers, which is not what that tab lists.
 
                 Each is hidden until the branch has at least one answer to it. A dropdown
                 offering only "All Pain Types" is a control that cannot do anything, and
-                three of them is most of the toolbar spent saying nothing — which is the
-                state every branch is in until its sheet carries these columns.
+                four of them is most of the toolbar spent saying nothing — which is the
+                state every branch is in until its sheet carries these columns. City is the
+                one most likely to be alone there: it reads the lead's own field as well as
+                the sheet's spellings, so a branch whose source has been mapped gets the
+                dropdown even where none of the intake questions are asked.
 
-                From lg. The three want ~350px that no narrower width has spare: at sm the
+                From lg. They want ~450px that no narrower width has spare: at sm the
                 search field has only just reappeared beside the actions, and adding these
                 there would drive the row into overflow rather than shrink the search,
                 which is the failure the collapse-to-an-icon was built to avoid. Under lg
                 the columns are still readable in the list; it is only asking that waits
                 for the width.
 
-                w-28 up to 2xl, w-32 from there. The narrow size is what lets the three of
-                them sit on the same line as the ranges at 1440 without either giving way;
-                past 1536 the width is going spare anyway, so they take the roomier size
-                back and the labels stop truncating so early. */}
+                Widths are per filter now (see TOOLBAR_FILTERS) rather than one class for
+                the row. The three intake dropdowns keep w-28 up to 2xl and w-32 from
+                there; City takes the size below each, because its longest label is "All
+                Cities" and its answers are single words. That ~100px is what keeps the
+                fourth from pushing the ranges onto a second row at 1440: the note above
+                puts the fixed part at ~1085px there, and a fourth at the intake width
+                would have taken the search under the length of its own placeholder. */}
             {!onConsultationTab && (
-              <div className="hidden shrink-0 items-center gap-1.5 lg:flex" data-testid="branch-intake-filters">
-                {INTAKE_QUESTIONS.map((q) => {
-                  const options = intakeOptions[q.key] || [];
+              <div className="hidden shrink-0 items-center gap-1.5 lg:flex" data-testid="branch-list-filters">
+                {TOOLBAR_FILTERS.map((f) => {
+                  const options = listFilterOptions[f.key] || [];
                   if (options.length === 0) return null;
-                  const active = !!intakeFilters[q.key];
+                  const active = !!listFilters[f.key];
                   return (
                     <select
-                      key={q.key}
-                      value={intakeFilters[q.key] || ""}
-                      onChange={(e) => setIntakeFilters((p) => ({ ...p, [q.key]: e.target.value }))}
-                      title={q.label}
-                      aria-label={q.label}
-                      className={`h-10 w-28 shrink-0 truncate rounded-md border px-2 text-xs font-medium transition-colors 2xl:w-32 ${
+                      key={f.key}
+                      value={listFilters[f.key] || ""}
+                      onChange={(e) => setListFilters((p) => ({ ...p, [f.key]: e.target.value }))}
+                      title={f.label}
+                      aria-label={f.label}
+                      className={`h-10 ${f.width} shrink-0 truncate rounded-md border px-2 text-xs font-medium transition-colors ${
                         active ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                       }`}
-                      data-testid={`branch-intake-filter-${q.key}`}
+                      data-testid={`branch-list-filter-${f.key}`}
                     >
-                      {/* Plural of the column heading, so the empty state names the thing
-                          being filtered rather than saying "All" three times in a row. */}
-                      <option value="">{`All ${q.label}s`}</option>
+                      <option value="">{f.allLabel}</option>
                       {options.map(([value, label]) => (
                         <option key={value} value={value}>{label}</option>
                       ))}
