@@ -2246,6 +2246,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     { key: "follow-up", label: "Follow-Up", color: "bg-amber-500" },
     { key: "timeline", label: "Timeline", color: "bg-emerald-500" },
     { key: "rnr", label: "RNR Record", color: "bg-rose-500" },
+    // Last, and deliberately after the three working tabs. The first four are what
+    // somebody DOES with a lead; this one is what the lead already told us, which is
+    // read once and then referred back to rather than worked.
+    { key: "lead-details", label: "Lead Details", color: "bg-indigo-500" },
   ];
 
   const avatarFirstChar = (lead.name?.trim()?.charAt(0) || "?").toUpperCase();
@@ -2577,60 +2581,6 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 </div>
               )}
 
-              {/* Who the patient is and what they came in saying, read back off the record.
-
-                  Under the working cards on purpose: a lead parked at RNR is opened to find
-                  out how many times somebody has rung, and this is the reference sitting
-                  beneath that. It costs nothing on the lead this was missing from most — one
-                  still at the opening, where none of RNR, Follow-Up, Appointment or the
-                  physio card draws at all, so this lands directly under Contact, which is
-                  exactly where it belongs for a lead nobody has worked yet. */}
-              {(leadDetailRows.length > 0 || formAnswers.length > 0) && (
-                <div className="overflow-hidden rounded-xl border border-indigo-100 bg-white shadow-sm" data-testid="branch-lead-details">
-                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700"><IdCard className="h-4 w-4" /></span>
-                    <p className="text-xs font-bold uppercase tracking-wider text-indigo-700">Lead Details</p>
-                  </div>
-                  <div className="space-y-2 px-4 py-3">
-                    {leadDetailRows.map(([label, value]) => (
-                      <DetailRow key={label} label={label} value={String(value)} />
-                    ))}
-                    {formAnswers.length > 0 && (
-                      <div className="space-y-2 border-t border-slate-100 pt-2.5" data-testid="branch-lead-form-answers">
-                        {/* Named for where they came from rather than "Custom Fields": on
-                            this board they are the questions the patient answered, not
-                            columns somebody added to a form. */}
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Enquiry Form</p>
-                        {/* Stacked, unlike the rows above. These labels are whole questions
-                            — "What type of pain are you experiencing?" — and a label beside
-                            its value would leave each of them a couple of words wide. */}
-                        {formAnswers.map(([key, value]) => (
-                          <div key={key}>
-                            <p className="text-[11px] font-medium text-slate-500">{humanKey(key)}</p>
-                            <p className="break-words text-sm font-medium text-slate-800">{String(value)}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Which advert bought this lead. Super Admin alone sees it — see adRows. */}
-              {adRows.length > 0 && (
-                <div className="overflow-hidden rounded-xl border border-fuchsia-100 bg-white shadow-sm" data-testid="branch-lead-data">
-                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-fuchsia-100 text-fuchsia-700"><Megaphone className="h-4 w-4" /></span>
-                    <p className="text-xs font-bold uppercase tracking-wider text-fuchsia-700">Lead Data</p>
-                  </div>
-                  <div className="space-y-2 px-4 py-3">
-                    {adRows.map(([label, value]) => (
-                      <DetailRow key={label} label={label} value={value} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {lead.notes && (
                 <div className="overflow-hidden rounded-xl border border-amber-100 bg-white shadow-sm">
                   <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
@@ -2759,6 +2709,75 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
             </div>
           )}
 
+          {/* The record itself, on its own tab rather than stacked under the working
+              cards on Overview.
+
+              Overview answers "what do I do with this lead" -- who to ring, when, what
+              was said. This answers "who is this", and a sheet import carries fifteen
+              rows of it plus the advert behind them, which pushed the pipeline and the
+              notes below the fold on precisely the leads carrying the most. Two
+              questions, two tabs; the reference gets room to be read instead of a
+              scroll past it to reach the working cards. */}
+          {activeTab === "lead-details" && (
+            <div className="space-y-3" data-testid="branch-lead-details-tab">
+              {/* Who the patient is and what they came in saying, read back off the record.
+                  The lead's own fields first, then the answers it arrived with. */}
+              {(leadDetailRows.length > 0 || formAnswers.length > 0) && (
+                <div className="overflow-hidden rounded-xl border border-indigo-100 bg-white shadow-sm" data-testid="branch-lead-details">
+                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700"><IdCard className="h-4 w-4" /></span>
+                    <p className="text-xs font-bold uppercase tracking-wider text-indigo-700">Lead Details</p>
+                  </div>
+                  <div className="space-y-2 px-4 py-3">
+                    {leadDetailRows.map(([label, value]) => (
+                      <DetailRow key={label} label={label} value={String(value)} />
+                    ))}
+                    {formAnswers.length > 0 && (
+                      <div className="space-y-2 border-t border-slate-100 pt-2.5" data-testid="branch-lead-form-answers">
+                        {/* Named for where they came from rather than "Custom Fields": on
+                            this board they are the questions the patient answered, not
+                            columns somebody added to a form. */}
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Enquiry Form</p>
+                        {/* Stacked, unlike the rows above. These labels are whole questions
+                            — "What type of pain are you experiencing?" — and a label beside
+                            its value would leave each of them a couple of words wide. */}
+                        {formAnswers.map(([key, value]) => (
+                          <div key={key}>
+                            <p className="text-[11px] font-medium text-slate-500">{humanKey(key)}</p>
+                            <p className="break-words text-sm font-medium text-slate-800">{String(value)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Which advert bought this lead. Super Admin alone sees it — see adRows. */}
+              {adRows.length > 0 && (
+                <div className="overflow-hidden rounded-xl border border-fuchsia-100 bg-white shadow-sm" data-testid="branch-lead-data">
+                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-fuchsia-100 text-fuchsia-700"><Megaphone className="h-4 w-4" /></span>
+                    <p className="text-xs font-bold uppercase tracking-wider text-fuchsia-700">Lead Data</p>
+                  </div>
+                  <div className="space-y-2 px-4 py-3">
+                    {adRows.map(([label, value]) => (
+                      <DetailRow key={label} label={label} value={value} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* A walk-in typed in at the desk has a name and a number and nothing
+                  else, so this tab can legitimately be empty. Said plainly rather than
+                  left blank, which reads as a screen that failed to load. */}
+              {leadDetailRows.length === 0 && formAnswers.length === 0 && adRows.length === 0 && (
+                <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400" data-testid="branch-lead-details-empty">
+                  Nothing was recorded for this lead beyond their name and number.
+                </p>
+              )}
+            </div>
+          )}
           {activeTab === "follow-up" && (
             <div className="space-y-4" data-testid="branch-lead-followup">
               <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-4" data-testid="branch-followup-form">
