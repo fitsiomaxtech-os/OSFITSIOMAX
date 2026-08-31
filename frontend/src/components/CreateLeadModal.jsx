@@ -11,7 +11,10 @@ import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { loadSession } from "@/lib/session";
 
 const SOURCE_OPTIONS = ["Meta", "SEO", "Referral", "Walk-In", "Website", "CSV Import", "Google Sheets", "Other"];
-const DEPARTMENT_OPTIONS = [
+// Exported because a board that reads a lead back has to name its Department the same way
+// the form that set it did -- a raw "offline_physio" on a detail card is the stored value
+// leaking through rather than a label.
+export const DEPARTMENT_OPTIONS = [
   { value: "offline_physio", label: "Offline Physio" },
   { value: "online_physio", label: "Online Physio" },
   { value: "offline_fitness", label: "Offline Fitness" },
@@ -31,7 +34,7 @@ const GENDER_OPTIONS = ["Male", "Female", "Other"];
  * sent nested under `lead_data` rather than flattened onto the lead. See V3LeadData in
  * backend/schemas/v3.py.
  */
-const LEAD_DATA_FIELDS = [
+export const LEAD_DATA_FIELDS = [
   { key: "id", label: "Lead ID", placeholder: "Meta's own lead id" },
   { key: "created_time", label: "Created Time", placeholder: "2026-08-31T10:30:00+0530" },
   { key: "ad_id", label: "Ad ID", placeholder: "e.g. 23851234567890123" },

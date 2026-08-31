@@ -37,6 +37,8 @@ import {
   Dumbbell,
   Video,
   HeartPulse,
+  IdCard,
+  Megaphone,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -64,7 +66,7 @@ import {
   setLeadFlags,
   rnrAttempt,
 } from "@/lib/api";
-import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
+import { to12h, endTime12h, callTimeStamp, callDateStamp, dateStampFull } from "@/lib/time";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
@@ -80,7 +82,7 @@ import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { ZumbaPanel } from "@/components/branch/ZumbaPanel";
 import { FitnessPanel } from "@/components/branch/FitnessPanel";
-import { CreateLeadModal } from "@/components/CreateLeadModal";
+import { CreateLeadModal, DEPARTMENT_OPTIONS, LEAD_DATA_FIELDS } from "@/components/CreateLeadModal";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 import { isCourseComplete } from "@/lib/leadStage";
@@ -103,6 +105,87 @@ const BRANCH_PORTFOLIO_STAGE = "Portfolio";
 // What the client walks away with. Built as its own document so it can be opened, printed
 // to PDF, saved or shared — same branding, styles and mechanics the payment receipt uses,
 // from lib/printable.js.
+
+/**
+ * One of the intake form's own questions, read back off a lead.
+ *
+ * These are sheet columns, so they arrive keyed by whatever the form called them --
+ * "what_type_of_pain_are_you_experiencing?" on one branch's sheet, "What type of pain are
+ * you experiencing" on the next. Compared on letters and digits alone so a form that
+ * gains a capital, loses its question mark or swaps underscores for spaces keeps filling
+ * its column instead of quietly going blank, which is a failure nobody can see.
+ *
+ * Falls back to the lead's own field where the question has one. A source whose mapping
+ * sends this column to Condition or Months of Pain has no extra_fields entry left to read
+ * -- the answer moved to the field it was mapped onto -- and the column would empty out
+ * for exactly the sources that mapped themselves most carefully.
+ */
+const squashKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const formAnswer = (lead, questionKey, fallback, formatFallback) => {
+  const wanted = squashKey(questionKey);
+  const extras = lead?.extra_fields || {};
+  for (const [key, value] of Object.entries(extras)) {
+    if (squashKey(key) === wanted && value !== null && value !== undefined && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+  const own = fallback ? lead?.[fallback] : null;
+  if (own === null || own === undefined || String(own).trim() === "") return "";
+  // The field's own value needs its unit put back on. The sheet answer reads "3-6 months"
+  // because that is what the patient ticked; months_of_pain is the bare number 6, and a
+  // column headed Pain Duration showing "6" is not an answer to it.
+  return formatFallback ? formatFallback(own) : String(own).trim();
+};
+
+/** "offline_physio" -> "Offline Physio", and whatever it already said where the dropdown
+ *  has no label for it: department is not a controlled field on an imported lead. */
+const departmentLabel = (value) =>
+  DEPARTMENT_OPTIONS.find((d) => d.value === value)?.label || value || "";
+
+/**
+ * A sheet column's key, said the way a person would say it.
+ *
+ * extra_fields is keyed by whatever the intake form called the question, which arrives as
+ * "what_type_of_pain_are_you_experiencing?". Printed verbatim that reads as a database row
+ * rather than as the answer somebody actually gave, so the underscores come out and the
+ * first letter goes up. Nothing else is touched — the question mark is part of the
+ * question, and re-casing the words would turn a sentence into a headline.
+ */
+const humanKey = (key) => {
+  const words = String(key || "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+};
+
+/**
+ * One ad-record field, said the way the form that set it says it.
+ *
+ * "fb" is Facebook, and is_organic comes back as a real boolean rather than as the
+ * "true"/"false" strings its select submitted — so the lookup is made on the stringified
+ * value, which is the one form both of them share.
+ */
+const adFieldValue = (field, value) => {
+  if (value === null || value === undefined || value === "") return "";
+  if (field.options) {
+    const match = field.options.find(([option]) => option === String(value));
+    return match ? match[1] : String(value);
+  }
+  return String(value);
+};
+
+/** Whether a lead actually carries an answer. Explicit rather than falsiness, because 0 is
+ *  one: "months_of_pain: 0" is somebody who started hurting this month. */
+const hasValue = (v) => v !== null && v !== undefined && String(v).trim() !== "";
+
+/** A label and its value hard against the other edge, for the read-only cards below.
+ *  Aligned to the top rather than centred so the label stays level with the first line of
+ *  an address that wraps, and break-words so an ad id with nowhere to break still does. */
+const DetailRow = ({ label, value }) => (
+  <div className="flex items-start justify-between gap-3 text-sm" data-testid={`branch-lead-row-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+    <span className="shrink-0 text-xs font-medium text-slate-500">{label}</span>
+    <span className="break-words text-right font-medium text-slate-800">{value}</span>
+  </div>
+);
 
 /** "2026-08-05" -> "05 - 08 - 2026" */
 const dmyLabel = (d) => {
@@ -896,14 +979,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     [visibleLeads, picked],
   );
 
-  const togglePicked = useCallback((id) => {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }, []);
-
+  // No per-row tick any more, so nothing calls a toggle. The rest of the selection is
+  // left standing: pickedVisible, the count bar and the bulk-delete dialog are whole and
+  // correct, and want only a control to set the selection from. Deleting them would be
+  // throwing away a working feature to tidy up after removing its only button.
   // Summary card counts follow the Date Filter (and search) too, instead of always
   // reflecting the branch's all-time totals — so the cards actually describe what's in
   // the table below them right now.
@@ -1509,44 +1588,34 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
-                  {/* Ticks every row the table is currently showing, and only those. The
-                      percentages below drop by 4 to pay for this column, so they still
-                      total 100 — table-fixed divides by the stated widths, and a set that
-                      overshoots quietly squeezes the last column instead. */}
-                  <th className="w-[4%] px-3 py-3">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 cursor-pointer accent-rose-600 align-middle"
-                      checked={visibleLeads.length > 0 && pickedVisible.length === visibleLeads.length}
-                      // Some but not all: neither ticked nor empty, so it reads as a partial
-                      // selection rather than as "nothing is selected".
-                      ref={(el) => { if (el) el.indeterminate = pickedVisible.length > 0 && pickedVisible.length < visibleLeads.length; }}
-                      onChange={(e) => setPicked(e.target.checked ? new Set(visibleLeads.map((l) => l.id)) : new Set())}
-                      title={`Select all ${visibleLeads.length} shown`}
-                      aria-label="Select all shown"
-                      data-testid="branch-select-all"
-                    />
-                  </th>
                   {/* A lead at either entry stage hasn't had a physio assigned yet, so that
-                      column is dropped there — every other view keeps it. */}
+                      column is dropped there — every other view keeps it.
+
+                      The three between Phone and the pipeline columns are the intake form's
+                      own questions, which is what the branch is actually reading this list
+                      to find out. Widths total 100 either way: table-fixed divides by the
+                      stated widths, and a set that overshoots quietly squeezes the last
+                      column instead. */}
                   {entryStageNames.includes(stageFilter) ? (
                     <>
-                      <th className="w-[22%] px-4 py-3">Patient</th>
-                      <th className="w-[13%] px-4 py-3">Phone</th>
-                      <th className="w-[21%] px-4 py-3">Email</th>
-                      <th className="w-[15%] px-4 py-3">Stage</th>
-                      <th className="w-[15%] px-4 py-3">Appointment</th>
-                      <th className="w-[10%] px-4 py-3 text-right">Updated</th>
+                      <th className="w-[20%] px-4 py-3">Patient</th>
+                      <th className="w-[12%] px-4 py-3">Phone</th>
+                      <th className="w-[14%] px-4 py-3">Pain Type</th>
+                      <th className="w-[14%] px-4 py-3">Pain Duration</th>
+                      <th className="w-[14%] px-4 py-3">Consultation Type</th>
+                      <th className="w-[13%] px-4 py-3">Appointment</th>
+                      <th className="w-[13%] px-4 py-3">Stage</th>
                     </>
                   ) : (
                     <>
-                      <th className="w-[19%] px-4 py-3">Patient</th>
+                      <th className="w-[18%] px-4 py-3">Patient</th>
                       <th className="w-[11%] px-4 py-3">Phone</th>
-                      <th className="w-[17%] px-4 py-3">Email</th>
-                      <th className="w-[13%] px-4 py-3">Stage</th>
-                      <th className="w-[13%] px-4 py-3">Assigned Physio</th>
-                      <th className="w-[13%] px-4 py-3">Appointment</th>
-                      <th className="w-[10%] px-4 py-3 text-right">Updated</th>
+                      <th className="w-[13%] px-4 py-3">Pain Type</th>
+                      <th className="w-[12%] px-4 py-3">Pain Duration</th>
+                      <th className="w-[13%] px-4 py-3">Consultation Type</th>
+                      <th className="w-[12%] px-4 py-3">Assigned Physio</th>
+                      <th className="w-[11%] px-4 py-3">Appointment</th>
+                      <th className="w-[10%] px-4 py-3">Stage</th>
                     </>
                   )}
                 </tr>
@@ -1574,19 +1643,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                         className={`cursor-pointer transition-colors ${picked.has(lead.id) ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-slate-50"}`}
                         data-testid={`branch-row-${lead.id}`}
                       >
-                        {/* stopPropagation on the cell as well as the box: the whole row
-                            opens the patient, and ticking a box should not also open them. */}
-                        <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 cursor-pointer accent-rose-600 align-middle"
-                            checked={picked.has(lead.id)}
-                            onChange={() => togglePicked(lead.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label={`Select ${lead.name || "patient"}`}
-                            data-testid={`branch-pick-${lead.id}`}
-                          />
-                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
@@ -1653,15 +1709,20 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                           </div>
                         </td>
                         <td className="truncate px-4 py-3 text-slate-600" title={lead.phone}>{lead.phone || "—"}</td>
-                        <td className="truncate px-4 py-3 text-slate-600" title={lead.email}>{lead.email || "—"}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
-                            style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
-                          >
-                            {rowStage ? stageDisplayLabel(rowStage) : "—"}
-                          </span>
-                        </td>
+                        {/* The intake form's three questions. Each falls back to the lead's
+                            own field where it has one — see formAnswer. */}
+                        {[
+                          ["what_type_of_pain_are_you_experiencing?", "condition", null],
+                          ["how_long_have_you_had_this_pain?", "months_of_pain", (n) => `${n} month${Number(n) === 1 ? "" : "s"}`],
+                          ["preferred_consultation_type?", null, null],
+                        ].map(([question, fallback, formatFallback]) => {
+                          const answer = formAnswer(lead, question, fallback, formatFallback);
+                          return (
+                            <td key={question} className="truncate px-4 py-3 text-slate-600" title={answer || undefined}>
+                              {answer || <span className="text-slate-400">—</span>}
+                            </td>
+                          );
+                        })}
                         {showAssignedPhysio && (
                           <td className="truncate px-4 py-3 text-slate-600" title={lead.assigned_physio_name}>{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
                         )}
@@ -1683,7 +1744,14 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             );
                           })()}
                         </td>
-                        <td className="px-4 py-3 text-right text-xs text-slate-400">{(lead.updated_at || "").slice(0, 10)}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
+                            style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
+                          >
+                            {rowStage ? stageDisplayLabel(rowStage) : "—"}
+                          </span>
+                        </td>
                       </tr>
                     );
                   });
@@ -2203,6 +2271,60 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // Drawn for a lead that has been called and not answered even after it has moved on:
   // the attempts are the reason it sits where it does, and they do not stop being true.
   const showRnrCard = atRnrStage || rnrCount > 0;
+  // What the lead itself says about the patient, as against what the pipeline says about
+  // them. This popup could show neither: it opened on a phone number, a stage strip and
+  // nothing else, so a lead somebody had filled a whole intake form for read as blank as a
+  // name typed in at the desk.
+  //
+  // Empty fields are dropped rather than drawn as em-dashes. A walk-in carries three of
+  // these and a sheet import carries fifteen, and a fixed list would show the first as a
+  // page of dashes — which is close to how the popup already read.
+  const leadDetailRows = [
+    ["Source", lead.source_tab || lead.source_type],
+    ["Department", departmentLabel(lead.department)],
+    ["Alternative Phone", lead.alternative_phone],
+    ["Age", lead.age],
+    ["Gender", lead.gender],
+    ["Occupation", lead.occupation],
+    ["Condition", lead.condition],
+    ["Months of Pain", hasValue(lead.months_of_pain) ? `${lead.months_of_pain} ${Number(lead.months_of_pain) === 1 ? "month" : "months"}` : ""],
+    ["Expected Consultation", hasValue(lead.expected_consultation_date) ? weekdayLabel(lead.expected_consultation_date) : ""],
+    ["Location", lead.location],
+    ["Address", lead.address],
+    ["City", lead.city],
+    ["State", lead.state],
+    ["Assigned To", lead.assigned_user_name],
+    // Last, and the one row every lead has: created_at is required on the record, so the
+    // card can never come out empty however little else was filled in.
+    ["Added", dateStampFull(lead.created_at)],
+  ].filter(([, value]) => hasValue(value));
+
+  // Every answer the intake form collected, keyed by the question as that sheet asked it.
+  // However long the form was: a branch that asks nine questions has nine rows here, and no
+  // board can know their names in advance.
+  //
+  // A column mapped onto one of the lead's own fields leaves no extra_fields entry behind,
+  // so the two lists do not repeat each other — and where both hold an answer to the same
+  // question they are genuinely two stored answers, both worth reading.
+  //
+  // Held to the three types a form field can honestly be. extra_fields is Dict[str, Any] on
+  // the wire and nothing validates what a sheet puts in it, so a nested value is possible —
+  // and String() would draw that as the literal "[object Object]", which is worse than not
+  // drawing the row at all.
+  const formAnswers = Object.entries(lead.extra_fields || {}).filter(
+    ([, value]) => ["string", "number", "boolean"].includes(typeof value) && hasValue(value),
+  );
+
+  // The advert behind the lead, and only the fields that were filled: V3LeadData is twelve
+  // optionals and a walk-in has none of them.
+  //
+  // Nothing here gates on the reader. The block is withheld from everyone but Super Admin on
+  // the way out of the API (lead_as_read_by in backend/deps.py), so a Branch Admin is handed
+  // null and the card simply never draws — the same lock the create form leans on, rather
+  // than a second one that could come to disagree with it.
+  const adRows = LEAD_DATA_FIELDS
+    .map((field) => [field.label, adFieldValue(field, lead.lead_data?.[field.key])])
+    .filter(([, value]) => hasValue(value));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
@@ -2451,6 +2573,60 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                         <ArrowLeftRight className="mr-1 h-3 w-3" /> Change
                       </Button>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Who the patient is and what they came in saying, read back off the record.
+
+                  Under the working cards on purpose: a lead parked at RNR is opened to find
+                  out how many times somebody has rung, and this is the reference sitting
+                  beneath that. It costs nothing on the lead this was missing from most — one
+                  still at the opening, where none of RNR, Follow-Up, Appointment or the
+                  physio card draws at all, so this lands directly under Contact, which is
+                  exactly where it belongs for a lead nobody has worked yet. */}
+              {(leadDetailRows.length > 0 || formAnswers.length > 0) && (
+                <div className="overflow-hidden rounded-xl border border-indigo-100 bg-white shadow-sm" data-testid="branch-lead-details">
+                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700"><IdCard className="h-4 w-4" /></span>
+                    <p className="text-xs font-bold uppercase tracking-wider text-indigo-700">Lead Details</p>
+                  </div>
+                  <div className="space-y-2 px-4 py-3">
+                    {leadDetailRows.map(([label, value]) => (
+                      <DetailRow key={label} label={label} value={String(value)} />
+                    ))}
+                    {formAnswers.length > 0 && (
+                      <div className="space-y-2 border-t border-slate-100 pt-2.5" data-testid="branch-lead-form-answers">
+                        {/* Named for where they came from rather than "Custom Fields": on
+                            this board they are the questions the patient answered, not
+                            columns somebody added to a form. */}
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Enquiry Form</p>
+                        {/* Stacked, unlike the rows above. These labels are whole questions
+                            — "What type of pain are you experiencing?" — and a label beside
+                            its value would leave each of them a couple of words wide. */}
+                        {formAnswers.map(([key, value]) => (
+                          <div key={key}>
+                            <p className="text-[11px] font-medium text-slate-500">{humanKey(key)}</p>
+                            <p className="break-words text-sm font-medium text-slate-800">{String(value)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Which advert bought this lead. Super Admin alone sees it — see adRows. */}
+              {adRows.length > 0 && (
+                <div className="overflow-hidden rounded-xl border border-fuchsia-100 bg-white shadow-sm" data-testid="branch-lead-data">
+                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-fuchsia-100 text-fuchsia-700"><Megaphone className="h-4 w-4" /></span>
+                    <p className="text-xs font-bold uppercase tracking-wider text-fuchsia-700">Lead Data</p>
+                  </div>
+                  <div className="space-y-2 px-4 py-3">
+                    {adRows.map(([label, value]) => (
+                      <DetailRow key={label} label={label} value={value} />
+                    ))}
                   </div>
                 </div>
               )}
