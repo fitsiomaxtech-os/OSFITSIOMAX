@@ -2843,13 +2843,20 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                               onClick={() => setApptDraft({ ...apptDraft, appointment_date: dateStr, physio_id: "", appointment_time: "", duration: null })}
                               className={`h-14 rounded-lg text-lg font-semibold transition ${
                                 isPicked
-                                  ? "bg-teal-600 text-white shadow-sm ring-2 ring-teal-200"
+                                  // Brand blue -- colors.palette.primary, #0EA5E9. The halo
+                                  // is sky-300 rather than sky-200 on purpose: sky-200 is
+                                  // what the legend teaches as "slots open", and a picked
+                                  // day ringed in it would read as saying both.
+                                  ? "bg-sky-500 text-white shadow-sm ring-2 ring-sky-300"
                                   : isPast
                                   ? "cursor-not-allowed text-slate-300"
                                   : hasSlots
-                                  // Purple marks a day that actually has a slot free, so the
-                                  // days worth clicking are visible without opening each one.
-                                  ? "bg-violet-300 text-white shadow-sm hover:bg-violet-400"
+                                  // Light blue marks a day that actually has a slot free, so
+                                  // the days worth clicking are visible without opening each
+                                  // one. The number goes dark with the fill -- this carried
+                                  // white text while it was violet-300, which a light blue
+                                  // cannot hold.
+                                  ? "bg-sky-200 text-sky-900 shadow-sm hover:bg-sky-300"
                                   : isToday
                                   ? "border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
                                   : "text-slate-600 hover:bg-slate-100"
@@ -2863,8 +2870,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                         })}
                       </div>
                       <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3 text-xs font-semibold text-slate-400">
-                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-violet-300" /> Slots open</span>
-                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-teal-600" /> Picked</span>
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-sky-200" /> Slots open</span>
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-sky-500" /> Picked</span>
                       </div>
                     </>
                   );
