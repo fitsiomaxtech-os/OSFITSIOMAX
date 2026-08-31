@@ -43,6 +43,17 @@ V3_BRANCH_STAGES = [
 BRANCH_ADMIN_ENTRY_STAGE = "Branch Assign"
 BRANCH_ADMIN_RNR_STAGE = "RNR"
 
+# Where a branch appointment goes when it is called off. Last in the pipeline and final:
+# nothing moves on from it, and reaching it releases the slot the consultation was holding
+# (see v3_move_branch_stage).
+#
+# Named here rather than written as a literal at each site because three of them have to
+# agree -- the seed that creates the pill, the stage move that frees the slot, and the
+# booking endpoint's own final_stage -- and they were already one rename apart from
+# silently doing nothing. Note it is "Cancelled", not the consultation pipeline's "Cancel":
+# two pipelines, two stages, and the Branch Leads card shows both.
+BRANCH_CANCELLED_STAGE = "Cancelled"
+
 # Branch's own consultation pipeline. "New Appointment" was retired — consultations
 # now begin at Follow Up (see seed.migrate_consultation_stages). The Head Physio's
 # independent pipeline below still has its own New Appointment stage.

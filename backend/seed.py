@@ -7,6 +7,7 @@ from security import hash_password
 from constants import (
     V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
     BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE,
+    BRANCH_CANCELLED_STAGE,
 )
 import lead_control
 from stage_utils import get_first_stage_name, first_branch_stage_for, realign_branch_stage_leads
@@ -158,6 +159,48 @@ async def ensure_rnr_stage() -> None:
         "type": "pre_sales",
         "order": insert_order,
         "is_final": False,
+        "created_at": now_iso(),
+    })
+
+
+async def ensure_branch_cancelled_stage() -> None:
+    """Give the Branch (sales) pipeline its Cancelled pill, last.
+
+    "Cancelled" has been in V3_BRANCH_STAGES since the beginning, but that list is only
+    read when the whole sales pipeline is re-seeded from the built-in defaults -- which has
+    not happened on this database in a long time -- so the stage never actually existed as
+    a row. The Branch Leads card showed a Cancel pill, but it was the Consultations
+    pipeline's, backed by consultation_stage: cancelling a booked appointment moved the
+    lead inside a pipeline it had not reached yet and left branch_stage sitting on
+    Appointment.
+
+    Last on purpose, and is_final: it is where a lead stops. Placed by reading the highest
+    order in the pipeline rather than at a fixed index, since Pipeline Stage Management can
+    reorder everything above it.
+
+    No applies_to: a cancelled appointment is a cancelled appointment whether the branch
+    runs its own leads or is fed by Pre-Sales, so both modes get the pill.
+
+    Idempotent, and a no-op until the sales stages exist.
+    """
+    existing = await v3_col("pipeline_stages").find_one(
+        {"type": "sales", "name": BRANCH_CANCELLED_STAGE}, {"_id": 0, "id": 1}
+    )
+    if existing:
+        return
+    last = await v3_col("pipeline_stages").find_one(
+        {"type": "sales"}, {"_id": 0, "order": 1}, sort=[("order", -1)]
+    )
+    if not last:
+        return
+    await v3_col("pipeline_stages").insert_one({
+        "id": str(uuid.uuid4()),
+        "name": BRANCH_CANCELLED_STAGE,
+        # Rose, the colour a stopped thing already wears across these boards.
+        "color": "#ef4444",
+        "type": "sales",
+        "order": (last.get("order") or 0) + 1,
+        "is_final": True,
         "created_at": now_iso(),
     })
 

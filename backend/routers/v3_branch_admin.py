@@ -14,7 +14,10 @@ from deps import (
     online_arm_practice, vertical_in_arm,
 )
 import lead_control
-from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
+from constants import (
+    V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
+    BRANCH_CANCELLED_STAGE,
+)
 from stage_utils import branch_stage_names_for_branch, get_first_stage_name
 from schemas.v3 import (
     V3UserOut, V3LeadOut,
@@ -467,11 +470,30 @@ async def v3_move_branch_stage(lead_id: str, payload: V3BranchStageInput, user: 
         raise HTTPException(status_code=400, detail="Invalid branch stage")
     old_stage = lead.get("branch_stage", "Unknown")
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {"branch_stage": payload.branch_stage, "updated_at": now_iso()}})
+
+    # Cancelled is where a booked consultation goes to die, and the slot it was holding has
+    # to go back on the calendar with it. Without this the lead read as cancelled on every
+    # board while the expert's 10:30 stayed Booked -- an hour nobody could sell and nobody
+    # was coming to.
+    #
+    # Done here rather than in a cancel endpoint of its own because the stage is the event:
+    # however a lead reaches Cancelled -- this pill, a bulk move, a later screen -- the
+    # appointment behind it is off. Idempotent, since a lead already cancelled has no rows
+    # left in new_appointment to match.
+    freed = 0
+    if payload.branch_stage == BRANCH_CANCELLED_STAGE:
+        res = await v3_col("appointments").update_many(
+            {"lead_id": lead_id, "status": "new_appointment"},
+            {"$set": {"status": "cancelled", "updated_at": now_iso()}},
+        )
+        freed = res.modified_count
+
     activity = {
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "branch_stage_change",
-        "details": f"Branch stage: '{old_stage}' -> '{payload.branch_stage}'",
+        "details": f"Branch stage: '{old_stage}' -> '{payload.branch_stage}'"
+                   + (f" · {freed} appointment{'' if freed == 1 else 's'} cancelled, slot freed" if freed else ""),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),
@@ -599,6 +621,30 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         raise HTTPException(status_code=404, detail="Physio not found")
 
     slot_time = f"{payload.appointment_date}T{payload.appointment_time}"
+
+    # The booking this lead already holds, read before anything is written so the slot it
+    # is on can be compared with the one being asked for. Rescheduling is not a separate
+    # endpoint -- rebooking IS the reschedule, and always has been, since the branch picks
+    # a new slot on the same popup either way. What was missing is that nothing said so
+    # afterwards.
+    #
+    # Derived here rather than taken from the caller: a flag on the payload would let a
+    # notes edit claim to be a reschedule, and this is the field the Consultant reads to
+    # know the patient has been moved once already.
+    prior_appt = await v3_col("appointments").find_one(
+        {"lead_id": lead_id, "appt_kind": "consultation", "status": "new_appointment"},
+        {"_id": 0, "id": 1, "slot_time": 1},
+    )
+    # Only a move counts. Re-picking the same slot is how the popup is used to edit notes
+    # or hand the appointment to another expert, and calling that a reschedule would put
+    # the tag on patients who were never moved at all.
+    is_reschedule = bool(
+        payload.final_stage == "Appointment Date & Time"
+        and prior_appt
+        and prior_appt.get("slot_time")
+        and prior_appt["slot_time"] != slot_time
+    )
+
     # Someone else already holding this exact slot blocks the booking — the slot belongs
     # to whichever client took it. Re-picking the same slot for the SAME lead is fine
     # (that's a reschedule onto itself / a notes edit), so this lead is excluded.
@@ -637,6 +683,13 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     if payload.final_stage == "Appointment Date & Time":
         updates["consultation_stage"] = lead.get("consultation_stage") or (await _consultation_stage_names())[0]
         updates["head_consultation_stage"] = lead.get("head_consultation_stage") or (await _head_consultation_stage_names())[0]
+    if is_reschedule:
+        # Counted rather than merely flagged: a patient moved three times is a different
+        # conversation from one moved once, and the flag alone cannot tell them apart.
+        updates["appointment_rescheduled"] = True
+        updates["appointment_reschedule_count"] = int(lead.get("appointment_reschedule_count") or 0) + 1
+        updates["appointment_rescheduled_at"] = now_iso()
+        updates["appointment_rescheduled_from"] = prior_appt["slot_time"]
     if payload.notes and payload.notes.strip():
         existing_notes = (lead.get("notes") or "").strip()
         appended = f"[Appt {payload.appointment_date} {payload.appointment_time}] {payload.notes.strip()}"
@@ -646,9 +699,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     # The lead fields above drive the Branch Leads table; the `appointments` record below
     # is what the Calendar tab renders and what marks the expert's slot as Booked on the
     # Consultant Calendar. Both must be written or the booking is invisible to scheduling.
-    existing_appt = await v3_col("appointments").find_one(
-        {"lead_id": lead_id, "appt_kind": "consultation", "status": "new_appointment"}, {"_id": 0, "id": 1}
-    )
+    existing_appt = prior_appt
     if payload.final_stage == "Cancelled":
         # Frees the slot again for everyone else.
         await v3_col("appointments").update_many(
@@ -699,6 +750,14 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             appt_fields["ref_no"] = payload.ref_no
         if payload.share_token:
             appt_fields["share_token"] = payload.share_token
+        if is_reschedule:
+            # On the appointment as well as on the lead. The Head Physio calendar draws
+            # slots straight out of this collection and never joins back to the lead, so
+            # without this the one screen where a moved appointment matters most -- the
+            # day the expert is about to work -- could not know it had moved.
+            appt_fields["rescheduled"] = True
+            appt_fields["rescheduled_from"] = prior_appt["slot_time"]
+            appt_fields["rescheduled_at"] = now_iso()
         if existing_appt:
             # Rescheduling an existing booking — move it rather than leaving a stale row
             # holding the old slot.
@@ -709,8 +768,14 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
-        "action": "branch_appointment_scheduled",
-        "details": f"Appointment {payload.appointment_date} {payload.appointment_time} with {physio['full_name']} → {payload.final_stage}" + (f" · Notes: {payload.notes.strip()}" if payload.notes else ""),
+        "action": "branch_appointment_rescheduled" if is_reschedule else "branch_appointment_scheduled",
+        "details": (
+            (f"Appointment moved from {prior_appt['slot_time'].replace('T', ' ')} to "
+             f"{payload.appointment_date} {payload.appointment_time} with {physio['full_name']}"
+             if is_reschedule else
+             f"Appointment {payload.appointment_date} {payload.appointment_time} with {physio['full_name']} → {payload.final_stage}")
+            + (f" · Notes: {payload.notes.strip()}" if payload.notes else "")
+        ),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),

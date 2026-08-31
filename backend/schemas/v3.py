@@ -456,6 +456,23 @@ class V3LeadOut(BaseModel):
     appointment_date: Optional[str] = None
     appointment_time: Optional[str] = None
     appointment_datetime: Optional[str] = None
+    # The consultation was moved off the slot it was first booked onto.
+    #
+    # A mark on the patient rather than a stage, for the same reason is_vip and
+    # needs_attention are: rescheduling does not move the lead anywhere -- it stays in
+    # Appointment, still waiting for the same consultation -- it only says something about
+    # how this one has gone. Branch Admin sets it by rebooking; the Consultant and the
+    # Head Physio calendar report it read-only, so whoever is about to see the patient
+    # knows this slot is not the first one that was arranged.
+    #
+    # Derived, never sent by a client: schedule-branch-appointment stamps it when the slot
+    # actually moves, so re-picking the same time or editing the notes is not a reschedule.
+    # `_count` is kept because the third move of one appointment is worth knowing about in
+    # a way the first is not, and `_from` names the slot it came off so the log reads.
+    appointment_rescheduled: Optional[bool] = False
+    appointment_reschedule_count: Optional[int] = 0
+    appointment_rescheduled_at: Optional[str] = None
+    appointment_rescheduled_from: Optional[str] = None
     portfolio_date: Optional[str] = None
     portfolio_time: Optional[str] = None
     portfolio_datetime: Optional[str] = None

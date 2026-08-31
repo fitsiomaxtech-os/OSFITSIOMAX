@@ -152,7 +152,11 @@ async def hp_my_calendar(branch_id: Optional[str] = None, user: V3UserOut = Depe
 
     appt_rows = await v3_col("appointments").find(
         {"doctor_id": doctor["id"], "status": "new_appointment"},
-        {"_id": 0, "slot_time": 1, "lead_name": 1, "id": 1},
+        # `rescheduled` rides along so the grid can say this hour is not the one the
+        # patient was first given. Read off the appointment rather than joined back to the
+        # lead: this endpoint never loads leads, and the appointment is stamped with it at
+        # the moment it is moved — see v3_schedule_branch_appointment.
+        {"_id": 0, "slot_time": 1, "lead_name": 1, "id": 1, "rescheduled": 1, "rescheduled_from": 1},
     ).to_list(1000)
     for row in appt_rows:
         # Written second on purpose. If a slot somehow holds both, the consultation is the

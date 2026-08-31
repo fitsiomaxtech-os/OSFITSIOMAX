@@ -9,7 +9,7 @@ import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { LeadDocuments } from "@/components/LeadDocuments";
 import { ProgressionTab } from "@/components/ProgressionTab";
-import { LeadMarks } from "@/components/ui/lead-marks";
+import { LeadMarks, RescheduledTag } from "@/components/ui/lead-marks";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
@@ -3666,7 +3666,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       ) : (
                         <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>
                       )}
-                      {l.name || "—"}<LeadMarks lead={l} className="ml-1.5" />
+                      {l.name || "—"}<LeadMarks lead={l} className="ml-1.5" /><RescheduledTag lead={l} className="ml-1.5" />
                     </p>
                     <p className="truncate text-xs text-slate-500">{l.phone || "—"}</p>
                   </div>
@@ -3773,7 +3773,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       )}
                     </td>
                     <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>
-                      <span className="block truncate">{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" /></span>
+                      <span className="block truncate">{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" /><RescheduledTag lead={l} className="ml-1.5" /></span>
                       {/* What they are going away with, under the name. Reading it meant
                           opening every row: the Stage column says where the paperwork has
                           got to, not what was decided, and those are different questions.

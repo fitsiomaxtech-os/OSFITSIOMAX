@@ -24,6 +24,7 @@ import { toast } from "@/components/ui/sonner";
 import { ConsultationsBoard, leadPlanParts, PlanLine } from "@/components/ConsultationsBoard";
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
 import { WeekStrip, todayIso } from "@/components/WeekStrip";
+import { RescheduledTag } from "@/components/ui/lead-marks";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   getHPMyCalendar,
@@ -153,6 +154,13 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
         // A review carries no decision fields of its own, so only a consult entry ever
         // has a plan -- the group below reads whichever of its entries has one.
         plan: leadPlanParts(l),
+        // Named exactly as the lead names them so the row can be handed straight to
+        // RescheduledTag without a second shape to translate. Only a consultation is ever
+        // rescheduled -- a review is placed on a day, not moved off a slot -- so the
+        // review rows below carry nothing.
+        appointment_rescheduled: !!l.appointment_rescheduled,
+        appointment_reschedule_count: l.appointment_reschedule_count || 0,
+        appointment_rescheduled_from: l.appointment_rescheduled_from || "",
       };
     }),
     ...reviewRows.filter((r) => matches(r.lead_name, r.phone, r.patient_number)).map((r) => ({
@@ -233,6 +241,14 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       // patient number and another not, and the row should show it either way.
       g.patientNo = g.patientNo || r.patientNo;
       g.phone = g.phone || r.phone;
+      // One rescheduled entry marks the patient. Grouping merges a consultation with the
+      // reviews sitting beside it, and the reviews carry no mark at all -- taking the last
+      // entry's value would blank a consultation that had genuinely been moved.
+      if (r.appointment_rescheduled) {
+        g.appointment_rescheduled = true;
+        g.appointment_reschedule_count = Math.max(g.appointment_reschedule_count || 0, r.appointment_reschedule_count || 1);
+        g.appointment_rescheduled_from = g.appointment_rescheduled_from || r.appointment_rescheduled_from;
+      }
       // Only the consult entry carries a plan; a review entry's is always empty and
       // must not overwrite one the consult entry already gave the group.
       g.plan = (g.plan && g.plan.length) ? g.plan : r.plan;
@@ -521,6 +537,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-slate-800">
                           <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{g.name}
+                          <RescheduledTag lead={g} className="ml-1.5" compact />
                           {g.entries.length > 1 && (
                             <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">×{g.entries.length}</span>
                           )}
@@ -573,6 +590,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                         <td className="px-4 py-3 text-left text-slate-400">{i + 1}</td>
                         <td className="px-4 py-3 text-left font-medium text-slate-800">
                           {g.name}
+                          <RescheduledTag lead={g} className="ml-1.5" />
                           {/* The count sits on the name because that is the thing that
                               used to be printed twice — it reads as "this patient, twice"
                               rather than as a second patient. */}
@@ -984,6 +1002,18 @@ function DaySlots({ date, slots, booked, onBack }) {
                 </p>
                 <p className="text-[10px]">{booking ? booking.lead_name : "Available"}</p>
                 {booking && <p className="text-[9px] font-bold uppercase tracking-wider opacity-70">{meta.label}</p>}
+                {/* The hour in front of the consultant is not the hour this patient was
+                    first given. Worth saying on the calendar and not only on the list:
+                    this is the screen read on the morning of the appointment. */}
+                {booking?.rescheduled && (
+                  <p
+                    className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700"
+                    title={booking.rescheduled_from ? `Moved from ${String(booking.rescheduled_from).replace("T", " ")}` : "Rescheduled"}
+                    data-testid={`hp-calendar-slot-rescheduled-${slot}`}
+                  >
+                    Rescheduled
+                  </p>
+                )}
               </div>
             );
           })}

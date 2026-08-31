@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   CheckCircle2,
@@ -45,6 +45,7 @@ import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { QuickDateFilterBar, intersectDateFilters } from "@/components/QuickDateFilterBar";
 import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
+import { RescheduledTag } from "@/components/ui/lead-marks";
 import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
 import {
   scheduleBranchAppointment,
@@ -82,6 +83,17 @@ import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 import { isCourseComplete } from "@/lib/leadStage";
+
+// Branch (sales) stages this file has to name out loud, kept here rather than spelled at
+// each site. They are the DB's own strings and the backend's constants.py holds the same
+// three -- a rename in Pipeline Stage Management breaks the pair together, which is at
+// least visible, where two spellings drifting apart is not.
+//
+// APPOINTMENT_STAGE reads "Appointment" on screen; the long form is the stored value.
+// See STAGE_DISPLAY_LABELS in ui/stage-tab.
+const APPOINTMENT_STAGE = "Appointment Date & Time";
+const BRANCH_RNR_STAGE = "RNR";
+const BRANCH_CANCELLED_STAGE = "Cancelled";
 
 // ---- Appointment confirmation -------------------------------------------------------
 // What the client walks away with. Built as its own document so it can be opened, printed
@@ -1364,7 +1376,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <span className="truncate font-semibold text-slate-900">{lead.name}</span>
+                          <span className="truncate font-semibold text-slate-900">{lead.name}<RescheduledTag lead={lead} className="ml-1.5" compact /></span>
                           <span
                             className="shrink-0 rounded-[5px] border px-2 py-0.5 text-[10px] font-medium"
                             style={hex ? { background: `${hex}14`, color: hex, border: `1px solid ${hex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
@@ -1548,6 +1560,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                                   The mobile card above already gave the name its own weight. */}
                               <span className="block truncate font-semibold text-slate-900" title={lead.name}>{lead.name}</span>
                               {lead.patient_number && <span className="block truncate font-mono text-[10px] text-slate-400" title={lead.patient_number}>{lead.patient_number}</span>}
+                              <RescheduledTag lead={lead} className="mt-0.5" />
                             </div>
                             {/* The two marks, after the name so they read as something said
                                 about this patient rather than as part of their identity.
@@ -1832,6 +1845,18 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // branch_stage and consultation_stage, with shared names (e.g. "Follow Up") kept to a
   // single pill backed by the sales-side field.
   const pipelineStages = [...entryStages, ...consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name))];
+  // A lead whose appointment is booked and not yet consulted. From here the branch has
+  // four things it can do, and none of them is moving the patient forward: forward is the
+  // consultation happening, which the Consultant drives from their own board.
+  //
+  // So the rest of the pipeline is drawn but not pressable. Hidden would read as a
+  // shorter pipeline rather than as a stage with few exits, and the card is the one place
+  // the whole journey is laid out -- a Branch Admin looking at it is often checking where
+  // a patient is going next, not moving them.
+  const inAppointmentStage = lead.branch_stage === APPOINTMENT_STAGE;
+  // The three real stages reachable from Appointment. Reschedule is the fourth exit and is
+  // not in here, because it is not a stage at all -- see the pill itself.
+  const APPOINTMENT_EXITS = [BRANCH_RNR_STAGE, "Follow Up", BRANCH_CANCELLED_STAGE];
   // `!!name` guards the matchesBranchStage call below: a lead with no consultation_stage
   // has not been handed over, and an undefined name is in neither pipelines' stage list.
   const isConsultationOnlyStage = (name) => !!name && !stages.some((s) => s.name === name);
@@ -1840,6 +1865,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   const [activityLog, setActivityLog] = useState([]);
 
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration } | null
+  // Asked before the lead is cancelled off the Appointment stage. A boolean rather than a
+  // draft: there is nothing to fill in, only something to be sure about.
+  const [cancelDraft, setCancelDraft] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   // Handing a booked appointment to a different CONSULTANT without moving it.
   //
   // The appointment dialog can already do this, but only the long way round: picking an
@@ -1922,7 +1951,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
         appointment_date: handover.date,
         appointment_time: handover.time,
         physio_id: doc.id,
-        final_stage: "Appointment Date & Time",
+        final_stage: APPOINTMENT_STAGE,
         ...(handover.duration ? { duration: handover.duration } : {}),
       });
       toast.success(`${handover.time} moved to ${doc.full_name}`);
@@ -2025,13 +2054,18 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     if (activeTab === "rnr") { loadActivity(); }
   }, [activeTab, lead.id]);
 
+  // Reports whether it actually moved. The toast is still raised here -- every caller
+  // wants it -- but a caller holding a confirmation dialog open needs to know not to
+  // dismiss it over a move the server refused.
   const moveStage = async (stage) => {
     try {
       await moveBranchStage(lead.id, { branch_stage: stage });
       toast.success(`Moved to ${stage}`);
       onMoved && onMoved(stage); // closes immediately; parent refreshes the list itself
+      return true;
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
+      return false;
     }
   };
 
@@ -2123,7 +2157,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // writes it (ensure_rnr_stage). Unlike Follow Up it is not matched loosely: RNR is an
   // initialism, and a loose test for three letters catches stage names that merely contain
   // them.
-  const atRnrStage = lead.branch_stage === "RNR";
+  const atRnrStage = lead.branch_stage === BRANCH_RNR_STAGE;
   // Drawn for a lead that has been called and not answered even after it has moved on:
   // the attempts are the reason it sits where it does, and they do not stop being true.
   const showRnrCard = atRnrStage || rnrCount > 0;
@@ -2413,10 +2447,21 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     // entered that pipeline (schedule-branch-appointment seeds
                     // consultation_stage the first time) — shown, but not yet clickable.
                     const notYetReached = consultationOnly && !lead.consultation_stage;
+                    // Everything that is not one of Appointment's four exits, while the
+                    // lead is sitting on Appointment. Drawn, and deliberately dead.
+                    const blockedFromAppointment = inAppointmentStage && !isActive && !APPOINTMENT_EXITS.includes(stage);
                     const tint = s.color || "#64748b";
                     const handleClick = () => {
-                      if (isMirror) return;
-                      if (stage === "Appointment Date & Time") {
+                      if (isMirror || blockedFromAppointment) return;
+                      // Cancelling is not a move like the others: it puts the expert's slot
+                      // back on the calendar, and the lead stops here. Asked before, not
+                      // reported after — the pill sits one press from Follow Up and there
+                      // is nothing on this card that undoes it.
+                      if (stage === BRANCH_CANCELLED_STAGE) {
+                        setCancelDraft(true);
+                        return;
+                      }
+                      if (stage === APPOINTMENT_STAGE) {
                         setApptDraft({
                           appointment_date: lead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
                           // Left blank on purpose — the time has to be picked from the
@@ -2426,7 +2471,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                           physio_id: lead.assigned_physio_id || "",
                           notes: "",
                           duration: null,
-                          final_stage: "Appointment Date & Time",
+                          final_stage: APPOINTMENT_STAGE,
                         });
                         return;
                       }
@@ -2445,17 +2490,49 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       moveStage(stage);
                     };
                     return (
+                      <Fragment key={s.id}>
                       <button
-                        key={s.id}
                         type="button"
-                        disabled={isActive || notYetReached || isMirror}
+                        disabled={isActive || notYetReached || isMirror || blockedFromAppointment}
                         onClick={handleClick}
-                        className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-90"
+                        title={blockedFromAppointment ? `${stageDisplayLabel(stage)} is not reachable from Appointment — the consultation moves the patient on from here` : undefined}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed ${blockedFromAppointment ? "disabled:opacity-40" : "disabled:opacity-90"}`}
                         style={isActive ? { background: tint, color: "#ffffff" } : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }}
                         data-testid={`branch-stage-btn-${stage}`}
                       >
                         {stageDisplayLabel(stage)}
                       </button>
+                      {/* Reschedule rides beside Appointment rather than being a stage of
+                          its own. Nothing about the patient changes when a booking moves —
+                          they are still in Appointment, still waiting for the same
+                          consultation — so a stage would have been a place the lead sat
+                          until somebody remembered to move it back.
+
+                          It opens the same booking popup Appointment does, prefilled with
+                          the slot currently held. The backend treats a rebooking onto a
+                          different slot as the reschedule and stamps the tag itself; there
+                          is no separate endpoint and nothing here says which it was. */}
+                      {stage === APPOINTMENT_STAGE && inAppointmentStage && (
+                        <button
+                          type="button"
+                          onClick={() => setApptDraft({
+                            appointment_date: lead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+                            // Blank, like the first booking: the new time has to come off
+                            // the expert's published slots, and carrying the old one over
+                            // would offer back the very slot being moved away from.
+                            appointment_time: "",
+                            physio_id: lead.assigned_physio_id || "",
+                            notes: "",
+                            duration: null,
+                            final_stage: APPOINTMENT_STAGE,
+                          })}
+                          className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition-all hover:bg-amber-100 hover:shadow-md"
+                          data-testid="branch-stage-btn-Reschedule"
+                        >
+                          Reschedule
+                        </button>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </div>
@@ -3063,6 +3140,58 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
         </div>
       )}
 
+
+      {/* Cancelling off Appointment. Says what will happen rather than "Are you sure?",
+          which asks a question whose answer depends on knowing what the button does: the
+          slot goes back on the expert's calendar, and Cancelled is the end of this
+          pipeline — nothing on this card moves a lead out of it again. */}
+      {cancelDraft && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) setCancelDraft(false); }}>
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="branch-cancel-confirm">
+            <div className="border-b p-5">
+              <h3 className="text-base font-semibold text-slate-800">Cancel this appointment?</h3>
+              <p className="text-[10px] text-slate-400">{lead.name}{lead.phone ? ` · ${lead.phone}` : ""}</p>
+            </div>
+            <div className="space-y-3 p-5">
+              <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-[11px] text-rose-800">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {apptSlotLabel(lead)
+                    ? <>The {apptSlotLabel(lead)} slot{lead.assigned_physio_name ? ` with ${lead.assigned_physio_name}` : ""} goes back on the calendar for someone else to take. </>
+                    : <>Any slot this lead is holding goes back on the calendar. </>}
+                  {lead.name} moves to Cancelled, which is the end of the Branch pipeline.
+                </span>
+              </div>
+              {/* Rebooking is the other door, and it is one press away on the same card.
+                  Said here because a Branch Admin reaching for Cancel because the patient
+                  cannot make Tuesday wants Reschedule, and finding that out afterwards
+                  costs them the slot. */}
+              <p className="text-[11px] text-slate-500">
+                If the patient only needs a different time, close this and press <span className="font-semibold text-amber-700">Reschedule</span> instead — that keeps the lead where it is.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t p-4">
+              <Button variant="outline" size="sm" onClick={() => setCancelDraft(false)} data-testid="branch-cancel-confirm-back">Keep it</Button>
+              <Button
+                size="sm"
+                disabled={cancelling}
+                className="bg-rose-600 text-white hover:bg-rose-700"
+                onClick={async () => {
+                  setCancelling(true);
+                  // Stays open if the move was refused, so the reason is read beside the
+                  // button that caused it rather than over a card that has just closed.
+                  const moved = await moveStage(BRANCH_CANCELLED_STAGE);
+                  setCancelling(false);
+                  if (moved) setCancelDraft(false);
+                }}
+                data-testid="branch-cancel-confirm-submit"
+              >
+                {cancelling ? "Cancelling..." : "Cancel appointment"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Appointment confirmation — the sheet the client is given. Opening it as a PDF,
           sharing it or saving it all render the exact same document. */}
