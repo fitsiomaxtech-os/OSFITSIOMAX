@@ -1356,7 +1356,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <span className="truncate font-semibold text-slate-800">{lead.name}</span>
+                          <span className="truncate font-semibold text-slate-900">{lead.name}</span>
                           <span
                             className="shrink-0 rounded-[5px] border px-2 py-0.5 text-[10px] font-medium"
                             style={hex ? { background: `${hex}14`, color: hex, border: `1px solid ${hex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
@@ -1532,7 +1532,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                               {lead.name?.charAt(0)?.toUpperCase() || "?"}
                             </div>
                             <div className="min-w-0">
-                              <span className="block truncate font-medium text-slate-800" title={lead.name}>{lead.name}</span>
+                              {/* The row's headline, so it carries the heaviest and darkest
+                                  text in the row. As font-medium/slate-800 it sat half a step
+                                  from the phone beside it and no heavier than the appointment
+                                  two columns over, which left the one thing this list is
+                                  scanned for competing with the columns either side of it.
+                                  The mobile card above already gave the name its own weight. */}
+                              <span className="block truncate font-semibold text-slate-900" title={lead.name}>{lead.name}</span>
                               {lead.patient_number && <span className="block truncate font-mono text-[10px] text-slate-400" title={lead.patient_number}>{lead.patient_number}</span>}
                             </div>
                             {/* The two marks, after the name so they read as something said
