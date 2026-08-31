@@ -1166,6 +1166,34 @@ const treatmentFeeStateOf = (l) => {
   if (l.treatment_fee_paid != null) return { kind: "paid", mode: l.treatment_fee_payment_mode || "" };
   return { kind: "due", amount: l.session_package_price };
 };
+
+/**
+ * Where one lead's Consultation Fee stands, read off the lead alone — the same three
+ * answers treatmentFeeStateOf gives, for the fee the row button beside it collects.
+ *
+ * No `none` arm, unlike the treatment one: every patient on this board was booked to be
+ * seen, so the consultation fee is due from all of them. There is nobody to show a dash to.
+ *
+ * A schedule with an unpaid row beats `package_paid`, which a short collection sets to the
+ * amount that was actually taken — read on its own it would tick a patient off as settled
+ * with the balance still owed.
+ */
+const consultationFeeStateOf = (l) => {
+  const rows = l.package_payment_details?.installments || [];
+  const nextIdx = rows.findIndex((i) => !i.paid);
+  if (nextIdx >= 0) {
+    const next = rows[nextIdx];
+    return {
+      kind: "balance",
+      nextIdx,
+      due: next?.due_date || "",
+      balance: round2(rows.filter((i) => !i.paid).reduce((sum, i) => sum + (i.amount || 0), 0)),
+      overdue: !!next?.due_date && next.due_date < new Date().toISOString().slice(0, 10),
+    };
+  }
+  if (l.package_paid != null) return { kind: "paid", mode: l.package_payment_mode || "" };
+  return { kind: "due", amount: l.package_price };
+};
 // Patient carries two lines now — the name, and what the consultation decided under it —
 // so it is the widest column rather than one of the middle ones. The room comes from Email,
 // which was thirteen per cent showing "dinezramyasri.008@g..." on every row: an address cut
@@ -1176,6 +1204,15 @@ const treatmentFeeStateOf = (l) => {
 const COLS_PLAIN = {
   sno: "w-[6%]", patient: "w-[24%]", appt: "w-[15%]", expert: "w-[17%]", stage: "w-[18%]",
   phone: "w-[12%]", pno: "w-[8%]",
+};
+
+// Every stage but Fee Collected ends its rows with a Consultation Fee action, so the plain
+// table needs its own set too — the seven reporting columns each give up a point or two to
+// pay for it, and the table widens at its min-width so nothing is squeezed on a laptop.
+// Must total 100, same as the other three.
+const COLS_PLAIN_WITH_ACTION = {
+  sno: "w-[5%]", patient: "w-[21%]", appt: "w-[13%]", expert: "w-[15%]", stage: "w-[16%]",
+  phone: "w-[11%]", pno: "w-[7%]", action: "w-[12%]",
 };
 
 // The one shape every stage panel in the lead card takes: a header band naming what is on
@@ -1297,8 +1334,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null — filters by appointment date
   const [search, setSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
-  // A Treatment Fee a row button asked for, held across the draft reset that selecting its
-  // patient triggers. See openRowTreatmentFee.
+  // A fee a row button asked for — `{ id, fee }` — held across the draft reset that
+  // selecting its patient triggers. Carries the fee as well as the patient now that two
+  // columns can park a request. See openRowTreatmentFee / openRowConsultationFee.
   const pendingRowFeeRef = useRef(null);
   const [detailTab, setDetailTab] = useState("overview");
   const [timelineRemarks, setTimelineRemarks] = useState([]);
@@ -1823,7 +1861,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // Consultant tab only: on Physio the treatment fee is already the column being read, and
   // on Rehab or Diet a fourth desk's action is a button about somebody else's money.
   const showTreatmentAction = showDiscountColumn && activeFee.key === "consultation" && !isConsultant;
-  const cols = showTreatmentAction ? COLS_WITH_ACTION : showDiscountColumn ? COLS_WITH_DISCOUNT : COLS_PLAIN;
+
+  // The Consultation Fee, collected from the row it is owed on — the same shortcut the
+  // Treatment Fee button above is, for the fee that comes first.
+  //
+  // Taking it meant opening each patient in turn to reach the Fee Collected card the popup
+  // already lives on, on a list where every row is somebody who owes it. The button at the
+  // end of the row is that card's button, on the row, opening the same popup.
+  //
+  // Off on Fee Collected, which is the one stage where it would say nothing: that list is
+  // filtered to patients whose fee is already in, and the amount, the item and the mode are
+  // three columns of it. The Treatment Fee action owns the end of the row there instead.
+  //
+  // Off for the Consultant too. Collecting is the Branch Admin's, and the Head Physio's
+  // board tracks its own pipeline rather than the branch's money.
+  const showConsultationAction = !showDiscountColumn && !isConsultant;
+  const cols = showTreatmentAction
+    ? COLS_WITH_ACTION
+    : showDiscountColumn
+      ? COLS_WITH_DISCOUNT
+      : showConsultationAction
+        ? COLS_PLAIN_WITH_ACTION
+        : COLS_PLAIN;
 
   // How many patients are behind each fee, counted off the stage's own rows. Carried on the
   // tab itself as a badge, so that Rehab holds eight and Diet five is readable from the row
@@ -2229,20 +2288,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // if a different amount was actually collected. If the Head Physio's decision was
   // "Consultation + Treatment" and the Treatment Fee hasn't been paid yet, its draft
   // opens alongside this one so both fees are collected together in one popup.
-  const openCollectFeeDraft = () => {
-    const existing = selectedLead.package_payment_details?.installments;
+  //
+  // `leadArg` is for the Consultation Fee button on the table's rows, which opens this on a
+  // patient who is not selected yet: `setSelectedLead` has not landed by the time this runs,
+  // so the row hands over the lead it already holds rather than reading a `selectedLead`
+  // that is still the last one — or nobody. Guarded on `.id` because the Fee Collected
+  // panel passes this straight to onClick, where the argument is a click event.
+  const openCollectFeeDraft = (leadArg) => {
+    const lead = leadArg?.id ? leadArg : selectedLead;
+    const existing = lead.package_payment_details?.installments;
     setCollectFeeDraft({
-      payment_mode: selectedLead.package_payment_mode || "cash",
-      amount: selectedLead.package_paid ?? selectedLead.package_price ?? "",
+      payment_mode: lead.package_payment_mode || "cash",
+      amount: lead.package_paid ?? lead.package_price ?? "",
       // Typed by hand or not at all -- see FeeAmountEntry. Reloaded from what was
       // actually agreed and recorded, never worked back out of what was collected.
-      discount: selectedLead.package_payment_details?.discount_amount ?? "",
+      discount: lead.package_payment_details?.discount_amount ?? "",
       // The date already promised for a balance still outstanding, so correcting a
       // collection doesn't make somebody re-agree a date the patient was given.
       balance_due_date: (existing || []).find((i) => !i.paid)?.due_date || "",
     });
-    if (selectedLead.consultation_decision === "consultation_treatment" && selectedLead.treatment_fee_paid == null) {
-      openTreatmentFeeDraft();
+    if (lead.consultation_decision === "consultation_treatment" && lead.treatment_fee_paid == null) {
+      openTreatmentFeeDraft(lead);
     }
   };
 
@@ -2757,25 +2823,43 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // patient, and which runs after this click. A popup opened here and now would be wiped
   // between the click and the paint. So the request is parked on a ref, which that reset
   // cannot reach, and the effect below picks it up once the patient is actually selected.
-  const openRowTreatmentFee = (lead) => {
+  const openRowTreatmentFee = (lead) => openRowFee(lead, "treatment");
+
+  // Opens whichever Consultation Fee popup a lead is owed: the installment one for a
+  // part-paid fee, the full Collect draft for everything else. The same fork the popup's own
+  // Consultation Fee card makes, taking the lead as an argument so a row can make it too.
+  const openConsultationFeeFor = (lead) => {
+    const state = consultationFeeStateOf(lead);
+    if (state.kind === "balance") openPartialCollectPopup(state.nextIdx, "consultation", lead);
+    else openCollectFeeDraft(lead);
+  };
+
+  // What the table's Consultation Fee row button does — same handoff as the Treatment Fee
+  // one beside it.
+  const openRowConsultationFee = (lead) => openRowFee(lead, "consultation");
+
+  function openRowFee(lead, fee) {
     setDetailTab("overview");
     // Already open on this patient: the id does not change, so neither the reset nor the
     // effect will fire and there is nothing to park.
     if (selectedLead?.id === lead.id) {
-      openTreatmentFeeFor(lead);
+      if (fee === "consultation") openConsultationFeeFor(lead);
+      else openTreatmentFeeFor(lead);
       return;
     }
-    pendingRowFeeRef.current = lead.id;
+    pendingRowFeeRef.current = { id: lead.id, fee };
     setSelectedLead(lead);
-  };
+  }
 
   // Declared here rather than up with the reset it works around, because effects run in the
   // order they are called and this one has to run second — after the reset has cleared the
   // drafts, or it would open a popup for the reset to close.
   useEffect(() => {
-    if (!selectedLead?.id || pendingRowFeeRef.current !== selectedLead.id) return;
+    const pending = pendingRowFeeRef.current;
+    if (!selectedLead?.id || pending?.id !== selectedLead.id) return;
     pendingRowFeeRef.current = null;
-    openTreatmentFeeFor(selectedLead);
+    if (pending.fee === "consultation") openConsultationFeeFor(selectedLead);
+    else openTreatmentFeeFor(selectedLead);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLead?.id]);
 
@@ -3842,7 +3926,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           {/* Fee Collected is the stage where a negotiated Consultation Fee has become a
               fact, so the discount and total columns are added there alone — on every
               earlier stage there is no payment yet and they would be a row of dashes. */}
-          <table className={`w-full table-fixed text-sm ${showTreatmentAction ? "min-w-[1000px]" : showDiscountColumn ? "min-w-[900px]" : "min-w-[700px]"}`}>
+          <table className={`w-full table-fixed text-sm ${showTreatmentAction ? "min-w-[1000px]" : showDiscountColumn ? "min-w-[900px]" : showConsultationAction ? "min-w-[800px]" : "min-w-[700px]"}`}>
             <thead className="sticky top-0 z-10 bg-slate-500 text-xs uppercase text-white">
               <tr>
                 <th className={`${cols.sno} px-3 py-2 text-left align-middle`}>S.No</th>
@@ -3868,6 +3952,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 {/* The one column on this table that does something rather than reports
                     something, so it sits at the end where a row is finished being read. */}
                 {showTreatmentAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>Treatment Fee</th>}
+                {showConsultationAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>Consultation Fee</th>}
               </tr>
             </thead>
             <tbody>
@@ -4025,11 +4110,64 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </td>
                       );
                     })()}
+                    {showConsultationAction && (() => {
+                      const c = consultationFeeStateOf(l);
+                      return (
+                        // stopPropagation on the cell, not just the button: the whole row
+                        // opens the patient, and a click that lands a pixel beside the
+                        // button would otherwise open the popup this button is a shortcut
+                        // past. Nothing in here wants the row's own click.
+                        <td
+                          className="whitespace-nowrap px-3 py-3 align-middle text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                          data-testid={`cons-row-consultation-${l.id}`}
+                        >
+                          {c.kind === "paid" ? (
+                            // Says so and stops there, exactly as the popup's card does. A
+                            // fee that is in is not a thing to press; correcting one is done
+                            // from the patient, where the figure it is correcting is on screen.
+                            <>
+                              <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                                <CheckCircle2 className="h-3 w-3" /> Paid
+                              </span>
+                              {c.mode && (
+                                <span className="mt-1 block text-[10px] uppercase tracking-wide text-slate-300">{c.mode}</span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                className={`w-full ${c.kind === "balance"
+                                  ? "bg-amber-500 text-white hover:bg-amber-600"
+                                  : "bg-sky-600 text-white hover:bg-sky-700"} shadow-sm ${ACT_BTN}`}
+                                onClick={() => openRowConsultationFee(l)}
+                                data-testid={`cons-row-consultation-collect-${l.id}`}
+                              >
+                                <IndianRupee className="mr-1 h-3.5 w-3.5 shrink-0" />
+                                {c.kind === "balance" ? "Collect Balance" : "Collect"}
+                              </Button>
+                              {/* The figure the button is about, under it. A part-paid fee
+                                  is the one case where "Collect" alone is a question rather
+                                  than an instruction — how much, and by when. */}
+                              <span
+                                className={`mt-1 block truncate text-[10px] font-medium ${c.kind === "balance" && c.overdue ? "text-rose-600" : c.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
+                                title={c.kind === "balance" && c.due ? `Due ${c.due}` : undefined}
+                              >
+                                {c.kind === "balance"
+                                  ? `${rupees(c.balance)} due${c.overdue ? " · overdue" : ""}`
+                                  : c.amount != null ? rupees(c.amount) : "—"}
+                              </span>
+                            </>
+                          )}
+                        </td>
+                      );
+                    })()}
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={showTreatmentAction ? 11 : showDiscountColumn ? 10 : 7} className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan={showTreatmentAction ? 11 : showDiscountColumn ? 10 : showConsultationAction ? 8 : 7} className="px-4 py-8 text-center text-sm text-slate-400">
                   {loading
                     ? "Loading…"
                     // An empty tab is not an empty stage: saying "no leads in consultations"
