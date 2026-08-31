@@ -11,7 +11,7 @@ from database import v3_col
 from utils import now_iso, active_doctor_query
 from deps import (
     v3_require_roles, v3_current_user, is_head_physio_role, consultants_serving_branch,
-    online_arm_practice, vertical_in_arm, lead_as_read_by,
+    online_arm_practice, vertical_in_arm,
 )
 import lead_control
 from constants import (
@@ -368,7 +368,7 @@ async def _stamp_session_progress(leads: list) -> None:
         lead["completed_sessions"] = found["done"]
 
 
-async def _board_payload(leads: list, branch_id: Optional[str], role: str = "") -> dict:
+async def _board_payload(leads: list, branch_id: Optional[str]) -> dict:
     """The Branch Leads response, from a list of leads somebody else has already chosen.
 
     Split from the endpoint because there are two ways in now and they differ only in that
@@ -410,8 +410,7 @@ async def _board_payload(leads: list, branch_id: Optional[str], role: str = "") 
     lead_list = []
     for lead in leads:
         try:
-            # `role` decides whether the ad record rides along — see lead_as_read_by.
-            lead_list.append(V3LeadOut(**lead_as_read_by(lead, role)))
+            lead_list.append(V3LeadOut(**lead))
         except Exception as e:
             logging.getLogger(__name__).error(f"branch-board: skipping unparseable lead {lead.get('id')}: {e}")
     # The board tells the client which desk owns this branch's leads, so the Pre Sales
@@ -430,10 +429,10 @@ async def _board_payload(leads: list, branch_id: Optional[str], role: str = "") 
 
 
 @router.get("/branch-board/{branch_id}")
-async def v3_branch_board_new(branch_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
+async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     try:
         leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
-        return await _board_payload(leads, branch_id, user.role)
+        return await _board_payload(leads, branch_id)
     except HTTPException:
         raise
     except Exception as e:
@@ -463,7 +462,7 @@ async def v3_arm_board(user: V3UserOut = Depends(v3_current_user)):
             {"vertical": {"$regex": "online", "$options": "i"}}, {"_id": 0},
         ).sort("updated_at", -1).to_list(20000)
         leads = [r for r in rows if vertical_in_arm(r.get("vertical"), practice)]
-        return await _board_payload(leads, None, user.role)
+        return await _board_payload(leads, None)
     except HTTPException:
         raise
     except Exception as e:
@@ -1038,7 +1037,7 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
         lead_list = []
         for ld in leads_docs:
             try:
-                lead_list.append(V3LeadOut(**lead_as_read_by(ld, user.role)).model_dump())
+                lead_list.append(V3LeadOut(**ld).model_dump())
             except Exception as e:
                 logging.getLogger(__name__).error(f"consultations-board: skipping unparseable lead {ld.get('id')}: {e}")
         return {"leads": lead_list, "stage_counts": stage_counts, "stages": stage_names}
