@@ -286,11 +286,6 @@ const branchStatusInfo = (lead, branches) => {
   return { branchName, status, statusColor };
 };
 
-// Same helper BranchManagementBoard.jsx and BranchFormDialogV2.jsx already carry â€”
-// every default vertical is named "online_.../offline_...", so reading the prefix off
-// the branch record itself can never disagree with how those two screens group branches.
-const isOnlineVertical = (v) => String(v || "").startsWith("online_");
-
 // Marketing Head's KPI row â€” a fixed funnel rather than the live Pre-Sales stage list,
 // since two of these span more than one field. "Branch Admin Appointment" counts
 // a branch board's own appointment stage regardless of how the lead got there: "New
@@ -367,22 +362,6 @@ const MARKETING_HEAD_FUNNEL = [
     match: (l) => l.stage === "Lost" || l.branch_stage === "Cancelled" || l.consultation_stage === "Cancel",
   },
 ];
-
-// Super Admin only: All | Offline | Online, then one pill per branch in that group â€”
-// the same split Branches & Verticals uses, so a branch's grouping reads the same way
-// everywhere. Picking a pill sets sourceFilter, the board's existing branch scope.
-const PreSalesGroupPill = ({ active, onClick, children, testid }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-      active ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-    }`}
-    data-testid={testid}
-  >
-    {children}
-  </button>
-);
 
 /**
  * Leads / Analytics â€” the board's two pages, not two of its filters.
@@ -599,15 +578,14 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handle
 
 /** A specific branch wins outright; otherwise the group's own branches summed (Offline/
  *  Online), or the bucket's grand total for All. Same shape as Overview's own helper. */
-const presalesAnalyticsValueFor = (bucket, branchId, group) => {
+const presalesAnalyticsValueFor = (bucket, branchId) => {
   if (!bucket) return 0;
   const branches = bucket.branches || [];
   if (branchId) {
     const hit = branches.find((b) => b.branch_id === branchId);
     return hit ? hit.value : 0;
   }
-  if (!group || group === "all") return bucket.total;
-  return branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).reduce((s, b) => s + b.value, 0);
+  return bucket.total;
 };
 
 /**
@@ -617,7 +595,7 @@ const presalesAnalyticsValueFor = (bucket, branchId, group) => {
  * independent, and sharing one would mean picking a date range on one silently changed
  * what the other was showing.
  */
-const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter, role }) => {
+const PreSalesAnalyticsPanel = ({ sourceFilter, role }) => {
   // Marketing Head reads a leads dashboard here instead of the seven figures: charts of
   // where leads came from and how far they got, and no money anywhere. A marketing desk
   // does not answer for revenue, and putting it on the same screen invites reading a
@@ -661,15 +639,9 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter, role }) =
 
   useEffect(() => { load(); }, [load]);
 
-  // The branch pills, resolved to the ids the leads dashboard filters on. Done here rather
-  // than server-side because the pills are what define a group, and this board owns them.
-  const branchIds = useMemo(() => {
-    if (sourceFilter) return [sourceFilter];
-    if (branchGroup !== "all") {
-      return branches.filter((b) => isOnlineVertical(b.vertical) === (branchGroup === "online")).map((b) => b.id);
-    }
-    return [];
-  }, [sourceFilter, branchGroup, branches]);
+  // The branch pill, resolved to the id the leads dashboard filters on. Empty means
+  // every branch, which is what no pill selected has always meant.
+  const branchIds = useMemo(() => (sourceFilter ? [sourceFilter] : []), [sourceFilter]);
 
   const fmt = (n) => `â‚¹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -708,7 +680,7 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter, role }) =
         // seven cards on a laptop would leave no room for the figures themselves.
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7" data-testid="presales-analytics-metrics">
           {PRESALES_ANALYTICS_METRICS.map((m) => {
-            const value = presalesAnalyticsValueFor(data?.[m.key], sourceFilter, branchGroup);
+            const value = presalesAnalyticsValueFor(data?.[m.key], sourceFilter);
             return (
               <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-3 py-3 sm:px-4 sm:py-3.5" data-testid={`presales-analytics-metric-${m.key}`}>
                 {/* Wraps rather than truncating. Seven-up leaves a card too narrow for
@@ -799,12 +771,14 @@ export const PreSalesCRM = ({
   const [loading, setLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
   const [activeTab, setActiveTab] = useState("leads"); // mobile bottom-nav only; desktop always shows Leads
-  // Super Admin, Sales Head and Marketing Head only, from here down: which branches count
-  // as one group (All/Offline/Online, same split Branches & Verticals uses), and which
-  // top-level pane is showing. Sales Head is Pre-Sales' own manager, and Marketing Head
-  // reads the same funnel from the marketing side â€” both get the same org-wide picture
-  // Super Admin's Pre Sales tab has, rather than one rep's own filtered book.
-  const [branchGroup, setBranchGroup] = useState("all");
+  // Super Admin, Sales Head and Marketing Head only, from here down: which top-level
+  // pane is showing. Sales Head is Pre-Sales' own manager, and Marketing Head reads the
+  // same funnel from the marketing side -- both get the same org-wide picture Super
+  // Admin's Pre Sales tab has, rather than one rep's own filtered book.
+  //
+  // An All/Offline/Online group filter sat here too, splitting the branch pills the way
+  // Branches & Verticals does. Removed: the pills under it already name every branch,
+  // so the group row was a second control for a scope you could already pick directly.
   const [masterViewOwn, setMasterViewOwn] = useState("leads"); // "leads" | "analytics"
   // The header's copy wins when the page supplies one; otherwise this board keeps its own.
   const headerOwnsViewTabs = typeof onMasterViewChange === "function";
@@ -826,8 +800,6 @@ export const PreSalesCRM = ({
   // and tags each row HANDLED BY, so this would read the same on Super Admin's and Sales
   // Head's â€” flipping this one flag is all it would take to give it to them too.
   const showHandledByFilter = role === "marketing_head";
-
-  const selectBranchGroup = (g) => { setBranchGroup(g); setSourceFilter(""); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -874,14 +846,6 @@ export const PreSalesCRM = ({
     // the all-branches view, so they only drop out once a specific branch is picked.
     if (sourceFilter) {
       rows = rows.filter((l) => (l.branch_id || "") === sourceFilter);
-    } else if (isSuperAdminMasterView && branchGroup !== "all") {
-      // No specific branch picked, but a group is â€” every branch in that group summed,
-      // same as leaving Offline/Online selected with no branch pill drilled into does on
-      // Overview.
-      const groupBranchIds = new Set(
-        branches.filter((b) => isOnlineVertical(b.vertical) === (branchGroup === "online")).map((b) => b.id)
-      );
-      rows = rows.filter((l) => groupBranchIds.has(l.branch_id || ""));
     }
     if (assignedUserId) {
       rows = rows.filter((l) => l.assigned_user_id === assignedUserId);
@@ -904,7 +868,7 @@ export const PreSalesCRM = ({
       });
     }
     return rows;
-  }, [leads, sourceFilter, dateFilter, isSuperAdminMasterView, branchGroup, branches, showHandledByFilter, handledByFilter, assignedUserId]);
+  }, [leads, sourceFilter, dateFilter, showHandledByFilter, handledByFilter, assignedUserId]);
 
   const stageCounts = useMemo(() => {
     const map = { All: dateSourceFiltered.length };
@@ -1027,10 +991,6 @@ export const PreSalesCRM = ({
     catch (e) { toast.error(e?.response?.data?.detail || "Move failed"); }
   };
 
-  // Branches under the selected group â€” every one under All, just the offline ones under
-  // Offline, just the online ones under Online. Super Admin only.
-  const visibleGroupBranches = branchGroup === "all" ? branches : branches.filter((b) => isOnlineVertical(b.vertical) === (branchGroup === "online"));
-
   if (PRESALES_CRM_LOCKED) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white py-24 text-center" data-testid="presales-crm-locked">
@@ -1077,15 +1037,9 @@ export const PreSalesCRM = ({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-2" data-testid="presales-branch-groups">
-            <PreSalesGroupPill active={branchGroup === "all"} onClick={() => selectBranchGroup("all")} testid="presales-branch-group-all">All</PreSalesGroupPill>
-            <PreSalesGroupPill active={branchGroup === "offline"} onClick={() => selectBranchGroup("offline")} testid="presales-branch-group-offline">Offline</PreSalesGroupPill>
-            <PreSalesGroupPill active={branchGroup === "online"} onClick={() => selectBranchGroup("online")} testid="presales-branch-group-online">Online</PreSalesGroupPill>
-          </div>
-
-          {visibleGroupBranches.length > 0 && (
+          {branches.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5" data-testid="presales-branch-pills">
-              {visibleGroupBranches.map((b) => (
+              {branches.map((b) => (
                 <PreSalesBranchPill
                   key={b.id}
                   active={sourceFilter === b.id}
@@ -1143,7 +1097,7 @@ export const PreSalesCRM = ({
       )}
 
       {masterView === "analytics" && isSuperAdminMasterView ? (
-        <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} role={role} />
+        <PreSalesAnalyticsPanel sourceFilter={sourceFilter} role={role} />
       ) : (
       <>
       {/* Toolbar */}
@@ -1416,14 +1370,9 @@ export const PreSalesCRM = ({
                   </PreSalesViewTab>
                 </div>
               )}
-              <div className="flex flex-wrap items-center gap-2" data-testid="presales-mobile-branch-groups">
-                <PreSalesGroupPill active={branchGroup === "all"} onClick={() => selectBranchGroup("all")} testid="presales-mobile-branch-group-all">All</PreSalesGroupPill>
-                <PreSalesGroupPill active={branchGroup === "offline"} onClick={() => selectBranchGroup("offline")} testid="presales-mobile-branch-group-offline">Offline</PreSalesGroupPill>
-                <PreSalesGroupPill active={branchGroup === "online"} onClick={() => selectBranchGroup("online")} testid="presales-mobile-branch-group-online">Online</PreSalesGroupPill>
-              </div>
-              {visibleGroupBranches.length > 0 && (
+              {branches.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5" data-testid="presales-mobile-branch-pills">
-                  {visibleGroupBranches.map((b) => (
+                  {branches.map((b) => (
                     <PreSalesBranchPill
                       key={b.id}
                       active={sourceFilter === b.id}
@@ -1471,7 +1420,7 @@ export const PreSalesCRM = ({
           </div>
 
           {masterView === "analytics" && isSuperAdminMasterView ? (
-            <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} role={role} />
+            <PreSalesAnalyticsPanel sourceFilter={sourceFilter} role={role} />
           ) : (
           <>
           {/* Same range row the desk gets, above the stage bar it narrows. */}
