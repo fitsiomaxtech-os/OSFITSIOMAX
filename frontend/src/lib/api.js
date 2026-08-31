@@ -185,6 +185,11 @@ export const scheduleBranchFollowUp = async (leadId, payload) => (await api.post
 export const rescheduleBranchFollowUp = async (leadId, followupId, payload) => (await api.post(`/leads/${leadId}/branch-follow-up/${followupId}/reschedule`, payload)).data;
 export const collectFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-fee`, payload)).data;
 export const assignPhysio = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-physio`, payload)).data;
+// Branch Transfer (Super Admin > Operations > Branch). The GET answers whether this
+// patient can move at all and what moving them releases, and carries the branches they
+// can be sent to with it — the branch they are at now is already excluded server-side.
+export const branchTransferPreview = async (leadId) => (await api.get(`/leads/${leadId}/branch-transfer`)).data;
+export const branchTransfer = async (leadId, payload) => (await api.post(`/leads/${leadId}/branch-transfer`, payload)).data;
 export const scheduleBranchAppointment = async (leadId, payload) => (await api.post(`/leads/${leadId}/schedule-branch-appointment`, payload)).data;
 // The patient's own confirmation page. Server-rendered HTML rather than an SPA route:
 // chat apps fetch a shared link with a crawler that doesn't run JavaScript, and only

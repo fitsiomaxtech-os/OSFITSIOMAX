@@ -105,7 +105,11 @@ const OperationsBranchTab = ({ branches, actingUser }) => {
         )}
       </div>
       {selectedId ? (
-        <BranchAdminBoard key={selectedId} branchId={selectedId} embedded />
+        // actingUser is passed for one reason: Branch Transfer is Super Admin's alone, and
+        // the board has no other way to know who is driving it from here. Every other
+        // caller passes the person whose own board it is; this one passes the person
+        // looking at somebody else's.
+        <BranchAdminBoard key={selectedId} branchId={selectedId} embedded actingUser={actingUser} />
       ) : (
         <EmptyPrompt text="Pick a branch above to open its full board" testid="ops-branch-empty" />
       )}

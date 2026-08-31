@@ -3,6 +3,7 @@ import {
   Calendar,
   CheckCircle2,
   ArrowLeftRight,
+  Building2,
   RefreshCw,
   ClipboardCheck,
   ChevronLeft,
@@ -68,6 +69,7 @@ import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
+import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
 import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
@@ -609,7 +611,14 @@ function BulkDeleteLeadsModal({ leads, onClose, onDeleted }) {
   );
 }
 
-export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null }) => {
+// Branch Transfer is Super Admin's alone — see backend/routers/v3_branch_transfer.py for
+// why neither branch involved gets to make the decision. Read off `actingUser`, which is
+// only ever passed when somebody is driving a branch's board from outside it
+// (Operations > Branch); `currentUser` next to it is the opposite case, the person whose
+// own board this is, and must not be reused for this.
+const canTransferBranch = (user) => String(user?.role || "").trim().toLowerCase() === "super_admin";
+
+export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null, actingUser = null }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {}, stages: [] });
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
   const [loading, setLoading] = useState(false);
@@ -1344,6 +1353,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <ConsultationsBoard
               branchId={branchId}
               viewerRole="branch_admin"
+              // Separate from viewerRole, which stays "branch_admin" so the board keeps
+              // drawing the Branch Admin's own pipeline and panels. This only says whether
+              // the person looking at it may move a patient off this branch entirely.
+              canTransferBranch={canTransferBranch(actingUser)}
               // Same fact the calendars above are given: an arm with no room in it meets
               // its patients over video, so Assign Physio says which room and says when
               // one is missing.
@@ -1706,6 +1719,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           // that opened it did.
           openedFromMirror={showingMirror || atBranchOpening(selectedLead)}
           onlineArm={armScoped}
+          canTransferBranch={canTransferBranch(actingUser)}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
           onOpenConsultationStage={(stage) => {
@@ -1870,7 +1884,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 // appointment about to be confirmed. At a branch it is nothing — the consultation is held
 // in a room, the field that would set a link is not offered on that board at all, and an
 // amber panel naming a gap nobody there can fill is noise on every booking they make.
-function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage, openedFromMirror = false, onlineArm = false }) {
+function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage, openedFromMirror = false, onlineArm = false, canTransferBranch = false }) {
   // The board offers two entry stages — the mirrored Pre-Sales "Leads" pill and the branch's
   // own first stage — but a single lead only ever came in through one of them, so its
   // pipeline shows that one and drops the other. Everything from RNR onwards is shared.
@@ -1907,6 +1921,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   const [activityLog, setActivityLog] = useState([]);
 
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration } | null
+  // Branch Transfer, opened from the header. A boolean, because everything the dialog
+  // needs it fetches for itself — including whether this lead may be transferred at all,
+  // which is the server's answer and not one worth guessing at here.
+  const [transferOpen, setTransferOpen] = useState(false);
   // Asked before the lead is cancelled off the Appointment stage. A boolean rather than a
   // draft: there is nothing to fill in, only something to be sure about.
   const [cancelDraft, setCancelDraft] = useState(false);
@@ -2232,14 +2250,43 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                         Leads it reads Leads, and the pipeline below highlights Leads too. */}
                     {headerStageName ? stageDisplayLabel(headerStageName) : "No Stage"}
                   </span>
+                  {/* Where this patient came from. Worth a chip of its own because their
+                      Patient Number still carries the FIRST branch's code -- deliberately,
+                      it is printed on receipts already issued -- and without this the
+                      receiving branch reads a number that looks like somebody else's. */}
+                  {lead.transferred_from_branch_name && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 ring-1 ring-indigo-100" data-testid="branch-lead-transferred-chip">
+                      <Building2 className="h-3 w-3" /> from {lead.transferred_from_branch_name}
+                    </span>
+                  )}
                   {lead.consultation_fee && <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700 ring-1 ring-teal-100">Fee Rs.{lead.consultation_fee}</span>}
                   {lead.package_amount && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100">Pkg Rs.{lead.package_amount}</span>}
                 </div>
               </div>
             </div>
-            <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" data-testid="branch-lead-close">
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              {/* Header rather than a tab of its own: a transfer is a thing done TO this
+                  patient, like closing the card, not another view of them. Drawn for
+                  Super Admin only, and only where a branch is in play at all — an online
+                  arm has no branch to move anybody off. Whether THIS patient is in one of
+                  the two windows is the dialog's question, not this button's: hiding it on
+                  an ineligible patient would leave a Super Admin hunting for a control
+                  that is simply absent, where the dialog can say which stage is in the way
+                  and what to finish first. */}
+              {canTransferBranch && !onlineArm && lead.branch_id && (
+                <button
+                  onClick={() => setTransferOpen(true)}
+                  title="Transfer this patient to another branch"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                  data-testid="branch-lead-transfer-btn"
+                >
+                  <Building2 className="h-3.5 w-3.5" /> Transfer
+                </button>
+              )}
+              <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" data-testid="branch-lead-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -2745,6 +2792,17 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
           )}
         </div>
       </div>
+
+      {/* Branch Transfer. onMoved rather than onUpdate on success: the patient is at a
+          different branch now, so this card is describing somebody who is no longer on
+          the board behind it -- that handler is the one that closes and reloads. */}
+      {transferOpen && (
+        <BranchTransferDialog
+          lead={lead}
+          onClose={() => setTransferOpen(false)}
+          onDone={() => { setTransferOpen(false); onMoved?.(); }}
+        />
+      )}
 
       {/* Appointment Date & Time Popup */}
       {handover && (

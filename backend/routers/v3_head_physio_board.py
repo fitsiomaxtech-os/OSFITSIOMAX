@@ -604,11 +604,29 @@ async def hp_assign_physio_with_sessions(
     if not total_sessions:
         raise HTTPException(status_code=400, detail="This lead has no session package to schedule")
 
+    # What is still owed, not the whole package. This endpoint books days AND re-books
+    # them: only the unrun ones are cleared below, so a patient part-way through a course
+    # who is given a different physio -- by a reassignment, or by being transferred to
+    # another branch, which releases their physio along with every day that physio was
+    # holding -- was being asked for the full package again. Twelve slots for a patient
+    # owed seven, landing seventeen rows on a twelve-day course with days 1-5 in it twice.
+    #
+    # Completed is the only status that consumes a day. An absence keeps the day owed and
+    # walks it down the calendar rather than writing it off -- see physio_mark_absent.
+    days_done = await v3_col("sessions").count_documents({"lead_id": lead_id, "status": "completed"})
+    remaining = max(0, total_sessions - days_done)
+    if not remaining:
+        raise HTTPException(status_code=400, detail=f"All {total_sessions} sessions on this package have been completed")
+
     sorted_slots = sorted(set(payload.slot_times))
     if len(sorted_slots) != len(payload.slot_times):
         raise HTTPException(status_code=400, detail="Duplicate session slot times were submitted")
-    if len(sorted_slots) != total_sessions:
-        raise HTTPException(status_code=400, detail=f"Pick exactly {total_sessions} session slots (got {len(sorted_slots)})")
+    if len(sorted_slots) != remaining:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Pick exactly {remaining} session slots (got {len(sorted_slots)})"
+                    + (f" — {days_done} of {total_sessions} are already done" if days_done else "")),
+        )
 
     physio = await v3_col("doctors").find_one({"id": payload.physio_id, "profile_type": "physio"}, {"_id": 0})
     if not physio:
@@ -664,7 +682,10 @@ async def hp_assign_physio_with_sessions(
             "lead_id": lead_id,
             "lead_name": lead.get("name", "Unknown"),
             "physio_id": physio["id"],
-            "session_number": i + 1,
+            # Continues from the days already run rather than restarting at 1: on a
+            # re-book the completed rows are still there, and numbering the new ones from
+            # one gave a course two day 1s and no day 12.
+            "session_number": days_done + i + 1,
             "total_sessions": total_sessions,
             "week_number": (this_date - first_date).days // 7 + 1,
             "slot_time": slot_time,
@@ -684,7 +705,8 @@ async def hp_assign_physio_with_sessions(
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "consultation_physio_assigned",
-        "details": f"Assigned {physio['full_name']} and booked all {total_sessions} sessions",
+        "details": (f"Assigned {physio['full_name']} and booked {len(session_docs)} of {total_sessions} sessions"
+                    if days_done else f"Assigned {physio['full_name']} and booked all {total_sessions} sessions"),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now,

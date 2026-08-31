@@ -55,6 +55,17 @@ export const isCourseComplete = (lead) => {
   // whose chart had gone out sat wherever the branch last left them, reading as Follow Up
   // for good, while the Nutritionist's own board counted them finished.
   if (dietCourseComplete(lead)) return true;
+  // A course interrupted rather than run out. Transferring a patient to another branch
+  // releases the days they had not yet attended -- those were hours on the LEAVING
+  // branch's physio calendar, and leaving them booked would hold a room at a clinic the
+  // patient is not going to walk into again. So the booked-day count collapses to the
+  // completed one, and the line below would read that as a course finished on the day it
+  // was interrupted. The package they paid for says otherwise: those sessions are still
+  // owed, and the patient is sitting on Physio Assign waiting for the receiving branch to
+  // give them a physio and book the rest. Ends the moment that happens, because assigning
+  // one is what writes assigned_physio_id back.
+  if (lead.transferred_at && !lead.assigned_physio_id
+      && (lead.session_package_sessions || 0) > (lead.completed_sessions || 0)) return false;
   // Otherwise off the days themselves, rather than a stage somebody remembers to set.
   // Gated on there having been days at all: a patient with none booked has not finished a
   // course, they have not started one.

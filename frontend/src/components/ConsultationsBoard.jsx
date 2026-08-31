@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Salad, HeartPulse, Music2, Video } from "lucide-react";
+import { Activity, AlertCircle, Building2, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Salad, HeartPulse, Music2, Video } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { LeadDocuments } from "@/components/LeadDocuments";
 import { ProgressionTab } from "@/components/ProgressionTab";
 import { LeadMarks, RescheduledTag } from "@/components/ui/lead-marks";
+import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
@@ -1054,12 +1055,21 @@ const consultationDiscount = (l) => {
   return off > 0 ? { off, pct: (off / listed) * 100 } : null;
 };
 
-// The percentages below must total 100 under table-fixed. Both sets are written out
+// The percentages below must total 100 under table-fixed. All three sets are written out
 // literally because Tailwind reads the source for class names and would compile nothing
 // from a template.
 const COLS_WITH_DISCOUNT = {
   sno: "w-[4%]", patient: "w-[20%]", appt: "w-[9%]", expert: "w-[11%]", stage: "w-[12%]",
   phone: "w-[8%]", pno: "w-[6%]", collected: "w-[11%]", discount: "w-[9%]", total: "w-[10%]",
+};
+
+// The Consultant tab alone ends its rows with a Treatment Fee action, so it needs a set of
+// its own — every other column gives up a point or two to pay for it. The table widens by
+// the same amount at its min-width, so nothing is squeezed on a laptop.
+const COLS_WITH_ACTION = {
+  sno: "w-[4%]", patient: "w-[18%]", appt: "w-[8%]", expert: "w-[10%]", stage: "w-[10%]",
+  phone: "w-[7%]", pno: "w-[6%]", collected: "w-[10%]", discount: "w-[8%]", total: "w-[9%]",
+  action: "w-[10%]",
 };
 
 /**
@@ -1124,6 +1134,39 @@ const rupees = (n) => `Rs.${Math.round(Number(n) || 0).toLocaleString("en-IN")}`
 // what they came to in total. Summed off FEE_TABS so a fee added there is counted here
 // without this needing to know about it.
 const totalPaid = (l) => FEE_TABS.reduce((sum, t) => sum + t.paid(l), 0);
+
+/**
+ * Where one lead's Treatment Fee stands, read off the lead alone.
+ *
+ * The popup works this out through half a dozen values derived from `selectedLead`, none of
+ * which exist for a row: a list renders every patient at once and none of them is selected.
+ * So the Consultant tab's row button asks the lead directly — the same four answers, in the
+ * order they happen in — and the popup is left exactly as it was.
+ *
+ * `none` is the honest answer for a Consultation Only patient. There is no treatment to
+ * charge for, so that row shows a dash rather than a button quoting a price nobody agreed.
+ *
+ * A schedule with an unpaid row beats `treatment_fee_paid`, which a Partial Payment plan
+ * sets to the full price the moment the plan is made — read on its own it would tick a
+ * patient off as settled on the day they promised to pay.
+ */
+const treatmentFeeStateOf = (l) => {
+  if (l.consultation_decision !== "consultation_treatment") return { kind: "none" };
+  const rows = l.treatment_fee_payment_details?.installments || [];
+  const nextIdx = rows.findIndex((i) => !i.paid);
+  if (nextIdx >= 0) {
+    const next = rows[nextIdx];
+    return {
+      kind: "balance",
+      nextIdx,
+      due: next?.due_date || "",
+      balance: round2(rows.filter((i) => !i.paid).reduce((sum, i) => sum + (i.amount || 0), 0)),
+      overdue: !!next?.due_date && next.due_date < new Date().toISOString().slice(0, 10),
+    };
+  }
+  if (l.treatment_fee_paid != null) return { kind: "paid", mode: l.treatment_fee_payment_mode || "" };
+  return { kind: "due", amount: l.session_package_price };
+};
 // Patient carries two lines now — the name, and what the consultation decided under it —
 // so it is the widest column rather than one of the middle ones. The room comes from Email,
 // which was thirteen per cent showing "dinezramyasri.008@g..." on every row: an address cut
@@ -1239,7 +1282,7 @@ const appointmentTone = (date) => {
   return on > today ? APPOINTMENT_TONE.upcoming : APPOINTMENT_TONE.past;
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, canTransferBranch = false }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
   // worth remarking on when they are assigned. Passed in rather than worked out here for
@@ -1255,6 +1298,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null — filters by appointment date
   const [search, setSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
+  // A Treatment Fee a row button asked for, held across the draft reset that selecting its
+  // patient triggers. See openRowTreatmentFee.
+  const pendingRowFeeRef = useRef(null);
+  // Branch Transfer, opened from the Physio Assign panel. A boolean: the dialog fetches
+  // its own eligibility and its own branch list, so there is nothing to stage here.
+  const [transferOpen, setTransferOpen] = useState(false);
   const [detailTab, setDetailTab] = useState("overview");
   const [timelineRemarks, setTimelineRemarks] = useState([]);
   const [timelineActivity, setTimelineActivity] = useState([]);
@@ -1762,12 +1811,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, [preStageFiltered, stageFilter, matchesStage]);
 
   const showDiscountColumn = stageFilter === "Fee Collected";
-  const cols = showDiscountColumn ? COLS_WITH_DISCOUNT : COLS_PLAIN;
 
   // Which of the three fees the Fee Collected list is showing. Consultation first: it is
   // the fee that puts a patient in this stage, so it is the one that answers "everyone".
   const [feeTab, setFeeTab] = useState("consultation");
   const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
+
+  // The Treatment Fee, collected from the row it is owed on.
+  //
+  // The Consultant tab is the list of everyone whose consultation fee is in, which is the
+  // same list of everyone the Treatment Fee is now due from — and taking it meant opening
+  // each patient in turn to reach the card the popup already carries. The button at the end
+  // of the row is that card's button, on the row, opening the same popup.
+  //
+  // Consultant tab only: on Physio the treatment fee is already the column being read, and
+  // on Rehab or Diet a fourth desk's action is a button about somebody else's money.
+  const showTreatmentAction = showDiscountColumn && activeFee.key === "consultation" && !isConsultant;
+  const cols = showTreatmentAction ? COLS_WITH_ACTION : showDiscountColumn ? COLS_WITH_DISCOUNT : COLS_PLAIN;
 
   // How many patients are behind each fee, counted off the stage's own rows. Carried on the
   // tab itself as a badge, so that Rehab holds eight and Diet five is readable from the row
@@ -2196,26 +2256,32 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // opened together with the Consultation Fee draft above; also independently
   // reachable from the Fee Collected panel as a fallback if it wasn't collected
   // together the first time.
-  function openTreatmentFeeDraft() {
+  // `leadArg` is for the Treatment Fee button on the Consultant tab's rows, which opens
+  // this on a patient who is not selected yet: `setSelectedLead` has not landed by the time
+  // this runs, so the row hands over the lead it already holds rather than reading a
+  // `selectedLead` that is still the last one — or nobody. Guarded on `.id` because the
+  // popup's own card passes this straight to onClick, where the argument is a click event.
+  function openTreatmentFeeDraft(leadArg) {
+    const lead = leadArg?.id ? leadArg : selectedLead;
     // A Partial Payment schedule that already exists on the lead (whether or not
     // every installment is collected yet) is reloaded from the real saved rows —
     // never reset back to two blank ones — so reopening this always shows what's
     // actually still owed, with already-collected rows carrying their paid flag.
-    const total = selectedLead.session_package_sessions || 0;
-    const rate = total ? (selectedLead.session_package_price || 0) / total : 0;
-    const existing = selectedLead.treatment_fee_payment_details?.installments;
+    const total = lead.session_package_sessions || 0;
+    const rate = total ? (lead.session_package_price || 0) / total : 0;
+    const existing = lead.treatment_fee_payment_details?.installments;
     setTreatmentFeeDraft({
-      payment_mode: selectedLead.treatment_fee_payment_mode || "cash",
-      amount: selectedLead.treatment_fee_paid ?? selectedLead.session_package_price ?? "",
+      payment_mode: lead.treatment_fee_payment_mode || "cash",
+      amount: lead.treatment_fee_paid ?? lead.session_package_price ?? "",
       // Typed by hand or not at all -- see FeeAmountEntry. Nothing about a short
       // amount infers one, so a reopened draft carries only the discount that was
       // actually agreed and recorded, never one worked back out of what was collected.
-      discount: selectedLead.treatment_fee_payment_details?.discount_amount ?? "",
+      discount: lead.treatment_fee_payment_details?.discount_amount ?? "",
       bank_name: "",
       cheque_number: "",
       // Cash/UPI/Card/Cheque default to covering every session (today's full
       // Collect behavior) — reducing this reveals a Due Date for the balance.
-      sessions_now: selectedLead.session_package_sessions ?? "",
+      sessions_now: lead.session_package_sessions ?? "",
       // The date already promised for a balance still outstanding, so correcting a
       // collection doesn't make somebody re-agree a date the patient was given.
       balance_due_date: (existing || []).find((i) => !i.paid)?.due_date || "",
@@ -2645,13 +2711,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // lead, or computed from that row's sessions x rate for a schedule not yet
   // saved — but always re-editable, plus a payment mode picker (same 4 modes as
   // everywhere else) and that mode's own fields.
-  const openPartialCollectPopup = (idx, fee = "treatment") => {
+  // `leadArg`, as on openTreatmentFeeDraft, is the row button's way in: the schedule is
+  // read off the lead it hands over rather than off derived state that still belongs to
+  // whoever was selected before. A saved row is the whole answer there — a plan reached
+  // from a row exists already, or the row would not be showing a balance to collect.
+  const openPartialCollectPopup = (idx, fee = "treatment", leadArg = null) => {
     // Only the Treatment Fee is ever collected against a schedule that has not been
     // saved yet (its Partial Payment plan is built in the popup and stored on first
     // collect). Every other fee's schedule exists already, because a collection is what
     // created it, so the saved row is the whole answer.
-    const saved = (fee === "treatment" ? savedInstallments : (feeBalances[fee]?.rows || []))[idx];
-    const inst = fee === "treatment" ? (partialInstallments[idx] || {}) : {};
+    const saved = leadArg
+      ? (leadArg[FEE_DETAIL_FIELDS[fee]]?.installments || [])[idx]
+      : (fee === "treatment" ? savedInstallments : (feeBalances[fee]?.rows || []))[idx];
+    const inst = !leadArg && fee === "treatment" ? (partialInstallments[idx] || {}) : {};
     const amount = saved?.amount ?? Math.round((parseInt(inst.sessions, 10) || 0) * perSessionRate);
     setPartialCollectDraft({
       idx,
@@ -2665,6 +2737,51 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       cash_notes: {},
     });
   };
+
+  // Opens whichever Treatment Fee popup a lead is owed: the installment one for a part-paid
+  // plan, the full Collect draft for everything else. The same fork the popup's own
+  // Treatment Fee card makes, taking the lead as an argument so a row can make it too.
+  const openTreatmentFeeFor = (lead) => {
+    const state = treatmentFeeStateOf(lead);
+    if (state.kind === "balance") openPartialCollectPopup(state.nextIdx, "treatment", lead);
+    else openTreatmentFeeDraft(lead);
+  };
+
+  // What the Consultant tab's row button does: open the patient, and open the fee on top
+  // of them.
+  //
+  // Selecting the lead as well is not incidental. Every popup on this board renders inside
+  // `selectedLead`, and collecting patches that lead and the row behind it — so the two have
+  // to move together or the popup opens over nobody. It also leaves the right thing behind:
+  // close the fee and the patient is open on the card the button came from, which is where
+  // somebody who has just taken one fee goes looking for the next.
+  //
+  // But selecting a lead is also what clears every draft on this board — the effect keyed on
+  // selectedLead.id, which is there so a half-typed collection never follows you to the next
+  // patient, and which runs after this click. A popup opened here and now would be wiped
+  // between the click and the paint. So the request is parked on a ref, which that reset
+  // cannot reach, and the effect below picks it up once the patient is actually selected.
+  const openRowTreatmentFee = (lead) => {
+    setDetailTab("overview");
+    // Already open on this patient: the id does not change, so neither the reset nor the
+    // effect will fire and there is nothing to park.
+    if (selectedLead?.id === lead.id) {
+      openTreatmentFeeFor(lead);
+      return;
+    }
+    pendingRowFeeRef.current = lead.id;
+    setSelectedLead(lead);
+  };
+
+  // Declared here rather than up with the reset it works around, because effects run in the
+  // order they are called and this one has to run second — after the reset has cleared the
+  // drafts, or it would open a popup for the reset to close.
+  useEffect(() => {
+    if (!selectedLead?.id || pendingRowFeeRef.current !== selectedLead.id) return;
+    pendingRowFeeRef.current = null;
+    openTreatmentFeeFor(selectedLead);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLead?.id]);
 
   // Submits the per-installment Collect popup. If the Partial Payment schedule
   // hasn't been saved to the lead yet (first-ever collect on this draft), it's
@@ -2812,10 +2929,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, [showPhysioModal]);
 
   const isRehabAssign = assignTrack === "rehab";
+  // How many days are STILL OWED, which is what this picker books. Both assign endpoints
+  // clear only the unrun days and keep the completed ones, so a patient part-way through
+  // a course needs the balance picked, not the course over again. That case used to be
+  // rare enough to go unnoticed; a branch transfer makes it the normal one, because
+  // moving a patient releases the physio holding their remaining days.
+  //
   // Rehab counts its own days off the rehab course; treatment counts the session package.
+  // completed_sessions is the treatment side only (rehab days are their own collection),
+  // which is why it is subtracted from one and not the other.
   const totalSessionsNeeded = (isRehabAssign
     ? selectedLead?.rehab_package_sessions
-    : selectedLead?.session_package_sessions) || 0;
+    : Math.max(0, (selectedLead?.session_package_sessions || 0) - (selectedLead?.completed_sessions || 0))) || 0;
   // What the picker calls a booked day, so its copy reads as the course being booked.
   const dayNoun = isRehabAssign ? "rehab day" : "treatment day";
   const courseName = (isRehabAssign
@@ -2915,8 +3040,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         return true;
       });
     if (mine.length === 0) return;
-    setPickedSessionSlots((prev) => (prev.length === 0 ? mine.slice(0, selectedLead.session_package_sessions || 0) : prev));
-  }, [physioCalendarData, physioPick, selectedLead, isRehabAssign]);
+    setPickedSessionSlots((prev) => (prev.length === 0 ? mine.slice(0, totalSessionsNeeded) : prev));
+  }, [physioCalendarData, physioPick, selectedLead, isRehabAssign, totalSessionsNeeded]);
 
   const sortedPickedSlots = useMemo(() => [...pickedSessionSlots].sort(), [pickedSessionSlots]);
   // A Rehab course entered without a day count leaves nothing to count towards. Rather than
@@ -3729,7 +3854,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           {/* Fee Collected is the stage where a negotiated Consultation Fee has become a
               fact, so the discount and total columns are added there alone — on every
               earlier stage there is no payment yet and they would be a row of dashes. */}
-          <table className={`w-full table-fixed text-sm ${showDiscountColumn ? "min-w-[900px]" : "min-w-[700px]"}`}>
+          <table className={`w-full table-fixed text-sm ${showTreatmentAction ? "min-w-[1000px]" : showDiscountColumn ? "min-w-[900px]" : "min-w-[700px]"}`}>
             <thead className="sticky top-0 z-10 bg-slate-500 text-xs uppercase text-white">
               <tr>
                 <th className={`${cols.sno} px-3 py-2 text-left align-middle`}>S.No</th>
@@ -3752,6 +3877,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 {showDiscountColumn && <th className={`${cols.collected} px-3 py-2 text-left align-middle`}>{activeFee.label} Fee</th>}
                 {showDiscountColumn && <th className={`${cols.discount} px-3 py-2 text-left align-middle`}>Discount</th>}
                 {showDiscountColumn && <th className={`${cols.total} px-3 py-2 text-left align-middle`}>Total Amount</th>}
+                {/* The one column on this table that does something rather than reports
+                    something, so it sits at the end where a row is finished being read. */}
+                {showTreatmentAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>Treatment Fee</th>}
               </tr>
             </thead>
             <tbody>
@@ -3855,11 +3983,65 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         {rupees(totalPaid(l))}
                       </td>
                     )}
+                    {showTreatmentAction && (() => {
+                      const t = treatmentFeeStateOf(l);
+                      return (
+                        // stopPropagation on the cell, not just the button: the whole row
+                        // opens the patient, and a click that lands a pixel beside the
+                        // button would otherwise open the popup this button is a shortcut
+                        // past. Nothing in here wants the row's own click.
+                        <td
+                          className="whitespace-nowrap px-3 py-3 align-middle text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                          data-testid={`cons-row-treatment-${l.id}`}
+                        >
+                          {t.kind === "none" ? (
+                            <span className="text-slate-300" title="Consultation Only — no treatment sessions were sold">—</span>
+                          ) : t.kind === "paid" ? (
+                            // Says so and stops there, exactly as the popup's card does. A
+                            // fee that is in is not a thing to press.
+                            <>
+                              <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                                <CheckCircle2 className="h-3 w-3" /> Paid
+                              </span>
+                              {t.mode && (
+                                <span className="mt-1 block text-[10px] uppercase tracking-wide text-slate-300">{t.mode}</span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                className={`w-full ${t.kind === "balance"
+                                  ? "bg-amber-500 text-white hover:bg-amber-600"
+                                  : "bg-emerald-600 text-white hover:bg-emerald-700"} shadow-sm ${ACT_BTN}`}
+                                onClick={() => openRowTreatmentFee(l)}
+                                data-testid={`cons-row-treatment-collect-${l.id}`}
+                              >
+                                <IndianRupee className="mr-1 h-3.5 w-3.5 shrink-0" />
+                                {t.kind === "balance" ? "Collect Balance" : "Collect"}
+                              </Button>
+                              {/* The figure the button is about, under it. A part-paid plan
+                                  is the one case where "Collect" alone is a question rather
+                                  than an instruction — how much, and by when. */}
+                              <span
+                                className={`mt-1 block truncate text-[10px] font-medium ${t.kind === "balance" && t.overdue ? "text-rose-600" : t.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
+                                title={t.kind === "balance" && t.due ? `Due ${t.due}` : undefined}
+                              >
+                                {t.kind === "balance"
+                                  ? `${rupees(t.balance)} due${t.overdue ? " · overdue" : ""}`
+                                  : t.amount != null ? rupees(t.amount) : "—"}
+                              </span>
+                            </>
+                          )}
+                        </td>
+                      );
+                    })()}
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={showDiscountColumn ? 10 : 7} className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan={showTreatmentAction ? 11 : showDiscountColumn ? 10 : 7} className="px-4 py-8 text-center text-sm text-slate-400">
                   {loading
                     ? "Loading…"
                     // An empty tab is not an empty stage: saying "no leads in consultations"
@@ -5181,17 +5363,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // A panel's own tab is only a tab when there is somewhere else to go. On a
               // patient with no diet and no rehab it was a tab bar of one: a button that
               // takes you to the view you are already looking at, sitting in the row above
-              // the button that does the panel's actual work -- so Fee Collected showed
-              // "Assign Physio" up top and "Reassign Physio" below, and only one of them
-              // assigned anybody.
+              // the button that does the panel's actual work.
               //
               // The second half is what keeps it safe. Off the own view -- Documents is
               // reachable with no diet and no rehab in sight -- this tab is the only way
               // back, so it returns the moment it is the way back rather than a no-op.
+              //
+              // Fee Collected does not use this any more. Its Assign Physio is the action
+              // rather than a view switcher, so hiding it would strand the lead; see the
+              // note on that panel's tab row.
               const showOwnTab = !!(DietDetailButton || RehabDetailButton) || programmeDetail !== "own";
 
               // The tab for a panel's own stage. Each panel names it for what it holds —
-              // "Assign Physio" on Fee Collected — because "Overview" would tell the reader
+              // "Rehab Details", "Treatment" — because "Overview" would tell the reader
               // nothing about which of the three views they are on.
               // Filled, so which step is open is read at a glance rather than found. Used by every
   // tab on this row so the selected one always looks the same, whichever it is.
@@ -5776,7 +5960,32 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       tabs={
                         <>
                           {FeeActions}
-                          {treatmentFeePaid && showOwnTab && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
+                          {/* The one Assign Physio on this panel, and it assigns. It used
+                              to be an OwnTab — a view switcher — with the button that did
+                              the work sitting in the body underneath, so the panel showed
+                              the words twice and only the lower one meant anything.
+
+                              It keeps the tab's other job: pressed from the Diet or Rehab
+                              view it returns to this one, so the row a programme was opened
+                              from is still the row that closes it.
+
+                              Not behind showOwnTab any more. That gate exists to hide a tab
+                              bar of one — a button leading to the view you are already on —
+                              and this is no longer that button: it is the step that moves the
+                              lead off Fee Collected, and the only one on this screen that
+                              can (the backend advances the stage on assign-consultation-
+                              physio alone). Hidden, the lead has nowhere to go. */}
+                          {treatmentFeePaid && (
+                            <Button
+                              size="sm"
+                              className={`bg-violet-600 text-white shadow-sm transition hover:bg-violet-700 hover:shadow ${ACT_BTN}`}
+                              onClick={() => { openDetail("own"); openPhysioModal("treatment"); }}
+                              data-testid="cons-open-physio-assign-from-fee-collected"
+                            >
+                              <Users className="mr-1 h-3.5 w-3.5" />
+                              <Lbl full="Assign Physio" short="Physio" />
+                            </Button>
+                          )}
                           {/* No Diet tab on this row. The Diet Fee card below is the way
                               into the diet programme from here — a button in the tab row
                               as well put the same view two doors apart on one screen,
@@ -5815,45 +6024,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                           {DietStatus}
 
-                          {treatmentFeePaid && (
-                            <>
-                              <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                                {/* A Partial Payment plan reaches here with money in but a
-                                    balance still owed, and this line read "Both fees
-                                    collected" over a Balance Amount card saying otherwise. */}
-                                {partialPlan
-                                  ? "Consultation Fee collected, Treatment Fee part-paid. The physiotherapist can be assigned now."
-                                  : "Both fees collected. Choose the physiotherapist who will deliver the sessions."}
-                              </p>
-                              {/* The act itself lives in the view, not in the tab that opens
-                                  the view. A tab that also fired the picker could not be
-                                  pressed to come back to what it was showing. */}
-                              <div className="mt-3">
-                                <Button
-                                  size="sm"
-                                  className={`bg-violet-600 text-white shadow-sm transition hover:bg-violet-700 hover:shadow ${ACT_BTN}`}
-                                  onClick={() => openPhysioModal("treatment")}
-                                  data-testid="cons-open-physio-assign-from-fee-collected"
-                                >
-                                  <Users className="mr-1 h-3.5 w-3.5" />
-                                  {/* Never "Reassign" here. assigned_physio_name is written
-                                      when the appointment is booked -- it is the physio who
-                                      took the consultation, set by the Branch Admin long
-                                      before anyone picks who delivers the treatment -- so
-                                      reading it as "a physio is already assigned" made this
-                                      button say Reassign for every patient who ever had a
-                                      consultation, which is all of them.
+                          {/* Where it stands, not what to press — the step itself is the
+                              Assign Physio button in the row above. Kept as a line of prose
+                              because the fee cards say what was paid and this says what that
+                              adds up to.
 
-                                      The stage is the honest test and it needs no field:
-                                      assign-consultation-physio is what moves a lead off
-                                      Fee Collected, so a lead sitting on this panel has no
-                                      treatment physio yet. Reassigning belongs to the
-                                      Physio Assign panel below, where the name does mean
-                                      what it says. */}
-                                  Assign Physio
-                                </Button>
-                              </div>
-                            </>
+                              Never "Reassign" up there, incidentally: assigned_physio_name is
+                              written when the appointment is booked — it is the physio who
+                              took the consultation, set long before anyone picks who delivers
+                              the treatment — so reading it as "a physio is already assigned"
+                              would say Reassign for every patient who ever had a consultation.
+                              The stage is the honest test and needs no field: a lead sitting
+                              on this panel has no treatment physio yet. */}
+                          {treatmentFeePaid && (
+                            <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                              {/* A Partial Payment plan reaches here with money in but a
+                                  balance still owed, and this line read "Both fees
+                                  collected" over a Balance Amount card saying otherwise. */}
+                              {partialPlan
+                                ? "Consultation Fee collected, Treatment Fee part-paid. Assign Physio above books the sessions."
+                                : "Both fees collected. Assign Physio above chooses who will deliver the sessions."}
+                            </p>
                           )}
                         </>
                       )}
@@ -5909,7 +6100,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               ? "Treatment sessions are in progress — every day is on this physio's calendar and on their board."
                               : "Treatment Fee collected. Choose the physiotherapist who will deliver the sessions."}
                           </p>
-                          <div className="mt-3">
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
                             <Button
                               size="sm"
                               className={`${assigned ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200 hover:bg-violet-50" : "bg-violet-600 text-white shadow-sm hover:bg-violet-700"} ${ACT_BTN}`}
@@ -5919,6 +6110,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               <Users className="mr-1 h-3.5 w-3.5" />
                               {assigned ? "Reassign Physio" : "Assign Physio & Book Sessions"}
                             </Button>
+                            {/* The second of the two moments a patient may change branch:
+                                the course is paid for and a physio is on it, and the
+                                patient is moving. Sits beside Reassign Physio because it
+                                is the same decision one step wider -- Reassign picks a
+                                different physio at this branch, this one hands the whole
+                                course to another branch to staff. Super Admin only, and
+                                only on a real branch: an online arm has none to move off. */}
+                            {canTransferBranch && !onlineArm && selectedLead.branch_id && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className={`border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 ${ACT_BTN}`}
+                                onClick={() => setTransferOpen(true)}
+                                data-testid="cons-open-branch-transfer"
+                              >
+                                <Building2 className="mr-1 h-3.5 w-3.5" />
+                                Transfer Branch
+                              </Button>
+                            )}
                           </div>
                         </>
                       )}
@@ -8353,6 +8563,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           receipt below — a status header, the facts, then the actions — because it does
           the same job: says what was just recorded and offers the few things anyone wants
           next. z-[70] to clear the lead popup it opens above. */}
+      {/* Branch Transfer. On success the patient belongs to another branch, so this board
+          -- which is one branch's -- closes them and reloads rather than patching the row
+          in place: the row is not this board's any more. */}
+      {transferOpen && selectedLead && (
+        <BranchTransferDialog
+          lead={selectedLead}
+          onClose={() => setTransferOpen(false)}
+          onDone={() => { setTransferOpen(false); setSelectedLead(null); load(); }}
+        />
+      )}
+
       {decisionReceipt && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4" onClick={(e) => { if (e.target === e.currentTarget) setDecisionReceipt(null); }} data-testid="cons-decision-receipt">
           <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl">

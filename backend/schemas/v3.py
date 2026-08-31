@@ -225,36 +225,6 @@ class V3DoctorOut(BaseModel):
     created_at: str
 
 
-class V3LeadData(BaseModel):
-    """The ad-platform record a lead arrived on — Meta's own lead export, field for field.
-
-    Kept as its own nested block rather than flattened onto the lead for two reasons. The
-    first is a collision: this `id` is Meta's lead id and `created_time` is when Meta
-    captured the form, neither of which is our `id` or our `created_at` — flattening would
-    have an ad record quietly overwrite the lead's own identity. The second is that the
-    whole block is one audience's (see reads_lead_data in deps.py), and
-    one nested field is far easier to withhold than twelve loose ones.
-
-    Every field is optional: a lead typed in by hand carries none of them, and an organic
-    lead legitimately has no ad, adset or campaign behind it.
-    """
-
-    id: Optional[str] = ""              # Meta's lead id, not ours
-    created_time: Optional[str] = ""    # when Meta captured the form, not when we stored it
-    ad_id: Optional[str] = ""
-    ad_name: Optional[str] = ""
-    adset_id: Optional[str] = ""
-    adset_name: Optional[str] = ""
-    campaign_id: Optional[str] = ""
-    campaign_name: Optional[str] = ""
-    form_id: Optional[str] = ""
-    form_name: Optional[str] = ""
-    # None, not False: "nobody said" and "this came off an ad" are different answers, and
-    # only the first one is true of a lead somebody typed in.
-    is_organic: Optional[bool] = None
-    platform: Optional[str] = ""        # "fb" | "ig", as Meta writes it
-
-
 class V3LeadCreate(BaseModel):
     name: str
     phone: str
@@ -277,8 +247,6 @@ class V3LeadCreate(BaseModel):
     gender: Optional[str] = ""
     occupation: Optional[str] = ""
     expected_consultation_date: Optional[str] = ""
-    # The ad record behind the lead — see V3LeadData. Only Super Admin's form offers it.
-    lead_data: Optional[V3LeadData] = None
 
 
 class V3LeadUpdate(BaseModel):
@@ -329,12 +297,6 @@ class V3LeadOut(BaseModel):
     lead_control: Optional[str] = None
     notes: Optional[str] = ""
     extra_fields: Dict[str, Any]
-    # The ad record behind the lead (see V3LeadData), or None where the reader is not
-    # entitled to it — every endpoint that lists leads withholds it from everyone but
-    # Super Admin. So None means either "no ad data" or "not yours to read", and no
-    # caller has any need to tell those two apart. This model ignores extras, so without
-    # this line the field would never be returned at all.
-    lead_data: Optional[Dict[str, Any]] = None
     consultation_fee: Optional[float] = None
     consultation_item_name: Optional[str] = None
     consultation_mode: Optional[str] = None
@@ -514,6 +476,18 @@ class V3LeadOut(BaseModel):
     portfolio_date: Optional[str] = None
     portfolio_time: Optional[str] = None
     portfolio_datetime: Optional[str] = None
+    # Where this patient was before, once Super Admin has moved them (Operations > Branch >
+    # Branch Transfer). Declared here because this model ignores extras: without them the
+    # boards could not mark a transferred patient as one, and a receiving Branch Admin
+    # would see a patient number carrying another branch's code with nothing to explain it.
+    transferred_from_branch_id: Optional[str] = None
+    transferred_from_branch_name: Optional[str] = None
+    transferred_at: Optional[str] = None
+    transfer_reason: Optional[str] = None
+    # What each branch this patient has passed through collected while it held them. Read
+    # by finance so a transfer never moves a closed month's revenue — see
+    # backend/branch_transfer.py.
+    revenue_frozen: Optional[List[Dict[str, Any]]] = None
     created_at: str
     updated_at: str
 

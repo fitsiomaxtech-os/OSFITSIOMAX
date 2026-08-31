@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
+import branch_transfer
 from database import v3_col
 from utils import live_branch_query
 from stage_utils import get_closing_stage_name
@@ -595,7 +596,9 @@ async def v3_dashboard_overview(
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
     activity_query.update(_date_range_query("created_at", start_date, end_date))
     activities = await v3_col("lead_activity").find(
-        activity_query, {"_id": 0, "lead_id": 1, "details": 1, "action": 1, "created_at": 1}
+        # branch_id is projected because a transferred patient's payments carry the branch
+        # that collected them — dropping it here would file them under the new branch.
+        activity_query, {"_id": 0, "lead_id": 1, "details": 1, "action": 1, "created_at": 1, "branch_id": 1}
     ).to_list(50000)
     activity_lead_ids = list({a["lead_id"] for a in activities if a.get("lead_id")})
     activity_leads = await v3_col("leads").find(
@@ -621,7 +624,10 @@ async def v3_dashboard_overview(
 
     for a in activities:
         lead = activity_lead_map.get(a.get("lead_id"), {})
-        bid = lead.get("branch_id")
+        # The branch whose till this collection went through, which is not always the one
+        # the patient is at today: a transferred patient's earlier payments carry a stamp
+        # naming the branch that took them. See backend/branch_transfer.py.
+        bid = branch_transfer.activity_branch(a, lead)
         vertical = lead.get("vertical") or branch_vertical(bid)
         amount = _parse_rs_amount(a.get("details", ""))
         add_to_bucket(revenue_bucket, bid, vertical, amount)
