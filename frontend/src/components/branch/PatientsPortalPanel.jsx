@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
-import { Copy, Phone, PhoneCall, RefreshCw, Trash2, User, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Activity, Copy, Dumbbell, HeartPulse, Music, Phone, PhoneCall, RefreshCw,
+  Stethoscope, Trash2, User, Users, X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
+import { QuickDateFilterBar } from "@/components/QuickDateFilterBar";
 import {
-  getBranchBoard, updateLead, deleteLead,
+  getBranchBoard, updateLead, deleteLead, listFitness, listZumba,
   getPortalAccountStatus, createOrResetPortalAccount,
 } from "@/lib/api";
 // Was a local copy of waNumber, identical to the three still inlined elsewhere. Now that
@@ -15,11 +20,11 @@ import { waNumber } from "@/lib/phone";
 const portalUrl = () => `${window.location.origin}/portal`;
 
 /**
- * Whether this patient is on a course of treatment, and so belongs on this list.
+ * Whether this patient is on a course of treatment.
  *
  * Mirrors has_treatment() in backend/routers/v3_patient_portal.py — the server enforces
- * it on the account itself, and this keeps the list from offering someone the server will
- * then refuse. Change one and change the other.
+ * it on the Client Portal account itself, and this keeps the popup from offering access
+ * the server will then refuse. Change one and change the other.
  *
  * Presence, never an amount: a patient on a 10,000 package who has paid 2,000 is
  * mid-treatment and belongs here. Excluded are "Consultation Only" and anyone who came
@@ -31,16 +36,42 @@ const hasTreatment = (l) => (
   || l.consultation_decision === "consultation_treatment"
 );
 
-/** Everything this patient has actually paid. Everyone listed here is on treatment, but
-    many also have a Consultation Fee and some a Diet one, so the column reports the total
-    rather than a single fee that only ever tells part of it. */
-const feesPaid = (l) => (l.package_paid || 0) + (l.treatment_fee_paid || 0) + (l.diet_fee_paid || 0);
+/**
+ * Whether the branch has actually consulted this patient, rather than merely holding a
+ * lead for them. Either the Consultation Fee is in, or the Head Physio has closed the
+ * visit with a decision — the two ends of a consultation that happened.
+ *
+ * A booked appointment is deliberately not enough. Branch Leads is where a lead waiting
+ * for a slot is worked; this roll is the people the branch has seen.
+ */
+const onConsultation = (l) => l.package_paid != null || !!l.consultation_decision;
+
+/**
+ * Whether a rehab programme exists for this patient: a course bought, a fee collected, or
+ * a physio and days booked by branch/assign-rehab.
+ *
+ * `rehab_referred` on its own is deliberately not enough, for the same reason a Zumba
+ * referral is not a membership — it is the Head Physio recommending rehab, which nobody
+ * has acted on yet.
+ */
+const onRehab = (l) => (
+  l.rehab_fee_paid != null || !!l.rehab_package_id || !!l.rehab_physio_id
+);
+
+/** Everything this patient has paid the branch through their lead. Many carry more than
+    one fee — a Consultation Fee and a Treatment Fee, sometimes Rehab or Diet beside them —
+    so the column reports the total rather than a single fee that only ever tells part of
+    it. The gym and class rolls add their own on top; see buildRoll. */
+const feesPaid = (l) => (
+  (l.package_paid || 0) + (l.treatment_fee_paid || 0)
+  + (l.rehab_fee_paid || 0) + (l.diet_fee_paid || 0)
+);
 
 /** Green once any money is in, amber while none is. Deliberately not a judgement about
     whether the whole package is settled — a partial payer is a normal treatment patient,
     and Accountant Manage is where a balance is chased. */
-const PaidBadge = ({ lead }) => (
-  feesPaid(lead) > 0 ? (
+const PaidBadge = ({ paid }) => (
+  paid > 0 ? (
     <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
   ) : (
     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Awaiting</span>
@@ -53,167 +84,409 @@ const PaidBadge = ({ lead }) => (
 const feeParts = (l) => [
   l.package_paid != null ? "Consultation" : null,
   l.treatment_fee_paid != null ? "Treatment" : null,
+  l.rehab_fee_paid != null ? "Rehab" : null,
   l.diet_fee_paid != null ? "Diet" : null,
 ].filter(Boolean).join(" + ") || "nothing collected yet";
 
+/**
+ * The cards over the list, in the order they are shown.
+ *
+ * `key` is both what the filter carries and what a row's service tags are named with, so
+ * a card and the rows it counts can never be named differently in two places.
+ */
+const CARDS = [
+  { key: "all", label: "All", sub: "on the roll", icon: Users, color: "#6366f1" },
+  { key: "consultation", label: "Consultations", sub: "seen by a physio", icon: Stethoscope, color: "#0284c7" },
+  { key: "treatment", label: "Treatments", sub: "on a course", icon: HeartPulse, color: "#059669" },
+  { key: "rehab", label: "Rehab", sub: "programme booked", icon: Activity, color: "#d97706" },
+  { key: "fitness", label: "Fitness", sub: "gym members", icon: Dumbbell, color: "#7c3aed" },
+  { key: "zumba", label: "Zumba", sub: "class members", icon: Music, color: "#db2777" },
+];
+
+const SERVICE_LABEL = {
+  consultation: "Consultation", treatment: "Treatment", rehab: "Rehab",
+  fitness: "Fitness", zumba: "Zumba",
+};
+
+// Written out rather than built off the card's hex above: Tailwind reads class names out
+// of the source, so a `bg-${tone}-100` put together at runtime compiles to nothing. The
+// tones follow the card colours — change one and change the other.
+const SERVICE_CHIP = {
+  consultation: "bg-sky-100 text-sky-700",
+  treatment: "bg-emerald-100 text-emerald-700",
+  rehab: "bg-amber-100 text-amber-700",
+  fitness: "bg-violet-100 text-violet-700",
+  zumba: "bg-pink-100 text-pink-700",
+};
+
+/** What a patient is here for, said on the row itself. One patient can be on several at
+    once, which is the whole reason the cards count a person and not a purchase. */
+const ServiceChips = ({ services }) => (
+  <span className="flex flex-wrap gap-1">
+    {services.map((s) => (
+      <span key={s} className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${SERVICE_CHIP[s]}`}>
+        {SERVICE_LABEL[s]}
+      </span>
+    ))}
+  </span>
+);
+
+/** Last ten digits — how a gym or class registration, which carries no lead id, is matched
+    back to the patient's lead. The same number is stored with +91, with a leading 0 and
+    with spaces through it, so anything less than comparing the subscriber digits finds
+    nothing. Returns "" for a number too short to be one, which is never matched against. */
+const phoneKey = (raw) => {
+  const d = String(raw || "").replace(/\D/g, "");
+  return d.length >= 10 ? d.slice(-10) : "";
+};
+
+/** A stored stamp as a Date, or null. A bare "YYYY-MM-DD" — which is what a gym joining
+    date is — is read as that day locally; through `new Date` it would be UTC midnight,
+    landing on the day before for any viewer west of Greenwich. */
+const asDate = (value) => {
+  if (!value) return null;
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+  if (ymd) return new Date(+ymd[1], +ymd[2] - 1, +ymd[3]);
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * The branch's patient roll, out of the three places somebody can be on it: a lead who has
+ * been consulted, treated or sent to rehab, and the gym and class rolls, which are
+ * registrations in collections of their own and mostly carry no lead at all.
+ *
+ * One row per person, not per thing they bought. A patient on treatment who also holds a
+ * gym membership is one row with two service tags — counted on both cards, listed once —
+ * because the alternative is a roll whose patient count is larger than its number of
+ * patients. Registrations are matched back to a lead by its id where the row carries one
+ * (an accepted Zumba referral does) and by phone otherwise.
+ *
+ * A lead with no tag at all is not on the roll: that is somebody still being worked, and
+ * Branch Leads is the board for them.
+ */
+const buildRoll = (leads, gymRows, classRows) => {
+  const rows = new Map();
+  const byLeadId = new Map();
+  const byPhone = new Map();
+
+  for (const l of leads) {
+    const row = {
+      key: l.id,
+      lead: l,
+      name: l.name || "",
+      phone: l.phone || "",
+      joinedAt: asDate(l.created_at),
+      paid: feesPaid(l),
+      services: [],
+    };
+    if (onConsultation(l)) row.services.push("consultation");
+    if (hasTreatment(l)) row.services.push("treatment");
+    if (onRehab(l)) row.services.push("rehab");
+    rows.set(row.key, row);
+    byLeadId.set(l.id, row);
+    // First lead on a number keeps it. A second is a duplicate record of one person, and
+    // the gym row that would hang off either of them is the same row.
+    const pk = phoneKey(l.phone);
+    if (pk && !byPhone.has(pk)) byPhone.set(pk, row);
+  }
+
+  const attach = (reg, service) => {
+    const found = (reg.lead_id && byLeadId.get(reg.lead_id)) || byPhone.get(phoneKey(reg.phone));
+    if (found) {
+      if (!found.services.includes(service)) found.services.push(service);
+      found.paid += Number(reg.fee_paid || 0);
+      return;
+    }
+    // Nothing among the leads to hang this on: somebody who walked into the gym or the
+    // class and has never been a patient anywhere else. They are on the branch's roll and
+    // on their own card, but there is no lead behind them, so the row does not open — see
+    // the list below.
+    const key = `${service}:${reg.id}`;
+    rows.set(key, {
+      key,
+      lead: null,
+      name: reg.name || "",
+      phone: reg.phone || "",
+      joinedAt: asDate(reg.joined_date || reg.joined_on || reg.created_at),
+      paid: Number(reg.fee_paid || 0),
+      services: [service],
+    });
+  };
+
+  for (const reg of gymRows) attach(reg, "fitness");
+  // A referral is not a member. Those rows are read live off a lead the consultation
+  // recommended Zumba for and nobody has registered yet (see _referred_rows in
+  // backend/routers/v3_zumba.py); that lead is already on this roll under whatever it has
+  // actually been through, and counting it here would stand the Zumba card over people who
+  // never joined the class.
+  for (const reg of classRows) if (reg.origin !== "consultation") attach(reg, "zumba");
+
+  // Newest first, undated last: three sources have to be put into one order, and the
+  // leads' own arrival order says nothing about where a gym row belongs among them.
+  return [...rows.values()].filter((r) => r.services.length > 0).sort((a, b) => {
+    if (!a.joinedAt) return b.joinedAt ? 1 : 0;
+    if (!b.joinedAt) return -1;
+    return b.joinedAt - a.joinedAt;
+  });
+};
+
 export const PatientsPortalPanel = ({ branchId }) => {
   const [leads, setLeads] = useState([]);
+  const [gym, setGym] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [card, setCard] = useState("all");
+  // null is All Time rather than an open-ended range: the absence of a narrowing and a
+  // range that happens to match everything read the same on screen but not in the code,
+  // and null is the shape QuickDateFilterBar already speaks.
+  const [dateFilter, setDateFilter] = useState(null);
   const [selected, setSelected] = useState(null);
 
   const load = useCallback(async () => {
     if (!branchId) return;
     setLoading(true);
-    try {
-      const data = await getBranchBoard(branchId);
-      setLeads((data.leads || []).filter(hasTreatment));
-    } catch { /* silent */ }
+    // Three rolls, asked for together and each allowed to fail on its own: a desk that may
+    // read the branch board but not the gym's still gets its patients, with the Fitness
+    // card reading zero rather than the whole panel coming up empty.
+    const [board, fitness, zumba] = await Promise.all([
+      getBranchBoard(branchId).catch(() => null),
+      listFitness(branchId).catch(() => null),
+      listZumba(branchId).catch(() => null),
+    ]);
+    setLeads(board?.leads || []);
+    setGym(fitness?.registrations || []);
+    setClasses(zumba?.registrations || []);
     setLoading(false);
   }, [branchId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const q = search.trim().toLowerCase();
-  const visible = q
-    ? leads.filter((l) => (l.name || "").toLowerCase().includes(q) || (l.phone || "").includes(q))
-    : leads;
+  const roll = useMemo(() => buildRoll(leads, gym, classes), [leads, gym, classes]);
+
+  // The date narrowing comes first and the cards count what survives it, so a card's
+  // figure always describes exactly the list pressing it gives you. A row with no date on
+  // it at all drops out of any range asked for — it cannot be shown to be inside one.
+  const inRange = useMemo(() => {
+    const from = dateFilter?.from || null;
+    const to = dateFilter?.to || null;
+    if (!from && !to) return roll;
+    return roll.filter((r) => {
+      if (!r.joinedAt) return false;
+      if (from && r.joinedAt < from) return false;
+      if (to && r.joinedAt > to) return false;
+      return true;
+    });
+  }, [roll, dateFilter]);
+
+  const counts = useMemo(() => {
+    const out = { all: inRange.length };
+    for (const c of CARDS) {
+      if (c.key === "all") continue;
+      out[c.key] = inRange.filter((r) => r.services.includes(c.key)).length;
+    }
+    return out;
+  }, [inRange]);
+
+  const visible = useMemo(() => {
+    const list = card === "all" ? inRange : inRange.filter((r) => r.services.includes(card));
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((r) => r.name.toLowerCase().includes(q) || r.phone.includes(q));
+  }, [inRange, card, search]);
+
+  const openLead = (row) => { if (row.lead) setSelected(row.lead); };
 
   return (
-    <div data-testid="branch-patients-panel">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-700">Patients</h3>
-        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
+    <div className="space-y-4" data-testid="branch-patients-panel">
+      {/* Six columns for six cards on a wide screen, so the row finishes flush with the
+          page. Written as literal class names because Tailwind reads them out of the
+          source — a count built from CARDS.length at runtime compiles to nothing. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {CARDS.map((c) => (
+          <StatTile
+            key={c.key}
+            label={c.label}
+            value={counts[c.key] ?? 0}
+            sub={c.sub}
+            icon={c.icon}
+            color={c.color}
+            active={card === c.key}
+            onClick={() => setCard(c.key)}
+            testid={`branch-patients-card-${c.key}`}
+          />
+        ))}
       </div>
 
-      {/* Refresh beside the search, icon-only and grey, as the other boards carry it. The
-          list is a snapshot of the branch board — a patient who pays or starts treatment
-          in another tab appears only on a reload, and there was no way to ask for one. */}
-      <div className="mb-3 flex items-center gap-2">
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search patient by name or phone..."
-          className="h-10 min-w-0 flex-1 sm:max-w-sm sm:flex-none"
-          data-testid="branch-patients-search"
-        />
-        <Button
-          onClick={load}
-          disabled={loading}
-          title="Refresh"
-          aria-label="Refresh"
-          className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-          data-testid="branch-patients-refresh"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </Button>
-      </div>
+      {/* Which service, then when they joined — two narrowings of one list, so the range
+          row sits directly under the cards it re-counts rather than beside the search,
+          which only looks inside whatever the two of them leave. */}
+      <QuickDateFilterBar value={dateFilter} onChange={setDateFilter} testid="branch-patients-date" />
 
-      {visible.length === 0 && !loading ? (
-        <div className="py-16 text-center">
-          <User className="mx-auto mb-3 h-10 w-10 text-slate-200" />
-          <p className="text-sm text-slate-400">No patients yet — a lead shows up here once they are on a course of treatment</p>
-        </div>
-      ) : (
-        <>
-        {/* Cards on a phone. Four columns can't hold their width there — the phone
-            column was cut off mid-number, which is the one thing this list is used to
-            look up. Call and WhatsApp sit on the card for the same reason. */}
-        <div className="space-y-2 md:hidden" data-testid="branch-patients-mobile">
-          {visible.map((l) => {
-            const wa = waNumber(l.phone);
-            return (
-              // A div, not a button: the actions below are interactive themselves.
-              <div
-                key={l.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelected(l)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(l); } }}
-                className="w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-3 text-left active:bg-slate-50"
-                data-testid={`branch-patient-card-${l.id}`}
-              >
-                <div className="flex items-start gap-2.5">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
-                    {l.name?.charAt(0)?.toUpperCase() || "?"}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="truncate font-semibold text-slate-800">{l.name}</span>
-                      <span className="shrink-0"><PaidBadge lead={l} /></span>
-                    </div>
-                    <p className="truncate text-xs text-slate-600">{l.phone || "—"}</p>
-                    <p className="mt-0.5 text-[11px] text-slate-500">
-                      Rs.{feesPaid(l)} paid
-                      <span className="text-slate-400"> · {feeParts(l)}</span>
-                    </p>
-                  </div>
-                </div>
-                {wa && (
-                  <div className="mt-2.5 flex gap-2 border-t border-slate-100 pt-2.5">
-                    <a
-                      href={`tel:${wa}`}
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-semibold text-slate-700 active:bg-slate-100"
-                      data-testid={`branch-patient-call-${l.id}`}
-                    >
-                      <Phone className="h-3.5 w-3.5" /> Call
-                    </a>
-                    <a
-                      href={`https://wa.me/${wa}`}
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 py-2 text-xs font-semibold text-[#128C7E] active:bg-[#25D366]/20"
-                      data-testid={`branch-patient-whatsapp-${l.id}`}
-                    >
-                      <WhatsAppIcon className="h-3.5 w-3.5" /> WhatsApp
-                    </a>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+      <div>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-slate-700">
+            Patients
+            {card !== "all" && (
+              <span className="ml-2 font-normal text-slate-400">· {CARDS.find((c) => c.key === card)?.label}</span>
+            )}
+          </h3>
+          <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
         </div>
 
-        <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-500 text-left text-xs uppercase text-white">
-              <tr>
-                <th className="px-4 py-2.5">Patient</th>
-                <th className="px-4 py-2.5">Phone</th>
-                <th className="px-4 py-2.5">Fees Paid</th>
-                <th className="px-4 py-2.5">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {visible.map((l) => (
-                <tr
-                  key={l.id}
-                  onClick={() => setSelected(l)}
-                  className="cursor-pointer transition-colors hover:bg-slate-50"
-                  data-testid={`branch-patient-row-${l.id}`}
+        {/* Refresh beside the search, icon-only and grey, as the other boards carry it. The
+            list is a snapshot of the branch — a patient who pays, starts treatment or joins
+            the gym in another tab appears only on a reload, and there was no way to ask
+            for one. */}
+        <div className="mb-3 flex items-center gap-2">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search patient by name or phone..."
+            className="h-10 min-w-0 flex-1 sm:max-w-sm sm:flex-none"
+            data-testid="branch-patients-search"
+          />
+          <Button
+            onClick={load}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+            data-testid="branch-patients-refresh"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+
+        {visible.length === 0 && !loading ? (
+          <div className="py-16 text-center">
+            <User className="mx-auto mb-3 h-10 w-10 text-slate-200" />
+            {/* Two different nothings. An empty roll means nobody has reached this branch
+                yet; an empty card means the filters have narrowed a roll that does have
+                people on it, and saying "no patients yet" there sends the reader looking
+                for missing records instead of at the card they pressed. */}
+            <p className="text-sm text-slate-400">
+              {roll.length === 0
+                ? "No patients yet — somebody shows up here once they have been consulted, put on treatment or rehab, or joined the gym or a class"
+                : "No patients under this card in the range chosen"}
+            </p>
+          </div>
+        ) : (
+          <>
+          {/* Cards on a phone. Four columns can't hold their width there — the phone
+              column was cut off mid-number, which is the one thing this list is used to
+              look up. Call and WhatsApp sit on the card for the same reason. */}
+          <div className="space-y-2 md:hidden" data-testid="branch-patients-mobile">
+            {visible.map((r) => {
+              const wa = waNumber(r.phone);
+              // Only a lead has a record to open. A gym or class member registered at the
+              // desk has none, so their card is a card and not a button — offering a popup
+              // that cannot load anything is worse than not offering one.
+              const openable = !!r.lead;
+              return (
+                // A div, not a button: the actions below are interactive themselves.
+                <div
+                  key={r.key}
+                  {...(openable ? {
+                    role: "button",
+                    tabIndex: 0,
+                    onClick: () => openLead(r),
+                    onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openLead(r); } },
+                  } : {})}
+                  className={`w-full rounded-xl border border-slate-200 bg-white p-3 text-left ${openable ? "cursor-pointer active:bg-slate-50" : ""}`}
+                  data-testid={`branch-patient-card-${r.key}`}
                 >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
-                        {l.name?.charAt(0)?.toUpperCase() || "?"}
-                      </span>
-                      <span className="font-medium text-slate-800">{l.name}</span>
+                  <div className="flex items-start gap-2.5">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                      {r.name?.charAt(0)?.toUpperCase() || "?"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="truncate font-semibold text-slate-800">{r.name}</span>
+                        <span className="shrink-0"><PaidBadge paid={r.paid} /></span>
+                      </div>
+                      <p className="truncate text-xs text-slate-600">{r.phone || "—"}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        Rs.{r.paid} paid
+                        {r.lead && <span className="text-slate-400"> · {feeParts(r.lead)}</span>}
+                      </p>
+                      <div className="mt-1.5"><ServiceChips services={r.services} /></div>
                     </div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
-                  <td className="px-4 py-3 text-slate-600">Rs.{feesPaid(l)} <span className="text-slate-400">({feeParts(l)})</span></td>
-                  {/* Not a blanket "Paid": a patient can be on treatment with a balance
-                      still owed, or with nothing collected yet, and both belong here. */}
-                  <td className="px-4 py-3"><PaidBadge lead={l} /></td>
+                  </div>
+                  {wa && (
+                    <div className="mt-2.5 flex gap-2 border-t border-slate-100 pt-2.5">
+                      <a
+                        href={`tel:${wa}`}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-semibold text-slate-700 active:bg-slate-100"
+                        data-testid={`branch-patient-call-${r.key}`}
+                      >
+                        <Phone className="h-3.5 w-3.5" /> Call
+                      </a>
+                      <a
+                        href={`https://wa.me/${wa}`}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 py-2 text-xs font-semibold text-[#128C7E] active:bg-[#25D366]/20"
+                        data-testid={`branch-patient-whatsapp-${r.key}`}
+                      >
+                        <WhatsAppIcon className="h-3.5 w-3.5" /> WhatsApp
+                      </a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-500 text-left text-xs uppercase text-white">
+                <tr>
+                  <th className="px-4 py-2.5">Patient</th>
+                  <th className="px-4 py-2.5">Phone</th>
+                  <th className="px-4 py-2.5">Services</th>
+                  <th className="px-4 py-2.5">Fees Paid</th>
+                  <th className="px-4 py-2.5">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        </>
-      )}
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visible.map((r) => (
+                  <tr
+                    key={r.key}
+                    onClick={() => openLead(r)}
+                    className={`transition-colors ${r.lead ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                    data-testid={`branch-patient-row-${r.key}`}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                          {r.name?.charAt(0)?.toUpperCase() || "?"}
+                        </span>
+                        <span className="font-medium text-slate-800">{r.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{r.phone || "—"}</td>
+                    <td className="px-4 py-3"><ServiceChips services={r.services} /></td>
+                    {/* The lead's own fees are named; a gym or class membership has no
+                        breakdown to name, so that row shows the figure alone rather than
+                        an empty pair of brackets. */}
+                    <td className="px-4 py-3 text-slate-600">
+                      Rs.{r.paid} {r.lead && <span className="text-slate-400">({feeParts(r.lead)})</span>}
+                    </td>
+                    {/* Not a blanket "Paid": a patient can be on treatment with a balance
+                        still owed, or with nothing collected yet, and both belong here. */}
+                    <td className="px-4 py-3"><PaidBadge paid={r.paid} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          </>
+        )}
+      </div>
 
       {selected && (
         <PatientPortalDetailModal
@@ -374,16 +647,28 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
               {lead.treatment_fee_paid != null && (
                 <p>Treatment Rs.{lead.treatment_fee_paid} <span className="capitalize text-slate-400">via {lead.treatment_fee_payment_mode}</span></p>
               )}
+              {lead.rehab_fee_paid != null && (
+                <p>Rehab Rs.{lead.rehab_fee_paid} <span className="capitalize text-slate-400">via {lead.rehab_fee_payment_mode}</span></p>
+              )}
               {lead.diet_fee_paid != null && (
                 <p>Diet Rs.{lead.diet_fee_paid} <span className="capitalize text-slate-400">via {lead.diet_fee_payment_mode}</span></p>
               )}
             </div>
           </div>
 
+          {/* The portal is for a course of sessions — progress to follow, a plan to read
+              between visits, a balance to watch — and create_or_reset_portal_account
+              refuses anyone else. Now that this list carries consultation, rehab, gym and
+              class patients too, the panel says so instead of offering a button whose only
+              possible outcome for most of them is the server's refusal. */}
           <div className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/40 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-violet-600">Client Portal</p>
 
-            {account === null ? (
+            {!hasTreatment(lead) ? (
+              <p className="text-xs text-slate-500" data-testid="branch-patient-portal-unavailable">
+                Only treatment patients get the Client Portal — there are no sessions here to follow yet.
+              </p>
+            ) : account === null ? (
               <p className="text-xs text-slate-400">Loading...</p>
             ) : (
               <>
