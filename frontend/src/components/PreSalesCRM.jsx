@@ -367,7 +367,7 @@ const MARKETING_HEAD_FUNNEL = [
  * Leads / Analytics â€” the board's two pages, not two of its filters.
  *
  * Wears the top nav strip's tab rather than the rounded pill everything under it wears.
- * These switch which page you are on; All/Offline/Online and the branch pills narrow
+ * These switch which page you are on; All/Online/Offline and the branch pills narrow
  * whatever page that is. Dressed as a pill, a page switch read as one more thing to
  * filter by, sitting in a stack of three rows that all looked alike.
  */
@@ -451,6 +451,24 @@ const HANDLED_BY_FILTERS = [
   { key: "all", label: "All" },
   { key: "pre_sales", label: "Pre-Sales" },
   { key: "branch_admin", label: "Branch Admin" },
+];
+
+/** Which arm a branch belongs to, read off the vertical's own key — "online_fitness",
+ *  "online_physiotherapy". The same test Branches & Verticals splits its groups on, so a
+ *  branch lands on the same side of the line on both boards. */
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+// Which arm of the business to read, above the branch pills that name the branches in it.
+//
+// This is not the pills said twice. A pill picks one branch, so there is no way through
+// them to ask for both online arms together, or for every room at once — and those are the
+// two questions a master view is opened to answer. Picking a group here still leaves every
+// branch in it pickable below.
+const BRANCH_MODE_FILTERS = [
+  // Widest first, as the Handled By row above it does: the other two are a step in from it.
+  { key: "all", label: "All" },
+  { key: "online", label: "Online" },
+  { key: "offline", label: "Offline" },
 ];
 
 /**
@@ -583,13 +601,21 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handle
 };
 
 /** A specific branch wins outright; otherwise the group's own branches summed (Offline/
- *  Online), or the bucket's grand total for All. Same shape as Overview's own helper. */
-const presalesAnalyticsValueFor = (bucket, branchId) => {
+ *  Online), or the bucket's grand total for All. Same shape as Overview's own helper.
+ *
+ *  The group is summed from the per-branch rows rather than asked of the endpoint, which
+ *  reports a total and a breakdown and no notion of an arm. An empty `groupBranchIds` is
+ *  All — the same thing no pill selected has always meant. */
+const presalesAnalyticsValueFor = (bucket, branchId, groupBranchIds) => {
   if (!bucket) return 0;
   const branches = bucket.branches || [];
   if (branchId) {
     const hit = branches.find((b) => b.branch_id === branchId);
     return hit ? hit.value : 0;
+  }
+  if (groupBranchIds?.length) {
+    const ids = new Set(groupBranchIds);
+    return branches.reduce((sum, b) => sum + (ids.has(b.branch_id) ? b.value : 0), 0);
   }
   return bucket.total;
 };
@@ -601,7 +627,7 @@ const presalesAnalyticsValueFor = (bucket, branchId) => {
  * independent, and sharing one would mean picking a date range on one silently changed
  * what the other was showing.
  */
-const PreSalesAnalyticsPanel = ({ sourceFilter, role }) => {
+const PreSalesAnalyticsPanel = ({ sourceFilter, groupBranchIds, role }) => {
   // Marketing Head reads a leads dashboard here instead of the seven figures: charts of
   // where leads came from and how far they got, and no money anywhere. A marketing desk
   // does not answer for revenue, and putting it on the same screen invites reading a
@@ -645,9 +671,13 @@ const PreSalesAnalyticsPanel = ({ sourceFilter, role }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  // The branch pill, resolved to the id the leads dashboard filters on. Empty means
-  // every branch, which is what no pill selected has always meant.
-  const branchIds = useMemo(() => (sourceFilter ? [sourceFilter] : []), [sourceFilter]);
+  // The branch pill, resolved to the id the leads dashboard filters on. A pill is the
+  // narrower of the two and wins; with none lit the group above it decides, and an empty
+  // list is every branch — which is what no pill selected has always meant.
+  const branchIds = useMemo(
+    () => (sourceFilter ? [sourceFilter] : (groupBranchIds || [])),
+    [sourceFilter, groupBranchIds],
+  );
 
   const fmt = (n) => `â‚¹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -686,7 +716,7 @@ const PreSalesAnalyticsPanel = ({ sourceFilter, role }) => {
         // seven cards on a laptop would leave no room for the figures themselves.
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7" data-testid="presales-analytics-metrics">
           {PRESALES_ANALYTICS_METRICS.map((m) => {
-            const value = presalesAnalyticsValueFor(data?.[m.key], sourceFilter);
+            const value = presalesAnalyticsValueFor(data?.[m.key], sourceFilter, groupBranchIds);
             return (
               <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-3 py-3 sm:px-4 sm:py-3.5" data-testid={`presales-analytics-metric-${m.key}`}>
                 {/* Wraps rather than truncating. Seven-up leaves a card too narrow for
@@ -782,9 +812,13 @@ export const PreSalesCRM = ({
   // same funnel from the marketing side -- both get the same org-wide picture Super
   // Admin's Pre Sales tab has, rather than one rep's own filtered book.
   //
-  // An All/Offline/Online group filter sat here too, splitting the branch pills the way
-  // Branches & Verticals does. Removed: the pills under it already name every branch,
-  // so the group row was a second control for a scope you could already pick directly.
+  // Which arm the board is reading: "all" | "online" | "offline". This was here once and
+  // was taken out as a second control for a scope the branch pills could already pick.
+  // That was wrong about what it does. A pill selects one branch, so the pills alone can
+  // show one online arm or the other and never both — and "how did Online do today" is a
+  // question this view exists to answer. Back, and narrowing the pills as well as the
+  // list, so the two read as one control rather than two that disagree.
+  const [modeFilter, setModeFilter] = useState("all");
   const [masterViewOwn, setMasterViewOwn] = useState("leads"); // "leads" | "analytics"
   // The header's copy wins when the page supplies one; otherwise this board keeps its own.
   const headerOwnsViewTabs = typeof onMasterViewChange === "function";
@@ -842,6 +876,33 @@ export const PreSalesCRM = ({
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
 
+  // The branches the group holds, and their ids. One source for three readers: the pills
+  // draw from the list, the leads memo filters on the ids, and Analytics is scoped by the
+  // same ids so the two panes cannot describe different populations.
+  const modeBranches = useMemo(() => (
+    modeFilter === "all"
+      ? branches
+      : branches.filter((b) => isOnlineVertical(b.vertical) === (modeFilter === "online"))
+  ), [branches, modeFilter]);
+  // Empty for All, which every reader downstream already treats as unscoped.
+  const modeBranchIds = useMemo(
+    () => (modeFilter === "all" ? [] : modeBranches.map((b) => b.id)),
+    [modeFilter, modeBranches],
+  );
+
+  // Changing the group has to let go of a pill the new group does not contain. Left set,
+  // the board would keep filtering to a branch whose pill is no longer drawn — a list
+  // narrowed to one branch with nothing on screen naming it. Done here rather than in an
+  // effect so the pills and the rows never render a frame out of step.
+  const pickMode = (key) => {
+    setModeFilter(key);
+    setSourceFilter((id) => {
+      if (!id || key === "all") return id;
+      const picked = branches.find((b) => b.id === id);
+      return picked && isOnlineVertical(picked.vertical) === (key === "online") ? id : "";
+    });
+  };
+
   // Leads narrowed by Date Filter + Branch filter only â€” feeds both the KPI
   // summary cards and the table, so the cards stay dynamic with those two filters
   // without also collapsing to whatever single stage tab is currently selected.
@@ -852,6 +913,13 @@ export const PreSalesCRM = ({
     // the all-branches view, so they only drop out once a specific branch is picked.
     if (sourceFilter) {
       rows = rows.filter((l) => (l.branch_id || "") === sourceFilter);
+    }
+    // The arm, where no single branch is picked — and pickMode guarantees a picked one is
+    // already inside it, so the two never fight. A lead with no branch yet belongs to
+    // neither arm, so it drops out of a group exactly as it drops out of a named branch.
+    if (modeFilter !== "all") {
+      const ids = new Set(modeBranchIds);
+      rows = rows.filter((l) => ids.has(l.branch_id));
     }
     if (assignedUserId) {
       rows = rows.filter((l) => l.assigned_user_id === assignedUserId);
@@ -874,7 +942,7 @@ export const PreSalesCRM = ({
       });
     }
     return rows;
-  }, [leads, sourceFilter, dateFilter, showHandledByFilter, handledByFilter, assignedUserId]);
+  }, [leads, sourceFilter, modeFilter, modeBranchIds, dateFilter, showHandledByFilter, handledByFilter, assignedUserId]);
 
   const stageCounts = useMemo(() => {
     const map = { All: dateSourceFiltered.length };
@@ -982,7 +1050,7 @@ export const PreSalesCRM = ({
 
   // Rendering thousands of rows at once is fine on desktop but chokes mobile
   // devices, so re-page back to 50 whenever the filtered set changes.
-  useEffect(() => { setVisibleCount(50); }, [stageFilter, sourceFilter, search, dateFilter, handledByFilter]);
+  useEffect(() => { setVisibleCount(50); }, [stageFilter, sourceFilter, modeFilter, search, dateFilter, handledByFilter]);
   const visibleLeads = filtered.slice(0, visibleCount);
 
   // Mobile Consultations tab â€” this rep's leads currently booked for a consultation.
@@ -1021,7 +1089,7 @@ export const PreSalesCRM = ({
         decided by who was logged in. Both now get the cards. */}
     <div className="hidden space-y-5 md:block" data-testid="presales-leads-tab">
       {/* Master View controls â€” Super Admin only: which pane (Leads / Analytics), and
-          which branches (All/Offline/Online, then the individual branches in that
+          which branches (All/Online/Offline, then the individual branches in that
           group) both panes are scoped to.
 
           Above the KPI cards, because the cards are counted for whatever these select.
@@ -1044,17 +1112,23 @@ export const PreSalesCRM = ({
           )}
 
           {branches.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="presales-branch-pills">
-              {branches.map((b) => (
-                <PreSalesBranchPill
-                  key={b.id}
-                  active={sourceFilter === b.id}
-                  onClick={() => setSourceFilter((id) => (id === b.id ? "" : b.id))}
-                  testid={`presales-branch-pill-${b.id}`}
-                >
-                  {branchLabel(b)}
-                </PreSalesBranchPill>
-              ))}
+            <div className="flex flex-wrap items-center gap-2" data-testid="presales-branch-filters">
+              {/* Ahead of the pills, not above them: the group and the branches in it are
+                  one question narrowing by degrees, and a row of its own would read as a
+                  filter for something else. */}
+              <SegmentedPillGroup options={BRANCH_MODE_FILTERS} active={modeFilter} onPick={pickMode} testid="presales-branch-mode" />
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="presales-branch-pills">
+                {modeBranches.map((b) => (
+                  <PreSalesBranchPill
+                    key={b.id}
+                    active={sourceFilter === b.id}
+                    onClick={() => setSourceFilter((id) => (id === b.id ? "" : b.id))}
+                    testid={`presales-branch-pill-${b.id}`}
+                  >
+                    {branchLabel(b)}
+                  </PreSalesBranchPill>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -1103,7 +1177,7 @@ export const PreSalesCRM = ({
       )}
 
       {masterView === "analytics" && isSuperAdminMasterView ? (
-        <PreSalesAnalyticsPanel sourceFilter={sourceFilter} role={role} />
+        <PreSalesAnalyticsPanel sourceFilter={sourceFilter} groupBranchIds={modeBranchIds} role={role} />
       ) : (
       <>
       {/* Toolbar */}
@@ -1377,17 +1451,20 @@ export const PreSalesCRM = ({
                 </div>
               )}
               {branches.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5" data-testid="presales-mobile-branch-pills">
-                  {branches.map((b) => (
-                    <PreSalesBranchPill
-                      key={b.id}
-                      active={sourceFilter === b.id}
-                      onClick={() => setSourceFilter((id) => (id === b.id ? "" : b.id))}
-                      testid={`presales-mobile-branch-pill-${b.id}`}
-                    >
-                      {branchLabel(b)}
-                    </PreSalesBranchPill>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2" data-testid="presales-mobile-branch-filters">
+                  <SegmentedPillGroup options={BRANCH_MODE_FILTERS} active={modeFilter} onPick={pickMode} testid="presales-mobile-branch-mode" />
+                  <div className="flex flex-wrap items-center gap-1.5" data-testid="presales-mobile-branch-pills">
+                    {modeBranches.map((b) => (
+                      <PreSalesBranchPill
+                        key={b.id}
+                        active={sourceFilter === b.id}
+                        onClick={() => setSourceFilter((id) => (id === b.id ? "" : b.id))}
+                        testid={`presales-mobile-branch-pill-${b.id}`}
+                      >
+                        {branchLabel(b)}
+                      </PreSalesBranchPill>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1426,7 +1503,7 @@ export const PreSalesCRM = ({
           </div>
 
           {masterView === "analytics" && isSuperAdminMasterView ? (
-            <PreSalesAnalyticsPanel sourceFilter={sourceFilter} role={role} />
+            <PreSalesAnalyticsPanel sourceFilter={sourceFilter} groupBranchIds={modeBranchIds} role={role} />
           ) : (
           <>
           {/* Same range row the desk gets, above the stage bar it narrows. */}
