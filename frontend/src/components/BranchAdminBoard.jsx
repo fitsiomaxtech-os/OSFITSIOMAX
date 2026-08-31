@@ -1239,15 +1239,23 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
-            <Button
-              onClick={() => setShowCreateLead(true)}
-              title="Create Lead"
-              aria-label="Create Lead"
-              className="h-10 w-10 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
-              data-testid="branch-create-lead-btn"
-            >
-              <UserPlus className="h-4 w-4" />
-            </Button>
+            {/* Branch Leads only. This toolbar is shared by both tabs (see the note
+                above it), which is what put a Create Lead button over the Consultation
+                pills -- and a consultation is a patient the branch already has, arrived
+                through Pre-Sales. There is nothing to create from that tab, so the
+                button offered an action whose result would not appear on the screen it
+                was pressed from. Hidden the same way the date popover above it is. */}
+            {!onConsultationTab && (
+              <Button
+                onClick={() => setShowCreateLead(true)}
+                title="Create Lead"
+                aria-label="Create Lead"
+                className="h-10 w-10 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
+                data-testid="branch-create-lead-btn"
+              >
+                <UserPlus className="h-4 w-4" />
+              </Button>
+            )}
             <PullFromSheetButton
               onPulled={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
               notConnectedHint="Google Sheets isn't connected yet — ask your Super Admin to connect it."
