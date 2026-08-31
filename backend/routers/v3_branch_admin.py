@@ -71,12 +71,19 @@ async def _presales_mirror_stage(entry_stage_name: str) -> dict:
     signal to count and filter it against that other field, and because no such stage
     exists in the collection, /branch-stage rejects any attempt to move a lead onto it.
 
-    It stops applying the moment the branch works the lead. A lead's Pre-Sales stage does
-    not change when a branch admin moves it to Appointment on this board — the two pipelines
-    track different things — so on the Pre-Sales reading alone it would still be a New Lead
-    and stay listed here forever. `unmoved_branch_stage` is the second half of the match:
-    the lead is only shown under Leads while it is still sitting at the branch's own
-    opening, so moving it anywhere takes it out of this pill and into that stage.
+    It stops applying the moment the branch works the lead: `unmoved_branch_stage` is the
+    match, so a lead is shown under Leads only while it is still sitting at the branch's
+    own opening, and moving it anywhere takes it out of this pill and into that stage.
+
+    That opening no longer draws a pill of its own — Branch Leads shows four, Leads / RNR /
+    Follow Up / Appointment, and this one is the first of them. So the match is on
+    `unmoved_branch_stage` alone; it used to also require the lead to be an unworked
+    Pre-Sales New Lead (`mirrors_stage`), which is where the pill's name comes from, and
+    that half had to go when the pill became the whole of the opening rather than a second
+    reading of it. A branch switched off Pre-Sales control has leads rehomed onto Branch
+    Assign still carrying whatever Pre-Sales stage they had reached, and the narrow match
+    left every one of them in no pill at all. `mirrors_stage` is still sent: it is what
+    tells the client this pill is a view rather than a move target.
     """
     return {
         "id": "presales-new-leads",
@@ -379,17 +386,22 @@ async def _board_payload(leads: list, branch_id: Optional[str], role: str = "") 
     stage_counts = {}
     branch_stages = await _branch_stages(branch_id)
     for stage in branch_stages:
-        # The Leads pill mirrors the Pre-Sales pipeline, so it counts a lead against its
-        # `stage` — and only while that lead is still at the branch's opening, or one
-        # the branch has already moved on would go on being counted here as well as in
-        # the stage it was moved to. Every real branch stage counts on `branch_stage`.
+        # The Leads pill is the branch's opening: it counts everyone still sitting at
+        # `unmoved_branch_stage` and lets go of them the moment the branch moves them on,
+        # or a lead already dealt with would go on being counted here as well as in the
+        # stage it was moved to. Every real branch stage counts on `branch_stage` too, so
+        # the two differ only in which name they compare against.
+        #
+        # It also required `stage == mirrors_stage` — that the lead was an unworked
+        # Pre-Sales New Lead, which is where the pill's name comes from. Dropped when the
+        # branch's own entry stage stopped drawing a pill of its own and this one became
+        # the whole of the opening; a branch switched off Pre-Sales control has leads
+        # rehomed onto that stage carrying their old Pre-Sales stage, and they were being
+        # counted under nothing at all.
         mirrors = stage.get("mirrors_stage")
         if mirrors:
             unmoved = stage.get("unmoved_branch_stage")
-            matches = sum(
-                1 for lead in leads
-                if lead.get("stage") == mirrors and lead.get("branch_stage") == unmoved
-            )
+            matches = sum(1 for lead in leads if lead.get("branch_stage") == unmoved)
         else:
             matches = sum(1 for lead in leads if lead.get("branch_stage") == stage["name"])
         stage_counts[stage["name"]] = matches

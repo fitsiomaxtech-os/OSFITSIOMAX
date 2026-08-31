@@ -95,6 +95,9 @@ import { isCourseComplete } from "@/lib/leadStage";
 const APPOINTMENT_STAGE = "Appointment Date & Time";
 const BRANCH_RNR_STAGE = "RNR";
 const BRANCH_CANCELLED_STAGE = "Cancelled";
+// Still a stage a lead can be moved to -- schedule-portfolio puts them there -- but no
+// longer one of the pills on the Branch Leads strip. See leadPillStages.
+const BRANCH_PORTFOLIO_STAGE = "Portfolio";
 
 // ---- Appointment confirmation -------------------------------------------------------
 // What the client walks away with. Built as its own document so it can be opened, printed
@@ -451,16 +454,17 @@ export const matchesConsultationStage = (lead, stageName) => {
  * Does this lead belong under this Branch stage?
  *
  * Nearly always a branch_stage comparison. The exception is the "Leads" pill, which the
- * board sends down carrying `mirrors_stage`: it shows the branch's own Pre-Sales New Leads
- * without those leads having been written to, so it has to be matched on the Pre-Sales
- * `stage` field instead. Same idea as the Diet Consultation chip above — the pill reads a
- * fact about the lead rather than claiming to own its position.
+ * board sends down carrying `mirrors_stage`: it claims every lead still sitting at the
+ * branch's own opening (`unmoved_branch_stage`, i.e. "Branch Assign"), and lets go of them
+ * the moment the branch moves them anywhere.
  *
- * That reading alone is not enough, though. Moving a lead to Appointment on this board does
- * not touch its Pre-Sales stage — the two pipelines track different things — so a lead the
- * branch had plainly dealt with stayed listed under Leads for good. Hence the second half
- * of the match: a mirrored pill only claims a lead while it is still sitting at the
- * branch's own opening. Move it anywhere and it leaves Leads for the stage it was moved to.
+ * It used to require the second half as well — that the lead was ALSO an unworked Pre-Sales
+ * New Lead, which is where the pill's name comes from. That half was dropped when the
+ * branch's own entry stage lost its pill to this one (see leadPillStages): the strip has a
+ * single opening now, so the pill has to hold everyone standing in it. A branch that was
+ * switched off Pre-Sales control carries leads rehomed onto Branch Assign with their old
+ * Pre-Sales stage still on them (realign_branch_stage_leads), and under the old two-part
+ * match those leads would now belong to no pill at all.
  *
  * The third exception is a lead the consultation pipeline has taken over. This board shows
  * both pipelines as one strip, and nothing writes branch_stage again once the appointment is
@@ -507,7 +511,7 @@ export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => 
   // would add up to more than the branch has.
   if (finished || handedOver) return false;
   if (!stage?.mirrors_stage) return here === name;
-  return lead.stage === stage.mirrors_stage && here === stage.unmoved_branch_stage;
+  return here === stage.unmoved_branch_stage;
 };
 
 /**
@@ -728,18 +732,25 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // consultation_stage exactly where it was, and that the lead was cancelled is the more
   // important thing to say about them than wherever their consultation had reached.
   //
-  // And except under the Leads pill, where branch_stage would read "Branch Assign" on
-  // every row of a list the admin opened by clicking Leads. The lead genuinely is still at
-  // the branch's opening; "Leads" is the name for that position while it is also an
-  // unworked Pre-Sales New Lead, and it is the name the admin is looking at.
+  // And except at the branch's own opening, which reads "Leads" wherever the row is
+  // listed -- not only under the Leads pill, as this once did. That pill is the whole of
+  // the opening on the strip now (see leadPillStages), so a chip saying "Branch Assign"
+  // would name a stage the bar above has no pill for: nothing to click, and nothing to
+  // tell the reader which pill their row is counted under.
   const showingMirror = !!mirrorStage && stageFilter === mirrorStage.name;
+  // Is this lead standing at that opening? Only meaningful on a branch running its own
+  // leads; a Pre-Sales-fed branch has no mirror pill and keeps naming its entry stage.
+  const atBranchOpening = useCallback(
+    (lead) => !!mirrorStage && !!lead?.branch_stage && lead.branch_stage === realEntryStage?.name,
+    [mirrorStage, realEntryStage],
+  );
   const finalBranchStages = useMemo(
     () => new Set(stages.filter((s) => s.is_final).map((s) => s.name)),
     [stages],
   );
   const rowStageName = useCallback(
     (lead) => {
-      if (showingMirror && lead.branch_stage) return mirrorStage.name;
+      if ((showingMirror || atBranchOpening(lead)) && lead.branch_stage) return mirrorStage.name;
       if (lead.branch_stage && finalBranchStages.has(lead.branch_stage)) return lead.branch_stage;
       // Finished, and no stage field anywhere says so — nothing writes "Completed" onto a
       // lead, which is why both pill sets read it off the patient instead. The chip has to
@@ -748,7 +759,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       if (lead.consultation_stage !== "Cancel" && isCourseComplete(lead)) return "Completed";
       return lead.consultation_stage || lead.branch_stage;
     },
-    [showingMirror, mirrorStage, finalBranchStages],
+    [showingMirror, atBranchOpening, mirrorStage, finalBranchStages],
   );
   const entryStageNames = [mirrorStage?.name, realEntryStage?.name].filter(Boolean);
 
@@ -759,6 +770,35 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     () => consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name)),
     [stages, consultationStages],
   );
+
+  // Which of the Branch stages get a pill on the strip. Four of them: Leads, RNR, Follow
+  // Up, Appointment — the shape the branch pipeline was built to mirror in the first place
+  // (see BRANCH_ADMIN_ENTRY_STAGE in the backend's constants.py).
+  //
+  // Only the strip. The pipeline itself is untouched: every stage dropped here is still a
+  // real position, still written to leads, still on the lead card's own Pipeline Stage row,
+  // and still counted in All Stages. What changes is which of them the reader can filter by.
+  //
+  //   - The branch's own entry stage ("Branch Assign") hands its pill to Leads, which now
+  //     claims everyone sitting there (see matchesBranchStage). They were two pills over
+  //     one position — one named for the position, one for the lead standing in it.
+  //   - Portfolio comes off. It is reached by its own scheduling dialog, not by the strip.
+  //   - So does the final stage ("Cancelled"), for the same reason: cancelling happens in
+  //     the appointment dialog and on the lead card, and the pill only ever showed the
+  //     leftovers.
+  //
+  // Gated on there being a mirror pill at all, which is to say on the branch running its
+  // own leads. A Pre-Sales-fed branch has no Leads pill to hand the opening to, so its
+  // strip is left exactly as it was.
+  const leadPillStages = useMemo(() => {
+    if (!mirrorStage) return stages;
+    return stages.filter((s) => s.mirrors_stage || (
+      s.name !== realEntryStage?.name
+      && s.name !== BRANCH_PORTFOLIO_STAGE
+      && !s.is_final
+    ));
+  }, [stages, mirrorStage, realEntryStage]);
+
   // The two bars used to be one. Branch Leads carried both pipelines end to end, which put
   // thirteen pills on a strip where the first six answer "has this lead been picked up"
   // and the rest answer "how is their treatment going" — one bar reading as one question
@@ -785,7 +825,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // A filter the new tab *does* own survives, which is what lets a lead popup send the
   // reader straight to its Consultation stage without this undoing the trip.
   useEffect(() => {
-    const ownedHere = (activeView === "branch_consultation" ? consultationOnlyStages : stages)
+    const ownedHere = (activeView === "branch_consultation" ? consultationOnlyStages : leadPillStages)
       .some((st) => st.name === stageFilter);
     if (stageFilter && !ownedHere) setStageFilter(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1067,7 +1107,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               stages the bar is given and which board sits underneath, and by nothing
               else. Two copies of this would be two toolbars to keep in step. */}
           <StageTabBar
-            stages={onConsultationTab ? consultationOnlyStages : stages}
+            stages={onConsultationTab ? consultationOnlyStages : leadPillStages}
             stageFilter={stageFilter}
             setStageFilter={setStageFilter}
             counts={onConsultationTab ? consultationCounts : salesCounts}
@@ -1659,11 +1699,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           branchId={branchId}
           stages={stages}
           consultationStages={consultationStages}
-          // Which of the two entry stages this lead's pipeline should open on. A lead can
-          // sit on Leads and Branch Assign at once (one reads its Pre-Sales stage, the other
-          // its branch stage), so the pill the admin opened it from is what decides —
-          // matching the stage strip they were just looking at.
-          openedFromMirror={showingMirror}
+          // Which of the two entry stages this lead's pipeline should open on. The strip
+          // above now shows only the mirrored one (see leadPillStages), so a lead standing
+          // at the branch's opening opens on Leads however it was reached — from the Leads
+          // pill or from All Stages — and the card names the position the same way the row
+          // that opened it did.
+          openedFromMirror={showingMirror || atBranchOpening(selectedLead)}
           onlineArm={armScoped}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
