@@ -15,7 +15,7 @@ import { LeadsAnalyticsDashboard } from "@/components/marketing/LeadsAnalyticsDa
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar } from "@/components/ui/stage-tab";
-import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
+import { MilkDateInput, MilkDateTextInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { callTimeStamp, callDateStamp } from "@/lib/time";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
@@ -544,17 +544,23 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handle
       {activeKey === "custom" && (
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
           <CalendarDays className="h-3.5 w-3.5" />
-          <MilkDateInput
+          {/* Typed, not picked. Whoever pulls this range already knows both dates — the
+              month grid made them navigate to two days they could simply have keyed in,
+              and a range a quarter back cost several taps of the arrow per field. */}
+          <MilkDateTextInput
             value={customFrom}
             onChange={(e) => { setCustomFrom(e.target.value); applyCustom(e.target.value, customTo); }}
-            className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+            className="h-8 w-[7.25rem] rounded-md border-slate-200 px-2 text-xs"
             data-testid={`${testid}-custom-from`}
           />
           <span>to</span>
-          <MilkDateInput
+          {/* Bounded by the other field, so a backwards range is refused as it is typed
+              rather than quietly returning nothing from the table below. */}
+          <MilkDateTextInput
             value={customTo}
             onChange={(e) => { setCustomTo(e.target.value); applyCustom(customFrom, e.target.value); }}
-            className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+            min={customFrom || undefined}
+            className="h-8 w-[7.25rem] rounded-md border-slate-200 px-2 text-xs"
             data-testid={`${testid}-custom-to`}
           />
         </div>

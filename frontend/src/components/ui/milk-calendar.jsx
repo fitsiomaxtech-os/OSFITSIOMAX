@@ -227,6 +227,107 @@ export const MilkDateInput = ({
 };
 
 
+/** `2026-08-31` → `31/08/2026`. Anything that is not a whole ISO date reads as empty,
+ *  so a half-typed or cleared value never shows as a mangled one. */
+export const isoToDmy = (v) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ""));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+};
+
+/** `31/08/2026` → `2026-08-31`, or "" if that is not a real day. The round-trip through
+ *  Date is the calendar check: JS rolls 31/02 forward to March, so a value that comes back
+ *  reporting a different day than it was given was never a date in the first place. */
+export const dmyToIso = (t) => {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(t || "").trim());
+  if (!m) return "";
+  const [, dd, mm, yyyy] = m;
+  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+  if (d.getFullYear() !== Number(yyyy) || d.getMonth() !== Number(mm) - 1 || d.getDate() !== Number(dd)) return "";
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+/** Keeps the field reading DD/MM/YYYY while it is being keyed in: digits only, eight of
+ *  them at most, separators put in rather than typed. Grouping off the digits instead of
+ *  appending a "/" after the second one is what lets backspace work — deleting the slash
+ *  in "12/" leaves "12", which regroups to "12" rather than instantly growing it back. */
+const maskDmy = (raw) => {
+  // A pasted ISO date is turned round rather than fed to the grouper, which would read its
+  // year as a day and give "20/26/0831". Dates get copied out of this app in ISO — a paste
+  // that lands as garbage looks like the field rejecting a date it plainly understands.
+  const pastedIso = isoToDmy(String(raw || "").trim());
+  const digits = String(pastedIso || raw || "").replace(/\D/g, "").slice(0, 8);
+  return [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean).join("/");
+};
+
+/**
+ * A date field that is typed rather than picked — same contract as MilkDateInput above
+ * (ISO `YYYY-MM-DD` in, `{ target: { value } }` out), so the two are interchangeable at a
+ * call site and nothing downstream can tell which one filled the value.
+ *
+ * The month grid is the right control for booking a day — you are reading a calendar to
+ * choose one. It is the wrong one for a report's from/to, where the operator already knows
+ * both dates and wants them entered: picking a range three months back is two fields and
+ * six taps through the grid against twelve keystrokes here.
+ *
+ * The value is only emitted once eight digits spell a real day inside min/max. Until then
+ * the parent holds "" — a half-typed date is not a date, and a range that recomputed on
+ * "3", then "31", then "31/0" would refilter the board under the operator mid-keystroke.
+ * `text` is therefore the field's own state: the prop cannot hold "31/0" to render back.
+ */
+export const MilkDateTextInput = ({
+  value, onChange, min, max, disabled, className = "",
+  placeholder = "DD/MM/YYYY", ...rest
+}) => {
+  const [text, setText] = useState(() => isoToDmy(value));
+  // What we last handed the parent. A `value` matching it is our own emission coming back
+  // round, which must not reset the text the operator is still typing into.
+  const emitted = useRef(value || "");
+
+  useEffect(() => {
+    if ((value || "") === emitted.current) return;
+    emitted.current = value || "";
+    setText(isoToDmy(value));
+  }, [value]);
+
+  const iso = dmyToIso(text);
+  // What the field is worth right now: the typed day, or "" while it is unfinished, not a
+  // real date, or outside the bounds a sibling field sets.
+  const out = iso && (!min || iso >= min) && (!max || iso <= max) ? iso : "";
+  // Only once all eight digits are in — a date is not wrong for being unfinished.
+  const invalid = text.replace(/\D/g, "").length === 8 && !out;
+
+  // Emitted from an effect rather than from the keystroke, so the field also speaks up when
+  // `min`/`max` move under it. A range whose end was refused for preceding its start must
+  // become the filter the moment the start is pulled back — deciding only on keypress left
+  // both fields reading as filled while the parent still held nothing from this one.
+  useEffect(() => {
+    if (out === emitted.current) return;
+    emitted.current = out;
+    onChange?.({ target: { value: out } });
+  }, [out]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handle = (e) => setText(maskDmy(e.target.value));
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      maxLength={10}
+      disabled={disabled}
+      value={text}
+      onChange={handle}
+      placeholder={placeholder}
+      aria-invalid={invalid || undefined}
+      className={`h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
+        invalid ? "border-red-400 text-red-600 focus:border-red-500" : "border-input text-slate-800 focus:border-sky-500"
+      } ${className}`}
+      {...rest}
+    />
+  );
+};
+
+
 /** Clinic hours. Appointments are taken between these, in half-hour slots. */
 export const SLOT_DAY_START = "10:00";
 export const SLOT_DAY_END = "22:00";
