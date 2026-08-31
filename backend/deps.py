@@ -123,6 +123,29 @@ def is_branch_admin_role(role: str) -> bool:
     return (role or "").strip().lower() in BRANCH_ADMIN_ROLES
 
 
+def reads_lead_data(role: str) -> bool:
+    """Whether this role may see the ad record behind a lead — see V3LeadData in schemas.
+
+    Super Admin alone. Which ad, which adset and which campaign bought a patient is the
+    org's own spend answering back; a branch or a desk works the lead in front of them
+    without it. Lives here beside the other role predicates rather than inside one router,
+    because every list of leads that leaves the building has to ask the same question.
+    """
+    return (role or "").strip().lower() == "super_admin"
+
+
+def lead_as_read_by(row: dict, role: str) -> dict:
+    """One lead document, as `role` is entitled to read it.
+
+    Applied wherever a *list* of leads is built for a caller. Enforced on the wire and not
+    only by hiding the tab that fills it, because a hidden tab is still a field in a
+    response somebody can open a network panel on.
+    """
+    if reads_lead_data(role):
+        return row
+    return {**row, "lead_data": None}
+
+
 # The two admins who run an arm rather than a place, and the practice each one runs.
 #
 # Every other Branch Admin is scoped by user.branch_id. These two are not scoped by

@@ -8,6 +8,7 @@ import {
   leadFieldsList, leadFieldsCreate, leadFieldsUpdate, leadFieldsDelete,
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { loadSession } from "@/lib/session";
 
 const SOURCE_OPTIONS = ["Meta", "SEO", "Referral", "Walk-In", "Website", "CSV Import", "Google Sheets", "Other"];
 const DEPARTMENT_OPTIONS = [
@@ -17,6 +18,37 @@ const DEPARTMENT_OPTIONS = [
   { value: "online_fitness", label: "Online Fitness" },
 ];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
+
+/**
+ * The ad record a lead arrived on — Meta's own lead export, field for field, in the order
+ * Meta writes it. Its own tab rather than more rows under Patient Details, because it
+ * answers a different question about the same person: Lead Details is who they are and
+ * what hurts, this is which advert we paid for to hear from them.
+ *
+ * Names match Meta's export exactly, so a row pasted across needs no translating. Two of
+ * them collide with the lead's own — this `id` is Meta's lead id, and `created_time` is
+ * when Meta captured the form, not when we stored it — which is why the whole block is
+ * sent nested under `lead_data` rather than flattened onto the lead. See V3LeadData in
+ * backend/schemas/v3.py.
+ */
+const LEAD_DATA_FIELDS = [
+  { key: "id", label: "Lead ID", placeholder: "Meta's own lead id" },
+  { key: "created_time", label: "Created Time", placeholder: "2026-08-31T10:30:00+0530" },
+  { key: "ad_id", label: "Ad ID", placeholder: "e.g. 23851234567890123" },
+  { key: "ad_name", label: "Ad Name", placeholder: "e.g. Back Pain — Video A" },
+  { key: "adset_id", label: "Adset ID", placeholder: "e.g. 23851234567890456" },
+  { key: "adset_name", label: "Adset Name", placeholder: "e.g. Chennai 25-54" },
+  { key: "campaign_id", label: "Campaign ID", placeholder: "e.g. 23851234567890789" },
+  { key: "campaign_name", label: "Campaign Name", placeholder: "e.g. Anna Nagar Leads Aug" },
+  { key: "form_id", label: "Form ID", placeholder: "e.g. 987654321012345" },
+  { key: "form_name", label: "Form Name", placeholder: "e.g. Free Consultation Form" },
+  // Three answers rather than a checkbox: blank means nobody has said, and that is the
+  // honest state of a lead somebody typed in by hand.
+  { key: "is_organic", label: "Is Organic", type: "select", options: [["", "—"], ["true", "Yes"], ["false", "No"]] },
+  { key: "platform", label: "Platform", type: "select", options: [["", "—"], ["fb", "Facebook (fb)"], ["ig", "Instagram (ig)"]] },
+];
+
+const blankLeadData = Object.fromEntries(LEAD_DATA_FIELDS.map((f) => [f.key, ""]));
 
 const blank = {
   name: "", source_tab: "Other", email: "", phone: "", alternative_phone: "",
@@ -37,6 +69,8 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
     ...(branchId ? { branch_id: branchId } : {}),
     ...(lockedDepartment ? { department: lockedDepartment } : {}),
   });
+  const [leadData, setLeadData] = useState(blankLeadData);
+  const [tab, setTab] = useState("details");
   const [extraFields, setExtraFields] = useState({});
   const [customFields, setCustomFields] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -51,11 +85,38 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const setExtra = (k, v) => setExtraFields((p) => ({ ...p, [k]: v }));
+  const setLD = (k, v) => setLeadData((p) => ({ ...p, [k]: v }));
+
+  // Read off the session rather than the isSuperAdmin prop: that prop says which board
+  // opened this form — Branch Admin's board passes false even when a Super Admin is the
+  // one looking at it through Operations — and this tab is about who is looking. The
+  // server withholds the same block from everybody else on the way back out (see
+  // reads_lead_data in backend/deps.py), so hiding it here is the courtesy, not the lock.
+  const isSuperAdminUser = String(loadSession()?.user?.role || "").trim().toLowerCase() === "super_admin";
 
   const submit = async () => {
-    if (!form.name.trim() || !form.phone.trim()) { toast.error("Name and phone are required"); return; }
+    if (!form.name.trim() || !form.phone.trim()) {
+      // Back to the tab the missing field is on, so the complaint points at something the
+      // user can actually see. Both required fields live on Lead Details.
+      setTab("details");
+      toast.error("Name and phone are required");
+      return;
+    }
     const payload = { ...form };
     payload.extra_fields = extraFields;
+    if (isSuperAdminUser) {
+      const filled = Object.entries(leadData)
+        .map(([k, v]) => [k, typeof v === "string" ? v.trim() : v])
+        .filter(([, v]) => v !== "");
+      // Left off entirely when the tab was never touched, rather than sent as a dozen
+      // empty strings — a lead with no advert behind it should read as having none, not
+      // as having been asked and answered blank.
+      if (filled.length) {
+        payload.lead_data = Object.fromEntries(
+          filled.map(([k, v]) => [k, k === "is_organic" ? v === "true" : v]),
+        );
+      }
+    }
     if (payload.months_of_pain === "") payload.months_of_pain = null;
     else payload.months_of_pain = Number(payload.months_of_pain);
     if (payload.age === "") payload.age = null;
@@ -90,7 +151,36 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
           </div>
         </div>
 
-        <div className="max-h-[70vh] space-y-5 overflow-y-auto px-6 py-5">
+        {/* Only a Super Admin gets a second tab, so for everyone else the form stays the
+            single uninterrupted page it has always been rather than one lone tab with
+            nothing beside it. */}
+        {isSuperAdminUser && (
+          <div className="flex gap-1 border-b border-slate-200 px-6" data-testid="lead-create-tabs">
+            {[
+              { key: "details", label: "Lead Details" },
+              { key: "lead_data", label: "Lead Data" },
+            ].map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+                  tab === t.key
+                    ? "border-indigo-600 text-indigo-600"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
+                data-testid={`lead-create-tab-${t.key}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Both panels stay mounted and one is hidden: switching tabs must not empty the
+            one you left, and a half-filled ad record is exactly the thing somebody would
+            tab away from mid-entry. */}
+        <div className={`max-h-[70vh] space-y-5 overflow-y-auto px-6 py-5 ${tab === "details" ? "" : "hidden"}`} data-testid="lead-create-panel-details">
           {/* Standard fields */}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name *"><Input placeholder="Full name" value={form.name} onChange={(e) => set("name", e.target.value)} data-testid="lead-create-name" /></Field>
@@ -168,6 +258,40 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
             )}
           </div>
         </div>
+
+        {isSuperAdminUser && (
+          <div className={`max-h-[70vh] space-y-5 overflow-y-auto px-6 py-5 ${tab === "lead_data" ? "" : "hidden"}`} data-testid="lead-create-panel-lead-data">
+            <div className="rounded-lg border border-slate-200 p-4">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Ad Record</p>
+              <p className="mb-3 text-xs text-slate-400">
+                The Meta lead export, field for field. Super Admin only. Leave blank for a walk-in, or for any lead with no advert behind it.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {LEAD_DATA_FIELDS.map((f) => (
+                  <Field key={f.key} label={f.label}>
+                    {f.type === "select" ? (
+                      <select
+                        className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm"
+                        value={leadData[f.key]}
+                        onChange={(e) => setLD(f.key, e.target.value)}
+                        data-testid={`lead-data-${f.key}`}
+                      >
+                        {f.options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                    ) : (
+                      <Input
+                        placeholder={f.placeholder}
+                        value={leadData[f.key]}
+                        onChange={(e) => setLD(f.key, e.target.value)}
+                        data-testid={`lead-data-${f.key}`}
+                      />
+                    )}
+                  </Field>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
           <Button variant="outline" onClick={onClose} data-testid="lead-create-cancel">Cancel</Button>

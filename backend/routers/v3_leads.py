@@ -7,7 +7,7 @@ from database import v3_col
 from utils import now_iso, normalize_slot_time, generate_patient_number
 from deps import (
     v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role,
-    vertical_names_an_arm,
+    vertical_names_an_arm, lead_as_read_by,
 )
 from constants import V3_STAGES
 from stage_utils import first_branch_stage_for, first_branch_stage_for_branch
@@ -62,7 +62,7 @@ async def v3_get_leads(
     # only the next import. One query for every branch, not one per lead.
     control_by_branch = await lead_control.branch_control_map()
     return [
-        V3LeadOut(**{**row, "lead_control": lead_control.control_for_lead(row, control_by_branch)})
+        V3LeadOut(**lead_as_read_by({**row, "lead_control": lead_control.control_for_lead(row, control_by_branch)}, user.role))
         for row in rows
     ]
 
@@ -111,6 +111,10 @@ async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_requir
         "gender": payload.gender or "",
         "occupation": payload.occupation or "",
         "expected_consultation_date": payload.expected_consultation_date or "",
+        # Stored whoever sends it; only Super Admin's form offers the tab that fills it,
+        # and only Super Admin reads it back — see lead_as_read_by in deps.py. Empty dict,
+        # not None, so the field is shaped the same for anyone who does read it.
+        "lead_data": payload.lead_data.model_dump() if payload.lead_data else {},
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
