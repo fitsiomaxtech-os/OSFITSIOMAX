@@ -1350,23 +1350,28 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 of their own underneath: search, then ranges, then the actions, one
                 horizontal line that never wraps.
 
-                From xl only. The six ranges want ~570px and the five action buttons on the
-                right ~240px; under about 1280px they cannot share a line with the search
-                without squeezing it to a stub, so narrower screens keep the stacked row
-                below instead. The same instance would have had to be two anyway — one
-                row cannot be both in the toolbar and under it.
+                Wide screens only — the breakpoint and its arithmetic are in the note just
+                below. Narrower ones keep the stacked row underneath instead. The same
+                instance would have had to be two anyway: one row cannot be both in the
+                toolbar and under it.
 
                 shrink-0 so the search is what gives way when the row gets tighter. Shared
                 by both tabs now — Branch Leads had no range row before, only the calendar
                 icon further along, which is why the toolbar comment below still calls out
                 that history. */}
-            {/* From 2xl rather than xl. The three intake dropdowns below want ~400px of the
-                same row, and at 1280 the ranges (~570), the search (~384) and the actions
-                (~240) had already spent all of it — adding the dropdowns there would have
-                pushed the row into exactly the overflow this breakpoint exists to prevent.
-                Between xl and 2xl the ranges fall back to their own row below, which is
-                already there and already the only copy on screen at every smaller width. */}
-            <div className="hidden shrink-0 2xl:block">
+            {/* From 1440px, not 2xl. It was 2xl (1536) because at 1280 the ranges (~570),
+                the three intake dropdowns (~400), the search (~384) and the actions (~240)
+                could not share a line — but that put the split just above the common
+                1440-and-1520 desktop, which is exactly where the row was being read as
+                broken: everything on one line and the ranges stranded on a second.
+
+                The ~90px the inline bar now saves by tightening (see QuickDateFilterBar's
+                `inline`) plus the ~48px the dropdowns give back at this width brings the
+                fixed part to ~1180px, so 1440 leaves the search around 200px — enough for
+                its placeholder — and anything wider only gives it more. Below 1440 the
+                arithmetic still doesn't work and the ranges keep their own row underneath,
+                which is where every narrower width has always had them. */}
+            <div className="hidden shrink-0 min-[1440px]:block">
               <QuickDateFilterBar
                 value={quickDate}
                 onChange={setQuickDate}
@@ -1388,12 +1393,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 three of them is most of the toolbar spent saying nothing — which is the
                 state every branch is in until its sheet carries these columns.
 
-                From lg. The three want ~400px that no narrower width has spare: at sm the
+                From lg. The three want ~350px that no narrower width has spare: at sm the
                 search field has only just reappeared beside the actions, and adding these
                 there would drive the row into overflow rather than shrink the search,
                 which is the failure the collapse-to-an-icon was built to avoid. Under lg
                 the columns are still readable in the list; it is only asking that waits
-                for the width. */}
+                for the width.
+
+                w-28 up to 2xl, w-32 from there. The narrow size is what lets the three of
+                them sit on the same line as the ranges at 1440 without either giving way;
+                past 1536 the width is going spare anyway, so they take the roomier size
+                back and the labels stop truncating so early. */}
             {!onConsultationTab && (
               <div className="hidden shrink-0 items-center gap-1.5 lg:flex" data-testid="branch-intake-filters">
                 {INTAKE_QUESTIONS.map((q) => {
@@ -1407,7 +1417,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       onChange={(e) => setIntakeFilters((p) => ({ ...p, [q.key]: e.target.value }))}
                       title={q.label}
                       aria-label={q.label}
-                      className={`h-10 w-32 shrink-0 truncate rounded-md border px-2 text-xs font-medium transition-colors ${
+                      className={`h-10 w-28 shrink-0 truncate rounded-md border px-2 text-xs font-medium transition-colors 2xl:w-32 ${
                         active ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                       }`}
                       data-testid={`branch-intake-filter-${q.key}`}
@@ -1532,9 +1542,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           </div>
 
           {/* The same range row as the one in the toolbar, for the widths where it will
-              not fit up there — below 2xl this is the only copy on screen, and above it
-              this one is the one that goes. Shared by both tabs now, same as the inline
-              copy above.
+              not fit up there — below 1440px this is the only copy on screen, and from
+              there up this one is the one that goes. Shared by both tabs now, same as the
+              inline copy above.
 
               A second date control on Branch Leads, and deliberately not a replacement for
               the calendar button the toolbar keeps there — that one still opens the shared
@@ -1545,7 +1555,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               way, which feeds the stage counts on the bar above and, on the Consultation
               tab, the ConsultationsBoard underneath too — so a pill's number always
               describes the list that pill opens. */}
-          <div className="2xl:hidden">
+          <div className="min-[1440px]:hidden">
             <QuickDateFilterBar
               value={quickDate}
               onChange={setQuickDate}
