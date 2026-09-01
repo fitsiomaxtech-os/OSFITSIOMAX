@@ -35,8 +35,20 @@ STANDARD_FIELDS = ["name", "phone", "email", "vertical", "condition", "age", "pr
 # header keeps it, so a spelling two fields could both want belongs to the one listed
 # first. That is why City sits above Preferred Branch rather than beside it.
 FIELD_ALIASES = {
-    "name": ["name", "lead name", "full name", "fullname", "customer name", "patient name"],
-    "phone": ["phone", "phone number", "mobile", "mobile number", "contact", "contact number", "whatsapp"],
+    # Spellings are compared squashed (see auto_map_columns), so one entry covers "Full
+    # Name", "full_name" and "FullName". What still has to be listed is a different way of
+    # asking: a form that says "Your Name" is not the "full name" spelling with the
+    # punctuation taken out, and would otherwise go unmapped and land the patient as
+    # "Unknown" on every board that lists them.
+    "name": [
+        "name", "lead name", "full name", "fullname", "customer name", "patient name",
+        "your name", "your full name", "name of patient", "patient's name", "client name",
+    ],
+    "phone": [
+        "phone", "phone number", "mobile", "mobile number", "contact", "contact number",
+        "whatsapp", "whatsapp number", "phone no", "mobile no", "contact no",
+        "your phone number", "your mobile number",
+    ],
     "email": ["email", "email id", "email address", "mail"],
     "vertical": ["vertical", "service", "service type", "category", "product"],
     "condition": ["condition", "issue", "ailment", "problem", "concern"],
@@ -87,14 +99,34 @@ def extract_spreadsheet_id(url: str) -> str:
 
 
 def auto_map_columns(headers: List[str]) -> Dict[str, str]:
+    """A sheet's headers matched onto the fields above, by letters and digits alone.
+
+    Compared through squash_header rather than on the lowercased header, because a form
+    names its own columns and the two spellings of one question are not the same string.
+    A Meta lead-ads export heads its columns "full_name" and "phone_number"; the aliases
+    above say "full name" and "phone number". Matched exactly, neither one hit -- so every
+    lead off such a sheet imported with its name unmapped and landed as "Unknown", and the
+    phone fell through to the fallback below and took column A, which on that export is
+    Meta's own lead id ("l:1773668330..."). Both columns were sitting right there in the
+    sheet under a name one underscore away from the one being looked for.
+
+    Still exact once squashed, never a substring: "city" inside "capacity" is the failure
+    that costs more than a column occasionally left for the mapping dialog to set by hand.
+
+    Where two headers squash the same the first one wins, matching the rule the alias
+    table is ordered by -- the first field to claim a header keeps it.
+    """
+    squashed: Dict[str, str] = {}
+    for header in headers:
+        squashed.setdefault(squash_header(header), header)
     mapping: Dict[str, str] = {}
-    lowered = {h.strip().lower(): h for h in headers}
     used: set = set()
     for std, aliases in FIELD_ALIASES.items():
         for alias in aliases:
-            if alias in lowered and lowered[alias] not in used:
-                mapping[std] = lowered[alias]
-                used.add(lowered[alias])
+            header = squashed.get(squash_header(alias))
+            if header and header not in used:
+                mapping[std] = header
+                used.add(header)
                 break
     return mapping
 

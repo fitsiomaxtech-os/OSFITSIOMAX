@@ -306,6 +306,36 @@ async def auto_sync_toggle(source_id: str, payload: AutoSyncToggle, _: V3UserOut
 
 # ---------- Pull (real Sheets API → existing dedupe/import logic) ----------
 
+# What a phone number looks like once the punctuation is gone: ten digits on their own,
+# or ten behind a country code. The upper bound is the point of the check -- a Meta lead
+# id ("l:1773668330612345") is sixteen digits and normalize_phone would hand back its last
+# ten quite happily, so a column is judged on how many digits it holds, not on whether
+# normalize_phone can salvage something from it.
+_PHONE_DIGITS = range(10, 14)
+
+
+def _detect_phone_column(headers: list, rows: list) -> Optional[str]:
+    """The column of this tab that actually holds phone numbers, or None.
+
+    Used only where the headers named none -- a sheet whose phone column is headed
+    something no alias list would guess. Decided on the values rather than the header for
+    exactly that reason, and it takes a clear majority of a column's filled-in rows: a
+    column that is mostly ages or pin codes with a stray long number in it is not the
+    phone column, and importing against the wrong one is the failure this replaced.
+    """
+    best, best_score = None, 0.0
+    for header in headers:
+        filled = [str(r.get(header, "") or "").strip() for r in rows]
+        filled = [v for v in filled if v]
+        if not filled:
+            continue
+        hits = sum(1 for v in filled if len(re.sub(r"\D", "", v)) in _PHONE_DIGITS)
+        score = hits / len(filled)
+        if score > best_score:
+            best, best_score = header, score
+    return best if best_score >= 0.6 else None
+
+
 async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Dict[str, Any]:
     """Pull rows from a Google Sheet into Leads. Returns result dict.
     Raises HTTPException for caller-facing errors; returns {"error": str} for scheduler usage.
@@ -394,7 +424,21 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
         else:
             mapping = auto_map_columns(headers)
         if "phone" not in mapping:
-            mapping["phone"] = headers[0] if headers else "phone"
+            detected = _detect_phone_column(headers, rows)
+            if not detected:
+                # Nothing in this tab reads as a phone number, and a lead with no way to
+                # reach the patient is not a lead. This used to fall through to headers[0]
+                # -- whatever column A happened to be -- which on a Meta lead-ads export
+                # is Meta's own lead id, so every row imported with "l:1773668330..." as
+                # its phone number and, worse, with phone_normalized derived from it:
+                # the dedupe key both importers skip on, wrong and unnoticed. Better to
+                # say the tab could not be read and let somebody map the column.
+                sample_errors.append(
+                    f"{tab_name}: no phone column found among {', '.join(headers[:8])}"
+                    f"{'...' if len(headers) > 8 else ''} — map one in the source's column mapping"
+                )
+                continue
+            mapping["phone"] = detected
         phone_key = mapping["phone"]
         last_headers, last_mapping = headers, mapping
 
