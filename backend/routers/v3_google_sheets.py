@@ -313,27 +313,36 @@ async def auto_sync_toggle(source_id: str, payload: AutoSyncToggle, _: V3UserOut
 # normalize_phone can salvage something from it.
 _PHONE_DIGITS = range(10, 14)
 
+# How much of a column has to read as a phone number before it is treated as the phone
+# column. A clear majority rather than a handful: a column that is mostly ages or pin
+# codes with a stray long number in it is not the phone column, and importing against the
+# wrong one is the failure this whole check replaced.
+_PHONE_MAJORITY = 0.6
+
+
+def _phone_score(header: str, rows: list) -> float:
+    """What proportion of this column's filled-in rows read as a phone number."""
+    filled = [str(r.get(header, "") or "").strip() for r in rows]
+    filled = [v for v in filled if v]
+    if not filled:
+        return 0.0
+    hits = sum(1 for v in filled if len(re.sub(r"\D", "", v)) in _PHONE_DIGITS)
+    return hits / len(filled)
+
 
 def _detect_phone_column(headers: list, rows: list) -> Optional[str]:
     """The column of this tab that actually holds phone numbers, or None.
 
-    Used only where the headers named none -- a sheet whose phone column is headed
-    something no alias list would guess. Decided on the values rather than the header for
-    exactly that reason, and it takes a clear majority of a column's filled-in rows: a
-    column that is mostly ages or pin codes with a stray long number in it is not the
-    phone column, and importing against the wrong one is the failure this replaced.
+    Decided on the values rather than the header, because this is what is left when the
+    header did not say -- a sheet whose phone column is headed something no alias list
+    would guess, or a stored mapping pointing at a column that turned out not to be one.
     """
     best, best_score = None, 0.0
     for header in headers:
-        filled = [str(r.get(header, "") or "").strip() for r in rows]
-        filled = [v for v in filled if v]
-        if not filled:
-            continue
-        hits = sum(1 for v in filled if len(re.sub(r"\D", "", v)) in _PHONE_DIGITS)
-        score = hits / len(filled)
+        score = _phone_score(header, rows)
         if score > best_score:
             best, best_score = header, score
-    return best if best_score >= 0.6 else None
+    return best if best_score >= _PHONE_MAJORITY else None
 
 
 async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Dict[str, Any]:
@@ -416,13 +425,41 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
     for tab_name, headers, rows in per_tab:
         rows_received += len(rows)
+        # This tab's own headers, mapped fresh. Used on its own where there is no usable
+        # stored mapping, and to fill the gaps in one where there is.
+        auto = auto_map_columns(headers)
         # The saved mapping is reused only if this tab's headers still contain every column
         # it points at — otherwise this tab gets its own headers auto-mapped fresh rather
         # than reading from the wrong columns.
         if stored_mapping and all(h in headers for h in stored_mapping.values()):
             mapping = dict(stored_mapping)
+            # A stored mapping is not a complete one. It is whatever the last pull worked
+            # out, written back at the end of this function -- so a field the mapper of the
+            # day failed to recognise is saved as "not mapped" and reused as such on every
+            # pull after it, and improving the mapper then changes nothing for the sources
+            # that most need it. That is exactly what happened to the name on the Meta
+            # export: "full_name" went unmatched once, under the old exact-match mapper,
+            # and the absence was persisted. Every pull since has read the sheet's name
+            # column and thrown it away, and every lead landed as "Unknown".
+            #
+            # So a field the stored mapping does not name is taken from this tab's own
+            # headers. Only ever additive: a column somebody set by hand in the mapping
+            # dialog is never overridden, and a header already spoken for is not claimed
+            # a second time.
+            for field, header in auto.items():
+                if field not in mapping and header not in set(mapping.values()):
+                    mapping[field] = header
         else:
-            mapping = auto_map_columns(headers)
+            mapping = auto
+        # A stored phone column that does not hold phone numbers is the old fallback's
+        # doing: with nothing mapped it took headers[0], and on a Meta export column A is
+        # Meta's own lead id. That guess was written back to the source like any other
+        # mapping, so removing the fallback does not undo it. Checked against the rows
+        # rather than trusted, and only ever replaced by a column that does read as phones.
+        if mapping.get("phone") and _phone_score(mapping["phone"], rows) < _PHONE_MAJORITY:
+            better = _detect_phone_column(headers, rows)
+            if better and better != mapping["phone"]:
+                mapping["phone"] = better
         if "phone" not in mapping:
             detected = _detect_phone_column(headers, rows)
             if not detected:
