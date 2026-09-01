@@ -143,14 +143,16 @@ const formAnswer = (lead, questionKey, fallback, formatFallback) => {
 };
 
 /**
- * The three intake-form questions the Branch Leads list gives a column to, and the
- * toolbar a filter on.
+ * The intake-form questions the Branch Leads list gives a column to, and the toolbar a
+ * filter on.
  *
  * One definition rather than two. The columns read these through formAnswer and so does
  * every dropdown above them, so a filter cannot come to disagree with the column it sits
  * over -- which is the failure that matters here, because a filter that reads the question
  * a little differently from the column silently returns nothing and looks like a branch
- * with no such patients.
+ * with no such patients. It is also what makes removing one of these a one-line change:
+ * Consultation Type was dropped from this list and left the column, the dropdown and the
+ * narrowing together, with no chance of a filter outliving the column it filtered.
  *
  * `fallback` and `formatFallback` are formAnswer's: where the sheet mapped this column
  * onto a field of the lead's own, the answer is read back off that field with its unit
@@ -159,7 +161,6 @@ const formAnswer = (lead, questionKey, fallback, formatFallback) => {
 const INTAKE_QUESTIONS = [
   { key: "pain_type", label: "Pain Type", question: "what_type_of_pain_are_you_experiencing?", fallback: "condition", formatFallback: null },
   { key: "pain_duration", label: "Pain Duration", question: "how_long_have_you_had_this_pain?", fallback: "months_of_pain", formatFallback: (n) => `${n} month${Number(n) === 1 ? "" : "s"}` },
-  { key: "consultation_type", label: "Consultation Type", question: "preferred_consultation_type?", fallback: null, formatFallback: null },
 ];
 
 /**
@@ -189,10 +190,10 @@ const cityAnswer = (lead) => formAnswer(lead, CITY_KEYS, "city", null);
 /**
  * The toolbar's dropdowns, in the order they sit in the row.
  *
- * One list rather than the three intake questions plus a fourth control written out
- * beside them: the filter row, the narrowing and the option-gathering all walk this, so a
- * dropdown cannot come to disagree with the list it filters -- the same reason
- * INTAKE_QUESTIONS is one list and not three copies of a select.
+ * One list rather than the intake questions plus a City control written out beside them:
+ * the filter row, the narrowing and the option-gathering all walk this, so a dropdown
+ * cannot come to disagree with the list it filters -- the same reason INTAKE_QUESTIONS is
+ * one list and not a copy of a select per question.
  *
  * `answer` is what the filter compares and what the options are gathered from. Each
  * intake question passes formAnswer its own question text; City passes cityAnswer, which
@@ -209,7 +210,7 @@ const TOOLBAR_FILTERS = [
     key: q.key,
     label: q.label,
     // Plural of the column heading, so the empty state names the thing being filtered
-    // rather than saying "All" three times in a row.
+    // rather than saying "All" once per dropdown.
     allLabel: `All ${q.label}s`,
     width: "w-28 2xl:w-32",
     answer: (lead) => formAnswer(lead, q.question, q.fallback, q.formatFallback),
@@ -218,11 +219,12 @@ const TOOLBAR_FILTERS = [
     key: "city",
     label: "City",
     allLabel: "All Cities",
-    // Narrower than the three before it, on what it holds rather than on what is left
-    // over. A city is one short word and "All Cities" is half the length of "All
-    // Consultation Types"; at the intake width the box would be mostly empty, and the
-    // ~100px it gives back is what keeps the four of them, the ranges and the search on
-    // one line at 1440 -- see the arithmetic in the toolbar note further down.
+    // Narrower than the intake dropdowns before it, on what it holds rather than on what
+    // is left over. A city is one short word and "All Cities" is shorter than "All Pain
+    // Durations"; at the intake width the box would be mostly empty. It bought ~100px
+    // back when this row held four dropdowns and had to fit at 1440 -- see the arithmetic
+    // in the toolbar note further down. The row is down to three now and the pressure is
+    // off, but the size is still the honest one for what the control holds.
     width: "w-24 2xl:w-28",
     answer: cityAnswer,
   },
@@ -815,7 +817,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // range picked here. The two combine below.
   const [quickDate, setQuickDate] = useState(null); // same shape; null = All
   // The toolbar's dropdowns, keyed as TOOLBAR_FILTERS is -- { pain_type, pain_duration,
-  // consultation_type, city } -- each holding the lowercased answer to match on or "" for
+  // city } -- each holding the lowercased answer to match on or "" for
   // the whole list. Lowercased because a sheet is not a controlled vocabulary: the same
   // answer arrives as "Online" from one form and "online" from the next, and matching on
   // what was typed would make those two different filters. City needs this as much as any
@@ -1456,29 +1458,28 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 showCustom={false}
               />
             </div>
-            {/* Pain Type, Pain Duration, Consultation Type and City — the columns the list
-                grew, now askable rather than only readable. In this row beside the search
-                and the ranges rather than on a strip of their own: a second line of filters
-                over a table is a second thing to scan before reaching the table, and this
-                row is where every other narrowing on this board already lives.
+            {/* Pain Type, Pain Duration and City — the columns the list grew, now askable
+                rather than only readable. In this row beside the search and the ranges
+                rather than on a strip of their own: a second line of filters over a table
+                is a second thing to scan before reaching the table, and this row is where
+                every other narrowing on this board already lives.
 
-                City sits last, after the three intake questions, rather than beside Phone
-                the way its column does. The column order is how a row reads — who, where,
+                City sits last, after the intake questions, rather than beside Phone the
+                way its column does. The column order is how a row reads — who, where,
                 then what they came in with. The filter order is the order these arrived
-                in, and re-cutting the row to match the table would move three controls a
-                branch already knows the position of to place one.
+                in, and re-cutting the row to match the table would move controls a branch
+                already knows the position of in order to place one.
 
-                It was left out when the column landed, on the grounds that a fourth control
-                would not fit the toolbar the three commits before it were spent fitting.
-                It fits: see the width note below, and it turns out a city is a shorter
-                word than a consultation type.
+                Consultation Type was here and is not any more, dropped with its column.
+                Removing it from INTAKE_QUESTIONS took the dropdown with the column in one
+                edit, which is the whole point of the two being one list.
 
                 Branch Leads only. The Consultation tab renders its own board underneath and
                 these read a lead's intake answers, which is not what that tab lists.
 
                 Each is hidden until the branch has at least one answer to it. A dropdown
-                offering only "All Pain Types" is a control that cannot do anything, and
-                four of them is most of the toolbar spent saying nothing — which is the
+                offering only "All Pain Types" is a control that cannot do anything, and a
+                row of them is most of the toolbar spent saying nothing — which is the
                 state every branch is in until its sheet carries these columns. City is the
                 one most likely to be alone there: it reads the lead's own field as well as
                 the sheet's spellings, so a branch whose source has been mapped gets the
@@ -1491,13 +1492,14 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 the columns are still readable in the list; it is only asking that waits
                 for the width.
 
-                Widths are per filter now (see TOOLBAR_FILTERS) rather than one class for
-                the row. The three intake dropdowns keep w-28 up to 2xl and w-32 from
-                there; City takes the size below each, because its longest label is "All
-                Cities" and its answers are single words. That ~100px is what keeps the
-                fourth from pushing the ranges onto a second row at 1440: the note above
-                puts the fixed part at ~1085px there, and a fourth at the intake width
-                would have taken the search under the length of its own placeholder. */}
+                Widths are per filter (see TOOLBAR_FILTERS) rather than one class for the
+                row. The intake dropdowns keep w-28 up to 2xl and w-32 from there; City
+                takes the size below each, because its longest label is "All Cities" and
+                its answers are single words. The arithmetic these were cut to fit was for
+                four dropdowns against a ~1085px fixed part at 1440, where the row had no
+                slack at all; with Consultation Type gone it has ~130px of it. Left as
+                they are rather than grown into the space -- these are the sizes of what
+                the controls hold, and the gap is better spent on the search. */}
             {!onConsultationTab && (
               <div className="hidden shrink-0 items-center gap-1.5 lg:flex" data-testid="branch-list-filters">
                 {TOOLBAR_FILTERS.map((f) => {
@@ -1839,31 +1841,37 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                   {/* A lead at either entry stage hasn't had a physio assigned yet, so that
                       column is dropped there — every other view keeps it.
 
-                      City sits with Phone rather than among the three that follow it:
-                      where the patient is is part of who they are, and the three after it
+                      City sits with Phone rather than among the ones that follow it:
+                      where the patient is is part of who they are, and the two after it
                       are the intake form's own questions, which is what the branch is
                       actually reading this list to find out. Widths total 100 either way:
                       table-fixed divides by the stated widths, and a set that overshoots
-                      quietly squeezes the last column instead. */}
+                      quietly squeezes the last column instead.
+
+                      Consultation Type's 13/12 went to Patient, Phone and City rather
+                      than being spread evenly. Those three are the ones that were
+                      actually truncating: a name is as long as the patient's name, a
+                      number carries +91 and the "p:" a Meta export prefixes it with, and
+                      "Chennai kolathur" did not fit. The intake pair took a point each,
+                      which is all "more_than_3_months" needs, and the columns after them
+                      hold values of a fixed size and took none. */}
                   {entryStageNames.includes(stageFilter) ? (
                     <>
-                      <th className="w-[18%] px-4 py-3">Patient</th>
-                      <th className="w-[11%] px-4 py-3">Phone</th>
-                      <th className="w-[10%] px-4 py-3">City</th>
-                      <th className="w-[13%] px-4 py-3">Pain Type</th>
-                      <th className="w-[12%] px-4 py-3">Pain Duration</th>
-                      <th className="w-[13%] px-4 py-3">Consultation Type</th>
+                      <th className="w-[22%] px-4 py-3">Patient</th>
+                      <th className="w-[14%] px-4 py-3">Phone</th>
+                      <th className="w-[13%] px-4 py-3">City</th>
+                      <th className="w-[14%] px-4 py-3">Pain Type</th>
+                      <th className="w-[14%] px-4 py-3">Pain Duration</th>
                       <th className="w-[12%] px-4 py-3">Appointment</th>
                       <th className="w-[11%] px-4 py-3">Stage</th>
                     </>
                   ) : (
                     <>
-                      <th className="w-[17%] px-4 py-3">Patient</th>
-                      <th className="w-[10%] px-4 py-3">Phone</th>
-                      <th className="w-[9%] px-4 py-3">City</th>
-                      <th className="w-[12%] px-4 py-3">Pain Type</th>
-                      <th className="w-[11%] px-4 py-3">Pain Duration</th>
-                      <th className="w-[12%] px-4 py-3">Consultation Type</th>
+                      <th className="w-[21%] px-4 py-3">Patient</th>
+                      <th className="w-[13%] px-4 py-3">Phone</th>
+                      <th className="w-[12%] px-4 py-3">City</th>
+                      <th className="w-[13%] px-4 py-3">Pain Type</th>
+                      <th className="w-[12%] px-4 py-3">Pain Duration</th>
                       <th className="w-[11%] px-4 py-3">Assigned Physio</th>
                       <th className="w-[10%] px-4 py-3">Appointment</th>
                       <th className="w-[8%] px-4 py-3">Stage</th>
