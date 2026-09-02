@@ -1027,10 +1027,31 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView]);
 
+  // The toolbar's calendar, wired so that picking a date releases the range row back to
+  // All.
+  //
+  // The two combine by overlap below, which is the right reading of two ranges somebody
+  // set on purpose and the wrong reading of the gesture that replaces one of them.
+  // Picking Sep 01 while Today is lit asks for Sep 01 and gets the overlap of two
+  // different days: an empty list, under a bar of zeroes, with two date controls lit
+  // above it. That reads as a broken board rather than as an answer, and the date just
+  // picked is plainly the one being asked for.
+  //
+  // Only when a date is actually set, so the x on the chip still clears the calendar
+  // alone — the row is already at All by then, and resetting it there would be resetting
+  // nothing. One direction only: pressing a range up in the row leaves the calendar as it
+  // was, so an exact day or a typed range is never thrown away by a control that cannot
+  // express one.
+  const applyDateFilter = (next) => {
+    setDateFilter(next);
+    if (next) setQuickDate(null);
+  };
+
   // What the board is actually narrowed to. The toolbar's date filter and the range row's
-  // quick pick are two independent controls over one list, so they combine by overlap
-  // rather than one overwriting the other — each keeps showing its own state, and neither
-  // can quietly cancel the other out.
+  // quick pick are two independent controls over one list, so where both are set they
+  // combine by overlap rather than one silently winning — each keeps showing its own
+  // state, and the list under them is what the two agreed on. Picking a date on the
+  // calendar is the one gesture that drops the other, for the reason above.
   //
   // Both tabs draw the range row now, so this no longer needs to branch on which one is
   // active: quickDate simply stays null wherever the row isn't mounted, and
@@ -1600,7 +1621,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 Consultation tab, where the row's own Custom was the copy that tab actually
                 used; with that gone, hiding it here would leave that tab unable to ask for
                 a range at all. */}
-            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
+            <DateFilterPopover value={dateFilter} onChange={applyDateFilter} testid="branch-date-filter" centered iconOnly />
             <Button
               onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
               disabled={loading}
