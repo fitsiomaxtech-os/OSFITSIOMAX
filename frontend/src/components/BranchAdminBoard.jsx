@@ -212,7 +212,13 @@ const FITNESS_FORM_QUESTIONS = [
 ];
 
 const PHYSIO_ARM_INTAKE_QUESTIONS = [ARM_LOOKING_FOR, ARM_START_WHEN];
-const FITNESS_ARM_INTAKE_QUESTIONS = [ARM_START_WHEN, ...FITNESS_FORM_QUESTIONS];
+
+// On fitness the columns are exactly the three its form asks, and nothing else. How Soon
+// led them for a while and read a dash on every patient: its question names
+// physiotherapy, so no fitness form has ever asked it, and "when are you planning to
+// start" -- which is the same question in fitness words -- was sitting in the next column
+// answering it.
+const FITNESS_ARM_INTAKE_QUESTIONS = FITNESS_FORM_QUESTIONS;
 
 /**
  * What the Online Physiotherapy form offers a person filling it in by hand.
@@ -1056,10 +1062,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const toolbarFilters = armPractice === "fitness" ? FITNESS_ARM_TOOLBAR_FILTERS
     : armPractice === "physio" ? PHYSIO_ARM_TOOLBAR_FILTERS
       : BRANCH_TOOLBAR_FILTERS;
-  // The five fixed columns on an arm's table take 60% between them; the questions share
+  // The five fixed columns on an arm's table take 62% between them; the questions share
   // what is left, however many the arm asks. An inline width rather than a class because
   // Tailwind compiles the classes it can see in the source, and this one is arithmetic.
-  const armQuestionWidth = `${40 / (intakeQuestions.length || 1)}%`;
+  const armQuestionWidth = `${38 / (intakeQuestions.length || 1)}%`;
 
   const loadBoard = useCallback(async () => {
     // Only a branch board needs a branch. Returning here used to be silent, which is how an
@@ -2095,9 +2101,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               instead of guessing the page header's pixel height, which was colliding with
               the stat cards row as it scrolled past. */}
           <div className="hidden w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white md:block" data-testid="branch-list">
-            {/* Wider floor where the board asks four questions rather than two: nine
-                columns inside 760px is 84px each, and the scroll region around it is
-                there to be used. */}
+            {/* Wider floor where the board asks more than two questions: fitness draws
+                eight columns, and eight inside 760px is 95px each with the scroll region
+                around it going unused. */}
             <table className={`w-full ${intakeQuestions.length > 2 ? "min-w-[980px]" : "min-w-[760px]"} table-fixed divide-y divide-slate-200 text-sm`}>
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
@@ -2123,21 +2129,21 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                   {onArmBoard ? (
                     /* An arm's own set, at every stage. The questions between City and
                        Appointment are that arm's form's -- two on the physiotherapy arm,
-                       four on fitness -- so they are drawn from the same list the columns
+                       three on fitness -- so they are drawn from the same list the columns
                        below and the dropdowns above are, rather than written out here and
                        left to drift from it.
 
                        Assigned Physio is not among them: nobody is assigned a room, and
                        the consultant taking the call is on the patient's card. */
                     <>
-                      <th className="w-[20%] px-4 py-3">Name</th>
-                      <th className="w-[13%] px-4 py-3">Phone Number</th>
-                      <th className="w-[11%] px-4 py-3">City</th>
+                      <th className="w-[19%] px-4 py-3">Name</th>
+                      <th className="w-[12%] px-4 py-3">Phone Number</th>
+                      <th className="w-[10%] px-4 py-3">City</th>
                       {intakeQuestions.map((q) => (
                         <th key={q.key} className="px-4 py-3" style={{ width: armQuestionWidth }}>{q.label}</th>
                       ))}
                       <th className="w-[10%] px-4 py-3">Appointment</th>
-                      <th className="w-[6%] px-4 py-3">Stage</th>
+                      <th className="w-[11%] px-4 py-3">Stage</th>
                     </>
                   ) : entryStageNames.includes(stageFilter) ? (
                     <>
@@ -2306,7 +2312,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                         </td>
                         <td className="px-4 py-3">
                           <span
-                            className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
+                            title={rowStage ? stageDisplayLabel(rowStage) : undefined}
+                            className="inline-block max-w-full truncate rounded-[5px] border px-2.5 py-0.5 align-middle text-xs font-medium"
                             style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
                           >
                             {rowStage ? stageDisplayLabel(rowStage) : "—"}
