@@ -215,6 +215,20 @@ const PHYSIO_ARM_INTAKE_QUESTIONS = [ARM_LOOKING_FOR, ARM_START_WHEN];
 const FITNESS_ARM_INTAKE_QUESTIONS = [ARM_START_WHEN, ...FITNESS_FORM_QUESTIONS];
 
 /**
+ * What the Online Physiotherapy form offers a person filling it in by hand.
+ *
+ * How Soon only, of that arm's pair. Looking For falls back to the lead's own `condition`
+ * (see ARM_LOOKING_FOR), and this form already has a Condition field writing that column,
+ * so offering it here as well would be two inputs on one form for one answer, landing in
+ * two different places and disagreeing the moment somebody fills in both.
+ *
+ * How Soon has no such field anywhere on the lead, which is what made it unanswerable at
+ * the desk: the column existed, the sheet's leads filled it, and a lead typed in by hand
+ * read a dash there with nothing on the form to change that.
+ */
+const PHYSIO_FORM_QUESTIONS = [ARM_START_WHEN];
+
+/**
  * Where the patient is, read however their sheet happened to carry it.
  *
  * City is a mappable lead column (LEAD_COLUMN_FIELDS in backend/lead_mapping.py), so a
@@ -2360,8 +2374,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           // board that created it, which is the disappearance ARM_DEPARTMENT exists to
           // prevent.
           lockedDepartment={ARM_DEPARTMENT[armPractice] || null}
-          // Only the fitness arm asks these, so only its form offers them.
-          formQuestions={armPractice === "fitness" ? FITNESS_FORM_QUESTIONS : []}
+          // Each arm offers the questions its own form asks: fitness its three, physio the
+          // one of its two that nothing else on this form can capture. A branch offers none
+          // -- its pair reads back off Condition and Months of Pain, which it already has.
+          formQuestions={armPractice === "fitness" ? FITNESS_FORM_QUESTIONS
+            : armPractice === "physio" ? PHYSIO_FORM_QUESTIONS : []}
           onClose={() => setShowCreateLead(false)}
           onSaved={loadBoard}
         />
