@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BadgeIndianRupee,
@@ -50,26 +50,62 @@ import {
   updateLead,
 } from "@/lib/api";
 import { toast, Toaster } from "@/components/ui/sonner";
-import { BusinessLeadsDashboard } from "@/components/BusinessLeadsDashboard";
-import { PreSalesBoard } from "@/components/PreSalesBoard";
-import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
-import { HeadPhysioBoard, HeadPhysioCalendarModal } from "@/components/HeadPhysioBoard";
-import { PhysioBoard, CalendarPage as PhysioCalendarPage } from "@/components/PhysioBoard";
-import { DietBoard } from "@/components/DietBoard";
-import { MarketingBoard } from "@/components/marketing/MarketingBoard";
-import { PreSalesCRM } from "@/components/PreSalesCRM";
-import { DashboardBoard } from "@/components/DashboardBoard";
-import { PipelineStageManagement } from "@/components/PipelineStageManagement";
-import { HRBoard } from "@/components/hr/HRBoard";
-import { HumanResourceBoard } from "@/components/hr/HumanResourceBoard";
-import { FinanceWiseBoard } from "@/components/branch/FinanceWiseBoard";
-import { PackagesBoard } from "@/components/PackagesBoard";
-import { MyConsultationBoard } from "@/components/MyConsultationBoard";
-import { OperationsBoard } from "@/components/OperationsBoard";
-import { AccountantBoard } from "@/components/finance/AccountantBoard";
-import { ZumbaMasterBoard } from "@/components/ZumbaMasterBoard";
-import { FeedbackBoard } from "@/components/branch/FeedbackBoard";
+
+/**
+ * The boards, each in its own chunk.
+ *
+ * These were static imports, and this file is what every signed-in person loads first, so
+ * webpack pulled all twenty-two boards -- and everything they reach, ConsultationsBoard
+ * and the charts included -- into one file the browser had to have before it could paint
+ * anything. A Physio downloaded Finance, HR, Marketing and Zumba to look at their own day.
+ *
+ * Nothing about how they render changes: every one of them was already behind a `show...`
+ * condition, so the import is now fetched on the same event that used to mount an
+ * already-downloaded component. The Suspense boundary sits below the header, so switching
+ * boards leaves the nav and the role bar on screen rather than blanking the page.
+ *
+ * Boards that import each other -- Operations reaches four of them, BranchManagement three
+ * -- are fine as they are: webpack lifts what they share into a common chunk rather than
+ * copying it into each, and none of them is reachable from the login screen either way.
+ */
+const BusinessLeadsDashboard = lazy(() => import("@/components/BusinessLeadsDashboard").then((m) => ({ default: m.BusinessLeadsDashboard })));
+const PreSalesBoard = lazy(() => import("@/components/PreSalesBoard").then((m) => ({ default: m.PreSalesBoard })));
+const BranchAdminBoard = lazy(() => import("@/components/BranchAdminBoard").then((m) => ({ default: m.BranchAdminBoard })));
+// Two entries against one module, which webpack resolves to one chunk they share -- the
+// calendar modal is opened from the header while the board is up, so by then it is loaded.
+const HeadPhysioBoard = lazy(() => import("@/components/HeadPhysioBoard").then((m) => ({ default: m.HeadPhysioBoard })));
+const HeadPhysioCalendarModal = lazy(() => import("@/components/HeadPhysioBoard").then((m) => ({ default: m.HeadPhysioCalendarModal })));
+const PhysioBoard = lazy(() => import("@/components/PhysioBoard").then((m) => ({ default: m.PhysioBoard })));
+const PhysioCalendarPage = lazy(() => import("@/components/PhysioBoard").then((m) => ({ default: m.CalendarPage })));
+const DietBoard = lazy(() => import("@/components/DietBoard").then((m) => ({ default: m.DietBoard })));
+const MarketingBoard = lazy(() => import("@/components/marketing/MarketingBoard").then((m) => ({ default: m.MarketingBoard })));
+const PreSalesCRM = lazy(() => import("@/components/PreSalesCRM").then((m) => ({ default: m.PreSalesCRM })));
+const DashboardBoard = lazy(() => import("@/components/DashboardBoard").then((m) => ({ default: m.DashboardBoard })));
+const PipelineStageManagement = lazy(() => import("@/components/PipelineStageManagement").then((m) => ({ default: m.PipelineStageManagement })));
+const HRBoard = lazy(() => import("@/components/hr/HRBoard").then((m) => ({ default: m.HRBoard })));
+const HumanResourceBoard = lazy(() => import("@/components/hr/HumanResourceBoard").then((m) => ({ default: m.HumanResourceBoard })));
+const FinanceWiseBoard = lazy(() => import("@/components/branch/FinanceWiseBoard").then((m) => ({ default: m.FinanceWiseBoard })));
+const PackagesBoard = lazy(() => import("@/components/PackagesBoard").then((m) => ({ default: m.PackagesBoard })));
+const MyConsultationBoard = lazy(() => import("@/components/MyConsultationBoard").then((m) => ({ default: m.MyConsultationBoard })));
+const OperationsBoard = lazy(() => import("@/components/OperationsBoard").then((m) => ({ default: m.OperationsBoard })));
+const AccountantBoard = lazy(() => import("@/components/finance/AccountantBoard").then((m) => ({ default: m.AccountantBoard })));
+const ZumbaMasterBoard = lazy(() => import("@/components/ZumbaMasterBoard").then((m) => ({ default: m.ZumbaMasterBoard })));
+const FeedbackBoard = lazy(() => import("@/components/branch/FeedbackBoard").then((m) => ({ default: m.FeedbackBoard })));
+
+/**
+ * What sits under the header while a board's chunk is on the wire.
+ *
+ * Left quiet on purpose. This page deliberately dropped its old "Loading boards..."
+ * banner because each board reports its own loading (see the note at the foot of this
+ * file); a chunk arriving is the same kind of wait, and announcing it in words would put
+ * back the thing that was removed.
+ */
+const BoardFallback = () => (
+  <div className="flex items-center justify-center py-20" data-testid="board-loading">
+    <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-sky-600" />
+  </div>
+);
 
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
@@ -1047,6 +1083,10 @@ export const CRMPage = ({ auth, onLogout }) => {
             </div>
           </div>
         </header>
+        {/* The modals sit in their own boundary with no fallback. A dialog that
+            arrives a beat after the click is better than a spinner in the middle
+            of a page for something that has not opened yet. */}
+        <Suspense fallback={null}>
 
         {showProfile && (
           <MyProfileModal user={auth.user} roleLabel={roleLabel} branchName={myBranchName} onClose={() => setShowProfile(false)} />
@@ -1090,6 +1130,8 @@ export const CRMPage = ({ auth, onLogout }) => {
         {showHeadPhysioBoard && showHPCalendar && (
           <HeadPhysioCalendarModal branchId={auth?.user?.branch_id} onClose={() => setShowHPCalendar(false)} />
         )}
+
+        </Suspense>
 
         <div className={`w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6 ${showSuperAdminBoard ? "pb-20 md:pb-6" : ""}`}>
 
@@ -1191,6 +1233,11 @@ export const CRMPage = ({ auth, onLogout }) => {
           </div>
         )}
 
+        {/* Below the nav, not around it: the tabs and the role bar stay on screen
+            while a board chunk is fetched, so switching boards reads as the board
+            loading rather than the page going away. */}
+        <Suspense fallback={<BoardFallback />}>
+
         {showSuperAdminBoard && superAdminView === "hr" && (
           <HRBoard />
         )}
@@ -1289,6 +1336,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         {showAccountantBoard && <AccountantBoard />}
         {showZumbaBoard && <ZumbaMasterBoard />}
 
+        </Suspense>
         </div>
       </div>
 
