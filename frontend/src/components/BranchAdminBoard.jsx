@@ -1968,31 +1968,30 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <table className="w-full min-w-[760px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
-                  {/* One header row for every stage now. It used to be two: Assigned
-                      Physio was dropped at the entry stages, where nobody has been
-                      assigned yet, and kept everywhere else. With that column gone the
-                      two variants said the same thing, and a branch reads the same list
-                      whichever pill it is standing on.
+                  {/* One header row for every stage. It used to be two, with Assigned
+                      Physio dropped at the entry stages where nobody has been assigned yet
+                      and kept everywhere else -- but a column that comes and goes as the
+                      reader moves along the strip is a table changing shape under them,
+                      and the dash an empty cell carries already says "nobody yet".
 
                       Ordered the way a row is read: who the patient is, the two ways to
-                      reach them, then the two answers the form collected -- what they
-                      want physiotherapy for, and how soon. City and Assigned Physio came
-                      out from between those groups; both are still on the patient's own
-                      card, which is what a row opens.
+                      reach them, the two answers the form collected -- what they want
+                      physiotherapy for and how soon -- then who is seeing them and when.
 
-                      Widths total 100: table-fixed divides by the stated widths, and a
-                      set that overshoots quietly squeezes the last column instead. Email
-                      takes the largest share after the name, because an address is the
-                      one value here with no natural length -- the rest are a phone
-                      number, two form answers out of a fixed list, a slot and a stage
-                      name. */}
-                  <th className="w-[21%] px-4 py-3">Name</th>
-                  <th className="w-[14%] px-4 py-3">Phone Number</th>
-                  <th className="w-[18%] px-4 py-3">Email</th>
-                  <th className="w-[15%] px-4 py-3">Looking For</th>
-                  <th className="w-[14%] px-4 py-3">How Soon</th>
-                  <th className="w-[11%] px-4 py-3">Appointment</th>
-                  <th className="w-[7%] px-4 py-3">Stage</th>
+                      Widths total 100: table-fixed divides by the stated widths, and a set
+                      that overshoots quietly squeezes the last column instead. Email still
+                      takes the largest share after the name, because an address is the one
+                      value here with no natural length. Every column gave up a point or
+                      two to make room for Assigned Physio, rather than the whole 11 coming
+                      out of one of them and leaving that one unreadable. */}
+                  <th className="w-[19%] px-4 py-3">Name</th>
+                  <th className="w-[13%] px-4 py-3">Phone Number</th>
+                  <th className="w-[16%] px-4 py-3">Email</th>
+                  <th className="w-[13%] px-4 py-3">Looking For</th>
+                  <th className="w-[12%] px-4 py-3">How Soon</th>
+                  <th className="w-[11%] px-4 py-3">Assigned Physio</th>
+                  <th className="w-[10%] px-4 py-3">Appointment</th>
+                  <th className="w-[6%] px-4 py-3">Stage</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -2003,7 +2002,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       <tr>
                         {/* The seven the header states. It was counting a column more than
                             the row ever drew, on both branches of the old split. */}
-                        <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
                         </td>
                       </tr>
@@ -2103,6 +2102,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             </td>
                           );
                         })}
+                        {/* Empty for most of the entry stages, where nobody has been
+                            assigned yet. The dash is the answer there rather than a
+                            missing one, which is why the column stays put instead of
+                            being dropped on those pills. */}
+                        <td className="truncate px-4 py-3 text-slate-600" title={lead.assigned_physio_name || undefined}>
+                          {lead.assigned_physio_name || <span className="text-slate-400">—</span>}
+                        </td>
                         <td className="px-4 py-3">
                           {(() => {
                             const slot = apptSlotLabel(lead);
