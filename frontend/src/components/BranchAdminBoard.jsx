@@ -39,6 +39,7 @@ import {
   HeartPulse,
   IdCard,
   Megaphone,
+  Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -83,6 +84,7 @@ import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { ZumbaPanel } from "@/components/branch/ZumbaPanel";
 import { FitnessPanel } from "@/components/branch/FitnessPanel";
 import { CreateLeadModal, DEPARTMENT_OPTIONS, LEAD_DATA_FIELDS } from "@/components/CreateLeadModal";
+import { LeadEditModal } from "@/components/LeadEditModal";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 import { isCourseComplete } from "@/lib/leadStage";
@@ -2258,6 +2260,10 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   const [activeTab, setActiveTab] = useState("overview");
   const [remarks, setRemarks] = useState([]);
   const [activityLog, setActivityLog] = useState([]);
+  // Correcting what the lead itself says, as against moving it or booking it. The tabs
+  // below are all things done TO a lead; this is the one thing done to the record, and it
+  // belongs beside the name it fixes rather than as a sixth tab among the four.
+  const [editing, setEditing] = useState(false);
 
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration } | null
   // Asked before the lead is cancelled off the Appointment stage. A boolean rather than a
@@ -2688,9 +2694,18 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                 </div>
               </div>
             </div>
-            <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" data-testid="branch-lead-close">
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                onClick={() => setEditing(true)}
+                className="inline-flex items-center gap-1.5 rounded-[5px] border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
+                data-testid="branch-lead-edit"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </button>
+              <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" data-testid="branch-lead-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -3951,6 +3966,21 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
             </div>
           </div>
         </div>
+      )}
+
+      {/* Every field on the lead, in one form. onUpdate is the board's own refresh, which
+          re-reads the row and hands this popup the saved version back -- so the cards
+          behind the form show the correction the moment it is made, without closing.
+
+          allowBranchChange is off: a patient moves between branches through Operations'
+          transfer, which carries their fees and sessions with them. */}
+      {editing && (
+        <LeadEditModal
+          lead={lead}
+          allowBranchChange={false}
+          onClose={() => setEditing(false)}
+          onSaved={onUpdate}
+        />
       )}
     </div>
   );
