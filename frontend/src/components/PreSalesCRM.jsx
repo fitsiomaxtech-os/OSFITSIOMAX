@@ -846,6 +846,10 @@ export const PreSalesCRM = ({
   // and tags each row HANDLED BY, so this would read the same on Super Admin's and Sales
   // Head's â€” flipping this one flag is all it would take to give it to them too.
   const showHandledByFilter = role === "marketing_head";
+  // Marketing Master View reads the funnel; it does not work it. The lead popup there is a
+  // record to look at, so the Move to Stage row is gone from its footer. Pre-Sales and the
+  // Sales master views keep it - they are the desks that actually move a lead along.
+  const canMoveStage = role !== "marketing_head";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1631,7 +1635,7 @@ export const PreSalesCRM = ({
       )}
 
       {editing && (
-        <LeadDetailDialog lead={editing} stages={stages} currentUser={currentUser} pinnedBranchId={branchId} onClose={() => setEditing(null)} onSaved={load} onMoveStage={moveToStage} />
+        <LeadDetailDialog lead={editing} stages={stages} currentUser={currentUser} pinnedBranchId={branchId} canMoveStage={canMoveStage} onClose={() => setEditing(null)} onSaved={load} onMoveStage={moveToStage} />
       )}
 
       {showCreate && (
@@ -2011,7 +2015,7 @@ const rnrDetail = (details) => {
 // pinnedBranchId: set when the board is a single branch's, which is how a Super Admin
 // drilled into a branch gets a branch for the appointment flow â€” they have none of their
 // own, and without it every appointment asks them to pick one they already chose.
-const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, onClose, onSaved, onMoveStage }) => {
+const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, canMoveStage = true, onClose, onSaved, onMoveStage }) => {
   const [tab, setTab] = useState("overview");
   const [showEdit, setShowEdit] = useState(false);
   const [currentLead, setCurrentLead] = useState(lead);
@@ -2254,7 +2258,10 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
             <div className="space-y-2" data-testid="presales-detail-followups">
               {(currentLead.follow_ups || []).length === 0 && (
                 <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-400" data-testid="presales-followups-empty">
-                  No follow-ups scheduled yet. Use <span className="font-semibold">Move to Stage â†’ Follow Up</span> to schedule one.
+                  {/* The instruction only makes sense on a board that has that row. */}
+                  {canMoveStage
+                    ? <>No follow-ups scheduled yet. Use <span className="font-semibold">Move to Stage â†’ Follow Up</span> to schedule one.</>
+                    : "No follow-ups scheduled yet."}
                 </div>
               )}
               {(currentLead.follow_ups || []).slice().reverse().map((f, idx) => {
@@ -2313,8 +2320,15 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
 
         {/* Its own scroll floor: with a long stage list the wrapping pills below can run
             to several rows, and a footer that grows without limit would squeeze the body
-            it sits under to nothing on a short screen. */}
+            it sits under to nothing on a short screen.
+
+            The whole bar goes when there is nothing left to put in it - a board that
+            cannot move stages and a lead that is not on RNR leaves an empty white strip
+            with a border on it, which reads as something that failed to load. */}
+        {(canMoveStage || currentLead.stage === "RNR") && (
         <div className="max-h-[40vh] shrink-0 overflow-y-auto border-t border-slate-200 bg-white px-4 py-3 sm:px-5">
+          {canMoveStage && (
+          <>
           <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
             <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
             Move to Stage
@@ -2361,9 +2375,11 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
               );
             })}
           </div>
+          </>
+          )}
 
           {currentLead.stage === "RNR" && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2" data-testid="presales-detail-rnr-tracker">
+            <div className={`${canMoveStage ? "mt-3 " : ""}flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2`} data-testid="presales-detail-rnr-tracker">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-600">
                   <PhoneOff className="h-3.5 w-3.5" />
@@ -2401,6 +2417,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
             </div>
           )}
         </div>
+        )}
       </div>
       )}
 
