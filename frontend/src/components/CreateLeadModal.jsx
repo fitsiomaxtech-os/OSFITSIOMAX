@@ -65,8 +65,14 @@ const blank = {
  *   of offering it. Passed by a board that finds its own leads by the vertical this field
  *   decides — an online arm's — where leaving it open would let somebody file a lead into
  *   another arm from a board that then could not show it back to them.
+ * @param formQuestions The intake questions this board's own form asks, as
+ *   `{ key, label, question }` — the Online Fitness board passes its three. Rendered as
+ *   their own section and written into extra_fields under `question`, which is the key the
+ *   sheet importer files an answer under and the key that board's columns read back. A
+ *   lead typed in here and one that arrived off the sheet then land in the same place.
+ *   Empty for every board that has none, and the section is then not drawn at all.
  */
-export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchId = null, lockedDepartment = null }) => {
+export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchId = null, lockedDepartment = null, formQuestions = [] }) => {
   const [form, setForm] = useState({
     ...blank,
     ...(branchId ? { branch_id: branchId } : {}),
@@ -241,6 +247,28 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
               </div>
             )}
           </div>
+
+          {/* This board's own form questions, above the custom fields because they are
+              this board's and those are every board's. Free text rather than a dropdown:
+              the answers arrive off a Meta form whose options are set there, not here, and
+              a fixed list would quietly refuse whatever the form is changed to ask next. */}
+          {formQuestions.length > 0 && (
+            <div className="rounded-lg border border-slate-200 p-4" data-testid="lead-create-form-questions">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Enquiry Form</p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {formQuestions.map((q) => (
+                  <Field key={q.key} label={q.label}>
+                    <Input
+                      placeholder={`Enter ${q.label}`}
+                      value={extraFields[q.question] ?? ""}
+                      onChange={(e) => setExtra(q.question, e.target.value)}
+                      data-testid={`lead-create-q-${q.key}`}
+                    />
+                  </Field>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Custom Fields */}
           <div className="rounded-lg border border-slate-200 p-4">

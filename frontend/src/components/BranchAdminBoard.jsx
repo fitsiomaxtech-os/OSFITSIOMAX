@@ -187,15 +187,32 @@ const BRANCH_INTAKE_QUESTIONS = [
   { key: "pain_duration", label: "Pain Duration", allLabel: "All Pain Durations", question: "how_long_have_you_had_this_pain?", fallback: "months_of_pain", formatFallback: (n) => `${n} month${Number(n) === 1 ? "" : "s"}` },
 ];
 
-const ARM_INTAKE_QUESTIONS = [
-  { key: "looking_for", label: "Looking For", allLabel: "All Reasons", question: "what_are_you_looking_for_physiotherapy_for?", fallback: "condition", formatFallback: null },
-  // No fallback field. The other three read back off the lead's own column where a sheet
-  // mapped the answer onto one, but nothing on a lead holds "how soon" -- the nearest is
-  // expected_consultation_date, a date somebody booked rather than an answer to this
-  // question, and reading it here would put a date under a heading nobody asked for one
-  // under. Unmapped, the sheet's own answer sits in extra_fields and is what shows.
-  { key: "start_when", label: "How Soon", allLabel: "All Timelines", question: "how_soon_would_you_like_to_start_physiotherapy?", fallback: null, formatFallback: null },
+// No fallback field on any of the arm questions below. The branch pair reads back off the
+// lead's own column where a sheet mapped the answer onto one, but nothing on a lead holds
+// a start time, a preferred hour or a fitness goal -- the nearest to the first is
+// expected_consultation_date, a date somebody booked rather than an answer to the
+// question, and reading it would put a date under a heading nobody asked for one under.
+// Unmapped, the sheet's own answer sits in extra_fields, which is what shows.
+const ARM_LOOKING_FOR = { key: "looking_for", label: "Looking For", allLabel: "All Reasons", question: "what_are_you_looking_for_physiotherapy_for?", fallback: "condition", formatFallback: null };
+const ARM_START_WHEN = { key: "start_when", label: "How Soon", allLabel: "All Timelines", question: "how_soon_would_you_like_to_start_physiotherapy?", fallback: null, formatFallback: null };
+
+/**
+ * The three the Online Fitness form asks, and the only questions this file offers to a
+ * person filling the form in by hand -- see the Add New Lead call further down.
+ *
+ * Keyed by the question exactly as the sheet writes it, because that is the key the
+ * importer files a sheet answer under and the key the column reads back. A lead typed in
+ * at the desk and one that arrived off the sheet then land in the same place and read the
+ * same way, which is the whole reason the form writes these rather than fields of its own.
+ */
+const FITNESS_FORM_QUESTIONS = [
+  { key: "planning_start", label: "Planning To Start", allLabel: "All Start Plans", question: "when_are_you_planning_to_start?", fallback: null, formatFallback: null },
+  { key: "workout_time", label: "Best Time", allLabel: "All Workout Times", question: "which_time_works_best_for_your_workouts?", fallback: null, formatFallback: null },
+  { key: "fitness_goal", label: "Fitness Goal", allLabel: "All Goals", question: "what_is_your_primary_fitness_goal?", fallback: null, formatFallback: null },
 ];
+
+const PHYSIO_ARM_INTAKE_QUESTIONS = [ARM_LOOKING_FOR, ARM_START_WHEN];
+const FITNESS_ARM_INTAKE_QUESTIONS = [ARM_START_WHEN, ...FITNESS_FORM_QUESTIONS];
 
 /**
  * Where the patient is, read however their sheet happened to carry it.
@@ -266,14 +283,42 @@ const toolbarFiltersFor = (questions) => [
 ];
 
 // Built once per question set, so the dropdowns change with the columns they sit over.
-// City is in both: it is a column on both boards.
+// City is in all three: it is a column on all three boards.
 const BRANCH_TOOLBAR_FILTERS = toolbarFiltersFor(BRANCH_INTAKE_QUESTIONS);
-const ARM_TOOLBAR_FILTERS = toolbarFiltersFor(ARM_INTAKE_QUESTIONS);
+const PHYSIO_ARM_TOOLBAR_FILTERS = toolbarFiltersFor(PHYSIO_ARM_INTAKE_QUESTIONS);
+const FITNESS_ARM_TOOLBAR_FILTERS = toolbarFiltersFor(FITNESS_ARM_INTAKE_QUESTIONS);
 
 /** Whether a branch record is one of the online arms rather than a room somebody walks
  *  into. Every default vertical is named "online_..."/"offline_...", which is the reading
  *  Operations, Branch Management and six other boards already take off this field. */
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+/**
+ * Which online arm a board belongs to -- "fitness", "physio", or null for a branch.
+ *
+ * Asked of the login's role first and the branch record second, because only one of the
+ * two is ever available: the arm's own admin reaches their board with no branch at all
+ * (see getArmBoard), and a Super Admin reaches the same arm as a branch tile under a role
+ * that says nothing about it.
+ *
+ * The vertical is tokenised rather than searched, the way vertical_in_arm does it in
+ * backend/deps.py: "online_fitness" and "online_fitness_gym" are one arm, and a value
+ * merely containing the letters is not.
+ */
+const ARM_PRACTICE_BY_ROLE = {
+  online_fitness_admin: "fitness",
+  online_physio_admin: "physio",
+};
+
+const armPracticeOf = (role, vertical) => {
+  const byRole = ARM_PRACTICE_BY_ROLE[String(role || "").trim().toLowerCase()];
+  if (byRole) return byRole;
+  if (!isOnlineVertical(vertical)) return null;
+  const tokens = new Set(String(vertical).toLowerCase().split(/[^a-z0-9]+/));
+  if (tokens.has("fitness") || tokens.has("gym")) return "fitness";
+  if (tokens.has("physio") || tokens.has("physiotherapy")) return "physio";
+  return null;
+};
 
 /** "offline_physio" -> "Offline Physio", and whatever it already said where the dropdown
  *  has no label for it: department is not a controlled field on an imported lead. */
@@ -679,9 +724,13 @@ const runsWithoutARoom = (role) => ONLINE_BRANCH_ADMIN_ROLES.includes(String(rol
 // Kept in step with DEPARTMENT_OPTIONS and VERTICAL_MAP in components/CreateLeadModal.jsx,
 // and through them with ONLINE_ARM_PRACTICE in backend/deps.py, which is what reads the
 // vertical back.
+//
+// Keyed by the arm's practice rather than by the role that runs it, because the board is
+// now reached two ways -- the arm's own admin, and a Super Admin on the arm's branch tile
+// -- and only one of those has a role that names the arm. See armPracticeOf.
 const ARM_DEPARTMENT = {
-  online_physio_admin: "online_physio",
-  online_fitness_admin: "online_fitness",
+  physio: "online_physio",
+  fitness: "online_fitness",
 };
 
 /**
@@ -983,9 +1032,20 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       .catch(() => { /* the list keeps the branch columns */ });
     return () => { cancelled = true; };
   }, [branchId]);
-  const onArmBoard = armScoped || isOnlineVertical(branchVertical);
-  const intakeQuestions = onArmBoard ? ARM_INTAKE_QUESTIONS : BRANCH_INTAKE_QUESTIONS;
-  const toolbarFilters = onArmBoard ? ARM_TOOLBAR_FILTERS : BRANCH_TOOLBAR_FILTERS;
+  // "fitness" | "physio" | null. The two arms ask their patients different things, so this
+  // decides the columns rather than a plain is-an-arm boolean would.
+  const armPractice = armPracticeOf(currentUser?.role, branchVertical);
+  const onArmBoard = !!armPractice;
+  const intakeQuestions = armPractice === "fitness" ? FITNESS_ARM_INTAKE_QUESTIONS
+    : armPractice === "physio" ? PHYSIO_ARM_INTAKE_QUESTIONS
+      : BRANCH_INTAKE_QUESTIONS;
+  const toolbarFilters = armPractice === "fitness" ? FITNESS_ARM_TOOLBAR_FILTERS
+    : armPractice === "physio" ? PHYSIO_ARM_TOOLBAR_FILTERS
+      : BRANCH_TOOLBAR_FILTERS;
+  // The five fixed columns on an arm's table take 60% between them; the questions share
+  // what is left, however many the arm asks. An inline width rather than a class because
+  // Tailwind compiles the classes it can see in the source, and this one is arithmetic.
+  const armQuestionWidth = `${40 / (intakeQuestions.length || 1)}%`;
 
   const loadBoard = useCallback(async () => {
     // Only a branch board needs a branch. Returning here used to be silent, which is how an
@@ -2021,7 +2081,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               instead of guessing the page header's pixel height, which was colliding with
               the stat cards row as it scrolled past. */}
           <div className="hidden w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white md:block" data-testid="branch-list">
-            <table className="w-full min-w-[760px] table-fixed divide-y divide-slate-200 text-sm">
+            {/* Wider floor where the board asks four questions rather than two: nine
+                columns inside 760px is 84px each, and the scroll region around it is
+                there to be used. */}
+            <table className={`w-full ${intakeQuestions.length > 2 ? "min-w-[980px]" : "min-w-[760px]"} table-fixed divide-y divide-slate-200 text-sm`}>
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
                   {/* Three shapes: an online arm's, and a branch's with and without
@@ -2044,19 +2107,23 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       which is all "more_than_3_months" needs, and the columns after them
                       hold values of a fixed size and took none. */}
                   {onArmBoard ? (
-                    /* An arm's own set, at every stage. The two questions are its form's
-                       (see ARM_INTAKE_QUESTIONS), and Assigned Physio is not among them:
-                       nobody is assigned a room, and the consultant taking the call is on
-                       the patient's card. Same widths as the entry-stage set below, which
-                       is the other seven-column shape this table takes. */
+                    /* An arm's own set, at every stage. The questions between City and
+                       Appointment are that arm's form's -- two on the physiotherapy arm,
+                       four on fitness -- so they are drawn from the same list the columns
+                       below and the dropdowns above are, rather than written out here and
+                       left to drift from it.
+
+                       Assigned Physio is not among them: nobody is assigned a room, and
+                       the consultant taking the call is on the patient's card. */
                     <>
-                      <th className="w-[22%] px-4 py-3">Name</th>
-                      <th className="w-[14%] px-4 py-3">Phone Number</th>
-                      <th className="w-[13%] px-4 py-3">City</th>
-                      <th className="w-[14%] px-4 py-3">Looking For</th>
-                      <th className="w-[14%] px-4 py-3">How Soon</th>
-                      <th className="w-[12%] px-4 py-3">Appointment</th>
-                      <th className="w-[11%] px-4 py-3">Stage</th>
+                      <th className="w-[20%] px-4 py-3">Name</th>
+                      <th className="w-[13%] px-4 py-3">Phone Number</th>
+                      <th className="w-[11%] px-4 py-3">City</th>
+                      {intakeQuestions.map((q) => (
+                        <th key={q.key} className="px-4 py-3" style={{ width: armQuestionWidth }}>{q.label}</th>
+                      ))}
+                      <th className="w-[10%] px-4 py-3">Appointment</th>
+                      <th className="w-[6%] px-4 py-3">Stage</th>
                     </>
                   ) : entryStageNames.includes(stageFilter) ? (
                     <>
@@ -2092,10 +2159,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                   if (visible.length === 0) {
                     return (
                       <tr>
-                        {/* Eight columns with Assigned Physio and seven without, which is
-                            what the header states and what the row draws. It read 9/8,
-                            one more than either has ever been. */}
-                        <td colSpan={showAssignedPhysio ? 8 : 7} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        {/* Counted rather than written down: five fixed columns, however
+                            many questions this board asks, and Assigned Physio where it is
+                            drawn. It used to read 9/8, one more than the table has ever
+                            had, and a fitness arm's nine would have been a third wrong
+                            answer to write down. */}
+                        <td colSpan={5 + intakeQuestions.length + (showAssignedPhysio ? 1 : 0)} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
                         </td>
                       </tr>
@@ -2283,7 +2352,16 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           branchId={branchId}
           // Fixed to this arm's own department where the board is an arm's — see
           // ARM_DEPARTMENT. Null everywhere else, which leaves the field as it was.
-          lockedDepartment={ARM_DEPARTMENT[String(currentUser?.role || "").trim().toLowerCase()] || null}
+          //
+          // Keyed off the board's practice rather than the login's role. Read off the role
+          // it was set for the arm's own admin and nobody else, so a Super Admin adding a
+          // patient from the same arm's tile got a free Department dropdown — and a lead
+          // saved with it blank is filed as offline physiotherapy and vanishes from the
+          // board that created it, which is the disappearance ARM_DEPARTMENT exists to
+          // prevent.
+          lockedDepartment={ARM_DEPARTMENT[armPractice] || null}
+          // Only the fitness arm asks these, so only its form offers them.
+          formQuestions={armPractice === "fitness" ? FITNESS_FORM_QUESTIONS : []}
           onClose={() => setShowCreateLead(false)}
           onSaved={loadBoard}
         />
