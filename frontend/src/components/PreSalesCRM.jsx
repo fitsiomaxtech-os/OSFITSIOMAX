@@ -1267,7 +1267,7 @@ export const PreSalesCRM = ({
           <div className="overflow-auto">
             <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead className="text-center text-xs text-slate-500">
-                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{isSuperAdminMasterView && <th className="px-3 py-2">HANDLED BY</th>}{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}{stageFilter === "RNR" && <th className="px-3 py-2">LAST CALL</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ASSIGNED TO</th><th className="px-3 py-2">ACTIONS</th></tr>
+                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{isSuperAdminMasterView && <th className="px-3 py-2">HANDLED BY</th>}{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}{stageFilter === "RNR" && <th className="px-3 py-2">LAST CALL</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ASSIGNED TO</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
                 {visibleLeads.map((l) => {
@@ -1288,7 +1288,6 @@ export const PreSalesCRM = ({
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50">
                         <span className="font-mono text-xs text-slate-700">{l.phone || "â€”"}</span>
                       </td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-600 transition-colors group-hover:bg-slate-50">{l.email || "â€”"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50">
                         <div className="flex flex-col items-center gap-1">
@@ -1393,7 +1392,7 @@ export const PreSalesCRM = ({
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && <tr><td colSpan={(stageFilter === "Appointment" ? 9 : 8) + (isSuperAdminMasterView ? 1 : 0)} className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan={(stageFilter === "Appointment" || stageFilter === "RNR" ? 8 : 7) + (isSuperAdminMasterView ? 1 : 0)} className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
               </tbody>
             </table>
           </div>
