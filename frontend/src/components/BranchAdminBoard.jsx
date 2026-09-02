@@ -165,10 +165,36 @@ const formAnswer = (lead, questionKey, fallback, formatFallback) => {
  * `fallback` and `formatFallback` are formAnswer's: where the sheet mapped this column
  * onto a field of the lead's own, the answer is read back off that field with its unit
  * put back on.
+ *
+ * `allLabel` is the dropdown's own wording, written out rather than pluralised from the
+ * heading -- same reason City's is written out further down. A heading is written to sit
+ * over a column and does not always take an s: "All Looking Fors" is what pluralising the
+ * arm's pair produces.
+ *
+ * Two sets, because the forms behind the two kinds of board are two forms. A branch sees
+ * a patient who arrives with a pain, and asks what it is and how long they have had it.
+ * The online arms advertise on Meta and ask what the patient wants physiotherapy for and
+ * how soon they want to start. Their leads carry no answer to the branch's pair, so on an
+ * arm's board the branch columns read a dash the whole way down and the dropdowns over
+ * them have nothing to offer.
+ *
+ * Which set a board draws is the board's own question, not the leads': an arm with no
+ * patients yet still has to head its columns, and one lead filed under an odd vertical
+ * must not repaint the table around it.
  */
-const INTAKE_QUESTIONS = [
-  { key: "pain_type", label: "Pain Type", question: "what_type_of_pain_are_you_experiencing?", fallback: "condition", formatFallback: null },
-  { key: "pain_duration", label: "Pain Duration", question: "how_long_have_you_had_this_pain?", fallback: "months_of_pain", formatFallback: (n) => `${n} month${Number(n) === 1 ? "" : "s"}` },
+const BRANCH_INTAKE_QUESTIONS = [
+  { key: "pain_type", label: "Pain Type", allLabel: "All Pain Types", question: "what_type_of_pain_are_you_experiencing?", fallback: "condition", formatFallback: null },
+  { key: "pain_duration", label: "Pain Duration", allLabel: "All Pain Durations", question: "how_long_have_you_had_this_pain?", fallback: "months_of_pain", formatFallback: (n) => `${n} month${Number(n) === 1 ? "" : "s"}` },
+];
+
+const ARM_INTAKE_QUESTIONS = [
+  { key: "looking_for", label: "Looking For", allLabel: "All Reasons", question: "what_are_you_looking_for_physiotherapy_for?", fallback: "condition", formatFallback: null },
+  // No fallback field. The other three read back off the lead's own column where a sheet
+  // mapped the answer onto one, but nothing on a lead holds "how soon" -- the nearest is
+  // expected_consultation_date, a date somebody booked rather than an answer to this
+  // question, and reading it here would put a date under a heading nobody asked for one
+  // under. Unmapped, the sheet's own answer sits in extra_fields and is what shows.
+  { key: "start_when", label: "How Soon", allLabel: "All Timelines", question: "how_soon_would_you_like_to_start_physiotherapy?", fallback: null, formatFallback: null },
 ];
 
 /**
@@ -200,8 +226,8 @@ const cityAnswer = (lead) => formAnswer(lead, CITY_KEYS, "city", null);
  *
  * One list rather than the intake questions plus a City control written out beside them:
  * the filter row, the narrowing and the option-gathering all walk this, so a dropdown
- * cannot come to disagree with the list it filters -- the same reason INTAKE_QUESTIONS is
- * one list and not a copy of a select per question.
+ * cannot come to disagree with the list it filters -- the same reason the intake questions
+ * are a list and not a copy of a select per question.
  *
  * `answer` is what the filter compares and what the options are gathered from. Each
  * intake question passes formAnswer its own question text; City passes cityAnswer, which
@@ -213,13 +239,14 @@ const cityAnswer = (lead) => formAnswer(lead, CITY_KEYS, "city", null);
  * the label with an s on it and "All Cities" is not, and a control reading "All Citys" is
  * the sort of thing nobody reports and everybody notices.
  */
-const TOOLBAR_FILTERS = [
-  ...INTAKE_QUESTIONS.map((q) => ({
+const toolbarFiltersFor = (questions) => [
+  ...questions.map((q) => ({
     key: q.key,
     label: q.label,
-    // Plural of the column heading, so the empty state names the thing being filtered
-    // rather than saying "All" once per dropdown.
-    allLabel: `All ${q.label}s`,
+    // Carried from the question rather than pluralised off the heading here -- see the
+    // note on the two question sets. The dropdown names the thing being filtered, which
+    // is not always the column heading with an s on it.
+    allLabel: q.allLabel,
     width: "w-36 2xl:w-40",
     answer: (lead) => formAnswer(lead, q.question, q.fallback, q.formatFallback),
   })),
@@ -237,6 +264,16 @@ const TOOLBAR_FILTERS = [
     answer: cityAnswer,
   },
 ];
+
+// Built once per question set, so the dropdowns change with the columns they sit over.
+// City is in both: it is a column on both boards.
+const BRANCH_TOOLBAR_FILTERS = toolbarFiltersFor(BRANCH_INTAKE_QUESTIONS);
+const ARM_TOOLBAR_FILTERS = toolbarFiltersFor(ARM_INTAKE_QUESTIONS);
+
+/** Whether a branch record is one of the online arms rather than a room somebody walks
+ *  into. Every default vertical is named "online_..."/"offline_...", which is the reading
+ *  Operations, Branch Management and six other boards already take off this field. */
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
 /** "offline_physio" -> "Offline Physio", and whatever it already said where the dropdown
  *  has no label for it: department is not a controlled field on an imported lead. */
@@ -885,8 +922,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // scroll and a filter before it answers anything. Every other range is one press away,
   // All included.
   const [quickDate, setQuickDate] = useState(() => quickDatePreset("today")); // same shape; null = All
-  // The toolbar's dropdowns, keyed as TOOLBAR_FILTERS is -- { pain_type, pain_duration,
-  // city } -- each holding the lowercased answer to match on or "" for
+  // The toolbar's dropdowns, keyed as this board's filter list is -- { pain_type,
+  // pain_duration, city } on a branch, { looking_for, start_when, city } on an online
+  // arm -- each holding the lowercased answer to match on, or "" for
   // the whole list. Lowercased because a sheet is not a controlled vocabulary: the same
   // answer arrives as "Online" from one form and "online" from the next, and matching on
   // what was typed would make those two different filters. City needs this as much as any
@@ -916,6 +954,38 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // of a branch — so asking /branch-board for branch "" is asking for nothing, which is
   // what this board did and why both online admins saw an empty table with no explanation.
   const armScoped = runsWithoutARoom(currentUser?.role);
+
+  /**
+   * Whether the board on screen belongs to one of the online arms, however it was reached.
+   *
+   * armScoped answers this for the arm's own admin and only for them: it reads the LOGIN's
+   * role. A Super Admin opening the same arm through Operations is a super_admin looking at
+   * a branch tile, so armScoped is false there and the board would head an arm's patients
+   * with a walk-in branch's columns.
+   *
+   * The branch record answers it for everyone else. Its `vertical` is where every other
+   * board reads this same question, rather than the branch's name -- that is typed by hand,
+   * and on this install reads "Online Physiotheraphy".
+   *
+   * Fetched here rather than handed in: three boards mount this one, and each would have to
+   * remember to pass it. Until it resolves the board draws the branch columns, which is the
+   * right way to be wrong for a moment -- most boards are branches, and the arm's own admin
+   * is already answered by armScoped without waiting for a request.
+   */
+  const [branchVertical, setBranchVertical] = useState(null);
+  useEffect(() => {
+    if (!branchId) { setBranchVertical(null); return undefined; }
+    let cancelled = false;
+    getBranches()
+      .then((rows) => {
+        if (!cancelled) setBranchVertical((rows || []).find((b) => b.id === branchId)?.vertical || null);
+      })
+      .catch(() => { /* the list keeps the branch columns */ });
+    return () => { cancelled = true; };
+  }, [branchId]);
+  const onArmBoard = armScoped || isOnlineVertical(branchVertical);
+  const intakeQuestions = onArmBoard ? ARM_INTAKE_QUESTIONS : BRANCH_INTAKE_QUESTIONS;
+  const toolbarFilters = onArmBoard ? ARM_TOOLBAR_FILTERS : BRANCH_TOOLBAR_FILTERS;
 
   const loadBoard = useCallback(async () => {
     // Only a branch board needs a branch. Returning here used to be silent, which is how an
@@ -1195,13 +1265,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // the marks were moved into it: the stage counts are drawn from this list, so a
     // narrowing applied anywhere else would leave every pill on the bar standing over the
     // table saying a number that is no longer in it.
-    for (const f of TOOLBAR_FILTERS) {
+    for (const f of toolbarFilters) {
       const wanted = listFilters[f.key];
       if (!wanted) continue;
       list = list.filter((l) => f.answer(l).toLowerCase() === wanted);
     }
     return list;
-  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter, listFilters]);
+  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter, listFilters, toolbarFilters]);
 
   /**
    * What each dropdown offers: the answers this branch has actually given, not a list
@@ -1220,7 +1290,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
    */
   const listFilterOptions = useMemo(() => {
     const out = {};
-    for (const f of TOOLBAR_FILTERS) {
+    for (const f of toolbarFilters) {
       const seen = new Map();
       for (const lead of boardData.leads) {
         const answer = f.answer(lead);
@@ -1233,7 +1303,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       out[f.key] = [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: "base" }));
     }
     return out;
-  }, [boardData.leads]);
+  }, [boardData.leads, toolbarFilters]);
 
   // The rows the table is actually showing. Hoisted out of the table body because the
   // select-all box and the delete bar have to agree with it exactly — "select all" that
@@ -1596,7 +1666,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 already knows the position of in order to place one.
 
                 Consultation Type was here and is not any more, dropped with its column.
-                Removing it from INTAKE_QUESTIONS took the dropdown with the column in one
+                Removing it from the question list took the dropdown with the column in one
                 edit, which is the whole point of the two being one list.
 
                 Branch Leads only. The Consultation tab renders its own board underneath and
@@ -1617,7 +1687,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 the columns are still readable in the list; it is only asking that waits
                 for the width.
 
-                Widths are per filter (see TOOLBAR_FILTERS) rather than one class for the
+                Widths are per filter (see toolbarFiltersFor) rather than one class for the
                 row. The intake dropdowns take w-36 up to 2xl and w-40 from there; City
                 takes the size below each, because its longest label is "All Cities" and
                 its answers are single words. The arithmetic these were cut to fit was for
@@ -1628,7 +1698,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 column, which is the one thing this row of dropdowns is for. */}
             {!onConsultationTab && (
               <div className="hidden shrink-0 items-center gap-1.5 lg:flex" data-testid="branch-list-filters">
-                {TOOLBAR_FILTERS.map((f) => {
+                {toolbarFilters.map((f) => {
                   const options = listFilterOptions[f.key] || [];
                   if (options.length === 0) return null;
                   return (
@@ -1954,8 +2024,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <table className="w-full min-w-[760px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
-                  {/* A lead at either entry stage hasn't had a physio assigned yet, so that
-                      column is dropped there — every other view keeps it.
+                  {/* Three shapes: an online arm's, and a branch's with and without
+                      Assigned Physio. A lead at either entry stage hasn't had a physio
+                      assigned yet, so that column is dropped there — every other view of a
+                      branch keeps it, and an arm never has it at all.
 
                       City sits with Phone rather than among the ones that follow it:
                       where the patient is is part of who they are, and the two after it
@@ -1971,7 +2043,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       "Chennai kolathur" did not fit. The intake pair took a point each,
                       which is all "more_than_3_months" needs, and the columns after them
                       hold values of a fixed size and took none. */}
-                  {entryStageNames.includes(stageFilter) ? (
+                  {onArmBoard ? (
+                    /* An arm's own set, at every stage. The two questions are its form's
+                       (see ARM_INTAKE_QUESTIONS), and Assigned Physio is not among them:
+                       nobody is assigned a room, and the consultant taking the call is on
+                       the patient's card. Same widths as the entry-stage set below, which
+                       is the other seven-column shape this table takes. */
+                    <>
+                      <th className="w-[22%] px-4 py-3">Name</th>
+                      <th className="w-[14%] px-4 py-3">Phone Number</th>
+                      <th className="w-[13%] px-4 py-3">City</th>
+                      <th className="w-[14%] px-4 py-3">Looking For</th>
+                      <th className="w-[14%] px-4 py-3">How Soon</th>
+                      <th className="w-[12%] px-4 py-3">Appointment</th>
+                      <th className="w-[11%] px-4 py-3">Stage</th>
+                    </>
+                  ) : entryStageNames.includes(stageFilter) ? (
                     <>
                       <th className="w-[22%] px-4 py-3">Patient</th>
                       <th className="w-[14%] px-4 py-3">Phone</th>
@@ -1998,11 +2085,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               <tbody className="divide-y divide-slate-100">
                 {(() => {
                   const visible = visibleLeads;
-                  const showAssignedPhysio = !entryStageNames.includes(stageFilter);
+                  // Never on an arm's board, and not at the entry stages of a branch's --
+                  // the header above draws the same two cases, and a row that disagreed
+                  // with it would slide every cell after this one a column to the left.
+                  const showAssignedPhysio = !onArmBoard && !entryStageNames.includes(stageFilter);
                   if (visible.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={showAssignedPhysio ? 9 : 8} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        {/* Eight columns with Assigned Physio and seven without, which is
+                            what the header states and what the row draws. It read 9/8,
+                            one more than either has ever been. */}
+                        <td colSpan={showAssignedPhysio ? 8 : 7} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
                         </td>
                       </tr>
@@ -2094,11 +2187,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             </td>
                           );
                         })()}
-                        {/* The intake form's three questions. Each falls back to the lead's
-                            own field where it has one — see formAnswer. Read from the same
-                            INTAKE_QUESTIONS the toolbar filters are built from, so a column
-                            and the dropdown above it cannot drift apart. */}
-                        {INTAKE_QUESTIONS.map((q) => {
+                        {/* This board's own intake questions — the branch pair or the arm
+                            pair, chosen once above. Each falls back to the lead's own field
+                            where it has one — see formAnswer. Read from the same list the
+                            toolbar filters are built from, so a column and the dropdown
+                            above it cannot drift apart. */}
+                        {intakeQuestions.map((q) => {
                           const answer = formAnswer(lead, q.question, q.fallback, q.formatFallback);
                           return (
                             <td key={q.key} className="truncate px-4 py-3 text-slate-600" title={answer || undefined}>
