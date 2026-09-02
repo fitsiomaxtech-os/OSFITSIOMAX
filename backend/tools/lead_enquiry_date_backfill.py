@@ -20,9 +20,11 @@ re-pull will not revisit a lead to correct it. This walks the ones already store
 
 What it changes and what it leaves.
 
-created_at only, and only where the lead carries an ad record with a readable
-created_time. A lead typed in by hand, or off a sheet with no such column, has no better
-answer than the one it already has and is left exactly as it is.
+created_at only, and only where the lead carries a readable enquiry stamp. That is looked
+for in the ad record first and then in extra_fields, because a source whose Meta columns
+nobody mapped keeps them all as extra detail under their own headers -- see
+find_enquiry_stamp. A lead typed in by hand, or off a sheet with no such column, has no
+better answer than the one it already has and is left exactly as it is.
 
 updated_at is set, as every write here does. patient_number is NOT touched: it is an
 identifier, printed on things and quoted back by patients, and its date is a fact about
@@ -46,7 +48,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from database import v3_col  # noqa: E402
-from utils import now_iso, enquiry_created_at  # noqa: E402
+from utils import now_iso, enquiry_created_at, find_enquiry_stamp  # noqa: E402
 
 
 def day_of(iso_text) -> str:
@@ -65,24 +67,34 @@ async def main(apply: bool = False, branch_code: str = ""):
         branch_ids = [r["id"] for r in rows]
         print("Branch: " + ", ".join(r.get("branch_name") or r["id"] for r in rows))
 
-    # $nin rather than two $ne keys: a dict literal keeps only the last of a repeated key,
-    # so the null check would have been dropped on the way in and never run.
-    query = {"lead_data.created_time": {"$exists": True, "$nin": [None, ""]}}
+    # Every lead, and the stamp is looked for in Python rather than queried on. It can be in
+    # the ad record or in extra_fields under whatever the sheet's header said (see
+    # find_enquiry_stamp), and a query naming one of those would quietly skip the leads
+    # carrying it in the other -- which is most of the point of walking them at all.
+    query = {}
     if branch_ids:
         query["branch_id"] = {"$in": branch_ids}
 
     leads = await v3_col("leads").find(
-        query, {"_id": 0, "id": 1, "name": 1, "patient_number": 1, "created_at": 1, "lead_data": 1},
-    ).to_list(20000)
+        query,
+        {"_id": 0, "id": 1, "name": 1, "patient_number": 1, "created_at": 1,
+         "lead_data": 1, "extra_fields": 1},
+    ).to_list(50000)
 
     if not leads:
-        print("No leads carry an ad record with a created_time. Nothing to move.")
+        print("No leads found.")
         return
 
     moving = []
     unreadable = []
+    no_stamp = 0
     for lead in leads:
-        raw = (lead.get("lead_data") or {}).get("created_time")
+        raw = find_enquiry_stamp(lead.get("lead_data"), lead.get("extra_fields"))
+        if not raw:
+            # Typed in at the desk, or off a sheet with no such column. Its created_at is
+            # the only answer anybody has about it, and it is left alone.
+            no_stamp += 1
+            continue
         enquired = enquiry_created_at(raw)
         if not enquired:
             unreadable.append((lead, raw))
@@ -90,9 +102,11 @@ async def main(apply: bool = False, branch_code: str = ""):
         if enquired != lead.get("created_at"):
             moving.append((lead, enquired))
 
+    carrying = len(leads) - no_stamp
     print()
-    print(f"{len(leads)} lead(s) carry an enquiry time.")
-    print(f"{len(moving)} would be re-dated, {len(leads) - len(moving) - len(unreadable)} already correct.")
+    print(f"{len(leads)} lead(s) read. {no_stamp} carry no enquiry stamp and are left as they are.")
+    print(f"Of the {carrying} that do: {len(moving)} would be re-dated, "
+          f"{carrying - len(moving) - len(unreadable)} already correct.")
 
     # The day changing is what a person notices: a lead moving by an hour inside the same
     # day changes no count anywhere, and one crossing midnight changes every list it is on.

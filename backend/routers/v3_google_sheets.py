@@ -24,7 +24,7 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 
 from database import v3_col
-from utils import now_iso, generate_patient_number, enquiry_created_at
+from utils import now_iso, generate_patient_number, enquiry_created_at, find_enquiry_stamp
 from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
 from stage_utils import first_branch_stage_for
@@ -514,7 +514,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             # created_time column nobody mapped. See enquiry_created_at: a sync that runs
             # late must not date a lead late, which is what shows a branch yesterday's
             # patients under today.
-            enquired_at = enquiry_created_at((ad_record or {}).get("created_time"))
+            enquired_at = enquiry_created_at(find_enquiry_stamp(ad_record, custom_payload))
             lead = {
                 "id": str(uuid.uuid4()),
                 "patient_number": patient_number,

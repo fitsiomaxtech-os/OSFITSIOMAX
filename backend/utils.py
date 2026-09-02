@@ -22,6 +22,37 @@ CLINIC_UTC_OFFSET = timedelta(hours=5, minutes=30)
 _COMPACT_OFFSET = re.compile(r"([+-]\d{2})(\d{2})$")
 
 
+# Headers a sheet writes the enquiry stamp under when nobody mapped the column onto the ad
+# record. Compared on letters and digits alone, the way every other header in this codebase
+# is, because a form names its own columns.
+#
+# The list can afford to be generous: whatever it finds still has to parse as a datetime
+# below, and a key holding anything else yields None and leaves the lead alone. A wrong
+# guess here costs nothing; a missing spelling costs a lead its real date.
+_ENQUIRY_STAMP_KEYS = {
+    "createdtime", "createdat", "leadcreatedtime", "submittedat", "submittedon",
+    "submissiontime", "timestamp",
+}
+
+
+def find_enquiry_stamp(ad_record, extras) -> Optional[str]:
+    """The enquiry stamp on a lead, wherever the sheet happened to leave it.
+
+    The ad record first, which is where a mapped Created Time column lands. Then
+    extra_fields, because a source whose Meta columns nobody mapped -- or one synced before
+    lead_data existed to map onto -- keeps them all as extra detail under their own
+    headers, and those leads have a real enquiry time too. See the same split on the board,
+    which reads its ad block and the stray extra_fields copy the same way.
+    """
+    value = (ad_record or {}).get("created_time")
+    if str(value or "").strip():
+        return str(value).strip()
+    for key, val in (extras or {}).items():
+        if re.sub(r"[^a-z0-9]", "", str(key).lower()) in _ENQUIRY_STAMP_KEYS and str(val or "").strip():
+            return str(val).strip()
+    return None
+
+
 def enquiry_created_at(created_time) -> Optional[str]:
     """When a lead enquired, from the ad export's own created_time. None if unreadable.
 
