@@ -2,7 +2,7 @@ import re
 import uuid
 from database import db, v2_col, v3_col
 from deps import HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES, is_hr_role, is_diet_role, is_zumba_role
-from utils import now_iso, derive_branch_code, generate_patient_number
+from utils import now_iso, derive_branch_code, generate_patient_number, enquiry_created_at, find_enquiry_stamp
 from security import hash_password
 from constants import (
     V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
@@ -1012,6 +1012,62 @@ async def backfill_patient_numbers() -> None:
         patient_number = await generate_patient_number(lead["branch_id"], at=lead.get("created_at"))
         if patient_number:
             await v3_col("leads").update_one({"id": lead["id"]}, {"$set": {"patient_number": patient_number}})
+
+
+async def backfill_lead_enquiry_dates() -> None:
+    """Date a lead by when the patient enquired, not by when the sync reached them.
+
+    Both importers stamped created_at with the moment the pull ran, and every board that
+    narrows by date is built on that field -- so a row the sheet picked up a day late was
+    dated a day late, and a branch filtering to the 1st was shown a patient who enquired on
+    the 31st. The enquiry time was in the export the whole time.
+
+    The importers read it now, but that only helps rows arriving from here on: both of them
+    skip a phone number they already hold, so a re-pull never revisits a lead to correct it.
+    Which leaves every lead already stored, and there is no version of "run this by hand on
+    the server" that makes a branch's counts right today. So it runs on startup, with the
+    other forty.
+
+    Safe to re-run, which is what makes that reasonable. The new value is computed from the
+    lead's own stamp and written only where it differs, so the second startup finds nothing
+    to do and the hundredth is a single query. A lead with no readable stamp -- typed in at
+    the desk, or off a sheet with no such column -- has no better answer than the one it
+    already carries and is left alone.
+
+    patient_number is deliberately not touched. It is an identifier, printed and quoted
+    back by patients, and its date says when the record was made rather than when anybody
+    enquired. Expect the two to disagree on exactly the leads this moves.
+
+    On the timezone, which decides whether a lead moves a day at all: Meta stamps
+    created_time in the AD ACCOUNT's zone, and the day the clinic counts a lead on is the
+    day Meta's own report puts it on. enquiry_created_at keeps the wall clock as written
+    and anchors it to the clinic's day rather than converting it -- see the note there.
+    """
+    # Every lead, streamed rather than collected, and the stamp looked for in Python. It can
+    # be in the ad record or in extra_fields under whatever the sheet's header said, and a
+    # query naming one of those would quietly skip the leads carrying it in the other. A
+    # cursor rather than to_list(N) for the same reason in a different shape: a cap silently
+    # stops backfilling once the clinic passes it, and nothing says it has.
+    cursor = v3_col("leads").find(
+        {},
+        {"_id": 0, "id": 1, "created_at": 1, "lead_data": 1, "extra_fields": 1},
+    )
+
+    moved = 0
+    async for lead in cursor:
+        stamp = find_enquiry_stamp(lead.get("lead_data"), lead.get("extra_fields"))
+        if not stamp:
+            continue
+        enquired = enquiry_created_at(stamp)
+        if not enquired or enquired == lead.get("created_at"):
+            continue
+        await v3_col("leads").update_one(
+            {"id": lead["id"]},
+            {"$set": {"created_at": enquired, "updated_at": now_iso()}},
+        )
+        moved += 1
+    if moved:
+        print(f"[startup] re-dated {moved} lead(s) to when the patient enquired")
 
 
 async def backfill_zumba_package_sessions() -> None:
