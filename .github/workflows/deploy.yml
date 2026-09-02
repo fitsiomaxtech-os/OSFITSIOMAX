@@ -13,95 +13,42 @@ on:
       - '**.md'
 
 jobs:
-  # Nothing in this pipeline used to look at the code before it reached the
-  # server. The deploy job ran the script on the VPS and that was the whole of
-  # it, so every build check anyone made was voluntary and local -- which is no
-  # check at all. On 2026-08-29 a commit was one command away from shipping a
-  # component that imported a module nobody had committed; the build step below
-  # is what catches that class of failure.
+  # One job, on the VPS runner. There used to be a separate `verify` job on a
+  # GitHub-hosted runner that built the frontend before this one was allowed to
+  # touch the box. It worked, but it cost ~45s of the ~65s a push took: a cold
+  # runner had to boot, check out, install Node, pull a 49 MB node_modules cache
+  # and run a full CRA production build -- whose output was then thrown away,
+  # since the deploy script below never reads it.
   #
-  # This runs on a GitHub-hosted runner rather than the VPS. The repo is public,
-  # so they cost nothing, and a verification competing for the box it is meant
-  # to be protecting is not much of a safety net.
-  verify:
-    runs-on: ubuntu-latest
+  # That frontend build was removed by request on 2026-09-02 to put pushes back
+  # near 20s. What it buys in speed it gives up in safety, and the trade is
+  # worth stating plainly: a JavaScript import of a module nobody committed now
+  # reaches the VPS, and nothing catches it until the app fails in a browser.
+  # Re-adding it means restoring the verify job from a100efb/b2bfd36.
+  #
+  # The backend check below is NOT part of that trade and should stay. It costs
+  # about a second, and it is the only automated thing standing between a bad
+  # commit and server.py's startup hook, which fires ~40 migrations against the
+  # live database on every restart -- several of them writing to lead rows
+  # (seed.py's undo_branch_leads_stage rewrites branch_stage and deletes a
+  # pipeline stage; normalize_lead_session_package_prices rewrites
+  # session_package_price). A half-saved router is a state this repo reaches
+  # whenever more than one session is writing to it, and restarting into one is
+  # how those migrations run against data they were never meant to touch.
+  #
+  # It proves the backend parses. It does not check imports or anything at
+  # runtime.
+  deploy:
+    runs-on: [self-hosted, osfitsiomax-vps]
     steps:
+      # Here only so the step below has a tree to compile. Incremental on a
+      # self-hosted runner, whose workspace persists between runs. This is not
+      # the checkout the deploy uses -- the script does its own pull into
+      # /root/OSFITSIOMAX -- but it is the same commit, so the check holds.
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # node_modules restored whole and keyed on the lockfile, so the install
-      # below only runs when a dependency actually changed. `.cache` is carved
-      # out of this entry because the next step owns that directory, and two
-      # cache entries writing the same path race with one silently winning.
-      - name: Restore node_modules
-        id: node-modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            frontend/node_modules
-            !frontend/node_modules/.cache
-          key: node-modules-${{ runner.os }}-node20-${{ hashFiles('frontend/package-lock.json') }}
-
-      # `npm ci`, not `npm install`. The comment that used to sit here said
-      # package-lock.json was untracked and so `ci` could not run -- that stopped
-      # being true three minutes after it was written, when the lockfile landed
-      # in 882c5ef. `ci` installs the lockfile rather than re-resolving ranges,
-      # so what this job verifies is what the lockfile pins.
-      #
-      # --legacy-peer-deps stays. The tree declares date-fns ^4.1.0 while
-      # react-day-picker 8.10.1 peer-requires ^2.28.0 || ^3.0.0, so npm refuses
-      # with ERESOLVE without it. The two have coexisted in every working install
-      # here -- 4.4.0 alongside 8.10.1. The real fix is to reconcile those two
-      # versions; until someone does, dropping this flag breaks every run.
-      - name: Install frontend dependencies
-        if: steps.node-modules.outputs.cache-hit != 'true'
-        working-directory: frontend
-        run: npm ci --no-audit --no-fund --legacy-peer-deps
-
-      # The build was ~55s of the ~85s this job took, nearly all of it webpack
-      # recompiling modules that had not changed. CRA 5 already writes a
-      # filesystem cache to node_modules/.cache -- react-scripts' webpack.config
-      # sets cache.type to 'filesystem' -- it just had nowhere to persist between
-      # runs. Restored AFTER the install, because `npm ci` deletes node_modules
-      # wholesale and would take the cache down with it.
-      #
-      # The key carries the sha so each run writes a fresh entry; the fallbacks
-      # take the newest entry built against the same lockfile.
-      - name: Restore webpack build cache
-        uses: actions/cache@v4
-        with:
-          path: frontend/node_modules/.cache
-          key: webpack-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ github.sha }}
-          restore-keys: |
-            webpack-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
-            webpack-${{ runner.os }}-
-
-      # CI is forced false because create-react-app promotes warnings to errors
-      # when it is set, and this tree carries pre-existing exhaustive-deps
-      # warnings in BranchReviewPanel, ClientHistoryModal, NetCashflowSunburst
-      # and CRMPage. The gate is here to catch what does not compile, not to
-      # fail a deploy on lint that was already on main before it existed.
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-        env:
-          CI: false
-
-      # Python syntax only -- a half-saved router, which is a state this repo
-      # reaches whenever more than one session is writing to it. It does NOT
-      # check imports or anything at runtime. Note which step catches what: a
-      # JavaScript import of a module nobody committed fails in the build step
-      # above, not here.
       - name: Compile backend
         run: python3 -m compileall -q backend
 
-  # Gated. The VPS is only touched once the tree above has been shown to build.
-  deploy:
-    needs: verify
-    runs-on: [self-hosted, osfitsiomax-vps]
-    steps:
       - name: Deploy to VPS
         run: bash /root/deploy-osfitsiomax.sh
