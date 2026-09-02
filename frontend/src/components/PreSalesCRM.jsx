@@ -1140,19 +1140,6 @@ export const PreSalesCRM = ({
         </div>
       )}
 
-      {/* The Leads pane's own range row. Above the KPI cards because it narrows them as
-          well as the table â€” both read the same date-filtered set. Analytics draws its
-          own inside the panel, so this is skipped there rather than stacking two. */}
-      {!(masterView === "analytics" && isSuperAdminMasterView) && (
-        <PreSalesRangePills
-          value={dateFilter}
-          onChange={setDateFilter}
-          testid="presales-leads-range"
-          handledBy={showHandledByFilter ? handledByFilter : undefined}
-          onHandledByChange={showHandledByFilter ? setHandledByFilter : undefined}
-        />
-      )}
-
       {/* KPI Cards â€” the Leads pane only. They are that table's stage filter, not a
           summary: each one selects a stage and the list below narrows to it. Analytics
           has no such table to narrow, and its own cards already open with All Leads, so
@@ -1254,6 +1241,20 @@ export const PreSalesCRM = ({
         )}
         </div>
       </div>
+
+      {/* The Leads pane's own range row, under the toolbar rather than above the KPI
+          cards. Search and these two filters are the one thing you reach for to narrow
+          the list, so they sit together as a block; the cards above keep reading as the
+          headline counts, and still recount against whatever this picks.
+          Already inside the leads branch, so it needs no analytics guard of its own —
+          that pane draws its own range row inside the panel. */}
+      <PreSalesRangePills
+        value={dateFilter}
+        onChange={setDateFilter}
+        testid="presales-leads-range"
+        handledBy={showHandledByFilter ? handledByFilter : undefined}
+        onHandledByChange={showHandledByFilter ? setHandledByFilter : undefined}
+      />
 
       {/* The stage strip that used to sit here is gone. It set the same `stageFilter`
           the KPI cards above already set, so every stage was on screen twice, four
