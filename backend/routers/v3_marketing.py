@@ -6,7 +6,7 @@ import uuid
 import re
 
 from database import v3_col
-from utils import now_iso, generate_patient_number
+from utils import now_iso, generate_patient_number, enquiry_created_at
 from deps import v3_require_roles, v3_current_user
 from constants import V3_STAGES
 from security import hash_password
@@ -759,6 +759,9 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
         assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
         source_branch_id = source.get("branch_id")
         patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
+        # Same as the Sheets importer: a lead is dated by when the patient enquired, not by
+        # when this sync happened to reach them. See enquiry_created_at.
+        enquired_at = enquiry_created_at((ad_record or {}).get("created_time"))
         lead = {
             "id": str(uuid.uuid4()),
             "patient_number": patient_number,
@@ -783,7 +786,7 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             "assigned_user_name": assigned["full_name"] if assigned else None,
             "assigned_user_role": "pre_sales" if assigned else None,
             "marketing_source_id": source_id,
-            "created_at": now_iso(),
+            "created_at": enquired_at or now_iso(),
             "updated_at": now_iso(),
         }
         await v3_col("leads").insert_one(lead.copy())

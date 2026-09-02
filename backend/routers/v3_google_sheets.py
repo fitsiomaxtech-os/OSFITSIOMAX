@@ -24,7 +24,7 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 
 from database import v3_col
-from utils import now_iso, generate_patient_number
+from utils import now_iso, generate_patient_number, enquiry_created_at
 from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
 from stage_utils import first_branch_stage_for
@@ -509,6 +509,12 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
             assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
             patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
+            # When the patient actually enquired, off the ad record, falling back to now
+            # for a row that carries no such stamp -- a walk-in sheet, or a form whose
+            # created_time column nobody mapped. See enquiry_created_at: a sync that runs
+            # late must not date a lead late, which is what shows a branch yesterday's
+            # patients under today.
+            enquired_at = enquiry_created_at((ad_record or {}).get("created_time"))
             lead = {
                 "id": str(uuid.uuid4()),
                 "patient_number": patient_number,
@@ -539,7 +545,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
                 "assigned_user_name": assigned["full_name"] if assigned else None,
                 "assigned_user_role": "pre_sales" if assigned else None,
                 "marketing_source_id": source_id,
-                "created_at": now_iso(),
+                "created_at": enquired_at or now_iso(),
                 "updated_at": now_iso(),
             }
             await v3_col("leads").insert_one(lead.copy())

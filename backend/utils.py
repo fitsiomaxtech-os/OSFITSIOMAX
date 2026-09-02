@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import re
 
@@ -9,6 +9,47 @@ def now_utc() -> datetime:
 
 def now_iso() -> str:
     return now_utc().isoformat()
+
+
+# The clinic's own clock. Every timestamp is stored UTC and every board buckets its days in
+# the reader's local time, which for this company is IST — so this is what "which day did
+# that happen on" means here.
+CLINIC_UTC_OFFSET = timedelta(hours=5, minutes=30)
+
+# Meta writes its offsets as +0000 as often as +00:00, and datetime.fromisoformat did not
+# accept the first form until 3.11. Normalised rather than depending on the interpreter the
+# VPS happens to run.
+_COMPACT_OFFSET = re.compile(r"([+-]\d{2})(\d{2})$")
+
+
+def enquiry_created_at(created_time) -> Optional[str]:
+    """When a lead enquired, from the ad export's own created_time. None if unreadable.
+
+    Two things are going on, and only one of them is a timezone conversion.
+
+    A lead's created_at used to be the moment the sync ran, which is not when anybody
+    enquired: a row the sheet picks up late is dated late, and the branch is shown
+    yesterday's patients under today. The enquiry time is right there in the ad record, so
+    that is what a lead is dated by now.
+
+    The offset on it is the AD ACCOUNT's, not the clinic's — this install's exports are
+    stamped -05:00 — and the day the clinic counts a lead on is the day Meta's own report
+    puts it on. Read as an instant, an enquiry at 14:42 on the 1st in that zone is 01:12 on
+    the 2nd in Chennai, and lands the lead on the wrong side of a date somebody is counting
+    against. So the wall clock is kept as written and re-anchored to the clinic's day: the
+    board shows 14:42 on the 1st, which is what Meta shows and what the branch counted.
+    """
+    text = str(created_time or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(_COMPACT_OFFSET.sub(r"\1:\2", text.replace("Z", "+00:00")))
+    except ValueError:
+        return None
+    # The offset is dropped rather than converted — see above. What is kept is the date and
+    # time the export displays, placed in the clinic's day.
+    naive = dt.replace(tzinfo=None)
+    return (naive - CLINIC_UTC_OFFSET).replace(tzinfo=timezone.utc).isoformat()
 
 
 def derive_branch_code(branch_name: str, existing_codes) -> str:
