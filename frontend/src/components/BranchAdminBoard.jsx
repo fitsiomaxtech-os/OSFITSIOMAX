@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
@@ -214,7 +215,7 @@ const TOOLBAR_FILTERS = [
     // Plural of the column heading, so the empty state names the thing being filtered
     // rather than saying "All" once per dropdown.
     allLabel: `All ${q.label}s`,
-    width: "w-28 2xl:w-32",
+    width: "w-36 2xl:w-40",
     answer: (lead) => formAnswer(lead, q.question, q.fallback, q.formatFallback),
   })),
   {
@@ -227,7 +228,7 @@ const TOOLBAR_FILTERS = [
     // back when this row held four dropdowns and had to fit at 1440 -- see the arithmetic
     // in the toolbar note further down. The row is down to three now and the pressure is
     // off, but the size is still the honest one for what the control holds.
-    width: "w-24 2xl:w-28",
+    width: "w-28 2xl:w-32",
     answer: cityAnswer,
   },
 ];
@@ -249,6 +250,61 @@ const departmentLabel = (value) =>
 const humanKey = (key) => {
   const words = String(key || "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+};
+
+/**
+ * The toolbar's filter dropdowns.
+ *
+ * These were native <select>s, which meant the open list was drawn by the operating
+ * system: a stack of raw sheet values in the OS's own font, ignoring every border, radius
+ * and colour the rest of this row is built from, and unstylable by design. Beside the
+ * range buttons and the search field it was the one control that looked like it had come
+ * from a different program.
+ *
+ * Built on the Select in components/ui now, so the menu is ours -- the card white the
+ * boards use, the same rounding as the toolbar, the chosen option ticked -- while Radix
+ * keeps what a native select gave for free: arrows to move, type-ahead to jump, Escape to
+ * close, and a trigger that still announces the column it filters.
+ *
+ * The answers are put through humanKey for display only. A sheet writes "back_pain" and
+ * "less_than_3_months", which is a database row rather than anything a person says out
+ * loud. The value behind each option is still the lowercased answer the list matches on,
+ * so what this control filters is exactly what it filtered before -- only what it reads
+ * has changed.
+ */
+const FILTER_ALL = "__all__";
+
+const FilterSelect = ({ filter, options, value, onChange }) => {
+  const active = !!value;
+  return (
+    // Radix will not take "" as an option's value -- that is its cleared state -- so the
+    // reset option carries a sentinel and is turned back into "" on the way out, which is
+    // what listFilters has always held for "this filter is not narrowing anything".
+    <Select value={value || FILTER_ALL} onValueChange={(v) => onChange(v === FILTER_ALL ? "" : v)}>
+      <SelectTrigger
+        title={filter.label}
+        aria-label={filter.label}
+        className={`h-10 ${filter.width} shrink-0 rounded-md border px-2.5 text-xs font-medium shadow-none transition-colors focus:ring-2 focus:ring-sky-200 ${
+          active
+            ? "border-sky-300 bg-sky-50 text-sky-700"
+            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+        }`}
+        data-testid={`branch-list-filter-${filter.key}`}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      {/* Capped and scrolling. A branch whose sheet offers thirty pain types would
+          otherwise open a menu taller than the board behind it. */}
+      <SelectContent className="max-h-72 border-slate-200" data-testid={`branch-list-filter-${filter.key}-menu`}>
+        {/* First and set apart, because it is the way out of the filter rather than
+            another answer to it. */}
+        <SelectItem value={FILTER_ALL} className="text-xs font-medium text-slate-500">{filter.allLabel}</SelectItem>
+        {options.map(([v, label]) => (
+          <SelectItem key={v} value={v} className="text-xs text-slate-700">{humanKey(label)}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 };
 
 /**
@@ -1522,36 +1578,27 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 for the width.
 
                 Widths are per filter (see TOOLBAR_FILTERS) rather than one class for the
-                row. The intake dropdowns keep w-28 up to 2xl and w-32 from there; City
+                row. The intake dropdowns take w-36 up to 2xl and w-40 from there; City
                 takes the size below each, because its longest label is "All Cities" and
                 its answers are single words. The arithmetic these were cut to fit was for
                 four dropdowns against a ~1085px fixed part at 1440, where the row had no
-                slack at all; with Consultation Type gone it has ~130px of it. Left as
-                they are rather than grown into the space -- these are the sizes of what
-                the controls hold, and the gap is better spent on the search. */}
+                slack at all; with Consultation Type gone it has ~130px of it, and about
+                80 of those are spent here. What the closed control reads is the all-label,
+                and at the old width that came out "All Pain Ty..." -- a filter naming no
+                column, which is the one thing this row of dropdowns is for. */}
             {!onConsultationTab && (
               <div className="hidden shrink-0 items-center gap-1.5 lg:flex" data-testid="branch-list-filters">
                 {TOOLBAR_FILTERS.map((f) => {
                   const options = listFilterOptions[f.key] || [];
                   if (options.length === 0) return null;
-                  const active = !!listFilters[f.key];
                   return (
-                    <select
+                    <FilterSelect
                       key={f.key}
+                      filter={f}
+                      options={options}
                       value={listFilters[f.key] || ""}
-                      onChange={(e) => setListFilters((p) => ({ ...p, [f.key]: e.target.value }))}
-                      title={f.label}
-                      aria-label={f.label}
-                      className={`h-10 ${f.width} shrink-0 truncate rounded-md border px-2 text-xs font-medium transition-colors ${
-                        active ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                      data-testid={`branch-list-filter-${f.key}`}
-                    >
-                      <option value="">{f.allLabel}</option>
-                      {options.map(([value, label]) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => setListFilters((p) => ({ ...p, [f.key]: v }))}
+                    />
                   );
                 })}
               </div>
