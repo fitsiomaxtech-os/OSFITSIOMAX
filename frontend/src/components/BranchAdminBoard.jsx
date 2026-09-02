@@ -165,10 +165,24 @@ const formAnswer = (lead, questionKey, fallback, formatFallback) => {
  * `fallback` and `formatFallback` are formAnswer's: where the sheet mapped this column
  * onto a field of the lead's own, the answer is read back off that field with its unit
  * put back on.
+ *
+ * `allLabel` is written out rather than pluralised from the heading, for the same reason
+ * City's is further down: a heading is written to sit over a column and does not always
+ * take an s. "All Looking Fors" is what pluralising this pair produces.
+ *
+ * The two here are the questions the physiotherapy forms actually ask. They used to be
+ * "what type of pain are you experiencing?" and "how long have you had this pain?", which
+ * no live form asks in those words -- so both columns read a dash on every lead these
+ * boards carry, and the dropdowns over them had nothing to offer.
  */
 const INTAKE_QUESTIONS = [
-  { key: "pain_type", label: "Pain Type", question: "what_type_of_pain_are_you_experiencing?", fallback: "condition", formatFallback: null },
-  { key: "pain_duration", label: "Pain Duration", question: "how_long_have_you_had_this_pain?", fallback: "months_of_pain", formatFallback: (n) => `${n} month${Number(n) === 1 ? "" : "s"}` },
+  { key: "looking_for", label: "Looking For", allLabel: "All Reasons", question: "what_are_you_looking_for_physiotherapy_for?", fallback: "condition", formatFallback: null },
+  // No fallback field. The others read back off the lead's own column where a sheet mapped
+  // the answer onto one, but nothing on a lead holds "how soon" -- the nearest is
+  // expected_consultation_date, which is a date somebody booked rather than the answer to
+  // this question, and reading it here would put a date under a heading nobody asked for
+  // one under. Unmapped, the sheet's own answer is in extra_fields and is what shows.
+  { key: "start_when", label: "How Soon", allLabel: "All Timelines", question: "how_soon_would_you_like_to_start_physiotherapy?", fallback: null, formatFallback: null },
 ];
 
 /**
@@ -217,9 +231,10 @@ const TOOLBAR_FILTERS = [
   ...INTAKE_QUESTIONS.map((q) => ({
     key: q.key,
     label: q.label,
-    // Plural of the column heading, so the empty state names the thing being filtered
-    // rather than saying "All" once per dropdown.
-    allLabel: `All ${q.label}s`,
+    // Carried from the question rather than pluralised off the heading here -- see the
+    // note on INTAKE_QUESTIONS. The dropdown names the thing being filtered, which is not
+    // always the column heading with an s on it.
+    allLabel: q.allLabel,
     width: "w-36 2xl:w-40",
     answer: (lead) => formAnswer(lead, q.question, q.fallback, q.formatFallback),
   })),
@@ -1024,7 +1039,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     },
     [showingMirror, atBranchOpening, mirrorStage, finalBranchStages],
   );
-  const entryStageNames = [mirrorStage?.name, realEntryStage?.name].filter(Boolean);
 
   // A stage the Consultation pipeline owns and the Branch one does not. Any name the two
   // share (e.g. "Follow Up") stays on the Branch side and is backed by the sales field, so
@@ -1954,55 +1968,42 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <table className="w-full min-w-[760px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
-                  {/* A lead at either entry stage hasn't had a physio assigned yet, so that
-                      column is dropped there — every other view keeps it.
+                  {/* One header row for every stage now. It used to be two: Assigned
+                      Physio was dropped at the entry stages, where nobody has been
+                      assigned yet, and kept everywhere else. With that column gone the
+                      two variants said the same thing, and a branch reads the same list
+                      whichever pill it is standing on.
 
-                      City sits with Phone rather than among the ones that follow it:
-                      where the patient is is part of who they are, and the two after it
-                      are the intake form's own questions, which is what the branch is
-                      actually reading this list to find out. Widths total 100 either way:
-                      table-fixed divides by the stated widths, and a set that overshoots
-                      quietly squeezes the last column instead.
+                      Ordered the way a row is read: who the patient is, the two ways to
+                      reach them, then the two answers the form collected -- what they
+                      want physiotherapy for, and how soon. City and Assigned Physio came
+                      out from between those groups; both are still on the patient's own
+                      card, which is what a row opens.
 
-                      Consultation Type's 13/12 went to Patient, Phone and City rather
-                      than being spread evenly. Those three are the ones that were
-                      actually truncating: a name is as long as the patient's name, a
-                      number carries +91 and the "p:" a Meta export prefixes it with, and
-                      "Chennai kolathur" did not fit. The intake pair took a point each,
-                      which is all "more_than_3_months" needs, and the columns after them
-                      hold values of a fixed size and took none. */}
-                  {entryStageNames.includes(stageFilter) ? (
-                    <>
-                      <th className="w-[22%] px-4 py-3">Patient</th>
-                      <th className="w-[14%] px-4 py-3">Phone</th>
-                      <th className="w-[13%] px-4 py-3">City</th>
-                      <th className="w-[14%] px-4 py-3">Pain Type</th>
-                      <th className="w-[14%] px-4 py-3">Pain Duration</th>
-                      <th className="w-[12%] px-4 py-3">Appointment</th>
-                      <th className="w-[11%] px-4 py-3">Stage</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="w-[21%] px-4 py-3">Patient</th>
-                      <th className="w-[13%] px-4 py-3">Phone</th>
-                      <th className="w-[12%] px-4 py-3">City</th>
-                      <th className="w-[13%] px-4 py-3">Pain Type</th>
-                      <th className="w-[12%] px-4 py-3">Pain Duration</th>
-                      <th className="w-[11%] px-4 py-3">Assigned Physio</th>
-                      <th className="w-[10%] px-4 py-3">Appointment</th>
-                      <th className="w-[8%] px-4 py-3">Stage</th>
-                    </>
-                  )}
+                      Widths total 100: table-fixed divides by the stated widths, and a
+                      set that overshoots quietly squeezes the last column instead. Email
+                      takes the largest share after the name, because an address is the
+                      one value here with no natural length -- the rest are a phone
+                      number, two form answers out of a fixed list, a slot and a stage
+                      name. */}
+                  <th className="w-[21%] px-4 py-3">Name</th>
+                  <th className="w-[14%] px-4 py-3">Phone Number</th>
+                  <th className="w-[18%] px-4 py-3">Email</th>
+                  <th className="w-[15%] px-4 py-3">Looking For</th>
+                  <th className="w-[14%] px-4 py-3">How Soon</th>
+                  <th className="w-[11%] px-4 py-3">Appointment</th>
+                  <th className="w-[7%] px-4 py-3">Stage</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(() => {
                   const visible = visibleLeads;
-                  const showAssignedPhysio = !entryStageNames.includes(stageFilter);
                   if (visible.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={showAssignedPhysio ? 9 : 8} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        {/* The seven the header states. It was counting a column more than
+                            the row ever drew, on both branches of the old split. */}
+                        <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
                         </td>
                       </tr>
@@ -2084,17 +2085,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                           </div>
                         </td>
                         <td className="truncate px-4 py-3 text-slate-600" title={lead.phone}>{lead.phone || "—"}</td>
-                        {/* Read through cityAnswer, so a lead whose sheet mapped the column
-                            and one whose sheet did not both show the same thing here. */}
-                        {(() => {
-                          const city = cityAnswer(lead);
-                          return (
-                            <td className="truncate px-4 py-3 text-slate-600" title={city || undefined} data-testid={`branch-row-city-${lead.id}`}>
-                              {city || <span className="text-slate-400">—</span>}
-                            </td>
-                          );
-                        })()}
-                        {/* The intake form's three questions. Each falls back to the lead's
+                        {/* Titled as well as truncated: an address is the one value in the
+                            row that routinely outruns its column, and the row opens the
+                            patient rather than letting anyone select the text out of it. */}
+                        <td className="truncate px-4 py-3 text-slate-600" title={lead.email || undefined} data-testid={`branch-row-email-${lead.id}`}>
+                          {lead.email || <span className="text-slate-400">—</span>}
+                        </td>
+                        {/* The intake form's own questions. Each falls back to the lead's
                             own field where it has one — see formAnswer. Read from the same
                             INTAKE_QUESTIONS the toolbar filters are built from, so a column
                             and the dropdown above it cannot drift apart. */}
@@ -2106,9 +2103,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             </td>
                           );
                         })}
-                        {showAssignedPhysio && (
-                          <td className="truncate px-4 py-3 text-slate-600" title={lead.assigned_physio_name}>{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
-                        )}
                         <td className="px-4 py-3">
                           {(() => {
                             const slot = apptSlotLabel(lead);
