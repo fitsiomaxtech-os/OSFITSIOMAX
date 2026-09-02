@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Calendar,
   CheckCircle2,
@@ -103,6 +103,11 @@ const BRANCH_CANCELLED_STAGE = "Cancelled";
 // Still a stage a lead can be moved to -- schedule-portfolio puts them there -- but no
 // longer one of the pills on the Branch Leads strip. See leadPillStages.
 const BRANCH_PORTFOLIO_STAGE = "Portfolio";
+
+// Where the Consultation tab opens. "Follow Up" comes first in the branch consultation
+// pipeline but is shared with the Branch strip, so it is not one of that tab's own pills;
+// Consultation Visit is the first that is, and is where the tab's work starts.
+const BRANCH_CONSULTATION_OPENING_STAGE = "Consultation Visit";
 
 // ---- Appointment confirmation -------------------------------------------------------
 // What the client walks away with. Built as its own document so it can be opened, printed
@@ -1078,16 +1083,51 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // in it, so a stage pill still means the same thing under it.
   const [markFilter, setMarkFilter] = useState(""); // "" | "vip" | "attention"
 
-  // Switching tabs drops a stage the new tab has no pill for. Left alone it would narrow
-  // the board to a stage with nothing on screen naming it and no second click to clear it.
-  // A filter the new tab *does* own survives, which is what lets a lead popup send the
-  // reader straight to its Consultation stage without this undoing the trip.
+  // Which tab has already been opened on its own stage. A ref rather than state: it only
+  // decides whether the effect below acts, and a re-render because it changed would be a
+  // render nobody is waiting for.
+  const openedOn = useRef(null);
+
+  // Two jobs when the tab changes, in order.
+  //
+  // First, drop a stage the new tab has no pill for. Left alone it would narrow the board
+  // to a stage with nothing on screen naming it and no second click to clear it. A filter
+  // the new tab *does* own survives, which is what lets a lead popup send the reader
+  // straight to its Consultation stage without this undoing the trip.
+  //
+  // Then open the tab where its work actually starts -- Branch Leads on Leads,
+  // Consultation on Consultation Visit -- rather than on the whole list. Both used to land
+  // on All Stages, which on Branch Leads is 2325 rows of which 2261 are the Leads pill
+  // anyway, so the first thing anybody did on arriving was press the pill they had just
+  // been shown the total of.
+  //
+  // Nothing is decided until the pills exist. The stage list arrives from the server after
+  // the first render, so on mount there is no name to open on yet; this re-runs when it
+  // lands, and openedOn holds the opening to once per visit rather than once per reload --
+  // which is also what stops a refresh from overriding somebody who pressed All Stages on
+  // purpose.
   useEffect(() => {
-    const ownedHere = (activeView === "branch_consultation" ? consultationOnlyStages : leadPillStages)
-      .some((st) => st.name === stageFilter);
+    const consultation = activeView === "branch_consultation";
+    const pills = consultation ? consultationOnlyStages : leadPillStages;
+    if (pills.length === 0) return;
+
+    const ownedHere = pills.some((st) => st.name === stageFilter);
     if (stageFilter && !ownedHere) setStageFilter(null);
+
+    if (openedOn.current === activeView) return;
+    openedOn.current = activeView;
+    // A stage the tab already owns was chosen for a reason -- a popup's deep link, or the
+    // reader's own click on the way in -- and is not something to open over.
+    if (ownedHere) return;
+    // Branch Leads opens on the mirror pill, which is the one reading "Leads". A branch fed
+    // by Pre-Sales has no mirror, so no Leads pill to open on, and keeps All Stages: the
+    // whole list is the only honest opening where the strip has nothing else to offer.
+    const opening = consultation
+      ? pills.find((st) => st.name === BRANCH_CONSULTATION_OPENING_STAGE)
+      : mirrorStage;
+    if (opening) setStageFilter(opening.name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView]);
+  }, [activeView, consultationOnlyStages, leadPillStages, mirrorStage]);
 
   // The toolbar's calendar, wired so that picking a date releases the range row back to
   // All.
