@@ -46,7 +46,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
-import { QuickDateFilterBar, intersectDateFilters } from "@/components/QuickDateFilterBar";
+import { QuickDateFilterBar, intersectDateFilters, quickDatePreset } from "@/components/QuickDateFilterBar";
 import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
 import { RescheduledTag } from "@/components/ui/lead-marks";
 import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
@@ -817,7 +817,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // above so the toolbar's date filter is left exactly as it was: pressing a range here
   // does not rewrite that control's label, and clearing that control does not undo the
   // range picked here. The two combine below.
-  const [quickDate, setQuickDate] = useState(null); // same shape; null = All
+  //
+  // Opens on Today rather than All. The board is read at the desk it belongs to, and the
+  // question being asked of it in the morning is who is coming in and who rang -- not the
+  // whole book back to the branch's first patient, which is what All is and which takes a
+  // scroll and a filter before it answers anything. Every other range is one press away,
+  // All included.
+  const [quickDate, setQuickDate] = useState(() => quickDatePreset("today")); // same shape; null = All
   // The toolbar's dropdowns, keyed as TOOLBAR_FILTERS is -- { pain_type, pain_duration,
   // city } -- each holding the lowercased answer to match on or "" for
   // the whole list. Lowercased because a sheet is not a controlled vocabulary: the same

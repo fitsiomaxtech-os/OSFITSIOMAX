@@ -71,6 +71,22 @@ export const QUICK_DATE_PRESETS = [
 const quickFilter = (p) => (p.key === "all" ? null : { key: p.key, label: p.label, ...p.range() });
 
 /**
+ * One preset's value by key, for a board that should OPEN on a range rather than on All.
+ *
+ * The same object the row emits when that button is pressed, so the button it names lights
+ * up on arrival without the board having to describe its own default twice.
+ *
+ * The range is computed when this is called, not when the module loads, so a board
+ * initialising on "today" means the day it was opened. A board left open across midnight
+ * keeps the day it started on until somebody presses a range again -- which is what
+ * pressing Today at 23:59 has always done, and not worth a ticking clock to fix.
+ */
+export const quickDatePreset = (key) => {
+  const preset = QUICK_DATE_PRESETS.find((p) => p.key === key);
+  return preset ? quickFilter(preset) : null;
+};
+
+/**
  * Narrows one date filter by another, so two independent controls over the same list
  * combine instead of one quietly winning. The result is the overlap: the later of the two
  * starts, the earlier of the two ends. Either side being null (unset) leaves the other
