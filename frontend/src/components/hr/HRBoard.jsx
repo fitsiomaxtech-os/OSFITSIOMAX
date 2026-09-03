@@ -553,42 +553,104 @@ const TabPill = ({ active, onClick, children, testid }) => (
 );
 
 /**
+ * One row of the designation dropdown.
+ *
+ * The lit row is the same solid sky-600 a lit TabPill is, so the thing that is chosen
+ * reads the same whichever of the two filters on the row it was chosen in. The tick is
+ * not decoration — the panel scrolls, and once the selected row is scrolled out of view
+ * the trigger's label is the only other thing saying what is set.
+ */
+const DesignationOption = ({ label, selected, onSelect, testid }) => (
+  <button
+    type="button"
+    onClick={onSelect}
+    className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm transition ${
+      selected ? "bg-sky-600 font-semibold text-white" : "text-slate-700 hover:bg-sky-50 hover:text-sky-800"
+    }`}
+    data-testid={testid}
+  >
+    <span className="truncate">{label}</span>
+    {selected && <Check className="h-3.5 w-3.5 shrink-0" />}
+  </button>
+);
+
+/**
  * The designation filter.
  *
  * Takes either a flat `options` list or `groups` from groupedDesignations, in which case
- * every department becomes an optgroup heading. The heading is a label and not a value:
- * what gets picked is still the job on its own, so the filter this feeds is unchanged and
- * a department's heading never narrows the match to that department's records — which
- * matters because the structure and the records disagree about where a job sits often
- * enough that pairing the two would filter to nobody.
+ * every department becomes a heading over the jobs it configures. The heading is a label
+ * and not a value: what gets picked is still the job on its own, so the filter this feeds
+ * is unchanged and a department's heading never narrows the match to that department's
+ * records — which matters because the structure and the records disagree about where a
+ * job sits often enough that pairing the two would filter to nobody.
  *
- * A value the list does not offer is added back as an option of its own. A filter can
- * arrive here already set — a Dashboard card or a department bar opens this page on one
- * — and it can be a spelling of a job the structure holds in different capitals. Without
- * this the control reads "All Designations" over a list that is filtered, which is the one
- * state a filter must never show.
+ * Built from Popover and buttons rather than a <select>. A native select's list is drawn
+ * by the browser, not by this page: the grey Windows menu, its own type size, its own
+ * highlight blue, and none of it reachable from a class. Next to the sky pills it sits
+ * beside, the one control that opened looked like it belonged to another application.
+ * This is the panel the rest of the OS opens — white card, sky highlight, and the
+ * department headings set in the same small caps section labels use elsewhere in this
+ * file. Popover carries the parts that are genuinely hard: it portals out, so a filter
+ * near the bottom of a card is not clipped by it, and it closes on Escape and on a click
+ * outside.
+ *
+ * The trigger shows a value the list does not offer. A filter can arrive here already set
+ * — a Dashboard card or a department bar opens this page on one — and it can be a
+ * spelling of a job the structure holds in different capitals. Reading "All Designations"
+ * over a list that is filtered is the one state a filter must never show.
  */
 const DesignationFilterSelect = ({ value, onChange, options, groups, testid }) => {
+  const [open, setOpen] = useState(false);
   const sections = groups || (options?.length ? [{ department: "", designations: options }] : []);
-  const offered = sections.some((g) => g.designations.some((d) => d === value));
+  const pick = (next) => { onChange(next); setOpen(false); };
+
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`h-10 max-w-[16rem] rounded-md border px-3 text-sm font-medium ${value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}
-      title="Filter by designation"
-      data-testid={testid}
-    >
-      <option value="">All Designations</option>
-      {value && !offered && <option value={value}>{titleCase(value)}</option>}
-      {sections.map((g, i) => (g.department ? (
-        <optgroup key={`grp-${i}`} label={g.department}>
-          {g.designations.map((d) => <option key={d} value={d}>{titleCase(d)}</option>)}
-        </optgroup>
-      ) : (
-        g.designations.map((d) => <option key={d} value={d}>{titleCase(d)}</option>)
-      )))}
-    </select>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Filter by designation"
+          className={`flex h-10 w-56 items-center justify-between gap-2 rounded-md border px-3 text-sm font-medium transition ${
+            value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+          }`}
+          data-testid={testid}
+        >
+          <span className="truncate">{value ? titleCase(value) : "All Designations"}</span>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      </PopoverTrigger>
+      {/* max-h + overflow on the list rather than the panel, so the headings scroll with
+          the rows they head rather than the panel growing past the fold on an install
+          with a lot of departments. */}
+      <PopoverContent align="start" className="w-64 p-1" data-testid={`${testid}-panel`}>
+        <div className="max-h-72 overflow-y-auto">
+          <DesignationOption
+            label="All Designations"
+            selected={!value}
+            onSelect={() => pick("")}
+            testid={`${testid}-all`}
+          />
+          {sections.map((g, i) => (
+            <div key={`grp-${i}`}>
+              {g.department && (
+                <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  {g.department}
+                </p>
+              )}
+              {g.designations.map((d) => (
+                <DesignationOption
+                  key={d}
+                  label={titleCase(d)}
+                  selected={!!value && nameKey(d) === nameKey(value)}
+                  onSelect={() => pick(d)}
+                  testid={`${testid}-${d}`}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 };
 
