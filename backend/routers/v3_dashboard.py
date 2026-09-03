@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
 from database import v3_col
-from utils import CLINIC_UTC_OFFSET, live_branch_query
+from utils import CLINIC_UTC_OFFSET, clinic_day_of, live_branch_query
 from stage_utils import get_closing_stage_name
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES, V3_BRANCH_STAGES
@@ -499,6 +499,12 @@ def _utc_stamp_range_query(field: str, start_date: Optional[str], end_date: Opti
     return {field: rng} if rng else {}
 
 
+# clinic_day_of, imported above, is the counterpart to these two and the other half of the
+# same mistake: they draw the WINDOW on the clinic's clock, it puts each row that came back
+# on a DAY on the same clock. It lives in utils beside CLINIC_UTC_OFFSET, because which day
+# something happened on is the clinic's definition and not this board's.
+
+
 @router.get("/dashboard/overview")
 async def v3_dashboard_overview(
     start_date: Optional[str] = Query(None),
@@ -775,10 +781,15 @@ def _is_online_vertical(vertical: Optional[str]) -> bool:
 
 
 def _weekday_of(created_at: Optional[str]) -> Optional[str]:
-    """Mon..Sun for a lead's created_at, or None if it has no usable date."""
-    stamp = str(created_at or "")[:10]
+    """Mon..Sun for a lead's created_at, or None if it has no usable date.
+
+    On the clinic's clock, like every other day this file counts: a lead taken at 02:00 on
+    a Sunday is stored at 20:30 Saturday UTC, and "which days run hot" is a question about
+    the day the desk worked, not the day Greenwich was having.
+    """
+    day = clinic_day_of(created_at)
     try:
-        return _WEEKDAYS[date.fromisoformat(stamp).weekday()]
+        return _WEEKDAYS[date.fromisoformat(day).weekday()]
     except (ValueError, TypeError):
         return None
 
@@ -821,12 +832,16 @@ async def v3_dashboard_leads_analytics(
     #
     # Split offline/online as it goes: the two are different businesses arriving through
     # different channels, and one line summing both hides a swing in either.
+    #
+    # Bucketed by the clinic's day, the same clock the window above was drawn on -- see
+    # clinic_day_of. The first ten characters of the stored stamp are a UTC date, and
+    # reading the day off those put the small hours on the day before.
     by_day: dict = {}
     for lead in leads:
-        stamp = str(lead.get("created_at") or "")[:10]
-        if not stamp:
+        day = clinic_day_of(lead.get("created_at"))
+        if not day:
             continue
-        row = by_day.setdefault(stamp, {"offline": 0, "online": 0})
+        row = by_day.setdefault(day, {"offline": 0, "online": 0})
         row["online" if _is_online_vertical(lead.get("vertical")) else "offline"] += 1
 
     def _trend_rows(buckets: dict) -> list:
@@ -852,6 +867,11 @@ async def v3_dashboard_leads_analytics(
     # or the shape lies about where leads are dropping.
     stage_order = await _stage_names("pre_sales", V3_STAGES)
     stage_counts = {name: 0 for name in stage_order}
+    # Leads whose stage is not one of the configured pre-sales stages -- renamed in
+    # Pipeline Stage Management since they were filed, or left on a stage that has since
+    # been removed. They used to be counted nowhere, so the funnel quietly stopped adding
+    # up to the total above it; they are carried and reported below instead.
+    off_pipeline = 0
     by_source: dict = {}
     by_branch: dict = {}
     by_vertical: dict = {}
@@ -865,6 +885,8 @@ async def v3_dashboard_leads_analytics(
         stage = lead.get("stage")
         if stage in stage_counts:
             stage_counts[stage] += 1
+        else:
+            off_pipeline += 1
         source = _lead_source(lead)
         by_source[source] = by_source.get(source, 0) + 1
         if str(lead.get("appointment_date") or "").strip():
@@ -894,12 +916,15 @@ async def v3_dashboard_leads_analytics(
         "booked": sum(booked_by_source.values()),
         "grain": grain,
         "trend": trend,
-        "by_stage": [{"name": name, "value": stage_counts[name]} for name in stage_order],
+        # Pipeline order, plus a residual row only when there is one to show. Naming it
+        # rather than dropping it keeps the funnel's bars summing to `total`; it is a
+        # remainder, not a stage, and nothing is added to the pipeline to hold it.
+        "by_stage": [{"name": name, "value": stage_counts[name]} for name in stage_order]
+                    + ([{"name": "Not in the pipeline", "value": off_pipeline}] if off_pipeline else []),
         # Six plus Other: a part-to-whole read at a glance stops working past about six
         # slices, whatever the palette can hold.
         "by_source": _ranked(by_source, 6),
-        "by_branch": _ranked({branch_names.get(bid, "Unassigned") if bid else "Unassigned": v
-                              for bid, v in by_branch.items()}, 8),
+        "by_branch": _ranked(_named_branch_counts(by_branch, branch_names), 8),
         "by_vertical": _ranked(by_vertical, 6),
         # Calendar order, not ranked — the question is which days run hot, and a bar chart
         # sorted by volume can't be read as a week.
@@ -1271,6 +1296,23 @@ METRIC_ORDER = list(METRIC_DEFS.keys())
 async def _physio_branches() -> list:
     rows = await v3_col("branches").find(live_branch_query(), {"_id": 0}).to_list(200)
     return [b for b in rows if b.get("vertical") == "offline_physiotherapy"]
+
+
+def _named_branch_counts(by_branch_id: dict, branch_names: dict) -> dict:
+    """Per-branch-id counts, re-keyed by branch name and SUMMED where names meet.
+
+    Written as a dict comprehension this silently lost leads. Several ids land on one
+    name -- every lead whose branch has since been deleted resolves to "Unassigned", and
+    so does every lead never given a branch -- and a comprehension keeps only whichever
+    of them Python happened to write last. "Leads by branch" then failed to add up to the
+    total printed above it, which is exactly the sort of disagreement this board is read
+    to catch.
+    """
+    counts: dict = {}
+    for bid, value in by_branch_id.items():
+        name = branch_names.get(bid, "Unassigned") if bid else "Unassigned"
+        counts[name] = counts.get(name, 0) + value
+    return counts
 
 
 def _lead_source(lead: dict) -> str:

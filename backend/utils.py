@@ -35,6 +35,43 @@ _ENQUIRY_STAMP_KEYS = {
 }
 
 
+def parse_stamp(text) -> Optional[datetime]:
+    """A stored timestamp, whatever spelling it arrived in. None if it is not one.
+
+    Three spellings reach this codebase and all three are real: now_iso() writes
+    "+00:00", a Meta export writes "+0000", and rows written before either carry no
+    offset at all. Callers that need to know which day something happened on should not
+    each be re-learning that -- see clinic_day_of below, which is the only question any
+    of them is actually asking.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(_COMPACT_OFFSET.sub(r"\1:\2", raw.replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
+def clinic_day_of(stamp) -> Optional[str]:
+    """Which clinic day a UTC-stamped instant falls on, as "YYYY-MM-DD". None if unreadable.
+
+    The counterpart to the range helpers on the dashboards: those draw the WINDOW on the
+    clinic's clock, this puts each row that came back on a DAY on the same clock. Reading
+    the day off the first ten characters of the stored string instead is a UTC day, which
+    is five and a half hours out -- "2026-09-02T21:30:00+00:00" reads as 2 September, but
+    the lead arrived at 03:00 on the 3rd and the branch counted it there.
+    """
+    moment = parse_stamp(stamp)
+    if moment is None:
+        return None
+    # A stamp written without an offset is already UTC -- now_iso() and
+    # enquiry_created_at() both write one, so this is a legacy row, not a local time.
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc).replace(tzinfo=None)
+    return (moment + CLINIC_UTC_OFFSET).date().isoformat()
+
+
 def find_enquiry_stamp(ad_record, extras) -> Optional[str]:
     """The enquiry stamp on a lead, wherever the sheet happened to leave it.
 

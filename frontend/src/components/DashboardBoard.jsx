@@ -729,11 +729,15 @@ const AnalyticsTab = ({ data, dateFilter }) => {
   const [trendMetric, setTrendMetric] = useState("leads");
 
   const branches = data?.leads?.branches || [];
-  const scopedBranchIds = branchId
-    ? [branchId]
-    : group === "all"
-      ? undefined
-      : branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).map((b) => b.branch_id);
+  // Through resolveBranchIds, the same resolution Marketing, Sales, Revenue and Team all
+  // use. This tab had its own copy of the filter and it disagreed on the one case that
+  // matters: a group holding no branches resolved to [], which the endpoint reads as no
+  // filter at all -- so picking Online with no online branches showed the whole company
+  // here while every other tab correctly showed nothing. Split as a string and back
+  // because that helper speaks the endpoint's comma-separated param and the dashboard
+  // below takes a list.
+  const ids = resolveBranchIds(branches, group, branchId);
+  const scopedBranchIds = ids ? String(ids).split(",") : undefined;
 
   const activeMetric = GROWTH_METRICS.find((m) => m.key === trendMetric) || GROWTH_METRICS[0];
 
