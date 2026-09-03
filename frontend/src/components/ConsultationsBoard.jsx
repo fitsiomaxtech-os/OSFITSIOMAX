@@ -1892,10 +1892,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // "Treatments" (there's nothing to "leave" for it to count as a real stage move).
   const matchesStage = useCallback((lead, stageName) => {
     if (isConsultant && stageName === "Treatments") return lead.treatment_fee_paid != null;
-    // Diet Consultation is a stage nothing writes — see matchesConsultationStage in
-    // BranchAdminBoard for why it is read off the lead's diet flag instead. Gated to the
-    // branch pipeline: the Head Physio's own board runs on head_consultation_stage and has
-    // no such stage, so this must not fire there.
+    // Diet Consultation is a stage nothing writes: the backend sets consultation_stage to
+    // Follow Up, Consultation Visit, Fee Collected, Physio Assign and Treatment Fee, and
+    // never to this one — so the pill could only ever read 0 however many diet patients the
+    // branch had. It is read off the lead instead, and off the fee rather than the
+    // recommendation: a consultation that ticks the box starts the conversation; the
+    // patient is on the programme once the fee is in and a Nutrition Coach has them.
+    //
+    // Deliberately NOT done by moving consultation_stage. Diet runs alongside treatment
+    // rather than instead of it, so a patient moved into this stage would vanish from Fee
+    // Collected or Physio Assign, where their physio course still lives.
+    //
+    // Gated to the branch pipeline: the Head Physio's own board runs on
+    // head_consultation_stage and has no such stage, so this must not fire there.
     if (!isConsultant && stageName === "Diet Consultation") {
       return lead.diet_fee_paid != null && !!lead.diet_coach_id;
     }
@@ -1908,9 +1917,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     // Rehab reads off the fee for the same reason Diet reads off its own — nothing ever
     // writes the stage. Branch pipeline only: the Consultant's own board has no such stage.
     if (!isConsultant && stageName === "Rehab") return lead.rehab_fee_paid != null;
-    // Nothing left to attend. Shared with matchesConsultationStage in BranchAdminBoard,
-    // which the Branch Leads bar reads the same rows through, rather than copied and kept
-    // in step by hand. Branch pipeline only: the Consultant's own board has no such stage.
+    // Nothing left to attend. This is the only implementation of it now: the Branch Leads
+    // bar counts its Consultation pills from this board's own rows (onCountChange) rather
+    // than from a second copy of these rules over a differently-filtered list, which is
+    // what it used to do. Branch pipeline only: the Consultant's own board has no such stage.
     if (!isConsultant && stageName === "Completed") return isCourseComplete(lead);
     // And a finished patient leaves every other position in the pipeline, which is the half
     // that makes the line above true. Nothing ever writes "Completed" onto a lead, so the
@@ -1921,7 +1931,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     //
     // Above the three cross-cutting stages on purpose, not below them: Rehab, Diet
     // Consultation and Diet Chart are facts about a patient rather than positions, and they
-    // run alongside the pipeline by design -- see matchesConsultationStage in BranchAdminBoard.
+    // run alongside the pipeline by design, so they are meant to hold whoever they describe.
     //
     // Cancel keeps whatever it holds. Abandoning a course is not finishing one, and the
     // branch pipeline reads it the same way.

@@ -754,59 +754,6 @@ const ARM_DEPARTMENT = {
 };
 
 /**
- * Does this lead belong under that consultation stage chip?
- *
- * Every stage but one is the plain string on the lead. Diet Consultation is a stage
- * nothing ever writes: the backend sets consultation_stage to Follow Up, Consultation
- * Visit, Fee Collected, Physio Assign, Treatment Fee and Consultation Completed, and
- * never to this one — so the chip could only ever read 0 and its list could only ever be
- * empty, however many diet patients the branch had.
- *
- * It is matched on the lead's diet flag instead, which is set when the Head Physio
- * recommends diet, when a Diet Consultation is booked, and when the Diet Fee is
- * collected. That is the same flag the Diet Master View's own queue is built from, so the
- * two boards now agree on who is a diet patient.
- *
- * Deliberately NOT done by moving the lead's consultation_stage: diet runs alongside
- * treatment rather than instead of it, so a patient moved into this stage would vanish
- * from Fee Collected or Physio Assign, where their physio course still lives. The chip
- * reads a fact about the lead; it does not relocate them.
- *
- * Mirrors the "Treatments" virtual stage ConsultationsBoard already matches this way.
- */
-export const matchesConsultationStage = (lead, stageName) => {
-  // Recommending diet is not being on the diet programme. A consultation that ticks the box
-  // starts the conversation; the patient is on it once the branch has taken the fee and a
-  // Nutrition Coach has them. Reading the flag alone filled this stage with everybody who
-  // had ever been offered it, which is a list nobody can work.
-  if (stageName === "Diet Consultation") return lead.diet_fee_paid != null && !!lead.diet_coach_id;
-  // Diet Chart, beside it: a separate product with its own fee (see DIET_FEE_KINDS.chart
-  // in ConsultationsBoard), so a patient is on this pill because that fee is in, not
-  // because a coach was assigned or a consultation was booked.
-  if (stageName === "Diet Chart") return lead.diet_chart_fee_paid != null;
-  // Rehab, on the same footing: a stage nothing writes. A patient is on the rehab list
-  // because their Rehab Fee is in, and they keep whatever position they actually hold in
-  // the physio pipeline — rehab runs beside it, not inside it.
-  if (stageName === "Rehab") return lead.rehab_fee_paid != null;
-  // Nothing left to attend — see isCourseComplete, which both boards showing this stage
-  // now read it through.
-  if (stageName === "Completed") return isCourseComplete(lead);
-  // And nowhere else in the pipeline, which is the half that makes that line true. Nothing
-  // writes "Completed" onto a lead, so consultation_stage still reads Fee Collected or
-  // Physio Assign for a patient with nothing left to attend — counted under both, with the
-  // two counts along one bar adding up to more patients than the branch has.
-  //
-  // Below the cross-cutting trio above it on purpose: Rehab, Diet Consultation and Diet
-  // Chart are facts about a patient rather than positions, and are meant to hold whoever
-  // they describe.
-  //
-  // Cancel keeps whatever it holds: abandoning a course is not finishing one, the same rule
-  // matchesBranchStage follows.
-  if (lead.consultation_stage !== "Cancel" && isCourseComplete(lead)) return false;
-  return lead.consultation_stage === stageName;
-};
-
-/**
  * Does this lead belong under this Branch stage?
  *
  * Nearly always a branch_stage comparison. The exception is the "Leads" pill, which the
@@ -1418,13 +1365,33 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     stages.forEach((s) => { counts[s.name] = filteredLeads.filter((l) => matchesBranchStage(l, s, isConsultationOnlyStage)).length; });
     return counts;
   }, [filteredLeads, stages, isConsultationOnlyStage]);
-  const consultationCounts = useMemo(() => {
-    const counts = {};
-    consultationStages.forEach((s) => {
-      counts[s.name] = filteredLeads.filter((l) => matchesConsultationStage(l, s.name)).length;
+  // The Consultation pills are counted by the board that draws the rows under them, not
+  // here. This memo used to do it off `filteredLeads`, which is this board's own list
+  // narrowed by the Date Filter on `created_at` -- and ConsultationsBoard narrows the same
+  // leads by `appointment_date`, because a consultation is worked on the day it is
+  // attended rather than the day the record was made. The two answered different
+  // questions and the tab opens on Today, so a patient booked in for this morning and
+  // entered last week was in the table with a bar of zeroes over it: eight cards reading 0
+  // above a row that was plainly there.
+  //
+  // ConsultationsBoard already publishes exactly this through onCountChange -- its own
+  // rows, after its own Date Filter, search and mark filter, counted by its own stage
+  // matcher. Reading it from there is what makes a pill's number and the list it opens the
+  // same list by construction, rather than two implementations kept in step by hand.
+  const [consultationCounts, setConsultationCounts] = useState({});
+  // Stable across renders, so ConsultationsBoard's reporting effect doesn't re-fire on
+  // every parent render -- it lists this callback among its dependencies, and an inline
+  // arrow would make each render schedule the next one. The counts are replaced only when
+  // they actually differ, for the same reason: a fresh object every time would re-render
+  // the whole board on each report for no change on screen.
+  const handleConsultationCounts = useCallback((_total, counts) => {
+    setConsultationCounts((prev) => {
+      const keys = Object.keys(counts);
+      const same = keys.length === Object.keys(prev).length
+        && keys.every((k) => prev[k] === counts[k]);
+      return same ? prev : counts;
     });
-    return counts;
-  }, [filteredLeads, consultationStages]);
+  }, []);
 
   // "All Stages" is the count of every lead matching the active Date Filter/search —
   // every lead in the branch when neither is set.
@@ -1935,6 +1902,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               onlineArm={armScoped}
               externalStageFilter={stageFilter}
               showOwnStageBar={false}
+              // The numbers on the cards above. Reported from this board rather than
+              // computed up here, so a pill counts exactly the rows its own click shows --
+              // see consultationCounts.
+              onCountChange={handleConsultationCounts}
               autoOpenLeadId={autoOpenLeadId}
               onAutoOpened={() => setAutoOpenLeadId(null)}
               // Driven by the toolbar above: passing externalSearch hides this board's own
