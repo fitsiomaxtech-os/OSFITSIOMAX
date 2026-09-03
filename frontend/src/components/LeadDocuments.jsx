@@ -101,7 +101,11 @@ const isImage = (t) => String(t || "").startsWith("image/");
 const NAV_BTN = "shrink-0 rounded-full bg-white/10 p-2 text-white transition hover:bg-white/25 sm:p-3";
 const fmtWhen = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}/${String(iso).slice(0, 4)}` : "—");
 
-export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedLabel = "", hint, onChanged }) => {
+// `canUpload` splits filing off from the rest of editing and defaults to `canEdit`, so a
+// caller that never mentions it keeps the panel it always had. Separate because a screen
+// can want the list, the share flag and the bin while having no business adding pages:
+// the Consultant reads a patient's file, the branch that ordered the reports files them.
+export const LeadDocuments = ({ leadId, canEdit = true, canUpload = canEdit, kind = "general", fixedLabel = "", hint, onChanged }) => {
   const [docs, setDocs] = useState([]);
   const [sharing, setSharing] = useState(null); // the doc whose share flag is in flight
   const [loading, setLoading] = useState(true);
@@ -317,7 +321,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
 
   return (
     <div className="space-y-3" data-testid="lead-documents">
-      {canEdit && (
+      {canUpload && (
         <div
           onDragOver={(e) => { e.preventDefault(); if (!busy) setDragging(true); }}
           onDragLeave={() => setDragging(false)}
@@ -408,9 +412,9 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
       ) : docs.length === 0 ? (
         // Nothing at all when there is a way to add one on screen: the panel above is both
         // the instruction and the action, and a box under it repeating that the list is
-        // empty is a hole in the middle of the step. Read-only callers still get a line,
-        // since for them an empty list is the whole answer.
-        canEdit ? null : (
+        // empty is a hole in the middle of the step. Callers with no uploader on screen
+        // still get a line, since for them an empty list is the whole answer.
+        canUpload ? null : (
           <p className="py-3 text-center text-xs text-slate-400">
             {fixedLabel ? `No ${fixedLabel.toLowerCase()} pages uploaded yet.` : "No documents yet."}
           </p>

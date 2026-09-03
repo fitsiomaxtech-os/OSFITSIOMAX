@@ -6839,6 +6839,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               <LeadDocuments
                 leadId={selectedLead.id}
                 canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                /* Read here, filed elsewhere. The Consultant's card is where a
+                   consultation is written up, and the reports and scans on a patient's
+                   file are ordered and filed by the branch — so this popup shows the pile
+                   without an uploader on top of it. The branch's own board keeps one. */
+                canUpload={["branch_admin", "super_admin"].includes(viewerRole)}
                 /* Filing or deleting a page here moves the same count the stage panel's
                    Documents tab shows, so it is retaken rather than left as it was when
                    the card opened. */
