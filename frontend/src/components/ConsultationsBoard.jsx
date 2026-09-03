@@ -1400,7 +1400,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
   const stageField = isConsultant ? "head_consultation_stage" : "consultation_stage";
-  const [board, setBoard] = useState({ leads: [], stage_counts: {} });
+  const [board, setBoard] = useState({ leads: [], stage_counts: {}, rx_lead_ids: [] });
+  // Everyone whose prescription is on file, as the board answered it. The Consultation Fee
+  // waits on that page, and the Collect button at the end of a row has to know before it is
+  // pressed — the per-patient count below only ever exists for the patient who is open.
+  //
+  // Held beside the leads rather than on them, which is how the board sends it: collecting
+  // a fee or moving a stage replaces the row it touched with the lead that endpoint
+  // returned, and a flag riding on the lead would be dropped by every one of them.
+  //
+  // Uploads are folded in as they happen (see notePrescriptionCount) so a row unlocks the
+  // moment the page is filed, without waiting for a reload.
+  const [rxLeadIds, setRxLeadIds] = useState(() => new Set());
+  const noteRxFiled = useCallback((leadId, filed) => {
+    setRxLeadIds((prev) => {
+      if (prev.has(leadId) === !!filed) return prev;
+      const next = new Set(prev);
+      if (filed) next.add(leadId); else next.delete(leadId);
+      return next;
+    });
+  }, []);
   const [stages, setStages] = useState([]); // dynamic Consultation Stages, from Super Admin > Pipeline Stage Management
   const [stageFilter, setStageFilter] = useState(null);
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null — filters by appointment date
@@ -1654,17 +1673,46 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       // anything is there should ask for one, not quietly wave the patient through.
       .catch(() => { if (!cancelled) setLeadDocCount(0); });
     leadDocuments(selectedLead.id, "prescription")
-      .then((r) => { if (!cancelled) setLeadRxCount((r?.documents || []).length); })
+      .then((r) => {
+        if (cancelled) return;
+        const count = (r?.documents || []).length;
+        setLeadRxCount(count);
+        // The row behind this patient reads the board's answer, which was taken when the
+        // list loaded. This one is fresher, so it corrects it — including downwards, for a
+        // prescription that has since been deleted.
+        noteRxFiled(selectedLead.id, count > 0);
+      })
       .catch(() => { if (!cancelled) setLeadRxCount(0); });
     return () => { cancelled = true; };
-  }, [selectedLead?.id, docTick]);
+  }, [selectedLead?.id, docTick, noteRxFiled]);
   // Closed whenever a different patient is opened: a Diet card left standing would
   // otherwise read as the new patient's, with the previous one's figures still in it.
   useEffect(() => { setProgrammeDetail("own"); }, [selectedLead?.id]);
 
-  // Whether this patient is at the point where paperwork gates the money, and whether it
-  // is on file. Computed up here rather than inside the stage panel because the panel is
-  // rendered inside a branch, and both the effect below and the tab row need the answer.
+  // Whether one lead still owes the prescription the Consultation Fee waits on — the same
+  // question the endpoint asks before it takes the money, asked of a row.
+  //
+  // Any lead, not the open one: the list draws a Collect button on every row, and reads the
+  // board's answer for each of them. The patient who is open is the one case where a fresher
+  // answer exists (the count fetched above), and noteRxFiled folds that back into the set,
+  // so both readers agree without this needing to know which patient is which.
+  //
+  // Only at Consultation Visit, and only while the fee is unpaid: a fee already taken is
+  // corrected from the popup, and holding a correction hostage to a page nobody filed at
+  // the time would strand it. Same two conditions the server gate applies.
+  const rxDue = useCallback(
+    (lead) => (
+      !!lead
+      && lead[stageField] === "Consultation Visit"
+      && lead.package_paid == null
+      && !rxLeadIds.has(lead.id)
+    ),
+    [stageField, rxLeadIds],
+  );
+
+  // Whether the patient on screen is at that point. Computed up here rather than inside the
+  // stage panel because the panel is rendered inside a branch, and both the effect below and
+  // the tab row need the answer.
   const docsGateOpen = (
     selectedLead?.[stageField] === "Consultation Visit"
     && (leadRxCount || 0) === 0
@@ -1697,6 +1745,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const had = lastRxCount.current;
     lastRxCount.current = count;
     setLeadRxCount(count);
+    // And the row on the list behind the popup, so its Collect button unlocks with the
+    // upload rather than on the next reload.
+    if (selectedLead?.id) noteRxFiled(selectedLead.id, count > 0);
     // A prescription is a document like any other, so filing one moves the general count
     // too — the uploader only reports its own kind, and the tab beside it counts them all.
     noteDocsChanged();
@@ -1795,7 +1846,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       try {
         setLoading(true);
         const res = await getConsultationsBoard(branchId, isConsultant ? "head_consultation" : undefined);
-        if (!cancelled) setBoard(res);
+        if (!cancelled) { setBoard(res); setRxLeadIds(new Set(res?.rx_lead_ids || [])); }
       } catch (err) {
         console.error("Consultations board load error:", err);
         if (!cancelled) toast.error("Failed to load consultations");
@@ -1812,6 +1863,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       setLoading(true);
       const res = await getConsultationsBoard(branchId, isConsultant ? "head_consultation" : undefined);
       setBoard(res);
+      setRxLeadIds(new Set(res?.rx_lead_ids || []));
     } catch (err) {
       console.error("Consultations board load error:", err);
       toast.error("Failed to load consultations");
@@ -3155,6 +3207,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   function openRowFee(lead, fee) {
     setDetailTab("overview");
+    // Paperwork before money, on the row as well as in the panel.
+    //
+    // The panel has always held the Consultation Fee behind the prescription — its Collect
+    // tab is locked until the page is filed. This button opened the popup straight off the
+    // lead and went round the whole of that, so a fee the panel would not take was taken
+    // from the list instead. It now does what the panel does: opens the patient on the
+    // uploader, which is the step that can actually be done.
+    //
+    // No popup is parked for afterwards. Filing the page is a job with a person at the desk
+    // in the middle of it, and a payment popup springing open behind the uploader would be
+    // collecting on a decision nobody has come back to.
+    if (fee === "consultation" && rxDue(lead)) {
+      // Said, not warned. The button this came from already reads "Prescription" and the
+      // screen it opens is the uploader, so the only thing left to explain is why the
+      // payment popup did not appear.
+      toast.info("Upload the prescription before collecting the Consultation Fee");
+      pendingRowFeeRef.current = null;
+      if (selectedLead?.id === lead.id) setProgrammeDetail("documents");
+      else setSelectedLead(lead); // the docs gate opens it on Documents by itself
+      return;
+    }
     // Already open on this patient: the id does not change, so neither the reset nor the
     // effect will fire and there is nothing to park.
     if (selectedLead?.id === lead.id) {
@@ -4448,6 +4521,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     })()}
                     {showConsultationAction && (() => {
                       const c = consultationFeeStateOf(l);
+                      // The prescription this fee waits on, still missing. The button stays
+                      // on the row and stays pressable — it is the way to the uploader — but
+                      // it says what it will actually do, in the same amber the panel's
+                      // Documents tab wears while the same page is outstanding. A button
+                      // labelled "Collect" that will not collect is the thing being fixed.
+                      const rxMissing = c.kind !== "paid" && rxDue(l);
                       return (
                         // stopPropagation on the cell, not just the button: the whole row
                         // opens the patient, and a click that lands a pixel beside the
@@ -4474,23 +4553,32 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <>
                               <Button
                                 size="sm"
-                                className={`w-full ${c.kind === "balance"
+                                className={`w-full ${rxMissing
+                                  ? "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                  : c.kind === "balance"
                                   ? "bg-amber-500 text-white hover:bg-amber-600"
                                   : "bg-sky-600 text-white hover:bg-sky-700"} shadow-sm ${ACT_BTN}`}
+                                title={rxMissing ? "Upload the prescription before collecting the Consultation Fee" : undefined}
                                 onClick={() => openRowConsultationFee(l)}
                                 data-testid={`cons-row-consultation-collect-${l.id}`}
                               >
-                                <IndianRupee className="mr-1 h-3.5 w-3.5 shrink-0" />
-                                {c.kind === "balance" ? "Collect Balance" : "Collect"}
+                                {rxMissing
+                                  ? <FileText className="mr-1 h-3.5 w-3.5 shrink-0" />
+                                  : <IndianRupee className="mr-1 h-3.5 w-3.5 shrink-0" />}
+                                {rxMissing ? "Prescription" : c.kind === "balance" ? "Collect Balance" : "Collect"}
                               </Button>
                               {/* The figure the button is about, under it. A part-paid fee
                                   is the one case where "Collect" alone is a question rather
-                                  than an instruction — how much, and by when. */}
+                                  than an instruction — how much, and by when. While the
+                                  prescription is outstanding it says so instead: the figure
+                                  is not the thing standing in the way. */}
                               <span
-                                className={`mt-1 block truncate text-[10px] font-medium ${c.kind === "balance" && c.overdue ? "text-rose-600" : c.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
-                                title={c.kind === "balance" && c.due ? `Due ${c.due}` : undefined}
+                                className={`mt-1 block truncate text-[10px] font-medium ${rxMissing ? "text-amber-600" : c.kind === "balance" && c.overdue ? "text-rose-600" : c.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
+                                title={rxMissing ? "Upload the prescription before collecting the Consultation Fee" : c.kind === "balance" && c.due ? `Due ${c.due}` : undefined}
                               >
-                                {c.kind === "balance"
+                                {rxMissing
+                                  ? "Required first"
+                                  : c.kind === "balance"
                                   ? `${rupees(c.balance)} due${c.overdue ? " · overdue" : ""}`
                                   : c.amount != null ? rupees(c.amount) : "—"}
                               </span>
@@ -6034,6 +6122,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // that card gets the filled button and the rest stay quiet outlines.
               const nextFeeStep = feeSteps.find((f) => !f.paid && (f.key === "consultation" || consultationPaid));
 
+              // And the Consultation Fee itself waits on the prescription — the server's
+              // rule too, since collect-package-payment refuses without it.
+              //
+              // The tab above these cards is already locked while the page is missing, but
+              // that lock only closes once the count has arrived: leadRxCount is null until
+              // the fetch lands, the effect that jumps to Documents waits for it, and the
+              // cards render in the meantime with a live Collect button on them. Reading the
+              // null as "no prescription" here is the safe way round — a card that waits a
+              // moment for an answer costs nothing, and one that collects before the answer
+              // arrives is the bug.
+              const consultationRxBlocked = docsRequired && !consultationPaid && !hasRx;
+
               const FeeSteps = (
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid="cons-fee-steps">
                   {feeSteps.map((f, i) => (
@@ -6068,10 +6168,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <Button
                             size="sm"
                             variant={nextFeeStep && f.key === nextFeeStep.key ? undefined : "outline"}
-                            /* Everything after the consultation fee waits on it, and says
-                               so rather than failing when pressed. */
-                            disabled={f.key !== "consultation" && !consultationPaid}
-                            title={f.key !== "consultation" && !consultationPaid ? "Collect the consultation fee first" : undefined}
+                            /* Everything after the consultation fee waits on it, and the
+                               consultation fee waits on the prescription. Both say so
+                               rather than failing when pressed. */
+                            disabled={f.key === "consultation" ? consultationRxBlocked : !consultationPaid}
+                            title={f.key === "consultation"
+                              ? (consultationRxBlocked ? "Upload the prescription first" : undefined)
+                              : (!consultationPaid ? "Collect the consultation fee first" : undefined)}
                             className={`w-full ${nextFeeStep && f.key === nextFeeStep.key ? "bg-sky-600 text-white hover:bg-sky-700" : ""} ${ACT_BTN}`}
                             onClick={f.act}
                             data-testid={`cons-fee-act-${f.key}`}

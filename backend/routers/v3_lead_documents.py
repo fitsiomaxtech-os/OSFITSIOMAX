@@ -130,6 +130,36 @@ def is_shared_with_patient(doc: dict) -> bool:
         return default_shared_with_patient(doc.get("kind") or GENERAL)
     return bool(value)
 
+
+async def has_prescription_on_file(lead_id: str) -> bool:
+    """Whether this patient's prescription has actually been filed.
+
+    The one question the Consultation Fee is gated on, asked in one place so the endpoint
+    that takes the money and the board that draws the button cannot answer it differently.
+
+    Deliberately not "has any document". That count goes up for a scheme letter or an old
+    MRI report, so a patient with paperwork on file and no prescription would open the gate
+    with somebody else's page.
+    """
+    return await v3_col("lead_documents").find_one(
+        {"lead_id": lead_id, "kind": PRESCRIPTION}, {"_id": 1}
+    ) is not None
+
+
+async def leads_with_prescription(lead_ids: list) -> set:
+    """The same question for a whole board, in one round trip.
+
+    A branch with two thousand patients would otherwise draw its list with two thousand
+    queries — which is why the board stamps this rather than each row asking for itself.
+    """
+    if not lead_ids:
+        return set()
+    rows = await v3_col("lead_documents").find(
+        {"lead_id": {"$in": list(lead_ids)}, "kind": PRESCRIPTION}, {"_id": 0, "lead_id": 1}
+    ).to_list(20000)
+    return {r["lead_id"] for r in rows if r.get("lead_id")}
+
+
 # Everyone who treats the patient can read their documents; the front desk and the
 # clinicians who order them can add. A Physio can read a report without being able to
 # delete one.

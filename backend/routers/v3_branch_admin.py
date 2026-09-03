@@ -24,6 +24,7 @@ from schemas.v3 import (
     V3BranchStageInput, V3CollectFeeInput, V3AssignPhysioInput, V3ConsultationStageInput,
     V3PortfolioScheduleInput,
 )
+from routers.v3_lead_documents import leads_with_prescription
 
 router = APIRouter(prefix="/api/v3")
 
@@ -1041,7 +1042,22 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
                 lead_list.append(V3LeadOut(**lead_as_read_by(ld, user.role)).model_dump())
             except Exception as e:
                 logging.getLogger(__name__).error(f"consultations-board: skipping unparseable lead {ld.get('id')}: {e}")
-        return {"leads": lead_list, "stage_counts": stage_counts, "stages": stage_names}
+        # Who has their prescription filed, as a list of ids beside the leads rather than a
+        # field on each of them. The Consultation Fee is gated on that page, and the Collect
+        # button at the end of a row has to know before it is pressed — a row that opens a
+        # payment it will not take reads as broken.
+        #
+        # Kept off the lead deliberately. Every collect and every stage move replaces the
+        # row it touched with the lead that endpoint returns, and a flag riding on the lead
+        # would be dropped by every one of them — locking a row whose prescription is on
+        # file. Answered once for the board, held beside it, and untouched by any of that.
+        rx_ids = await leads_with_prescription([ld.get("id") for ld in leads_docs if ld.get("id")])
+        return {
+            "leads": lead_list,
+            "stage_counts": stage_counts,
+            "stages": stage_names,
+            "rx_lead_ids": sorted(rx_ids),
+        }
     except HTTPException:
         raise
     except Exception as e:
