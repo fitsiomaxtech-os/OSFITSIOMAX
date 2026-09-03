@@ -482,6 +482,65 @@ const configuredDesignations = (meta, department) => {
 };
 
 /**
+ * The same designations, arranged under the department each belongs to.
+ *
+ * The flat list configuredDesignations returns is what the Employees filter used to
+ * offer, and with every department's titles in it that row ran to sixteen pills over two
+ * lines with nothing to say which belonged where — Nutritionist and Accountant sat side
+ * by side as though they were the same kind of thing. Grouped, the department is read
+ * first and the job second, which is the order the org is actually shaped in.
+ *
+ * Each designation appears once across the whole list, under the first department that
+ * configures it. What gets picked is the job on its own, so a title offered under two
+ * headings would be two options that filter to exactly the same people.
+ *
+ * Departments are walked in meta.departments order — the order Departments & Designation
+ * shows them in — so the dropdown reads the same way as the tab that defines it.
+ *
+ * A final group collects designations that are on somebody's record but in no
+ * department's configured list. Those are the ones a filter built only from the structure
+ * loses, and losing one means the people holding it cannot be filtered for at all. With a
+ * department chosen they join that department's own group rather than a stray second
+ * heading, and "Unassigned" — which is not a department and has no configured list — is
+ * only ever described this way.
+ */
+const groupedDesignations = (meta, department, employees) => {
+  const configured = meta?.department_designations || {};
+  const scoped = Boolean(department);
+  const held = (employees || [])
+    .filter((e) => !scoped || (e.department || "Unassigned") === department)
+    .map((e) => e.designation);
+
+  // Keyed on jobKey, the same letters-only comparison the rest of this file folds
+  // spellings with, so "Pre- Sales" and "Pre-Sales" are one option rather than two.
+  const seen = new Set();
+  const take = (names) => (names || []).filter(Boolean).filter((n) => {
+    const key = jobKey(n);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const order = department === "Unassigned" ? []
+    : department ? [department]
+    : (meta?.departments || Object.keys(configured));
+
+  const groups = [];
+  order.forEach((d) => {
+    const names = take(designationsUnder(configured, d));
+    if (names.length) groups.push({ department: titleCase(d), designations: names });
+  });
+
+  const rest = take(dedupeNames(held));
+  if (rest.length) {
+    if (scoped && groups.length) groups[0].designations = groups[0].designations.concat(rest);
+    else if (groups.length) groups.push({ department: "Other", designations: rest });
+    else groups.push({ department: scoped ? titleCase(department) : "", designations: rest });
+  }
+  return groups;
+};
+
+/**
  * A filter pill, lit or not.
  *
  * The unlit ones are tinted rather than white. Against a white card a white pill with a
@@ -507,18 +566,45 @@ const TabPill = ({ active, onClick, children, testid }) => (
   </button>
 );
 
-const DesignationFilterSelect = ({ value, onChange, options, testid }) => (
-  <select
-    value={value}
-    onChange={(e) => onChange(e.target.value)}
-    className={`h-10 rounded-md border px-3 text-sm font-medium ${value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}
-    title="Filter by designation"
-    data-testid={testid}
-  >
-    <option value="">All Designations</option>
-    {options.map((d) => <option key={d} value={d}>{d}</option>)}
-  </select>
-);
+/**
+ * The designation filter.
+ *
+ * Takes either a flat `options` list or `groups` from groupedDesignations, in which case
+ * every department becomes an optgroup heading. The heading is a label and not a value:
+ * what gets picked is still the job on its own, so the filter this feeds is unchanged and
+ * a department's heading never narrows the match to that department's records — which
+ * matters because the structure and the records disagree about where a job sits often
+ * enough that pairing the two would filter to nobody.
+ *
+ * A value the list does not offer is added back as an option of its own. A filter can
+ * arrive here already set — a Dashboard card or a department bar opens this page on one
+ * — and it can be a spelling of a job the structure holds in different capitals. Without
+ * this the control reads "All Designations" over a list that is filtered, which is the one
+ * state a filter must never show.
+ */
+const DesignationFilterSelect = ({ value, onChange, options, groups, testid }) => {
+  const sections = groups || (options?.length ? [{ department: "", designations: options }] : []);
+  const offered = sections.some((g) => g.designations.some((d) => d === value));
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`h-10 max-w-[16rem] rounded-md border px-3 text-sm font-medium ${value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}
+      title="Filter by designation"
+      data-testid={testid}
+    >
+      <option value="">All Designations</option>
+      {value && !offered && <option value={value}>{titleCase(value)}</option>}
+      {sections.map((g, i) => (g.department ? (
+        <optgroup key={`grp-${i}`} label={g.department}>
+          {g.designations.map((d) => <option key={d} value={d}>{titleCase(d)}</option>)}
+        </optgroup>
+      ) : (
+        g.designations.map((d) => <option key={d} value={d}>{titleCase(d)}</option>)
+      )))}
+    </select>
+  );
+};
 
 /** The mobile card list and desktop table that show a filtered set of employees —
  *  identical markup whether it's reached from the Employees tab or from a department
@@ -691,21 +777,22 @@ const EmployeesTab = ({ meta, initialFilter }) => {
   const load = useCallback(() => hrEmployees({ status: filterStatus === "all" ? "" : filterStatus }).then(setEmployees).catch((e) => console.warn("[load failed]", e?.message || e)), [filterStatus]);
   useEffect(() => { load(); }, [load]);
 
-  // Designation options narrow to whichever department is picked, so the dropdown never
+  // Designation options narrow to whichever department is picked, so the picker never
   // offers a combination ("Accountant" under "Doctors") that would filter to nothing.
   //
-  // Sourced from the department's own configured designation list (Departments &
-  // Designation → Manage Designations) rather than from who currently holds one — a
+  // Grouped by department rather than listed flat. With every department's titles in one
+  // row this filter ran to sixteen pills over two lines and nothing in it said which job
+  // belonged to which department, so the reader had to already know the org to use it.
+  // See groupedDesignations.
+  //
+  // Each department's own configured designation list (Departments & Designation →
+  // Manage Designations) is what fills the groups, not only who currently holds a job — a
   // designation with zero employees today (a newly added admin type, say) still needs to
   // show up as a filter, or there'd be no way to filter for the first person hired into it.
-  // Falls back to deriving from employees when no single department is selected (there's no
-  // one department's list to scope "All Departments" or "Unassigned" to).
-  const designationOptions = useMemo(() => {
-    const configured = configuredDesignations(meta, department);
-    if (configured.length > 0) return configured;
-    const pool = department ? employees.filter((e) => (e.department || "Unassigned") === department) : employees;
-    return dedupeNames(pool.map((e) => e.designation));
-  }, [employees, department, meta]);
+  const designationGroups = useMemo(
+    () => groupedDesignations(meta, department, employees),
+    [employees, department, meta]
+  );
 
   const filtered = employees.filter((e) => {
     // "Unassigned" is what the Dashboard calls an employee with no department, so it has
@@ -761,32 +848,39 @@ const EmployeesTab = ({ meta, initialFilter }) => {
         )}
       </div>
 
-      {/* Designation row — narrows to whichever department is picked above. */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="hr-emp-designation-filter">
-        <TabPill active={designation === ""} onClick={() => setDesignation("")} testid="hr-emp-designation-filter-all">
-          All Designations
-        </TabPill>
-        {designationOptions.map((d) => (
-          <TabPill key={d} active={designation === d} onClick={() => setDesignation(d)} testid={`hr-emp-designation-filter-${d}`}>
-            {titleCase(d)}
-          </TabPill>
-        ))}
-      </div>
+      {/* Designation and Work Type — one row of controls where there used to be two rows
+          of pills. The department row above is the axis this page is read along, and a
+          designation row as long as that one was competed with it; a dropdown that opens
+          department by department sits under it instead of beside it. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2" data-testid="hr-emp-designation-filter">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Designation</span>
+          <DesignationFilterSelect
+            value={designation}
+            onChange={setDesignation}
+            groups={designationGroups}
+            testid="hr-emp-designation-filter-select"
+          />
+        </div>
 
-      {/* Work Type row — same Online/Offline split as Branches & Verticals.
-          No Both pill, though Both is now an answer: somebody who works the two modes
-          already appears under each of these, so a third pill would list them a second
-          time rather than reach anybody the two cannot. */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="hr-emp-worktype-filter">
-        <TabPill active={workType === ""} onClick={() => setWorkType("")} testid="hr-emp-worktype-filter-all">
-          All
-        </TabPill>
-        <TabPill active={workType === "online"} onClick={() => setWorkType("online")} testid="hr-emp-worktype-filter-online">
-          Online
-        </TabPill>
-        <TabPill active={workType === "offline"} onClick={() => setWorkType("offline")} testid="hr-emp-worktype-filter-offline">
-          Offline
-        </TabPill>
+        <span className="hidden h-6 w-px shrink-0 bg-slate-200 sm:block" aria-hidden="true" />
+
+        {/* Same Online/Offline split as Branches & Verticals. No Both pill, though Both is
+            now an answer: somebody who works the two modes already appears under each of
+            these, so a third pill would list them a second time rather than reach anybody
+            the two cannot. */}
+        <div className="flex flex-wrap items-center gap-2" data-testid="hr-emp-worktype-filter">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Work Type</span>
+          <TabPill active={workType === ""} onClick={() => setWorkType("")} testid="hr-emp-worktype-filter-all">
+            All
+          </TabPill>
+          <TabPill active={workType === "online"} onClick={() => setWorkType("online")} testid="hr-emp-worktype-filter-online">
+            Online
+          </TabPill>
+          <TabPill active={workType === "offline"} onClick={() => setWorkType("offline")} testid="hr-emp-worktype-filter-offline">
+            Offline
+          </TabPill>
+        </div>
       </div>
 
       {/* Actions row */}
