@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
 from database import v3_col
-from utils import live_branch_query
+from utils import CLINIC_UTC_OFFSET, live_branch_query
 from stage_utils import get_closing_stage_name
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES, V3_BRANCH_STAGES
@@ -427,15 +427,76 @@ async def v3_master_control(
     }
 
 
-def _date_range_query(field: str, start_date: Optional[str], end_date: Optional[str]) -> dict:
+# Two clocks, and a date filter has to know which of them it is reading.
+#
+# Every board here sends a plain calendar day -- "2026-09-03" -- and every one of them
+# means the clinic's day: the day the branch worked and counts its figures against. What
+# that day is worth as a query depends entirely on how the field being filtered was
+# written, and the two kinds in this database do not answer to the same bound.
+#
+#   appointment_date   the day the branch picked, stored as typed  ("2026-09-03")
+#   slot_time          a wall-clock slot the branch published      ("2026-09-03T10:00")
+#       Local already. The day compares against them directly, and always did.
+#
+#   created_at         an instant, always UTC and always offset-stamped -- see now_iso()
+#                      and enquiry_created_at(), which both end in "+00:00"
+#       Midnight on the clinic's day is 18:30 UTC on the day BEFORE. Compared as written,
+#       the window is the right length and five and a half hours late: it drops whatever
+#       the clinic did between midnight and 05:30 and takes the small hours of the next
+#       morning in exchange.
+#
+# One helper compared both kinds the same way, so a single row of cards was reading two
+# different windows at once -- Sessions Total Booked counting the clinic's day off
+# slot_time, while Leads, Consultations and every revenue figure beside it counted a UTC
+# day off created_at. Hence a row that reported six sessions booked on a day it also
+# reported nothing sold and nobody seen: not one window disagreeing with the data, but two
+# windows disagreeing with each other.
+
+
+def _local_date_range_query(field: str, start_date: Optional[str], end_date: Optional[str]) -> dict:
+    """A clinic day, against a field already stored on the clinic's own clock."""
     if not start_date and not end_date:
         return {}
     rng: dict = {}
     if start_date:
         rng["$gte"] = start_date
     if end_date:
+        # Sorts after every wall-clock stamp on that day, and after a bare date.
         rng["$lte"] = f"{end_date}T23:59:59"
     return {field: rng}
+
+
+def _clinic_day_start_utc(day: str, plus_days: int = 0) -> Optional[str]:
+    """Midnight opening a clinic day, written as the UTC stamp it is stored as.
+
+    None for anything that is not a date, which leaves that end of the range unbounded --
+    the same thing an absent start_date/end_date has always meant here. A filter that
+    cannot be read should widen the window, not silently empty it.
+    """
+    try:
+        d = date.fromisoformat(str(day)[:10])
+    except (TypeError, ValueError):
+        return None
+    midnight = datetime(d.year, d.month, d.day) + timedelta(days=plus_days)
+    return (midnight - CLINIC_UTC_OFFSET).isoformat()
+
+
+def _utc_stamp_range_query(field: str, start_date: Optional[str], end_date: Optional[str]) -> dict:
+    """A clinic day, against a field stored as a UTC instant.
+
+    Half-open at the top -- `$lt` the midnight that opens the next day, rather than `$lte`
+    some stamp inside this one. The stored values carry microseconds and a "+00:00" suffix,
+    and a bound written to sit at the last second of a day is one a real stamp sorts past
+    on the strength of that suffix alone. A boundary is cheaper to name than to approach.
+    """
+    lo = _clinic_day_start_utc(start_date) if start_date else None
+    hi = _clinic_day_start_utc(end_date, plus_days=1) if end_date else None
+    rng: dict = {}
+    if lo:
+        rng["$gte"] = lo
+    if hi:
+        rng["$lt"] = hi
+    return {field: rng} if rng else {}
 
 
 @router.get("/dashboard/overview")
@@ -506,7 +567,7 @@ async def v3_dashboard_overview(
 
     leads_bucket = new_bucket()
     lead_rows = await v3_col("leads").find(
-        _date_range_query("created_at", start_date, end_date), {"_id": 0, "branch_id": 1, "vertical": 1}
+        _utc_stamp_range_query("created_at", start_date, end_date), {"_id": 0, "branch_id": 1, "vertical": 1}
     ).to_list(50000)
     for l in lead_rows:
         bid = l.get("branch_id")
@@ -518,7 +579,7 @@ async def v3_dashboard_overview(
     # held right up until a range with no dates in it was asked for.
     appt_bucket = new_bucket()
     appt_query = {"appointment_date": {"$nin": [None, ""]}}
-    appt_query.update(_date_range_query("appointment_date", start_date, end_date))
+    appt_query.update(_local_date_range_query("appointment_date", start_date, end_date))
     appt_rows = await v3_col("leads").find(
         appt_query, {"_id": 0, "branch_id": 1, "vertical": 1}
     ).to_list(50000)
@@ -537,7 +598,7 @@ async def v3_dashboard_overview(
     # token ever issued and reported them as booked sessions. Any dated range hid the
     # problem, since a token has no slot_time to fall inside it.
     sess_query = {"lead_id": {"$exists": True}}
-    sess_query.update(_date_range_query("slot_time", start_date, end_date))
+    sess_query.update(_local_date_range_query("slot_time", start_date, end_date))
     sess_rows = await v3_col("sessions").find(sess_query, {"_id": 0, "branch_id": 1, "status": 1}).to_list(50000)
     for s in sess_rows:
         bid = s.get("branch_id")
@@ -577,7 +638,7 @@ async def v3_dashboard_overview(
     # than the entire board. A dashboard that cannot name a payment should still count it.
     revenue_split = {"consultation": 0.0, "session": 0.0, "diet": 0.0, "rehab": 0.0, "spot_joining": 0.0, "zumba": 0.0}
     zumba_query: dict = {}
-    zumba_query.update(_date_range_query("created_at", start_date, end_date))
+    zumba_query.update(_utc_stamp_range_query("created_at", start_date, end_date))
     zumba_rows = await v3_col("zumba_registrations").find(
         zumba_query, {"_id": 0, "branch_id": 1, "fee_paid": 1},
     ).to_list(5000)
@@ -593,7 +654,7 @@ async def v3_dashboard_overview(
         revenue_split["zumba"] += amount
 
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
-    activity_query.update(_date_range_query("created_at", start_date, end_date))
+    activity_query.update(_utc_stamp_range_query("created_at", start_date, end_date))
     activities = await v3_col("lead_activity").find(
         activity_query, {"_id": 0, "lead_id": 1, "details": 1, "action": 1, "created_at": 1}
     ).to_list(50000)
@@ -742,7 +803,7 @@ async def v3_dashboard_leads_analytics(
     as often as one branch, and resolving that to ids is the client's job — it owns the
     pills that define it.
     """
-    query: dict = _date_range_query("created_at", start_date, end_date)
+    query: dict = _utc_stamp_range_query("created_at", start_date, end_date)
     wanted_branches = [b for b in (branch_ids or "").split(",") if b.strip()]
     if wanted_branches:
         query["branch_id"] = {"$in": wanted_branches}
@@ -1014,12 +1075,12 @@ async def v3_dashboard_branch_breakdown(
         raise HTTPException(status_code=404, detail="Branch not found")
 
     lead_rows = await v3_col("leads").find(
-        {"branch_id": branch_id, **_date_range_query("created_at", start_date, end_date)},
+        {"branch_id": branch_id, **_utc_stamp_range_query("created_at", start_date, end_date)},
         {"_id": 0, "assigned_user_id": 1, "assigned_user_name": 1, "assigned_physio_id": 1, "assigned_physio_name": 1},
     ).to_list(50000)
 
     appt_rows = await v3_col("appointments").find(
-        {"branch_id": branch_id, "appt_kind": "consultation", **_date_range_query("created_at", start_date, end_date)},
+        {"branch_id": branch_id, "appt_kind": "consultation", **_utc_stamp_range_query("created_at", start_date, end_date)},
         {"_id": 0, "doctor_id": 1, "doctor_name": 1, "created_by": 1, "created_by_role": 1},
     ).to_list(50000)
 
@@ -1233,7 +1294,7 @@ async def dashboard_lead_metrics(
     branch_ids = {b["id"] for b in branches}
 
     ranged = await v3_col("leads").find(
-        _date_range_query("created_at", start_date, end_date), {"_id": 0}
+        _utc_stamp_range_query("created_at", start_date, end_date), {"_id": 0}
     ).to_list(50000)
     everyone = await v3_col("leads").find({}, {"_id": 0}).to_list(50000)
 
@@ -1302,7 +1363,7 @@ async def dashboard_lead_metric_detail(
     branch_ids = {b["id"] for b in branches}
     branch_names = {b["id"]: b.get("branch_name", "") for b in branches}
 
-    query = _date_range_query("created_at", start_date, end_date) if d["ranged"] else {}
+    query = _utc_stamp_range_query("created_at", start_date, end_date) if d["ranged"] else {}
     pool = await v3_col("leads").find(query, {"_id": 0}).to_list(50000)
 
     matched = [l for l in pool if l.get("branch_id") in branch_ids and d["match"](l, today)]

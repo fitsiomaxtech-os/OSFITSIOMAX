@@ -116,7 +116,13 @@ const OVERVIEW_METRICS = [
 const overviewStartOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
 const overviewStartOfWeek = (d) => { const x = overviewStartOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; };
 const overviewStartOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
-const overviewToIso = (d) => d.toISOString().slice(0, 10);
+// The reader's own calendar day, not UTC's. toISOString() converts before it formats, so
+// local midnight on a +05:30 clock comes back as 18:30 the day BEFORE: "This Week" and
+// "This Month" each opened a day early, and "Today" read as yesterday until 05:30 every
+// morning. Built from the local getters instead, which is the day the clinic is asking
+// about and the day /dashboard/overview now answers on.
+const overviewToIso = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 // Same top-level split as MANAGER's own filter (All Branches / Offline / Online).
 // Under it, a second row of one pill per branch in that group — same branches MANAGER
