@@ -461,34 +461,20 @@ const designationsUnder = (groups, department) => {
 };
 
 /**
- * The designations configured under a department — or under all of them.
+ * The designations of a department — or of all of them — arranged under the department
+ * each belongs to.
  *
- * The configured list, not the one read back off whoever happens to hold a job today. Those
- * two answer different questions: Department & Designation says what the org has, and the
- * records say what is currently filled. A filter built from the records cannot offer a designation
- * nobody holds yet, which is exactly the one somebody is about to hire into.
+ * Both filters that offer designations used to list them flat, and with every
+ * department's titles in one row that ran to sixteen pills over two lines with nothing to
+ * say which belonged where — Nutritionist and Accountant sat side by side as though they
+ * were the same kind of thing. Grouped, the department is read first and the job second,
+ * which is the order the org is actually shaped in.
  *
- * With no department chosen it is every department's list, so the row on Roles &
- * Credentials with All Departments selected is the whole structure rather than a sample
- * of it.
- *
- * Returns nothing when the structure has not been set up, which lets the caller fall back
- * to deriving from its own records rather than showing an empty row.
- */
-const configuredDesignations = (meta, department) => {
-  const groups = meta?.department_designations || {};
-  if (department && department !== "Unassigned") return dedupeNames(designationsUnder(groups, department));
-  return dedupeNames(Object.values(groups).flat());
-};
-
-/**
- * The same designations, arranged under the department each belongs to.
- *
- * The flat list configuredDesignations returns is what the Employees filter used to
- * offer, and with every department's titles in it that row ran to sixteen pills over two
- * lines with nothing to say which belonged where — Nutritionist and Accountant sat side
- * by side as though they were the same kind of thing. Grouped, the department is read
- * first and the job second, which is the order the org is actually shaped in.
+ * The configured list leads, not the one read back off whoever happens to hold a job
+ * today. Those two answer different questions: Department & Designation says what the org
+ * has, and the records say what is currently filled. A filter built from the records alone
+ * cannot offer a designation nobody holds yet, which is exactly the one somebody is about
+ * to hire into.
  *
  * Each designation appears once across the whole list, under the first department that
  * configures it. What gets picked is the job on its own, so a title offered under two
@@ -3136,9 +3122,10 @@ const DesignationEmployeesModal = ({ designation, employees, departmentNames, on
 const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
-  // Same pill filters as the Employees tab, reading off each user's linked employee
-  // record — a user with no linked employee (most Branch Admin/Pre-Sales accounts
-  // still without one) simply won't match either filter.
+  // Same filters as the Employees tab — department pills over a designation dropdown —
+  // reading off each user's linked employee record. A user with no linked employee (most
+  // Branch Admin/Pre-Sales accounts still without one) won't match the department filter;
+  // the designation one still reaches them, through their role. See filteredUsers.
   const [deptFilter, setDeptFilter] = useState("");
   const [designationFilter, setDesignationFilter] = useState("");
   const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
@@ -3146,36 +3133,37 @@ const RolesTab = ({ meta, reloadMeta }) => {
   const [actionTarget, setActionTarget] = useState(null);
   const [view, setView] = useState("list"); // "list" | "branch"
 
-  // No role parameter any more: the Designation pills do that job, and they narrow the rows
-  // already loaded rather than re-fetching. Search stays on the server, where it can reach
-  // a name this page has not loaded.
+  // No role parameter any more: the Designation filter does that job, and it narrows the
+  // rows already loaded rather than re-fetching. Search stays on the server, where it can
+  // reach a name this page has not loaded.
   const load = useCallback(() => hrUsers({ search }).then(setUsers).catch((e) => console.warn("[load failed]", e?.message || e)), [search]);
   useEffect(() => { load(); }, [load]);
 
   const selectDept = (d) => { setDeptFilter(d); setDesignationFilter(""); };
 
-  // Designations narrow to whichever department is picked, same as the Employees tab —
-  // scoped to users actually linked to an employee, so a pill never offers a combination
-  // that would filter the list to nothing.
-  const designationOptions = useMemo(() => {
-    const configured = configuredDesignations(meta, deptFilter);
-    if (configured.length > 0) return configured;
-    // Only where nothing is configured at all: an install that has not set the structure
-    // up still gets a working filter off whoever is on the books.
-    const pool = deptFilter ? users.filter((u) => u.linked_employee?.department === deptFilter) : users;
-    return dedupeNames(pool.map((u) => u.linked_employee?.designation));
-  }, [users, deptFilter, meta]);
+  // Designations narrow to whichever department is picked and are grouped under it, same
+  // as the Employees tab — the two filters ask the same question of two lists and should
+  // not read as two different controls.
+  //
+  // The records half is each user's linked employee, which is the only place a user
+  // carries a department at all. Accounts with no employee behind them contribute
+  // nothing here, and do not need to: their role is what the filter below matches them
+  // on, and a role's label is a designation the structure already lists.
+  const designationGroups = useMemo(
+    () => groupedDesignations(meta, deptFilter, users.map((u) => u.linked_employee).filter(Boolean)),
+    [users, deptFilter, meta]
+  );
 
-  // Matched on the shared key rather than the exact string. One pill now stands for every
-  // spelling of a job, so picking Consultant finds the people filed under CONSULTANT too
-  // — which is what a reader expects of a list that shows the job once.
+  // Matched on the shared key rather than the exact string. One option now stands for
+  // every spelling of a job, so picking Consultant finds the people filed under CONSULTANT
+  // too — which is what a reader expects of a list that shows the job once.
   const filteredUsers = users.filter((u) => {
     if (deptFilter && nameKey(u.linked_employee?.department) !== nameKey(deptFilter)) return false;
     // Designation OR role. The designation is on the employee record, and plenty of
     // accounts have no employee behind them — most Branch Admin and Pre-Sales logins still
-    // do not — so reading only that left them matching no pill at all. Their role says the
+    // do not — so reading only that left them matching nothing at all. Their role says the
     // same thing the designation would have, and a designation IS a role here, so the one
-    // pill answers for both. This is what the separate role filter used to be for.
+    // option answers for both. This is what the separate role filter used to be for.
     if (designationFilter) {
       const want = jobKey(designationFilter);
       if (jobKey(u.linked_employee?.designation) !== want && jobKey(roleLabel(u.role)) !== want) return false;
@@ -3242,9 +3230,10 @@ const RolesTab = ({ meta, reloadMeta }) => {
   // each hidden by class depending on breakpoint, not the hidden attribute.
   return (
     <div className="flex flex-col gap-4" data-testid="hr-roles-tab">
-      {/* Same department/designation pills as the Employees tab, reading off each row's
-          linked employee — one block rather than one per breakpoint, since TabPill
-          already wraps on a narrow screen and the state behind it is shared either way. */}
+      {/* Same department pills and grouped designation dropdown as the Employees tab,
+          reading off each row's linked employee — one block rather than one per
+          breakpoint, since TabPill already wraps on a narrow screen and the state behind
+          it is shared either way. */}
       <div className="flex flex-wrap items-center gap-2" data-testid="hr-roles-dept-filter">
         <TabPill active={deptFilter === ""} onClick={() => selectDept("")} testid="hr-roles-dept-filter-all">
           All Departments
@@ -3256,14 +3245,13 @@ const RolesTab = ({ meta, reloadMeta }) => {
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-2" data-testid="hr-roles-designation-filter">
-        <TabPill active={designationFilter === ""} onClick={() => setDesignationFilter("")} testid="hr-roles-designation-filter-all">
-          All Designations
-        </TabPill>
-        {designationOptions.map((d) => (
-          <TabPill key={d} active={designationFilter === d} onClick={() => setDesignationFilter(d)} testid={`hr-roles-designation-filter-${d}`}>
-            {titleCase(d)}
-          </TabPill>
-        ))}
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Designation</span>
+        <DesignationFilterSelect
+          value={designationFilter}
+          onChange={setDesignationFilter}
+          groups={designationGroups}
+          testid="hr-roles-designation-filter-select"
+        />
       </div>
 
       {/* Two questions, two shapes. The list answers "who is this person and what can
