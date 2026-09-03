@@ -676,18 +676,20 @@ async def physio_complete_session(
             detail=f"Day {blocking} has not been completed yet — days are completed in order",
         )
 
-    # One of the two is the report. Checked here and not only in the popup: this is what
-    # the day-report views read to tell a day that was written up from one that was ticked
-    # off, and a session completed through the API with neither would read as the latter.
+    # The day's own note is the report. Checked here and not only in the popup: this is
+    # what the day-report views read to tell a day that was written up from one that was
+    # ticked off, and a session completed through the API with none would read as the latter.
     treatment_remarks = (payload.remarks or "").strip()
     rehab_remarks = (payload.rehab_remarks or "").strip()
-    # A rehab day has no treatment half to write about, so only the rehab note counts —
-    # otherwise it could be signed off with a note about treatment that did not happen and
-    # the one thing the day exists to record left blank.
+    # Each track is required to fill in its own half and no other. A rehab day has no
+    # treatment half to write about; a treatment day accepting the rehab note in place of
+    # its own let a day be signed off with the one thing it exists to record left blank,
+    # and filed under a course it does not belong to — the Head Physio's review and the
+    # patient's portal both read the two fields apart.
     if is_rehab and not rehab_remarks:
         raise HTTPException(status_code=400, detail="Rehab Remarks is required")
-    if not is_rehab and not treatment_remarks and not rehab_remarks:
-        raise HTTPException(status_code=400, detail="Treatment Remarks or Rehab Remarks is required")
+    if not is_rehab and not treatment_remarks:
+        raise HTTPException(status_code=400, detail="Treatment Remarks is required")
 
     # What was actually given on the day, off the Super Admin catalogue. Not required —
     # see the field's note on V3CompleteSessionInput — but checked against the catalogue

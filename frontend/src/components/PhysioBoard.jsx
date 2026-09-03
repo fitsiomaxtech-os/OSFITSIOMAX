@@ -1976,8 +1976,15 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                             <PhysioTreatmentChips names={s.physio_treatments} testid={`physio-day-treatments-${s.id}`} />
                           </div>
                         )}
-                        {(s.jr_physio_remarks || s.rehab_remarks) && (
-                          <p className="mt-0.5 text-[10px] text-emerald-600">Remarks: {s.jr_physio_remarks || s.rehab_remarks}</p>
+                        {/* Every note the day carries, each under its own name. `||`
+                            printed the treatment half and swallowed the rehab one, so a
+                            day written up with both -- which is every day signed off while
+                            the popup still offered two boxes -- read as half a record. */}
+                        {s.jr_physio_remarks && (
+                          <p className="mt-0.5 text-[10px] text-emerald-600"><span className="font-semibold">Treatment: </span>{s.jr_physio_remarks}</p>
+                        )}
+                        {s.rehab_remarks && (
+                          <p className="mt-0.5 text-[10px] text-emerald-600"><span className="font-semibold">Rehab: </span>{s.rehab_remarks}</p>
                         )}
                       </div>
                       {done ? (
@@ -2607,8 +2614,14 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
                             {s.physio_treatments.join(" · ")}
                           </p>
                         )}
-                        {done && (s.jr_physio_remarks || s.rehab_remarks) && (
-                          <p className="mt-0.5 truncate text-[10px] text-emerald-600">{s.jr_physio_remarks || s.rehab_remarks}</p>
+                        {/* Both, when both were written. Labelled only on the rehab line:
+                            a treatment day's note is the expected one and naming it in a
+                            one-line preview costs more room than it buys. */}
+                        {done && s.jr_physio_remarks && (
+                          <p className="mt-0.5 truncate text-[10px] text-emerald-600">{s.jr_physio_remarks}</p>
+                        )}
+                        {done && s.rehab_remarks && (
+                          <p className="mt-0.5 truncate text-[10px] text-emerald-600"><span className="font-semibold">Rehab: </span>{s.rehab_remarks}</p>
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
@@ -2941,13 +2954,14 @@ function CompleteSessionModal({ session, onClose, onDone }) {
   // mid-shift should be on the list the next time a physio signs a day off, not after a
   // reload of the whole board.
   const [physioTypes, setPhysioTypes] = useState([]);
-  // A rehab day is written up as rehab and nothing else. The two boxes exist because a
-  // treatment day can carry a note about the rehab plan worked alongside it — that is a
-  // treatment session with rehab in it. A rehab day has no treatment half to write about,
-  // so offering the tab asks for a note that should not exist and lets the day be signed
-  // off with the wrong one filled in.
+  // One note per day, named after the course the day belongs to: a treatment day is
+  // written up as treatment, a rehab day as rehab. Offering both asked for a note that
+  // should not exist and let a day be signed off with the wrong half filled in — a
+  // treatment day whose only note sat under "Rehab" read, everywhere downstream, as a
+  // rehab record of a day that was not rehab. Days completed while both boxes were on
+  // offer keep whatever they were written up with; the read-back below prints every note
+  // a day actually carries, both of them when it carries both.
   const isRehab = session.track === "rehab";
-  const [remarkTab, setRemarkTab] = useState(session.track === "rehab" ? "rehab" : "treatment");
   const [submitting, setSubmitting] = useState(false);
   const isDone = session.status === "completed";
 
@@ -2960,18 +2974,19 @@ function CompleteSessionModal({ session, onClose, onDone }) {
     getPhysioTypes().then(setPhysioTypes).catch(() => setPhysioTypes([]));
   }, [isDone]);
 
-  // Either one on its own is a report on a treatment day — a day of hands-on work with
-  // nothing to add about the rehab plan is a real day, and so is the reverse. On a rehab
-  // day only the rehab note counts, because it is the only one being asked for.
-  const hasReport = isRehab ? Boolean(rehabRemarks.trim()) : Boolean(remarks.trim() || rehabRemarks.trim());
+  // The day's own note is the report. Only one is asked for, so only that one can stand
+  // in for a day having been written up at all.
+  const hasReport = Boolean((isRehab ? rehabRemarks : remarks).trim());
 
   const handleSubmit = async () => {
-    if (!hasReport) { toast.error(isRehab ? "Add Rehab Remarks" : "Add Treatment Remarks or Rehab Remarks"); return; }
+    if (!hasReport) { toast.error(isRehab ? "Add Rehab Remarks" : "Add Treatment Remarks"); return; }
     setSubmitting(true);
     try {
+      // Sent per track rather than both-and-empty: a treatment day posting a rehab note it
+      // never showed a box for is how the wrong half got filled in the first place.
       await physioCompleteSession(session.id, {
-        remarks,
-        rehab_remarks: rehabRemarks,
+        remarks: isRehab ? "" : remarks,
+        rehab_remarks: isRehab ? rehabRemarks : "",
         physio_treatments: treatments,
       });
       toast.success("Session completed");
@@ -3045,48 +3060,11 @@ function CompleteSessionModal({ session, onClose, onDone }) {
                 />
               </div>
 
-              {/* One note at a time. Both textareas stacked made the popup a scroll on a
-                  phone, and a physio writing up a day is only ever in one of them. Neither
-                  is unmounted -- what has been typed into the other is state, not markup,
-                  so switching back and forth cannot lose it. */}
-              <div className={`flex gap-1 border-b border-slate-200 ${isRehab ? "hidden" : ""}`} data-testid="session-remark-tabs">
-                {[
-                  { key: "treatment", label: "Treatment Remarks", filled: Boolean(remarks.trim()) },
-                  { key: "rehab", label: "Rehab Remarks", filled: Boolean(rehabRemarks.trim()) },
-                ].map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setRemarkTab(t.key)}
-                    className={`shrink-0 whitespace-nowrap rounded-t-md px-3 py-2 text-xs font-medium transition ${
-                      remarkTab === t.key ? "border-b-2 border-sky-500 text-sky-700" : "border-b-2 border-transparent text-slate-400 hover:text-slate-600"
-                    }`}
-                    data-testid={`session-remark-tab-${t.key}`}
-                  >
-                    {t.label}
-                    {/* Which tab has been written in. Only one is on screen, so without
-                        this the button below enables itself for a note the physio cannot
-                        see -- and a day written up in the other tab reads as an empty box. */}
-                    {t.filled && <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 align-middle" />}
-                  </button>
-                ))}
-              </div>
-
-              {remarkTab === "treatment" ? (
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Treatment Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
-                  </label>
-                  <textarea
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    rows={4}
-                    placeholder="Exercises done, observations, next steps..."
-                    className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                    data-testid="session-remarks"
-                  />
-                </div>
-              ) : (
+              {/* The one note this day is for. No tabs: with a box per track there was a
+                  choice to get wrong, and a treatment day written up under "Rehab" is a
+                  rehab record of a day that never was -- the Head Physio's review, the
+                  patient's portal and the day list all read the two fields apart. */}
+              {isRehab ? (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">
                     Rehab Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
@@ -3100,13 +3078,25 @@ function CompleteSessionModal({ session, onClose, onDone }) {
                     data-testid="session-rehab-remarks"
                   />
                 </div>
+              ) : (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">
+                    Treatment Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
+                  </label>
+                  <textarea
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    rows={4}
+                    placeholder="Exercises done, observations, next steps..."
+                    className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                    data-testid="session-remarks"
+                  />
+                </div>
               )}
 
-              {/* Said before the press rather than after: the button is disabled until one
-                  of the two has something in it -- either tab. */}
-              <p className="text-[11px] text-slate-400" data-testid="session-remarks-hint">
-                {isRehab ? "Required." : "Fill in at least one of the two."}
-              </p>
+              {/* Said before the press rather than after: the button stays disabled until
+                  the box above has something in it. */}
+              <p className="text-[11px] text-slate-400" data-testid="session-remarks-hint">Required.</p>
             </>
           )}
         </div>
