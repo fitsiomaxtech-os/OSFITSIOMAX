@@ -1634,12 +1634,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // old MRI report, so a patient with paperwork on file and no prescription would have
   // opened the gate with somebody else's document.
   const [leadRxCount, setLeadRxCount] = useState(null);
+  // Bumped by the uploaders whenever anything is filed or removed, which is what makes the
+  // two counts above a live figure instead of the one that happened to be true when the
+  // card was opened. Without it the tab said "Documents (0)" with the page the reader had
+  // just filed sitting on screen underneath it: the only count ever taken predated the
+  // upload, and nothing asked for another.
   const [docTick, setDocTick] = useState(0);
+  const noteDocsChanged = useCallback(() => setDocTick((t) => t + 1), []);
+  // Cleared on the way to a different patient, and only there. A refresh must not blank
+  // them: the counts are what the fee gate reads, so a flash of "not counted yet" straight
+  // after an upload relocks the step that upload had just cleared.
+  useEffect(() => { setLeadDocCount(null); setLeadRxCount(null); }, [selectedLead?.id]);
   useEffect(() => {
-    if (!selectedLead?.id) { setLeadDocCount(null); setLeadRxCount(null); return; }
+    if (!selectedLead?.id) return;
     let cancelled = false;
-    setLeadDocCount(null);
-    setLeadRxCount(null);
     leadDocuments(selectedLead.id)
       .then((r) => { if (!cancelled) setLeadDocCount((r?.documents || []).length); })
       // Counted as none rather than left unknown: an upload screen that cannot say whether
@@ -1689,6 +1697,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const had = lastRxCount.current;
     lastRxCount.current = count;
     setLeadRxCount(count);
+    // A prescription is a document like any other, so filing one moves the general count
+    // too — the uploader only reports its own kind, and the tab beside it counts them all.
+    noteDocsChanged();
     // Nothing to move on to once the fee is in: the tab is a receipt then, not a step.
     if (had === 0 && count > 0 && selectedLead?.package_paid == null) {
       setProgrammeDetail((cur) => (cur === "documents" ? "own" : cur));
@@ -6295,7 +6306,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             {/* Amber until the prescription is in, whatever else is on
                                 file: the colour is about the step that is outstanding, and
                                 a scheme letter does not finish this one. */}
-                            <Lbl full={hasRx ? `Documents (${leadDocCount})` : "Prescription — required"} short="Docs" />
+                            <Lbl full={!hasRx ? "Prescription — required" : leadDocCount == null ? "Documents" : `Documents (${leadDocCount})`} short="Docs" />
                           </Button>
                           {/* Always on screen, and shut until the scan is filed. This panel
                               is a sequence — paperwork, then money — so a step that
@@ -6715,6 +6726,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               <LeadDocuments
                 leadId={selectedLead.id}
                 canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                /* Filing or deleting a page here moves the same count the stage panel's
+                   Documents tab shows, so it is retaken rather than left as it was when
+                   the card opened. */
+                onChanged={noteDocsChanged}
               />
             )}
 
