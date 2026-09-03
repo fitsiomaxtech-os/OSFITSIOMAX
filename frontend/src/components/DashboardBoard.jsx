@@ -11,8 +11,10 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getDashboardLeadsTrend, getLeadsAnalytics, getRevenueOverview, mkGetTeam, getDashboardClients } from "@/lib/api";
+import { getDashboardOverview, getDashboardLeadsTrend, getLeadsAnalytics, getRevenueOverview, mkGetTeam, getDashboardClients, hrUsers, hrEmployees, hrMeta } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
+import { StaffRoster } from "@/components/StaffRoster";
+import { setCustomRoleClasses } from "@/lib/roles";
 import { LeadsAnalyticsDashboard } from "@/components/marketing/LeadsAnalyticsDashboard";
 
 // Five sub-tabs, each scoped by the same date range and the same All/Offline/Online +
@@ -317,11 +319,16 @@ const RevenueTab = ({ data, loading, dateFilter }) => {
 };
 
 /**
- * Dashboard > Team — both rosters (Pre-Sales, and the branch accounts themselves), scoped
- * by the same All/Offline/Online filter rather than one branch at a time — "the teams
- * across all online offline" in one screen instead of picked one branch at a time.
+ * Dashboard > Team — everyone who works here, then the two rosters that carry a
+ * conversion rate (Pre-Sales, and the branch accounts themselves), scoped by the same
+ * All/Offline/Online filter rather than one branch at a time — "the teams across all
+ * online offline" in one screen instead of picked one branch at a time.
+ *
+ * The roster goes first because it is the wider question: the two panels below it measure
+ * two desks, and every other person on the payroll — consultants, physios, nutritionists,
+ * HR, Finance — is only on this tab because the roster lists them.
  */
-const TeamTab = ({ team, loading, branches }) => {
+const TeamTab = ({ team, loading, branches, roster, rosterLoading }) => {
   const [group, setGroup] = useState("all");
   const [branchId, setBranchId] = useState("");
 
@@ -342,9 +349,29 @@ const TeamTab = ({ team, loading, branches }) => {
     ? branches.find((b) => b.branch_id === branchId)?.branch_name
     : group === "all" ? null : (group === "online" ? "Online" : "Offline");
 
+  // Which branches the roster draws a section for — the same filter the cards below read,
+  // applied to branches rather than to people, because the roster is grouped by branch.
+  const visibleBranches = branchId
+    ? branches.filter((b) => b.branch_id === branchId)
+    : group === "all"
+      ? branches
+      : branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online"));
+
   return (
     <div className="space-y-4" data-testid="dashboard-team-tab">
       <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-team-filter" />
+
+      {/* showUnposted only under All: an accountant is posted to no branch, so keeping
+          them on screen while the filter says Online or Anna Nagar would be the filter
+          silently not applying to the one section it cannot describe. */}
+      <StaffRoster
+        users={roster?.users}
+        employees={roster?.employees}
+        loading={rosterLoading}
+        branches={branches}
+        visibleBranches={visibleBranches}
+        showUnposted={!branchId && group === "all"}
+      />
 
       {/* No benchmarkFrom, so the average follows the filter — narrowed to one branch or
           one mode, its agents are measured against each other, the peers actually doing
@@ -379,6 +406,8 @@ export const DashboardBoard = () => {
   const [loading, setLoading] = useState(false);
   const [team, setTeam] = useState(null);
   const [teamLoading, setTeamLoading] = useState(false);
+  const [roster, setRoster] = useState(null);
+  const [rosterLoading, setRosterLoading] = useState(false);
 
   // A named loader rather than the fetch inline in the effect, so Refresh has something to
   // call — the effect still owns when it runs on a date change.
@@ -408,6 +437,28 @@ export const DashboardBoard = () => {
       .catch(() => { toast.error("Failed to load the team"); setTeam({ pre_sales: [], sales: [] }); })
       .finally(() => setTeamLoading(false));
   }, [activeTab, team, teamLoading]);
+
+  // The staff roster, fetched on the same terms and for the same reason: an account and an
+  // employee record are lists of people, not of anything that happened between two dates,
+  // so both are fetched once on the first visit to Team and left alone.
+  //
+  // Both halves settle together, and a failure in either leaves an empty list rather than
+  // a half-drawn roster claiming to be the whole company. hrMeta rides along only for the
+  // colours a custom role was given — the roster renders roles the built-in map does not
+  // name, and without it they would wear the neutral fallback. Its own failure costs a hue
+  // and nothing else, so it is swallowed.
+  useEffect(() => {
+    if (activeTab !== "team" || roster || rosterLoading) return;
+    setRosterLoading(true);
+    hrMeta().then((m) => setCustomRoleClasses(m?.custom_roles)).catch(() => {});
+    Promise.all([hrUsers(), hrEmployees({ status: "active" })])
+      .then(([users, employees]) => setRoster({
+        users: Array.isArray(users) ? users : [],
+        employees: Array.isArray(employees) ? employees : [],
+      }))
+      .catch(() => { toast.error("Failed to load the staff roster"); setRoster({ users: [], employees: [] }); })
+      .finally(() => setRosterLoading(false));
+  }, [activeTab, roster, rosterLoading]);
 
   // Every branch, offline or online — the roster Marketing/Sales/Revenue/Team's filter
   // picks from. Read off the leads bucket, but any bucket would do; they all carry the
@@ -497,7 +548,7 @@ export const DashboardBoard = () => {
       ) : activeTab === "revenue" ? (
         <RevenueTab data={data} loading={loading} dateFilter={dateFilter} />
       ) : activeTab === "team" ? (
-        <TeamTab team={team} loading={teamLoading} branches={branches} />
+        <TeamTab team={team} loading={teamLoading} branches={branches} roster={roster} rosterLoading={rosterLoading} />
       ) : activeTab === "clients" ? (
         <ClientsTab />
       ) : (
