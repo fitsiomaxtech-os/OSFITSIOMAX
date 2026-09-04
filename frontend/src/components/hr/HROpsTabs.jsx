@@ -350,8 +350,10 @@ const DayDetailModal = ({ row, date, onClose, onSaved }) => {
           </button>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <Stat label="On the clock" value={hours(row.login_minutes)} testid="hr-att-detail-login" />
+        {/* Worked and away, not the span between the two presses. Check in and check out
+            are both on the row already, so the gross figure was the one number here that
+            could be read straight off the two beside it. */}
+        <div className="mt-4 grid grid-cols-2 gap-2">
           <Stat label="Worked" value={hours(row.worked_minutes)} tone="text-emerald-600" testid="hr-att-detail-worked" />
           <Stat label="On break" value={duration(row.break_minutes)} tone="text-amber-600" testid="hr-att-detail-break" />
         </div>
@@ -471,18 +473,20 @@ export const AttendanceTab = () => {
   }, [filtered, k, shown, single]);
 
   const exportCsv = () => {
+    // The same columns the table shows, so a spreadsheet of this and a screenshot of it
+    // do not carry different figures.
     const head = single
-      ? ["Employee", "Code", "Department", "Designation", "Branch", "Status", "Check in", "Check out", "Login hours", "Worked hours", "Break minutes", "Breaks"]
-      : ["Employee", "Code", "Department", "Designation", "Branch", "Days present", "Days away", "Login hours", "Worked hours", "Break minutes", "Breaks"];
+      ? ["Employee", "Code", "Department", "Designation", "Branch", "Status", "Check in", "Check out", "Worked hours", "Break minutes", "Breaks"]
+      : ["Employee", "Code", "Department", "Designation", "Branch", "Days present", "Days away", "Worked hours", "Break minutes", "Breaks"];
     downloadCsv([
       head,
       ...shown.map((r) => (single
         ? [r.full_name, r.employee_code, r.department, r.designation, r.branch_name,
            (BOARD_STATUS[r.status] || {}).label || r.status, r.check_in, r.check_out,
-           (r.login_minutes / 60).toFixed(2), (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count]
+           (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count]
         : [r.full_name, r.employee_code, r.department, r.designation, r.branch_name,
            r.present_days, r.away_days,
-           (r.login_minutes / 60).toFixed(2), (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count])),
+           (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count])),
     ], `attendance-${data?.from || ""}${single ? "" : `_to_${data?.to || ""}`}.csv`);
   };
 
@@ -612,7 +616,6 @@ export const AttendanceTab = () => {
                         <th className="px-4 py-3 text-right">Days Away</th>
                       </>
                     )}
-                    <th className="px-4 py-3 text-right">Total Login Hour</th>
                     <th className="px-4 py-3 text-right">Worked Hours</th>
                     <th className="px-4 py-3">Break Time</th>
                     {single && <th className="px-4 py-3 text-center">Details</th>}
@@ -646,7 +649,6 @@ export const AttendanceTab = () => {
                           <td className={`px-4 py-3 text-right ${r.away_days ? "font-semibold text-rose-600" : "text-slate-400"}`}>{r.away_days}</td>
                         </>
                       )}
-                      <td className="px-4 py-3 text-right text-slate-700">{hours(r.login_minutes)}</td>
                       <td className="px-4 py-3 text-right font-semibold text-slate-800">{hours(r.worked_minutes)}</td>
                       <td className="px-4 py-3">
                         {r.break_minutes > 0 ? (
@@ -674,7 +676,7 @@ export const AttendanceTab = () => {
                   ))}
                   {shown.length === 0 && (
                     <tr>
-                      <td colSpan={single ? 9 : 7} className="px-4 py-10 text-center text-slate-400">
+                      <td colSpan={single ? 8 : 6} className="px-4 py-10 text-center text-slate-400">
                         {filtered ? "Nobody matches these filters." : "No active employees."}
                       </td>
                     </tr>
