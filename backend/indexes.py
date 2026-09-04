@@ -83,6 +83,11 @@ CORE_INDEXES = [
     ("attendance", [("date", 1), ("employee_id", 1)], "date_employee"),
     # _clear_leave_marks, when an approval is revoked or deleted.
     ("attendance", [("approval_id", 1)], "approval_id"),
+    # The clock in the header -- see routers/v3_clock.py. Every press reads and writes one
+    # person's one document for today, which is this key exactly, and it is read again on
+    # every page load by everyone signed in. Their own month scans {user_id} with date as a
+    # range, which the same compound key answers through its prefix.
+    ("clock_days", [("user_id", 1), ("date", 1)], "user_date"),
     # The approvals list: filtered by status, newest first.
     ("approvals", [("status", 1), ("requested_at", -1)], "status_recent"),
     ("approvals", [("id", 1)], "id"),

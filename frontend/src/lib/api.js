@@ -447,6 +447,18 @@ export const hrEmployees = async (params = {}) => {
 // by backend/routers/v3_hr_ops.py under the same /hr prefix as the structure endpoints
 // above. Split there and grouped here for the same reason: one is the shape of the
 // company, the other is what happened this month.
+// ---------- the clock in the header ----------
+//
+// Everyone's own day, pressed by them. No id anywhere in here on purpose: each of these
+// answers for whoever the token belongs to, and there is no shape of request that reads
+// somebody else's — that is HR's register above.
+export const clockToday = async () => (await api.get("/clock/today")).data;
+export const clockIn = async () => (await api.post("/clock/in")).data;
+export const clockBreakOut = async (reason) => (await api.post("/clock/break-out", { reason })).data;
+export const clockBreakIn = async () => (await api.post("/clock/break-in")).data;
+export const clockOut = async () => (await api.post("/clock/out")).data;
+export const clockHistory = async (month) => (await api.get("/clock/history", { params: month ? { month } : {} })).data;
+
 export const hrAttendanceDay = async (date) => (await api.get("/hr/attendance", { params: date ? { date } : {} })).data;
 export const hrMarkAttendance = async (date, entries) => (await api.post("/hr/attendance", { date, entries })).data;
 export const hrAttendanceMonth = async (month) => (await api.get("/hr/attendance/month", { params: month ? { month } : {} })).data;
@@ -520,9 +532,6 @@ export const hrUsers = async (params = {}) => {
 };
 export const hrCreateUser = async (payload) => (await api.post("/hr/users", payload)).data;
 export const hrUpdateUser = async (id, payload) => (await api.patch(`/hr/users/${id}`, payload)).data;
-// All four times go together — a box left empty clears that mark rather than leaving
-// the stored one alone, which is the only way one can be taken back off a roster.
-export const hrSetUserTiming = async (id, timing) => (await api.patch(`/hr/users/${id}/timing`, timing)).data;
 export const hrUpdateUserRole = async (id, role) => (await api.patch(`/hr/users/${id}/role?role=${role}`)).data;
 export const hrResetPassword = async (id, password) => (await api.patch(`/hr/users/${id}/reset-password?password=${encodeURIComponent(password)}`)).data;
 export const hrDeactivateUser = async (id) => (await api.delete(`/hr/users/${id}`)).data;

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, Quote, AlarmClock, Coffee } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, Quote } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee, uploadEmployeePhoto,
-  hrUsers, hrCreateUser, hrUpdateUser, hrSetUserTiming, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrMeta, hrAddCustomRole,
+  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrMeta, hrAddCustomRole,
   hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrDeleteDesignation, hrReorderDesignations,
   getBranches, getVerticals,
 } from "@/lib/api";
@@ -17,9 +17,6 @@ import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { downloadCsv } from "@/lib/printable";
 import { ROLE_META, roleLabel, roleClasses, setCustomRoleClasses } from "@/lib/roles";
-// The hours an account is rostered on — written here, in Credentials, and read by the
-// register in HROpsTabs. See lib/workTiming.js for why the two share one copy of them.
-import { LATE_GRACE_MINUTES, isRostered, prettyTime, workTiming } from "@/lib/workTiming";
 import { AttendanceTab, PayrollTab, ApprovalsTab, QuotesTab } from "@/components/hr/HROpsTabs";
 
 // Matches ALL_BRANCHES in backend/routers/v3_hr.py, which resolves it to a name on the way
@@ -1538,44 +1535,6 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
   );
 };
 
-/**
- * A rostered shift as one line — "9:00 AM → 6:00 PM" — with the break under it when there
- * is one.
- *
- * Half a shift still prints: an account with only a login time reads "9:00 AM → —", which
- * is the honest shape of a roster half filled in. Nothing at all reads "Not set" rather
- * than a dash, because a blank here is the reason Attendance cannot tell a late arrival
- * from an early one — that is worth naming, not tidying away.
- */
-const TimingSummary = ({ user, className = "" }) => {
-  const t = workTiming(user);
-  if (!isRostered(t)) return <span className={`text-xs text-slate-400 ${className}`}>Not set</span>;
-  return (
-    <span className={`block text-xs leading-tight text-slate-700 ${className}`}>
-      <span className="whitespace-nowrap font-medium">
-        {prettyTime(t.login_time) || "—"} <span className="text-slate-400">→</span> {prettyTime(t.logout_time) || "—"}
-      </span>
-      {(t.break_in_time || t.break_out_time) && (
-        <span className="mt-0.5 flex items-center gap-1 whitespace-nowrap text-[11px] text-slate-500">
-          <Coffee className="h-3 w-3 shrink-0 text-amber-500" />
-          {prettyTime(t.break_in_time) || "—"} <span className="text-slate-300">→</span> {prettyTime(t.break_out_time) || "—"}
-        </span>
-      )}
-    </span>
-  );
-};
-
-/** One of the four boxes. A native time input, so the browser gives its own clock and its
- *  own 12/24-hour habit while the value stored stays 24-hour HH:MM. */
-const TimeField = ({ value, onChange, testid }) => (
-  <input
-    type="time"
-    value={value || ""}
-    onChange={(e) => onChange(e.target.value)}
-    className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
-    data-testid={testid}
-  />
-);
 
 const UserBranch = ({ user }) => {
   const branches = user.branches || [];
@@ -3460,15 +3419,6 @@ const RolesTab = ({ meta, reloadMeta }) => {
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span>
-              <button
-                type="button"
-                onClick={() => setActionTarget({ ...u, openTiming: true })}
-                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1"
-                data-testid={`hr-user-card-timing-${u.id}`}
-              >
-                <AlarmClock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                <TimingSummary user={u} />
-              </button>
             </div>
             {u.linked_employee && (
               <p className="mt-1.5 text-xs text-emerald-600">{u.linked_employee.employee_code} - {u.linked_employee.designation || u.linked_employee.full_name}</p>
@@ -3504,28 +3454,13 @@ const RolesTab = ({ meta, reloadMeta }) => {
 
                   Branch keeps its column and loses only its heading: a branch name says what
                   it is, where an employee code and a status pill do not. */}
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Timing</th><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2" /><th className="px-3 py-2">Actions</th></tr></thead>
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2" /><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>
                 {sortedUsers.map((u, i) => (
                   <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-user-row-${u.id}`}>
                     <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                     <td className="px-3 py-2 font-medium text-slate-800">{u.full_name}</td>
                     <td className="px-3 py-2 text-slate-600">{u.email}</td>
-                    {/* Clickable, because a roster is read here and fixed here — the four
-                        boxes are behind the same Actions popup as everything else, and
-                        hunting for them through it to change one time was the long way
-                        round the thing the column is showing you. */}
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => setActionTarget({ ...u, openTiming: true })}
-                        className="rounded-md px-1.5 py-1 text-left transition hover:bg-sky-50"
-                        title={`Set work timing for ${u.full_name}`}
-                        data-testid={`hr-user-timing-${u.id}`}
-                      >
-                        <TimingSummary user={u} />
-                      </button>
-                    </td>
                     <td className="px-3 py-2 text-xs text-emerald-600">{u.linked_employee ? `${u.linked_employee.employee_code} - ${u.linked_employee.designation || u.linked_employee.full_name}` : "—"}</td>
                     <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span></td>
                     <td className="px-3 py-2"><UserBranch user={u} /></td>
@@ -3541,7 +3476,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
                     </td>
                   </tr>
                 ))}
-                {sortedUsers.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">No users.</td></tr>}
+                {sortedUsers.length === 0 && <tr><td colSpan="7" className="px-3 py-6 text-center text-slate-400">No users.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -3562,9 +3497,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
 };
 
 const UserActionsModal = ({ user, onClose, onDone }) => {
-  // Opened straight onto the timing form when the Timing column itself was clicked, rather
-  // than onto the action list with the form one click further in.
-  const [mode, setMode] = useState(user.openTiming ? "timing" : null); // null | "edit" | "timing" | "password" | "delete"
+  const [mode, setMode] = useState(null); // null | "edit" | "password" | "delete"
   const [pwd, setPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3581,7 +3514,6 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
     mobile_number: user.mobile_number || "",
     aadhar_number: user.aadhar_number || "",
   });
-  const [timingForm, setTimingForm] = useState(workTiming(user));
 
   useEffect(() => {
     if (mode !== "edit") return;
@@ -3604,18 +3536,6 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
       toast.success(`${editForm.full_name} updated`);
       onDone();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to update user"); }
-    finally { setBusy(false); }
-  };
-
-  const submitTiming = async () => {
-    try {
-      setBusy(true);
-      // Sent whole, blanks included — the endpoint reads an empty box as "clear this one",
-      // which is the only way a time already on the roster can be taken back off it.
-      await hrSetUserTiming(user.id, timingForm);
-      toast.success(`Work timing saved for ${user.full_name}`);
-      onDone();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to save work timing"); }
     finally { setBusy(false); }
   };
 
@@ -3675,22 +3595,6 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
               <div>
                 <p className="text-sm font-semibold text-sky-700">Edit</p>
                 <p className="text-[11px] text-sky-600">Update this user's details.</p>
-              </div>
-            </button>
-
-            <button
-              onClick={() => setMode("timing")}
-              className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left hover:bg-amber-100"
-              data-testid="hr-actions-timing"
-            >
-              <AlarmClock className="h-4 w-4 text-amber-600" />
-              <div>
-                <p className="text-sm font-semibold text-amber-700">Work Timing</p>
-                <p className="text-[11px] text-amber-600">
-                  {isRostered(workTiming(user))
-                    ? "Login, logout and break hours — read by Attendance."
-                    : "Not set. Attendance cannot tell a late arrival without it."}
-                </p>
               </div>
             </button>
 
@@ -3800,35 +3704,6 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setMode(null)} className="flex-1" data-testid="hr-actions-edit-back">Back</Button>
               <Button onClick={submitEdit} disabled={busy} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-actions-edit-save">Save Changes</Button>
-            </div>
-          </div>
-        )}
-
-        {mode === "timing" && (
-          <div className="space-y-3" data-testid="hr-actions-timing-form">
-            <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] leading-relaxed text-sky-800">
-              The hours this login is expected to keep. Attendance measures the day against
-              them — a check-in more than {LATE_GRACE_MINUTES} minutes past the login time is
-              flagged late on the register.
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Login Time"><TimeField value={timingForm.login_time} onChange={(v) => setTimingForm({ ...timingForm, login_time: v })} testid="hr-actions-timing-login" /></Field>
-              <Field label="Logout Time"><TimeField value={timingForm.logout_time} onChange={(v) => setTimingForm({ ...timingForm, logout_time: v })} testid="hr-actions-timing-logout" /></Field>
-              {/* "Break in" starts the break and "break out" ends it — the same reading as
-                  login and logout, where in is the beginning of the thing named. Said on
-                  the labels rather than left to be guessed, since the other reading (out
-                  of the room, back in) is just as natural and would store the two
-                  backwards. */}
-              <Field label="Break In Time"><TimeField value={timingForm.break_in_time} onChange={(v) => setTimingForm({ ...timingForm, break_in_time: v })} testid="hr-actions-timing-break-in" /></Field>
-              <Field label="Break Out Time"><TimeField value={timingForm.break_out_time} onChange={(v) => setTimingForm({ ...timingForm, break_out_time: v })} testid="hr-actions-timing-break-out" /></Field>
-            </div>
-            <p className="text-[11px] text-slate-500">
-              Break In is when the break starts; Break Out is the return from it. Leave a box
-              empty to remove that time.
-            </p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setMode(null)} className="flex-1" data-testid="hr-actions-timing-back">Back</Button>
-              <Button onClick={submitTiming} disabled={busy} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-actions-timing-save">Save Timing</Button>
             </div>
           </div>
         )}
@@ -4022,12 +3897,7 @@ const BranchSelectDropdown = ({ value, branches, onChange }) => {
 const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
-  const [form, setForm] = useState({
-    employee_id: "", full_name: "", email: "", role: "", branch_id: "", branch_ids: [], password: "", confirm: "",
-    // The hours the new login is expected to keep. Optional here — a hire made in a hurry
-    // is still a working login — and set or changed later from the Timing column.
-    login_time: "", logout_time: "", break_in_time: "", break_out_time: "",
-  });
+  const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", branch_id: "", branch_ids: [], password: "", confirm: "" });
   const roleLabelForMulti = multiBranchLabel(form.role);
   const isMultiBranchRole = Boolean(roleLabelForMulti);
   const [resolvingRole, setResolvingRole] = useState(false);
@@ -4130,10 +4000,6 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
         employee_id: form.employee_id || null,
         ...(isMultiBranchRole ? { branch_ids: form.branch_ids }
           : { branch_id: form.branch_id || null }),
-        login_time: form.login_time,
-        logout_time: form.logout_time,
-        break_in_time: form.break_in_time,
-        break_out_time: form.break_out_time,
       });
       toast.success("User created");
       onSaved();
@@ -4186,20 +4052,6 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
             />
           )}
         </Field>
-        {/* Optional, and last of the details: the account works without it, but a login
-            with no hours is one Attendance cannot call late, so it is worth asking while
-            the person is in front of you. Break In starts the break; Break Out ends it. */}
-        <div className="rounded-lg border border-slate-200 p-3" data-testid="hr-create-user-timing">
-          <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-            <AlarmClock className="h-3.5 w-3.5 text-slate-400" />Work Timing <span className="font-normal text-slate-400">— optional, used by Attendance</span>
-          </p>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <Field label="Login Time"><TimeField value={form.login_time} onChange={(v) => setForm({ ...form, login_time: v })} testid="hr-create-user-login-time" /></Field>
-            <Field label="Logout Time"><TimeField value={form.logout_time} onChange={(v) => setForm({ ...form, logout_time: v })} testid="hr-create-user-logout-time" /></Field>
-            <Field label="Break In Time"><TimeField value={form.break_in_time} onChange={(v) => setForm({ ...form, break_in_time: v })} testid="hr-create-user-break-in-time" /></Field>
-            <Field label="Break Out Time"><TimeField value={form.break_out_time} onChange={(v) => setForm({ ...form, break_out_time: v })} testid="hr-create-user-break-out-time" /></Field>
-          </div>
-        </div>
         <Field label="Password *"><PasswordInput placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} testid="hr-create-user-pwd" /></Field>
         <Field label="Confirm Password *"><PasswordInput placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} testid="hr-create-user-confirm" /></Field>
         <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="hr-create-user-cancel">Cancel</Button><Button onClick={submit} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-create-user-submit">Create User</Button></div>

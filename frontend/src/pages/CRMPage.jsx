@@ -51,6 +51,10 @@ import {
 } from "@/lib/api";
 import { toast, Toaster } from "@/components/ui/sonner";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
+// Everyone's own clock, in the bar above every board. Static rather than one of the
+// lazy boards below: it is on screen for every role from the first paint, so splitting
+// it would only add a round trip to the one control that is always there.
+import { ClockWidget } from "@/components/ClockWidget";
 
 /**
  * The boards, each in its own chunk.
@@ -922,6 +926,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <ClockWidget />
                 <button type="button" onClick={() => setShowPhysioCalendar(true)} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-calendar">
                   <CalendarDays className="h-5 w-5" />
                 </button>
@@ -991,6 +996,10 @@ export const CRMPage = ({ auth, onLogout }) => {
               )}
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* First in the cluster, and before the bell: the clock is the only control
+                  here that is about the person rather than about their work, and it is the
+                  one they press twice a day whatever board they are on. */}
+              <ClockWidget />
               {/* Phone only. On a desktop the board already carries its own search box
                   above the list, so a second one in the header was the same job twice —
                   it's only on a phone, where that box is a scroll away, that reaching it

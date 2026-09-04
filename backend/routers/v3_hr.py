@@ -10,10 +10,6 @@ from utils import now_iso, live_branch_query
 from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES, HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES, LEGACY_BRANCH_ADMIN_ROLES
 from security import hash_password
 from schemas.v3 import V3UserOut
-# The four clock marks an account is rostered on. Written here, in Credentials, and
-# read by the register in v3_hr_ops.py -- see work_timing.py for why the rules sit in
-# a module of their own rather than in either of the two files that use them.
-from work_timing import clean_work_timing, timing_of
 
 
 router = APIRouter(prefix="/api/v3/hr")
@@ -517,14 +513,6 @@ class UserAccountCreate(BaseModel):
     branch_ids: Optional[List[str]] = None
     mobile_number: Optional[str] = None
     aadhar_number: Optional[str] = None
-    # The clock this account is expected to keep, all four optional -- see work_timing.py.
-    # Asked for at creation so a hire made on a Monday is already on the register with
-    # their hours, rather than being created and then rostered as a second job.
-    login_time: Optional[str] = None
-    logout_time: Optional[str] = None
-    break_in_time: Optional[str] = None
-    break_out_time: Optional[str] = None
-
     # No role normalisation here on purpose — see the note on V3UserOut in schemas/v3.py.
     # "consultant" used to be rewritten to "physio" on the way in, so creating a
     # CONSULTANT silently created a treating physio instead and the role could never
@@ -539,20 +527,6 @@ class UserAccountUpdate(BaseModel):
     branch_ids: Optional[List[str]] = None
     mobile_number: Optional[str] = None
     aadhar_number: Optional[str] = None
-
-
-class UserWorkTiming(BaseModel):
-    """The whole clock, posted together.
-
-    Deliberately not part of UserAccountUpdate: that handler drops every None it is given,
-    which is what stops a partial edit from wiping the fields it did not mention -- and it
-    is also what would make a time impossible to remove once set. All four are sent at
-    once here, so a box left empty is an instruction to clear it rather than an omission.
-    """
-    login_time: Optional[str] = None
-    logout_time: Optional[str] = None
-    break_in_time: Optional[str] = None
-    break_out_time: Optional[str] = None
 
 
 async def _next_emp_code() -> str:
@@ -588,9 +562,8 @@ async def hr_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin", "m
 
     # Real figures now that HR keeps a register: see routers/v3_hr_ops.py, which owns the
     # marks these count and the statuses they are named after. Imported inside the handler
-    # rather than at module scope because that module imports nothing from here and the
-    # pair should stay that way -- a top-level import would make the direction easy to
-    # reverse by accident.
+    # because that module imports resolve_employee_branches from this one at module scope,
+    # so a top-level import here would close the loop and neither would load.
     from routers.v3_hr_ops import LATE, PENDING, PRESENT
     from utils import clinic_today
 
@@ -623,21 +596,25 @@ async def _next_emp_code_legacy() -> str:
     return f"EMP{(cnt + 1):04d}"
 
 
-@router.get("/employees")
-async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
-    q: Dict[str, Any] = {}
-    if status:
-        q["status"] = status
-    rows = await v3_col("employees").find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
-    # branch_name is denormalized onto the response only — the record itself keeps just
-    # branch_id, same split as list_users' own bmap below, so a branch rename never needs
-    # a matching pass over every employee that points at it.
+async def resolve_employee_branches(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Put a readable branch on each employee row, in place, and hand them back.
+
+    Shared because two screens ask this and the answer has to be the same one: the
+    Employees tab lists it, and the attendance register filters by it (see _roster in
+    routers/v3_hr_ops.py). A second implementation would have "Anna Nagar" on one screen
+    and "No branch" on the other for the same person, and both would look right in
+    isolation.
+
+    branch_name is denormalized onto the response only -- the record itself keeps just
+    branch_id, so a branch rename never needs a matching pass over every employee that
+    points at it.
+    """
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     bmap = {b["id"]: b.get("branch_name", "") for b in branch_docs}
 
     # Where the employee record carries no branch, the linked account is asked. The two
     # halves are one person, and the account is the half that decides what they can
-    # actually see — an employee row reading "No branch" above an account scoped to Anna
+    # actually see -- an employee row reading "No branch" above an account scoped to Anna
     # Nagar is the record disagreeing with itself, not a fact about the person.
     #
     # Read-time rather than a migration: the write-time cascades keep the two in step from
@@ -672,6 +649,15 @@ async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3
         # being changed. The stored record is left untouched.
         r["branch_id"] = bid
     return rows
+
+
+@router.get("/employees")
+async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
+    q: Dict[str, Any] = {}
+    if status:
+        q["status"] = status
+    rows = await v3_col("employees").find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return await resolve_employee_branches(rows)
 
 
 # Employee photos live beside the store's item images, under the `uploads/` tree server.py
@@ -1153,10 +1139,6 @@ async def list_users(search: Optional[str] = None, role: Optional[str] = None, _
         # where they work yet, which is a gap to fill rather than a reach to report. Left
         # on the row so every reader keeps its shape.
         r["org_wide"] = False
-        # Always all four, blank where unset, so the Credentials column and the timing
-        # form both read one shape rather than each guessing at a missing key. The flat
-        # fields are still on the row too -- this is a second view of them, not a move.
-        r["work_timing"] = timing_of(r)
     return rows
 
 
@@ -1186,7 +1168,6 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         "employee_id": payload.employee_id,
         "mobile_number": payload.mobile_number,
         "aadhar_number": payload.aadhar_number,
-        **clean_work_timing(payload.model_dump()),
         "is_active": True,
         "created_at": now_iso(),
     }
@@ -1381,23 +1362,6 @@ async def reset_password(user_id: str, password: str, caller: V3UserOut = Depend
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Password reset"}
-
-
-@router.patch("/users/{user_id}/timing")
-async def set_user_work_timing(user_id: str, payload: UserWorkTiming, caller: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """Set (or clear) the four clock marks this account is expected to keep.
-
-    Its own endpoint rather than four more fields on the edit form, because this is the
-    half of an account that attendance reads: the register measures a check-in against
-    `login_time`, and the person who fills the register in is not usually the person
-    renaming accounts. Clearing is posting the form empty -- see UserWorkTiming.
-    """
-    await _guard_super_admin_target(user_id, caller)
-    timing = clean_work_timing(payload.model_dump())
-    res = await v3_col("users").update_one({"id": user_id}, {"$set": timing})
-    if res.matched_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {"message": "Work timing saved", "work_timing": timing}
 
 
 async def _set_expert_active(user_id: str, active: bool) -> int:

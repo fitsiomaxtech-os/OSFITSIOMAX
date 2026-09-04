@@ -22,13 +22,19 @@ import pytest
 # directory changes behaviour.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from datetime import datetime  # noqa: E402
+
 from fastapi import HTTPException  # noqa: E402
+
+from utils import CLINIC_UTC_OFFSET  # noqa: E402
 
 from routers.v3_hr_ops import (  # noqa: E402
     _compute_slip, _dates_between, _month_span, _pick_for_today, _totals,
     _valid_date, _valid_month,
 )
-from work_timing import clean_work_timing, late_by  # noqa: E402
+from routers.v3_clock import (  # noqa: E402
+    ACTIONS, DONE, ON_BREAK, OUT, WORKING, _break_minutes, _minutes_between, _public, _state,
+)
 
 # 30 days, ₹30,000 — so a day is worth exactly ₹1,000 and every figure below can be read
 # without arithmetic.
@@ -172,91 +178,112 @@ class TestDateValidation:
     def test_a_month_is_checked_too(self):
         with pytest.raises(HTTPException):
             _valid_month("2026-13")
-# The other half of the same chain: the roster a register is measured against. The four
-# times are set per login in Super Admin -> Credentials and read by attendance, and the
-# rules for both live in work_timing.py -- pure, like everything else tested here, so the
-# rule that turns "09:00 rostered, 09:14 typed" into "late by 14" is pinned down in the
-# same file as the rules payroll reads.
-class TestLateness:
-    NINE = {"login_time": "09:00"}
+# The clock in the header -- routers/v3_clock.py. Pure, like everything else here: what a
+# day's document means, and what may be pressed next, is worked out from the timestamps on
+# it rather than stored, so it can be checked without a database or a session.
+#
+# It is tested in this file because the register reads what the clock writes. A day that
+# reads as "working" when somebody has gone home is an In with no Out on HR's screen and a
+# worked figure that grows overnight.
 
-    @pytest.mark.parametrize("check_in,expected", [
-        ("09:00", 0),    # on the dot is not late
-        ("09:10", 10),
-        ("09:14", 14),
-        ("10:30", 90),
-        ("08:50", 0),    # early is not negative-late, it is simply not late
-    ])
-    def test_minutes_past_the_rostered_login(self, check_in, expected):
-        assert late_by(self.NINE, check_in) == expected
-
-    def test_a_night_shift_counts_forward_over_midnight(self):
-        """22:00 rostered, 01:00 typed is three hours late, not twenty-one hours early."""
-        assert late_by({"login_time": "22:00"}, "01:00") == 180
-
-    def test_arriving_before_a_night_shift_is_not_late(self):
-        assert late_by({"login_time": "22:00"}, "21:55") == 0
-
-    @pytest.mark.parametrize("shift,check_in", [
-        ({}, "09:45"),                       # nobody has rostered this person
-        ({"login_time": ""}, "09:45"),
-        ({"login_time": "09:00"}, ""),       # a mark with no clock on it
-        ({"login_time": "09:00"}, "half"),   # anything unparseable
-    ])
-    def test_nothing_to_measure_is_not_a_late_arrival(self, shift, check_in):
-        """A missing half of the comparison reads as 0, never as a huge overrun."""
-        assert late_by(shift, check_in) == 0
+DAY = "2026-09-04"
 
 
-class TestWorkTiming:
-    """What Super Admin may store as somebody's hours.
+def _at(hhmm):
+    """A UTC stamp for a clinic-clock time, so a fixture reads as the hour it means.
 
-    Only what could not be worked is refused. A half-filled roster is how one gets filled
-    in, so it is allowed all the way through.
+    Through CLINIC_UTC_OFFSET rather than by hand: the borrow at half past is exactly the
+    kind of arithmetic a fixture gets wrong quietly, and then tests the wrong minutes.
     """
+    local = datetime.fromisoformat(f"{DAY}T{hhmm}:00+00:00")
+    return (local - CLINIC_UTC_OFFSET).isoformat()
 
-    def test_a_full_day_is_kept_as_typed(self):
-        assert clean_work_timing({
-            "login_time": "09:00", "logout_time": "18:00",
-            "break_in_time": "13:00", "break_out_time": "13:45",
-        }) == {
-            "login_time": "09:00", "logout_time": "18:00",
-            "break_in_time": "13:00", "break_out_time": "13:45",
-        }
 
-    def test_nothing_set_is_four_blanks_rather_than_a_refusal(self):
-        assert clean_work_timing({}) == {
-            "login_time": "", "logout_time": "", "break_in_time": "", "break_out_time": "",
-        }
+def _day(clock_in=None, clock_out=None, breaks=()):
+    doc = {"date": DAY, "breaks": [dict(b) for b in breaks]}
+    if clock_in:
+        doc.update(clock_in=clock_in, clock_in_at=_at(clock_in))
+    if clock_out:
+        doc.update(clock_out=clock_out, clock_out_at=_at(clock_out))
+    return doc
 
-    def test_a_login_on_its_own_is_enough(self):
-        """It is the only one attendance needs — the register measures arrivals against it."""
-        assert clean_work_timing({"login_time": "09:00"})["login_time"] == "09:00"
 
-    def test_a_night_shift_and_its_break_are_allowed(self):
-        assert clean_work_timing({
-            "login_time": "22:00", "logout_time": "06:00",
-            "break_in_time": "02:00", "break_out_time": "02:30",
-        })["break_in_time"] == "02:00"
+def _brk(out, reason="Lunch", back=None):
+    entry = {"out": out, "out_at": _at(out), "reason": reason, "in": "", "in_at": ""}
+    if back:
+        entry.update({"in": back, "in_at": _at(back)})
+    return entry
 
-    @pytest.mark.parametrize("bad", ["9am", "25:00", "09:60", "0900", "9", "09:00:00"])
-    def test_a_time_that_is_not_a_clock_is_refused(self, bad):
-        with pytest.raises(HTTPException) as err:
-            clean_work_timing({"login_time": bad})
-        assert err.value.status_code == 400
 
-    def test_a_shift_cannot_end_where_it_starts(self):
-        with pytest.raises(HTTPException):
-            clean_work_timing({"login_time": "09:00", "logout_time": "09:00"})
+class TestClockState:
+    """The four states, read off the document rather than stored beside it."""
 
-    def test_half_a_break_is_refused(self):
-        with pytest.raises(HTTPException):
-            clean_work_timing({"login_time": "09:00", "logout_time": "18:00", "break_in_time": "13:00"})
+    def test_a_day_nobody_has_touched_is_out(self):
+        assert _state(None) == OUT
+        assert _state({}) == OUT
 
-    @pytest.mark.parametrize("brk", [("19:00", "19:30"), ("17:45", "18:30"), ("08:00", "08:30")])
-    def test_a_break_outside_the_shift_is_refused(self, brk):
-        with pytest.raises(HTTPException):
-            clean_work_timing({
-                "login_time": "09:00", "logout_time": "18:00",
-                "break_in_time": brk[0], "break_out_time": brk[1],
-            })
+    def test_clocked_in_is_working(self):
+        assert _state(_day(clock_in="09:00")) == WORKING
+
+    def test_an_unclosed_break_is_on_break(self):
+        assert _state(_day(clock_in="09:00", breaks=[_brk("13:00")])) == ON_BREAK
+
+    def test_a_closed_break_is_back_to_working(self):
+        assert _state(_day(clock_in="09:00", breaks=[_brk("13:00", back="13:40")])) == WORKING
+
+    def test_clocked_out_is_done(self):
+        assert _state(_day(clock_in="09:00", clock_out="18:00")) == DONE
+
+    def test_only_the_last_break_can_be_open(self):
+        """Two taken and one still running -- the state is about the one with no end."""
+        day = _day(clock_in="09:00", breaks=[_brk("11:00", "Tea break", back="11:15"), _brk("13:00")])
+        assert _state(day) == ON_BREAK
+
+    def test_every_state_offers_something_to_press_except_the_finished_one(self):
+        assert ACTIONS[OUT] == ["clock_in"]
+        assert ACTIONS[ON_BREAK] == ["break_in"]      # not clock_out -- the break must close first
+        assert "break_out" in ACTIONS[WORKING] and "clock_out" in ACTIONS[WORKING]
+        assert ACTIONS[DONE] == []
+
+
+class TestClockArithmetic:
+    """Worked time is the day minus the breaks, and a running break still counts."""
+
+    def test_a_finished_day_is_measured_to_the_clock_out(self):
+        out = _public(_day(clock_in="09:00", clock_out="18:00"), DAY)
+        assert out["worked_minutes"] == 9 * 60
+        assert out["break_minutes"] == 0
+
+    def test_breaks_come_off_the_worked_total(self):
+        day = _day(clock_in="09:00", clock_out="18:00", breaks=[_brk("13:00", back="13:45")])
+        out = _public(day, DAY)
+        assert out["break_minutes"] == 45
+        assert out["worked_minutes"] == 9 * 60 - 45
+
+    def test_a_break_still_running_is_counted_and_flagged(self):
+        out = _public(_day(clock_in="09:00", breaks=[_brk("13:00", "Lunch")]), DAY)
+        assert out["breaks"][0]["running"] is True
+        assert out["on_break_since"] == "13:00"
+        assert out["break_reason"] == "Lunch"
+
+    def test_the_reason_is_carried_through_to_whoever_reads_the_day(self):
+        out = _public(_day(clock_in="09:00", breaks=[_brk("11:00", "Prayer", back="11:10")]), DAY)
+        assert [(b["out"], b["in"], b["reason"]) for b in out["breaks"]] == [("11:00", "11:10", "Prayer")]
+
+    def test_an_untouched_day_is_an_empty_day_rather_than_nothing(self):
+        """The header has to draw something before the first press of the morning."""
+        out = _public(None, DAY)
+        assert out["state"] == OUT and out["clock_in"] == "" and out["worked_minutes"] == 0
+        assert out["date"] == DAY
+
+    def test_a_break_across_midnight_is_the_minutes_it_took(self):
+        """A night shift crosses one every time, so the stamps are subtracted, not the faces."""
+        assert _minutes_between("2026-09-04T23:50:00+00:00", "2026-09-05T00:20:00+00:00") == 30
+
+    def test_a_missing_or_unreadable_stamp_is_no_minutes_at_all(self):
+        assert _minutes_between(None, "2026-09-04T09:00:00+00:00") == 0
+        assert _minutes_between("half past nine", "2026-09-04T09:00:00+00:00") == 0
+
+    def test_break_minutes_count_an_open_break_up_to_the_moment_asked(self):
+        day = _day(clock_in="09:00", breaks=[_brk("13:00")])
+        assert _break_minutes(day, _at("13:30")) == 30

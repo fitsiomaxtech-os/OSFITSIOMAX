@@ -23,8 +23,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlarmClock, Ban, CalendarCheck, CalendarDays, CalendarOff, Check, ChevronLeft, ChevronRight,
-  Download, IndianRupee, Lock, Palmtree, Pin, PinOff, Plus, Quote, RefreshCw, Save, Sun,
-  Trash2, TriangleAlert, Undo2, Wallet, X,
+  Download, Filter, IndianRupee, Lock, Palmtree, Pin, PinOff, Plus, Quote, RefreshCw, Save,
+  Sun, Trash2, TriangleAlert, Undo2, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,9 +33,9 @@ import { toast } from "@/components/ui/sonner";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { downloadCsv } from "@/lib/printable";
-// The hours each person is rostered on, set in Super Admin → Credentials. Shared with
-// that screen rather than reimplemented here — see lib/workTiming.js.
-import { LATE_GRACE_MINUTES, isRostered, lateBy, lateLabel, prettyTime, workTiming } from "@/lib/workTiming";
+// The clock people press for themselves — see components/ClockWidget.jsx, which is where
+// the times on this register come from now.
+import { duration, prettyTime } from "@/lib/clock";
 import {
   hrAttendanceDay, hrMarkAttendance, hrEmployees,
   hrApprovals, hrCreateApproval, hrDecideApproval, hrDeleteApproval,
@@ -102,6 +102,96 @@ const Empty = ({ children }) => (
   <p className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">{children}</p>
 );
 
+
+// ---------- filtering a roster ----------
+
+// The three things a register is narrowed by. Fifty rows is more than anybody marks in
+// one sitting, and whoever is filling it in is usually working one branch or one desk at
+// a time.
+//
+// Held as data rather than three copies of the same markup so the bar, the option lists
+// and the "showing N of M" line all read the same field names, and adding a fourth axis
+// is one entry rather than four edits.
+const ROSTER_FILTERS = [
+  { key: "department", label: "Department", all: "All Departments" },
+  { key: "designation", label: "Designation", all: "All Designations" },
+  { key: "branch_name", label: "Branch", all: "All Branches" },
+];
+
+const NO_FILTERS = { department: "", designation: "", branch_name: "" };
+
+// An employee with nothing in the field. A real option rather than a gap, because
+// "who has no branch set" is a question somebody actually asks -- it is the list you work
+// through to fix the records. Underscored so it cannot collide with a branch called
+// "Unassigned".
+const UNSET = "__unset__";
+const UNSET_LABELS = { department: "No department", designation: "No designation", branch_name: "No branch" };
+
+const fieldValue = (row, key) => String(row?.[key] || "").trim();
+const matchesFilter = (row, key, want) => {
+  if (!want) return true;
+  const has = fieldValue(row, key);
+  return want === UNSET ? !has : has === want;
+};
+
+/** Rows passing every filter except `except` — which is what each dropdown's own options
+ *  are drawn from, so narrowing to a department leaves only the designations that
+ *  department actually has, and a filter can never offer a choice that yields nothing. */
+const narrow = (rows, filters, except) =>
+  rows.filter((r) => ROSTER_FILTERS.every((f) => f.key === except || matchesFilter(r, f.key, filters[f.key])));
+
+const optionsFor = (rows, filters, key) => {
+  const scoped = narrow(rows, filters, key);
+  const named = [...new Set(scoped.map((r) => fieldValue(r, key)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return scoped.some((r) => !fieldValue(r, key)) ? [...named, UNSET] : named;
+};
+
+/** The three dropdowns, plus a Clear that only appears once something is filtered.
+ *
+ *  Selects rather than pills: a clinic has more branches and far more designations than
+ *  fit a row of chips, and a dropdown is the control that stays the same size as the
+ *  lists grow. */
+const RosterFilterBar = ({ rows, filters, onChange, shown, total, testid }) => {
+  const active = ROSTER_FILTERS.filter((f) => filters[f.key]);
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid={testid}>
+      <Filter className="h-4 w-4 shrink-0 text-slate-400" />
+      {ROSTER_FILTERS.map((f) => {
+        const options = optionsFor(rows, filters, f.key);
+        const value = filters[f.key];
+        // A filter whose value has gone (the department it belonged to was deselected, or
+        // nobody in the narrowed set has it) still renders its own value, so a selection
+        // never silently disappears from the control while still applying to the list.
+        const list = value && !options.includes(value) ? [...options, value] : options;
+        return (
+          <select
+            key={f.key}
+            value={value}
+            onChange={(e) => onChange({ ...filters, [f.key]: e.target.value })}
+            title={f.label}
+            className={`h-9 max-w-[190px] rounded-md border px-2 text-sm font-medium ${
+              value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"
+            }`}
+            data-testid={`${testid}-${f.key}`}
+          >
+            <option value="">{f.all}</option>
+            {list.map((o) => <option key={o} value={o}>{o === UNSET ? UNSET_LABELS[f.key] : o}</option>)}
+          </select>
+        );
+      })}
+      {active.length > 0 && (
+        <>
+          <Button variant="ghost" size="sm" onClick={() => onChange({ ...NO_FILTERS })} data-testid={`${testid}-clear`}>
+            <X className="h-4 w-4" />Clear
+          </Button>
+          <span className="text-xs font-medium text-slate-500" data-testid={`${testid}-count`}>
+            Showing {shown} of {total}
+          </span>
+        </>
+      )}
+    </div>
+  );
+};
 // ---------- Attendance ----------
 
 // Mirrors ATTENDANCE_STATUSES in backend/routers/v3_hr_ops.py. `lop` is repeated here
@@ -145,51 +235,49 @@ const MarkPicker = ({ value, disabled, onPick, testid }) => (
   </div>
 );
 
-// ---------- the roster behind the register ----------
+// ---------- what the person themselves recorded ----------
 //
-// The hours Super Admin sets against a login in Credentials. The register carries them per
-// row so a day is filled in against the hours somebody is actually on, and so the "late by
-// 14m" it reports has the 09:00 it was measured from sitting next to it.
+// The In and Out on this register are, for anybody who used the clock in their header, the
+// times they pressed it — see backend/routers/v3_clock.py, which writes them here. HR can
+// still type over them, because a phone left at home is a real thing and the register has
+// to be able to say what happened either way.
 
-/** A row's rostered hours, with the break under them.
+/** The marker on a row whose times were pressed rather than typed.
  *
- *  Nobody rostered reads as "No timing set" rather than as a dash — a blank here is the
- *  reason the register cannot say whether an arrival was late, so it is named, and the
- *  title says where the answer is set. */
-const ShiftCell = ({ shift }) => {
-  const t = workTiming({ shift });
-  if (!isRostered(t)) {
-    return (
-      <span className="text-[11px] text-slate-300" title="Set this person's hours in Super Admin → Credentials → Timing">
-        No timing set
-      </span>
-    );
-  }
+ *  Worth showing rather than assuming: a register where most rows are clocked is one HR is
+ *  checking, and one where none of them are is one they are still filling in by hand. */
+const ClockedTag = () => (
+  <span
+    className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700"
+    title="Pressed by this person from their own header"
+  >
+    <AlarmClock className="h-3 w-3" />Clocked
+  </span>
+);
+
+/** A row's breaks, with the reasons on them.
+ *
+ *  The reasons are the whole point of asking for one, so they belong on the register rather
+ *  than only in the person's own history — "where was this person for fifty minutes" is a
+ *  question HR asks of the day, and answering it should not need a second screen. */
+// A tooltip's line break. Written as a named constant because an escape inside a JSX file
+// is easy to lose to a reformat, and losing this one puts every break on one long line.
+const NEWLINE = String.fromCharCode(10);
+
+const BreaksCell = ({ breaks, minutes }) => {
+  if (!breaks || breaks.length === 0) return <span className="text-[11px] text-slate-300">—</span>;
+  const detail = breaks
+    .map((b) => `${b.reason}: ${prettyTime(b.out)} → ${b.in ? prettyTime(b.in) : "still out"}`)
+    .join(NEWLINE);
   return (
-    <span className="block text-[11px] leading-tight text-slate-600">
-      <span className="whitespace-nowrap font-medium text-slate-700">
-        {prettyTime(t.login_time) || "—"} <span className="text-slate-400">→</span> {prettyTime(t.logout_time) || "—"}
+    <span className="block text-[11px] leading-tight" title={detail}>
+      <span className="font-semibold text-amber-700">{breaks.length} · {duration(minutes)}</span>
+      <span className="mt-0.5 block max-w-[11rem] truncate text-slate-500">
+        {breaks.map((b) => b.reason).filter(Boolean).join(", ")}
       </span>
-      {(t.break_in_time || t.break_out_time) && (
-        <span className="mt-0.5 block whitespace-nowrap text-slate-400">
-          Break {prettyTime(t.break_in_time) || "—"} → {prettyTime(t.break_out_time) || "—"}
-        </span>
-      )}
     </span>
   );
 };
-
-/** The amber "late by" chip. Shown only where there is both a rostered login and a typed
- *  check-in to measure against it. It reports the clock and says nothing about the mark HR
- *  chose, which stays theirs — the two are allowed to disagree. */
-const LateChip = ({ minutes }) => (
-  <span
-    className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700"
-    title="Past the login time on this person's roster"
-  >
-    <AlarmClock className="h-3 w-3" />Late by {lateLabel(minutes)}
-  </span>
-);
 
 const TimeBox = ({ value, disabled, onChange, testid }) => (
   <input
@@ -211,6 +299,11 @@ export const AttendanceTab = () => {
   const [draft, setDraft] = useState({});
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Department, designation and branch. Narrowing changes what is ON SCREEN and nothing
+  // else: marks already typed behind a filter stay in the draft and still save (see
+  // `dirty`, which is taken over every row), because a filter is a way of looking at the
+  // register, not a decision about it.
+  const [filters, setFilters] = useState(NO_FILTERS);
 
   const load = useCallback((on) => {
     setLoading(true);
@@ -222,6 +315,10 @@ export const AttendanceTab = () => {
   useEffect(() => { load(day); }, [day, load]);
 
   const rows = useMemo(() => data?.rows || [], [data]);
+  // What the table draws and what the chips count. Everything that WRITES -- dirty, save,
+  // fill blanks -- works off `rows` or off this deliberately, and each says which.
+  const shown = useMemo(() => narrow(rows, filters), [rows, filters]);
+  const filtered = shown.length !== rows.length;
   const rowOf = (r) => ({ ...r, ...(draft[r.employee_id] || {}) });
 
   const dirty = useMemo(() => rows.filter((r) => {
@@ -229,6 +326,12 @@ export const AttendanceTab = () => {
     if (!d) return false;
     return d.status !== r.status || (d.check_in || "") !== r.check_in || (d.check_out || "") !== r.check_out || (d.note || "") !== r.note;
   }), [rows, draft]);
+
+  // Edits made before the filter was narrowed, now off screen. They still save -- `dirty`
+  // is taken over every row on purpose -- so the only real risk is the Save button
+  // counting changes the reader cannot see and reading like a miscount. Said out loud
+  // rather than fixed by dropping them, because dropping them would lose work.
+  const hiddenDirty = useMemo(() => dirty.filter((r) => !shown.includes(r)).length, [dirty, shown]);
 
   const set = (id, patch) => setDraft((prev) => {
     const base = rows.find((r) => r.employee_id === id) || {};
@@ -240,15 +343,23 @@ export const AttendanceTab = () => {
   });
 
   /** Fill every row that has no mark yet — the register's fast path. Rows already marked
-   *  and rows locked by an approval are left exactly as they are. */
+   *  and rows locked by an approval are left exactly as they are.
+   *
+   *  Fills what is ON SCREEN, not the whole register. Filtering to Sales and pressing this
+   *  must not quietly mark forty people the filter is hiding: the button sits next to the
+   *  list it appears to act on, and acting on more than that is the kind of thing nobody
+   *  finds until payroll. Its label says which, whenever a filter is up. */
   const fillBlanks = (status) => {
     const patch = {};
-    rows.forEach((r) => {
+    shown.forEach((r) => {
       const cur = rowOf(r);
       if (cur.locked || cur.status) return;
       patch[r.employee_id] = { status, check_in: "", check_out: "", note: cur.note || "" };
     });
-    if (!Object.keys(patch).length) { toast.info("Every row is already marked."); return; }
+    if (!Object.keys(patch).length) {
+      toast.info(filtered ? "Every row in this filter is already marked." : "Every row is already marked.");
+      return;
+    }
     setDraft((prev) => ({ ...prev, ...patch }));
   };
 
@@ -267,11 +378,13 @@ export const AttendanceTab = () => {
   };
 
   // The draft's own count, not the server's, so the chips move as the register is filled
-  // rather than only after a save.
+  // rather than only after a save -- and over what is on screen, so narrowing to a
+  // department answers "what does this department look like today" rather than leaving
+  // eight figures describing a list nobody is looking at.
   const summary = useMemo(() => {
     const out = { unmarked: 0, lop: 0 };
     MARKS.forEach((m) => { out[m.key] = 0; });
-    rows.forEach((r) => {
+    shown.forEach((r) => {
       // Read straight off the draft rather than through rowOf, which the dependency
       // array cannot see into. Every draft entry carries a full status, so the two agree.
       const s = (draft[r.employee_id] || r).status;
@@ -280,36 +393,12 @@ export const AttendanceTab = () => {
       out.lop += MARK_BY_KEY[s]?.lop || 0;
     });
     return out;
-  }, [rows, draft]);
+  }, [shown, draft]);
 
   const isToday = day === (data?.today || todayIso());
-  // The server's grace, which is the one the stored figure was worked out with. The
-  // constant only covers the moment before the register's first reply lands.
-  const grace = data?.late_grace_minutes ?? LATE_GRACE_MINUTES;
-
-  /** Fill a row's In and Out from the hours that person is rostered on.
-   *
-   *  An explicit click, never automatic. A register is a record of what happened, and
-   *  writing 09:00 into it because that is when somebody was due would be the register
-   *  making the claim rather than reporting one. This only saves the typing where the
-   *  roster is in fact what happened. */
-  const applyRosterHours = (r) => {
-    const shift = r.shift || {};
-    set(r.employee_id, { check_in: shift.login_time || "", check_out: shift.logout_time || "" });
-  };
-
-  // Two things the roster says about the day, both counted off the draft so they move as
-  // the register is filled in. `late` is the clock's answer, which is not the same as the
-  // Late mark HR may or may not choose to set — that stays theirs.
-  const rosterNote = useMemo(() => {
-    let late = 0, unrostered = 0;
-    rows.forEach((r) => {
-      const d = { ...r, ...(draft[r.employee_id] || {}) };
-      if (!isRostered(r.shift)) { unrostered += 1; return; }
-      if (CLOCKED.has(d.status) && lateBy(r.shift, d.check_in) > grace) late += 1;
-    });
-    return { late, unrostered };
-  }, [rows, draft, grace]);
+  // How much of this day filled itself in. Counted over what is on screen, like every
+  // other figure on this board, so it agrees with the rows under it when a filter is on.
+  const clockedCount = useMemo(() => shown.filter((r) => r.clocked).length, [shown]);
 
   return (
     <div className="space-y-4" data-testid="hr-attendance-tab">
@@ -338,9 +427,8 @@ export const AttendanceTab = () => {
           )}
 
           <span className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" />
-
           <Button variant="outline" size="sm" onClick={() => fillBlanks("present")} data-testid="hr-att-all-present">
-            <Check className="h-4 w-4" />Fill blanks as Present
+            <Check className="h-4 w-4" />{filtered ? "Fill shown blanks as Present" : "Fill blanks as Present"}
           </Button>
           <Button variant="outline" size="sm" onClick={() => fillBlanks("week_off")} data-testid="hr-att-all-off">
             <Sun className="h-4 w-4" />as Week off
@@ -358,6 +446,19 @@ export const AttendanceTab = () => {
             </Button>
           </div>
         </CardContent>
+        {/* Its own row under the controls, not squeezed in beside them: three dropdowns
+            and a day picker on one line wrap into an unreadable block on anything narrower
+            than a desktop. */}
+        <CardContent className="border-t border-slate-100 p-3 pt-3">
+          <RosterFilterBar
+            rows={rows}
+            filters={filters}
+            onChange={setFilters}
+            shown={shown.length}
+            total={rows.length}
+            testid="hr-att-filters"
+          />
+        </CardContent>
       </Card>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
@@ -366,6 +467,16 @@ export const AttendanceTab = () => {
         ))}
         <Stat label="Unmarked" value={summary.unmarked} tone={summary.unmarked ? "text-amber-600" : "text-slate-400"} testid="hr-att-count-unmarked" />
       </div>
+
+      {/* The Save button counts every pending change, including ones a narrowed filter is
+          hiding. That is the right behaviour -- a filter should not quietly discard work
+          -- but it makes the count disagree with the screen, so the difference is named. */}
+      {hiddenDirty > 0 && (
+        <p className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800" data-testid="hr-att-hidden-dirty-note">
+          <Filter className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {hiddenDirty} unsaved {hiddenDirty === 1 ? "change is" : "changes are"} outside the current filter. Saving still includes {hiddenDirty === 1 ? "it" : "them"}.
+        </p>
+      )}
 
       {/* Unmarked is deliberately not a silent absence — payroll pays those days. Said
           here so nobody discovers it at the end of the month on a payslip. */}
@@ -376,21 +487,13 @@ export const AttendanceTab = () => {
         </p>
       )}
 
-      {/* What the roster says about the day, beside what the marks say. Late here is the
-          clock's answer — a check-in past the login time somebody is rostered on — and it
-          is deliberately separate from the Late mark, which is HR's decision about that
-          fact and is not made for them. */}
-      {rosterNote.late > 0 && (
-        <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="hr-att-late-note">
+      {/* Said once, at the top: most of this register may already be filled in. The times
+          on a clocked row were pressed by the person they are about, so what is left here
+          is the marks, and the rows nobody clocked. */}
+      {clockedCount > 0 && (
+        <p className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800" data-testid="hr-att-clocked-note">
           <AlarmClock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {rosterNote.late} {rosterNote.late === 1 ? "person" : "people"} checked in more than {grace} minutes after their rostered login time.
-        </p>
-      )}
-
-      {rosterNote.unrostered > 0 && (
-        <p className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="hr-att-unrostered-note">
-          <AlarmClock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {rosterNote.unrostered} {rosterNote.unrostered === 1 ? "person has" : "people have"} no work timing set, so a late arrival cannot be spotted for them. Set it in Super Admin → Credentials → Timing.
+          {clockedCount} {clockedCount === 1 ? "person" : "people"} clocked in from their own header — those times and breaks are theirs, not typed here.
         </p>
       )}
 
@@ -410,7 +513,7 @@ export const AttendanceTab = () => {
           {/* Phone: one card per person. The pills wrap onto their own line, which is the
               only way seven of them fit a phone without becoming a dropdown. */}
           <div className="space-y-2 lg:hidden" data-testid="hr-att-cards">
-            {rows.map((r) => {
+            {shown.map((r) => {
               const d = rowOf(r);
               return (
                 <div key={r.employee_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-att-card-${r.employee_id}`}>
@@ -418,13 +521,18 @@ export const AttendanceTab = () => {
                     <EmployeeAvatar employee={r} size={34} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium text-slate-800">{r.full_name}</p>
-                      <p className="truncate text-xs text-slate-400">{r.employee_code}{r.designation ? ` · ${r.designation}` : ""}</p>
+                      <p className="truncate text-xs text-slate-400">
+                        {[r.employee_code, r.designation, r.branch_name].filter(Boolean).join(" · ")}
+                      </p>
                     </div>
                     {d.locked && <Lock className="h-3.5 w-3.5 shrink-0 text-sky-500" title="Set by an approved request" />}
                   </div>
-                  <div className="mt-1.5" data-testid={`hr-att-shift-m-${r.employee_id}`}>
-                    <ShiftCell shift={r.shift} />
-                  </div>
+                  {r.clocked && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2" data-testid={`hr-att-clocked-m-${r.employee_id}`}>
+                      <ClockedTag />
+                      <BreaksCell breaks={r.breaks} minutes={r.break_minutes} />
+                    </div>
+                  )}
                   <div className="mt-2">
                     <MarkPicker value={d.status} disabled={d.locked} onPick={(s) => set(r.employee_id, { status: s })} testid={`hr-att-mark-m-${r.employee_id}`} />
                   </div>
@@ -434,26 +542,13 @@ export const AttendanceTab = () => {
                         <TimeBox value={d.check_in} onChange={(v) => set(r.employee_id, { check_in: v })} testid={`hr-att-in-m-${r.employee_id}`} />
                         <span className="text-xs text-slate-400">to</span>
                         <TimeBox value={d.check_out} onChange={(v) => set(r.employee_id, { check_out: v })} testid={`hr-att-out-m-${r.employee_id}`} />
-                        {isRostered(r.shift) && !d.locked && (r.shift.login_time || r.shift.logout_time) && (
-                          <button
-                            type="button"
-                            onClick={() => applyRosterHours(r)}
-                            className="rounded border border-slate-200 px-1.5 py-1 text-[10px] font-semibold text-slate-500"
-                            data-testid={`hr-att-use-shift-m-${r.employee_id}`}
-                          >
-                            Use hours
-                          </button>
-                        )}
                       </div>
-                      {lateBy(r.shift, d.check_in) > grace && (
-                        <div data-testid={`hr-att-late-m-${r.employee_id}`}><LateChip minutes={lateBy(r.shift, d.check_in)} /></div>
-                      )}
                     </>
                   )}
                 </div>
               );
             })}
-            {rows.length === 0 && <Empty>No active employees to mark.</Empty>}
+            {shown.length === 0 && <Empty>{filtered ? "Nobody matches these filters." : "No active employees to mark."}</Empty>}
           </div>
 
           <Card className="hidden lg:block">
@@ -468,16 +563,16 @@ export const AttendanceTab = () => {
                     <tr>
                       <th className="px-3 py-2">S.No</th>
                       <th className="px-3 py-2">Employee</th>
-                      <th className="px-3 py-2">Dept</th>
-                      <th className="px-3 py-2">Shift</th>
+                      <th className="px-3 py-2">Dept &amp; Branch</th>
                       <th className="px-3 py-2">Mark</th>
                       <th className="px-3 py-2">In</th>
                       <th className="px-3 py-2">Out</th>
+                      <th className="px-3 py-2">Breaks</th>
                       <th className="px-3 py-2">Note</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r, i) => {
+                    {shown.map((r, i) => {
                       const d = rowOf(r);
                       const changed = dirty.some((x) => x.employee_id === r.employee_id);
                       return (
@@ -495,33 +590,27 @@ export const AttendanceTab = () => {
                               </div>
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-slate-600">{r.department || "—"}</td>
-                          <td className="px-3 py-2" data-testid={`hr-att-shift-${r.employee_id}`}>
-                            <ShiftCell shift={r.shift} />
-                            {/* Only where there are hours to copy and a mark that takes a
-                                clock — on a week off there is nothing for it to mean. */}
-                            {isRostered(r.shift) && CLOCKED.has(d.status) && !d.locked && (r.shift.login_time || r.shift.logout_time) && (
-                              <button
-                                type="button"
-                                onClick={() => applyRosterHours(r)}
-                                className="mt-1 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
-                                data-testid={`hr-att-use-shift-${r.employee_id}`}
-                              >
-                                Use these hours
-                              </button>
-                            )}
+                          {/* Both, stacked: they are two of the three things the bar above
+                              filters on, so a narrowed list should show what it was
+                              narrowed by rather than leaving the reader to trust it. */}
+                          <td className="px-3 py-2 text-slate-600">
+                            {r.department || "—"}
+                            {r.branch_name && <span className="block text-xs text-slate-400">{r.branch_name}</span>}
                           </td>
                           <td className="px-3 py-2">
                             <MarkPicker value={d.status} disabled={d.locked} onPick={(s) => set(r.employee_id, { status: s })} testid={`hr-att-mark-${r.employee_id}`} />
                           </td>
                           <td className="px-3 py-2">
                             <TimeBox value={d.check_in} disabled={d.locked || !CLOCKED.has(d.status)} onChange={(v) => set(r.employee_id, { check_in: v })} testid={`hr-att-in-${r.employee_id}`} />
-                            {CLOCKED.has(d.status) && lateBy(r.shift, d.check_in) > grace && (
-                              <span className="block" data-testid={`hr-att-late-${r.employee_id}`}><LateChip minutes={lateBy(r.shift, d.check_in)} /></span>
-                            )}
+                            {/* Under the time rather than in a column of its own: what it
+                                says is where that time came from. */}
+                            {r.clocked && <span className="mt-1 block" data-testid={`hr-att-clocked-${r.employee_id}`}><ClockedTag /></span>}
                           </td>
                           <td className="px-3 py-2">
                             <TimeBox value={d.check_out} disabled={d.locked || !CLOCKED.has(d.status)} onChange={(v) => set(r.employee_id, { check_out: v })} testid={`hr-att-out-${r.employee_id}`} />
+                          </td>
+                          <td className="px-3 py-2" data-testid={`hr-att-breaks-${r.employee_id}`}>
+                            <BreaksCell breaks={r.breaks} minutes={r.break_minutes} />
                           </td>
                           <td className="px-3 py-2">
                             <input
@@ -536,7 +625,7 @@ export const AttendanceTab = () => {
                         </tr>
                       );
                     })}
-                    {rows.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">No active employees to mark.</td></tr>}
+                    {shown.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">{filtered ? "Nobody matches these filters." : "No active employees to mark."}</td></tr>}
                   </tbody>
                 </table>
               </div>

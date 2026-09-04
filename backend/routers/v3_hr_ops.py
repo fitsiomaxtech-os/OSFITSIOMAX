@@ -14,11 +14,12 @@ loss-of-pay days are what payroll deducts. Nothing runs backwards: deleting a pa
 leaves attendance alone, and revoking an approval only clears the marks that approval put
 there (see `_clear_leave_marks`).
 
-One thing feeds in from outside that chain: the hours each person is rostered on, set per
-login in Super Admin -> Credentials. The register reads them to say how late a check-in
-was -- see _shift_by_employee -- and reports that beside the mark rather than instead of
-it. What the clock says and what HR decided about it are two different facts, and payroll
-still reads only the second.
+One thing feeds in from outside that chain: the clock in the header, which every person
+presses for themselves (routers/v3_clock.py). It writes the times and the breaks onto the
+register's rows, so the In and Out columns are what people actually pressed rather than
+somebody's recollection of when they arrived. The marks stay HR's -- a clocked-in day is
+`present` only where nobody has said otherwise, and absent, half and leave are decisions
+this file has always left to a person.
 
 Lives beside routers/v3_hr.py rather than inside it. Same URL prefix -- these are all
 /api/v3/hr to whoever is calling -- but that file is the org's *structure* (who exists,
@@ -41,11 +42,17 @@ from database import v3_col
 from deps import v3_current_user, is_hr_role
 from schemas.v3 import V3UserOut
 from utils import clinic_today, now_iso
-# The hours Super Admin rosters an account on in Credentials. The register reads them;
-# routers/v3_hr.py writes them. See work_timing.py for why the rules live apart from
-# both -- "late" has to mean the same thing on the screen that sets a shift and on the
-# one that measures a day against it.
-from work_timing import LATE_GRACE_MINUTES, WORK_TIMING_FIELDS, is_rostered, late_by, timing_of
+
+# The one thing this module takes from the org chart next door: how to read an employee's
+# branch. That answer is not a lookup -- it falls back to the linked account, and a
+# multi-branch desk holds several -- and two implementations of it would put "Anna Nagar"
+# on the Employees tab and "No branch" on the register for the same person.
+#
+# This direction is the right way round: the register reads employee records, so it
+# depends on the module that owns them. v3_hr.py's dashboard needs three constants back
+# out of here, and imports them inside the handler precisely because of this line -- a
+# top-level import there would close the loop.
+from routers.v3_hr import resolve_employee_branches
 
 router = APIRouter(prefix="/api/v3/hr")
 
@@ -124,31 +131,6 @@ def _dates_between(start: str, end: str) -> List[str]:
     return [(a + timedelta(days=n)).isoformat() for n in range((b - a).days + 1)]
 
 
-# ---------- the clock each person is rostered on ----------
-
-
-async def _shift_by_employee() -> Dict[str, Dict[str, str]]:
-    """Each employee's rostered clock, read off the login account that belongs to them.
-
-    The timing is set against the account, in Credentials, because that is the screen that
-    lists everyone who signs in. The register is drawn against the employee record. The
-    employee_id on the account is the join between the two, and someone with no account --
-    or an account nobody has rostered yet -- simply has no shift here, which the register
-    shows as "no timing set" rather than as an on-time arrival at midnight.
-    """
-    fields = {"_id": 0, "employee_id": 1, **{f: 1 for f in WORK_TIMING_FIELDS}}
-    rows = await v3_col("users").find({"employee_id": {"$nin": [None, ""]}}, fields).to_list(2000)
-    out: Dict[str, Dict[str, str]] = {}
-    for r in rows:
-        timing = timing_of(r)
-        # An account with nothing set is not an answer, and skipping it lets a second
-        # account on the same employee -- one person, two logins -- be the one that
-        # carries the hours.
-        if not is_rostered(timing):
-            continue
-        out.setdefault(r["employee_id"], timing)
-    return out
-
 
 # ---------- attendance ----------
 
@@ -171,12 +153,21 @@ async def _roster() -> List[Dict[str, Any]]:
     Inactive employees are left out rather than shown greyed. Someone who has left does
     not have days to mark, and a register that lists them invites a mark that would then
     have to be reasoned about at payroll time.
+
+    Department, designation and branch come along because the register is filtered by all
+    three -- fifty rows is more than anybody marks in one sitting, and the person filling
+    it in is usually working one branch or one desk at a time.
     """
     fields = {
         "_id": 0, "id": 1, "full_name": 1, "employee_code": 1, "department": 1,
         "designation": 1, "photo_url": 1, "gross_salary": 1, "net_salary": 1,
+        # Both, because branch_id alone is not the whole answer: a multi-branch desk holds
+        # branch_ids, and an employee with neither may still have one on their account.
+        # resolve_employee_branches settles all three cases.
+        "branch_id": 1, "branch_ids": 1,
     }
     rows = await v3_col("employees").find({"status": "active"}, fields).to_list(1000)
+    await resolve_employee_branches(rows)
     return sorted(rows, key=lambda e: str(e.get("full_name") or "").lower())
 
 
@@ -195,31 +186,26 @@ async def attendance_day(
     roster = await _roster()
     marks = await v3_col("attendance").find({"date": on}, {"_id": 0}).to_list(2000)
     by_emp = {m["employee_id"]: m for m in marks}
-    shifts = await _shift_by_employee()
 
     rows = []
     summary = {s: 0 for s in ATTENDANCE_STATUSES}
     summary["unmarked"] = 0
-    # Arrivals past the rostered login, counted separately from the `late` mark. The two
-    # answer different questions -- this one is what the clock says, that one is what HR
-    # decided about it -- and a day where they disagree is worth being able to see.
-    summary["late_by_clock"] = 0
-    summary["unrostered"] = 0
+    # How many of the day's rows are somebody's own record rather than a typed one. Worth
+    # counting on its own: a register that is mostly clocked is one HR is checking, and a
+    # register that is mostly typed is one they are still filling in by hand.
+    summary["clocked"] = 0
     for e in roster:
         m = by_emp.get(e["id"]) or {}
         status = m.get("status") or ""
-        shift = shifts.get(e["id"]) or timing_of({})
-        late = late_by(shift, m.get("check_in") or "")
-        if late > LATE_GRACE_MINUTES:
-            summary["late_by_clock"] += 1
-        if not is_rostered(shift):
-            summary["unrostered"] += 1
+        if m.get("clocked"):
+            summary["clocked"] += 1
         rows.append({
             "employee_id": e["id"],
             "full_name": e.get("full_name") or "",
             "employee_code": e.get("employee_code") or "",
             "department": e.get("department") or "",
             "designation": e.get("designation") or "",
+            "branch_name": e.get("branch_name") or "",
             "photo_url": e.get("photo_url") or "",
             "status": status,
             "check_in": m.get("check_in") or "",
@@ -229,22 +215,16 @@ async def attendance_day(
             # leave that was signed off and then wonders why payroll disagrees with them.
             "locked": bool(m.get("approval_id")),
             "marked_by": m.get("marked_by") or "",
-            # The hours this person is rostered on, so the register is filled in against
-            # what was expected rather than from memory. All four keys are always here,
-            # blank where nobody has set them.
-            "shift": shift,
-            "late_by_minutes": late,
-            "is_late": late > LATE_GRACE_MINUTES,
+            # What this person's own clock recorded, where they used it. `clocked` is what
+            # tells the register that the In and Out beside it were pressed rather than
+            # typed, and the breaks are the account of the gap between them.
+            "clocked": bool(m.get("clocked")),
+            "breaks": m.get("breaks") or [],
+            "break_minutes": int(m.get("break_minutes") or 0),
         })
         summary[status if status in summary else "unmarked"] += 1
 
-    return {
-        "date": on,
-        "today": clinic_today(),
-        "rows": rows,
-        "summary": summary,
-        "late_grace_minutes": LATE_GRACE_MINUTES,
-    }
+    return {"date": on, "today": clinic_today(), "rows": rows, "summary": summary}
 
 
 @router.post("/attendance")
@@ -285,8 +265,7 @@ async def mark_attendance(payload: AttendanceDay, user: V3UserOut = Depends(requ
             raise HTTPException(status_code=400, detail=f"Unknown attendance status: {status}")
         writable.append((entry, status))
 
-    shifts = await _shift_by_employee()
-    saved, cleared, late = 0, 0, 0
+    saved, cleared = 0, 0
     for entry, status in writable:
         # Clearing a mark is a real action -- it is how a wrong entry is taken back -- so
         # an empty status deletes the row rather than storing "" as an eighth status.
@@ -294,22 +273,14 @@ async def mark_attendance(payload: AttendanceDay, user: V3UserOut = Depends(requ
             res = await v3_col("attendance").delete_one({"date": on, "employee_id": entry.employee_id})
             cleared += res.deleted_count
             continue
-        check_in = (entry.check_in or "").strip()
-        # Worked out here and stored, not left to be recomputed on every read: the roster
-        # can change next month, and how late somebody was on a day that has already been
-        # marked is a fact about that day rather than about the hours they are on now.
-        late_minutes = late_by(shifts.get(entry.employee_id) or {}, check_in)
-        if late_minutes > LATE_GRACE_MINUTES:
-            late += 1
         await v3_col("attendance").update_one(
             {"date": on, "employee_id": entry.employee_id},
             {
                 "$set": {
                     "status": status,
-                    "check_in": check_in,
+                    "check_in": (entry.check_in or "").strip(),
                     "check_out": (entry.check_out or "").strip(),
                     "note": (entry.note or "").strip(),
-                    "late_by_minutes": late_minutes,
                     "marked_by": user.full_name,
                     "marked_at": now_iso(),
                 },
@@ -319,7 +290,7 @@ async def mark_attendance(payload: AttendanceDay, user: V3UserOut = Depends(requ
         )
         saved += 1
 
-    return {"date": on, "saved": saved, "cleared": cleared, "locked_skipped": skipped, "late_by_clock": late}
+    return {"date": on, "saved": saved, "cleared": cleared, "locked_skipped": skipped}
 
 
 async def _month_marks(month: str) -> Dict[str, Dict[str, float]]:
