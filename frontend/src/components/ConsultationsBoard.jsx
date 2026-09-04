@@ -849,12 +849,18 @@ const SplitPaymentLines = ({ lines, modes, expected, onChange, testPrefix, count
  * The rest is the balance (see BalanceDueBlock, and settle_fee_money on the server,
  * which schedules it as an unpaid installment collectable later under any payment mode).
  *
+ * `lockAmount` is for the fees nobody at the counter gets to name: the amount box is
+ * replaced by the figure itself, and it follows the net payable instead of being typed,
+ * so the discount boxes are the only way to move it. The Consultation Fee is collected
+ * that way -- its price is assigned upstream and a short collection there was never a
+ * thing Branch Admin should be deciding on the spot.
+ *
  * `discount` (rupees) and `amount` are both the parent's, and both go to the server.
  * The percentage box is a way of arriving at the rupee discount and nothing more, so it
  * keeps its own text state -- a half-typed "1." must survive to the "12" it is becoming
  * -- with `selfEdit` stopping the sync back from overwriting the box being typed into.
  */
-const FeeAmountEntry = ({ assignedPrice, discount, amount, onChange, label, testPrefix }) => {
+const FeeAmountEntry = ({ assignedPrice, discount, amount, onChange, label, testPrefix, lockAmount = false }) => {
   const price = Number(assignedPrice);
   const hasPrice = Number.isFinite(price) && price > 0;
   const discountRs = Math.max(0, parseFloat(discount) || 0);
@@ -879,7 +885,10 @@ const FeeAmountEntry = ({ assignedPrice, discount, amount, onChange, label, test
   const applyDiscount = (raw) => {
     const off = parseFloat(raw);
     const patch = { discount: raw };
-    if (hasPrice && (!validAmt || Math.abs(amt - netPayable) < 0.01)) {
+    // A locked amount has no part payment to protect -- it is the net payable by
+    // definition, so it follows the discount every time rather than only while it
+    // still happens to be sitting on it.
+    if (hasPrice && (lockAmount || !validAmt || Math.abs(amt - netPayable) < 0.01)) {
       patch.amount = String(round2(price - (Number.isFinite(off) ? round2(off) : 0)));
     }
     onChange(patch);
@@ -935,18 +944,38 @@ const FeeAmountEntry = ({ assignedPrice, discount, amount, onChange, label, test
 
       <div>
         <label className="mb-1 block text-[11px] font-medium text-slate-500">{label}</label>
-        <Input
-          type="number"
-          min="0"
-          value={amount}
-          onChange={(e) => onChange({ amount: e.target.value })}
-          className="h-9"
-          data-testid={`${testPrefix}-amount`}
-        />
-        {hasPrice && (
-          <p className="mt-1 text-[11px] text-slate-400" data-testid={`${testPrefix}-amount-hint`}>
-            Collecting less than Rs.{netPayable} leaves a balance to collect later — it is not a discount.
-          </p>
+        {lockAmount && hasPrice ? (
+          // Nothing here is the collector's to decide: the fee is the assigned price
+          // less whatever discount was agreed above, and that is the whole sum. Shown
+          // rather than typed so the figure still reads back before it is banked.
+          <>
+            <div
+              className="flex h-9 items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2.5 text-sm font-semibold text-slate-700"
+              data-testid={`${testPrefix}-amount`}
+            >
+              <span>Rs.{Number.isFinite(amt) ? amt.toLocaleString("en-IN") : netPayable.toLocaleString("en-IN")}</span>
+              <Lock className="h-3.5 w-3.5 text-slate-400" />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-400" data-testid={`${testPrefix}-amount-hint`}>
+              Fixed at the assigned price{discountRs > 0 ? " less the discount" : ""}. Use the Discount boxes above to reduce what is payable.
+            </p>
+          </>
+        ) : (
+          <>
+            <Input
+              type="number"
+              min="0"
+              value={amount}
+              onChange={(e) => onChange({ amount: e.target.value })}
+              className="h-9"
+              data-testid={`${testPrefix}-amount`}
+            />
+            {hasPrice && (
+              <p className="mt-1 text-[11px] text-slate-400" data-testid={`${testPrefix}-amount-hint`}>
+                Collecting less than Rs.{netPayable} leaves a balance to collect later — it is not a discount.
+              </p>
+            )}
+          </>
         )}
       </div>
 
@@ -2472,10 +2501,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   };
 
   // ---- Collect Fee (Branch Admin) — at the Consultation Visit stage ----
-  // The amount defaults to the assigned package_price but Branch Admin can edit it
-  // if a different amount was actually collected. If the Head Physio's decision was
-  // "Consultation + Treatment" and the Treatment Fee hasn't been paid yet, its draft
-  // opens alongside this one so both fees are collected together in one popup.
+  // The amount is the assigned package_price and is not Branch Admin's to retype
+  // (see `lockAmount` on FeeAmountEntry) — a discount agreed in the popup is the one
+  // thing that moves it. If the Head Physio's decision was "Consultation + Treatment"
+  // and the Treatment Fee hasn't been paid yet, its draft opens alongside this one so
+  // both fees are collected together in one popup.
   //
   // `leadArg` is for the Consultation Fee button on the table's rows, which opens this on a
   // patient who is not selected yet: `setSelectedLead` has not landed by the time this runs,
@@ -6988,7 +7018,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             data-testid="cons-collect-fee-amount"
                           />
                           {selectedLead.package_price != null && (
-                            <p className="mt-1 text-[11px] text-slate-400">Assigned package price: Rs.{selectedLead.package_price} — editable in the next step if a different amount was actually collected.</p>
+                            <p className="mt-1 text-[11px] text-slate-400">Assigned package price: Rs.{selectedLead.package_price} — a discount can be agreed in the next step; the fee itself is not editable.</p>
                           )}
                         </div>
                         <div>
@@ -7116,9 +7146,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <button onClick={() => setPackageConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
-                    {/* Replaces the old bare amount box and its "differs from" warning.
-                        A discount is typed into its own boxes; an amount under what that
-                        leaves payable is a balance, named underneath — never a write-off. */}
+                    {/* Replaces the old bare amount box and its "differs from" warning:
+                        a discount is typed into its own boxes, and nothing else moves the
+                        fee. `lockAmount` is why the fee itself is shown rather than typed
+                        — it is the assigned price less that discount, which is not Branch
+                        Admin's to overtype, so there is no box to overtype it in. */}
                     <FeeAmountEntry
                       assignedPrice={expected}
                       discount={collectFeeDraft.discount}
@@ -7126,6 +7158,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       onChange={(patch) => setCollectFeeDraft({ ...collectFeeDraft, ...patch })}
                       label="Consultation Fee (₹)"
                       testPrefix="cons-collect-fee-confirm"
+                      lockAmount
                     />
 
                     <BalanceDueBlock
