@@ -520,6 +520,9 @@ export const hrUsers = async (params = {}) => {
 };
 export const hrCreateUser = async (payload) => (await api.post("/hr/users", payload)).data;
 export const hrUpdateUser = async (id, payload) => (await api.patch(`/hr/users/${id}`, payload)).data;
+// All four times go together — a box left empty clears that mark rather than leaving
+// the stored one alone, which is the only way one can be taken back off a roster.
+export const hrSetUserTiming = async (id, timing) => (await api.patch(`/hr/users/${id}/timing`, timing)).data;
 export const hrUpdateUserRole = async (id, role) => (await api.patch(`/hr/users/${id}/role?role=${role}`)).data;
 export const hrResetPassword = async (id, password) => (await api.patch(`/hr/users/${id}/reset-password?password=${encodeURIComponent(password)}`)).data;
 export const hrDeactivateUser = async (id) => (await api.delete(`/hr/users/${id}`)).data;

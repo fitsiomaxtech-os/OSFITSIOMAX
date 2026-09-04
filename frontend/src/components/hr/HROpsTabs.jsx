@@ -33,6 +33,9 @@ import { toast } from "@/components/ui/sonner";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { downloadCsv } from "@/lib/printable";
+// The hours each person is rostered on, set in Super Admin → Credentials. Shared with
+// that screen rather than reimplemented here — see lib/workTiming.js.
+import { LATE_GRACE_MINUTES, isRostered, lateBy, lateLabel, prettyTime, workTiming } from "@/lib/workTiming";
 import {
   hrAttendanceDay, hrMarkAttendance, hrEmployees,
   hrApprovals, hrCreateApproval, hrDecideApproval, hrDeleteApproval,
@@ -142,6 +145,52 @@ const MarkPicker = ({ value, disabled, onPick, testid }) => (
   </div>
 );
 
+// ---------- the roster behind the register ----------
+//
+// The hours Super Admin sets against a login in Credentials. The register carries them per
+// row so a day is filled in against the hours somebody is actually on, and so the "late by
+// 14m" it reports has the 09:00 it was measured from sitting next to it.
+
+/** A row's rostered hours, with the break under them.
+ *
+ *  Nobody rostered reads as "No timing set" rather than as a dash — a blank here is the
+ *  reason the register cannot say whether an arrival was late, so it is named, and the
+ *  title says where the answer is set. */
+const ShiftCell = ({ shift }) => {
+  const t = workTiming({ shift });
+  if (!isRostered(t)) {
+    return (
+      <span className="text-[11px] text-slate-300" title="Set this person's hours in Super Admin → Credentials → Timing">
+        No timing set
+      </span>
+    );
+  }
+  return (
+    <span className="block text-[11px] leading-tight text-slate-600">
+      <span className="whitespace-nowrap font-medium text-slate-700">
+        {prettyTime(t.login_time) || "—"} <span className="text-slate-400">→</span> {prettyTime(t.logout_time) || "—"}
+      </span>
+      {(t.break_in_time || t.break_out_time) && (
+        <span className="mt-0.5 block whitespace-nowrap text-slate-400">
+          Break {prettyTime(t.break_in_time) || "—"} → {prettyTime(t.break_out_time) || "—"}
+        </span>
+      )}
+    </span>
+  );
+};
+
+/** The amber "late by" chip. Shown only where there is both a rostered login and a typed
+ *  check-in to measure against it. It reports the clock and says nothing about the mark HR
+ *  chose, which stays theirs — the two are allowed to disagree. */
+const LateChip = ({ minutes }) => (
+  <span
+    className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700"
+    title="Past the login time on this person's roster"
+  >
+    <AlarmClock className="h-3 w-3" />Late by {lateLabel(minutes)}
+  </span>
+);
+
 const TimeBox = ({ value, disabled, onChange, testid }) => (
   <input
     type="time"
@@ -234,6 +283,33 @@ export const AttendanceTab = () => {
   }, [rows, draft]);
 
   const isToday = day === (data?.today || todayIso());
+  // The server's grace, which is the one the stored figure was worked out with. The
+  // constant only covers the moment before the register's first reply lands.
+  const grace = data?.late_grace_minutes ?? LATE_GRACE_MINUTES;
+
+  /** Fill a row's In and Out from the hours that person is rostered on.
+   *
+   *  An explicit click, never automatic. A register is a record of what happened, and
+   *  writing 09:00 into it because that is when somebody was due would be the register
+   *  making the claim rather than reporting one. This only saves the typing where the
+   *  roster is in fact what happened. */
+  const applyRosterHours = (r) => {
+    const shift = r.shift || {};
+    set(r.employee_id, { check_in: shift.login_time || "", check_out: shift.logout_time || "" });
+  };
+
+  // Two things the roster says about the day, both counted off the draft so they move as
+  // the register is filled in. `late` is the clock's answer, which is not the same as the
+  // Late mark HR may or may not choose to set — that stays theirs.
+  const rosterNote = useMemo(() => {
+    let late = 0, unrostered = 0;
+    rows.forEach((r) => {
+      const d = { ...r, ...(draft[r.employee_id] || {}) };
+      if (!isRostered(r.shift)) { unrostered += 1; return; }
+      if (CLOCKED.has(d.status) && lateBy(r.shift, d.check_in) > grace) late += 1;
+    });
+    return { late, unrostered };
+  }, [rows, draft, grace]);
 
   return (
     <div className="space-y-4" data-testid="hr-attendance-tab">
@@ -300,6 +376,24 @@ export const AttendanceTab = () => {
         </p>
       )}
 
+      {/* What the roster says about the day, beside what the marks say. Late here is the
+          clock's answer — a check-in past the login time somebody is rostered on — and it
+          is deliberately separate from the Late mark, which is HR's decision about that
+          fact and is not made for them. */}
+      {rosterNote.late > 0 && (
+        <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="hr-att-late-note">
+          <AlarmClock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {rosterNote.late} {rosterNote.late === 1 ? "person" : "people"} checked in more than {grace} minutes after their rostered login time.
+        </p>
+      )}
+
+      {rosterNote.unrostered > 0 && (
+        <p className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="hr-att-unrostered-note">
+          <AlarmClock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {rosterNote.unrostered} {rosterNote.unrostered === 1 ? "person has" : "people have"} no work timing set, so a late arrival cannot be spotted for them. Set it in Super Admin → Credentials → Timing.
+        </p>
+      )}
+
       {/* What this day costs, said on the day it is marked rather than at the end of the
           month on a payslip. Absences and half days are the only two marks that carry a
           figure -- see LOP_DAYS in backend/routers/v3_hr_ops.py, which is where payroll
@@ -328,15 +422,33 @@ export const AttendanceTab = () => {
                     </div>
                     {d.locked && <Lock className="h-3.5 w-3.5 shrink-0 text-sky-500" title="Set by an approved request" />}
                   </div>
+                  <div className="mt-1.5" data-testid={`hr-att-shift-m-${r.employee_id}`}>
+                    <ShiftCell shift={r.shift} />
+                  </div>
                   <div className="mt-2">
                     <MarkPicker value={d.status} disabled={d.locked} onPick={(s) => set(r.employee_id, { status: s })} testid={`hr-att-mark-m-${r.employee_id}`} />
                   </div>
                   {CLOCKED.has(d.status) && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <TimeBox value={d.check_in} onChange={(v) => set(r.employee_id, { check_in: v })} testid={`hr-att-in-m-${r.employee_id}`} />
-                      <span className="text-xs text-slate-400">to</span>
-                      <TimeBox value={d.check_out} onChange={(v) => set(r.employee_id, { check_out: v })} testid={`hr-att-out-m-${r.employee_id}`} />
-                    </div>
+                    <>
+                      <div className="mt-2 flex items-center gap-2">
+                        <TimeBox value={d.check_in} onChange={(v) => set(r.employee_id, { check_in: v })} testid={`hr-att-in-m-${r.employee_id}`} />
+                        <span className="text-xs text-slate-400">to</span>
+                        <TimeBox value={d.check_out} onChange={(v) => set(r.employee_id, { check_out: v })} testid={`hr-att-out-m-${r.employee_id}`} />
+                        {isRostered(r.shift) && !d.locked && (r.shift.login_time || r.shift.logout_time) && (
+                          <button
+                            type="button"
+                            onClick={() => applyRosterHours(r)}
+                            className="rounded border border-slate-200 px-1.5 py-1 text-[10px] font-semibold text-slate-500"
+                            data-testid={`hr-att-use-shift-m-${r.employee_id}`}
+                          >
+                            Use hours
+                          </button>
+                        )}
+                      </div>
+                      {lateBy(r.shift, d.check_in) > grace && (
+                        <div data-testid={`hr-att-late-m-${r.employee_id}`}><LateChip minutes={lateBy(r.shift, d.check_in)} /></div>
+                      )}
+                    </>
                   )}
                 </div>
               );
@@ -357,6 +469,7 @@ export const AttendanceTab = () => {
                       <th className="px-3 py-2">S.No</th>
                       <th className="px-3 py-2">Employee</th>
                       <th className="px-3 py-2">Dept</th>
+                      <th className="px-3 py-2">Shift</th>
                       <th className="px-3 py-2">Mark</th>
                       <th className="px-3 py-2">In</th>
                       <th className="px-3 py-2">Out</th>
@@ -383,11 +496,29 @@ export const AttendanceTab = () => {
                             </div>
                           </td>
                           <td className="px-3 py-2 text-slate-600">{r.department || "—"}</td>
+                          <td className="px-3 py-2" data-testid={`hr-att-shift-${r.employee_id}`}>
+                            <ShiftCell shift={r.shift} />
+                            {/* Only where there are hours to copy and a mark that takes a
+                                clock — on a week off there is nothing for it to mean. */}
+                            {isRostered(r.shift) && CLOCKED.has(d.status) && !d.locked && (r.shift.login_time || r.shift.logout_time) && (
+                              <button
+                                type="button"
+                                onClick={() => applyRosterHours(r)}
+                                className="mt-1 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
+                                data-testid={`hr-att-use-shift-${r.employee_id}`}
+                              >
+                                Use these hours
+                              </button>
+                            )}
+                          </td>
                           <td className="px-3 py-2">
                             <MarkPicker value={d.status} disabled={d.locked} onPick={(s) => set(r.employee_id, { status: s })} testid={`hr-att-mark-${r.employee_id}`} />
                           </td>
                           <td className="px-3 py-2">
                             <TimeBox value={d.check_in} disabled={d.locked || !CLOCKED.has(d.status)} onChange={(v) => set(r.employee_id, { check_in: v })} testid={`hr-att-in-${r.employee_id}`} />
+                            {CLOCKED.has(d.status) && lateBy(r.shift, d.check_in) > grace && (
+                              <span className="block" data-testid={`hr-att-late-${r.employee_id}`}><LateChip minutes={lateBy(r.shift, d.check_in)} /></span>
+                            )}
                           </td>
                           <td className="px-3 py-2">
                             <TimeBox value={d.check_out} disabled={d.locked || !CLOCKED.has(d.status)} onChange={(v) => set(r.employee_id, { check_out: v })} testid={`hr-att-out-${r.employee_id}`} />
@@ -405,7 +536,7 @@ export const AttendanceTab = () => {
                         </tr>
                       );
                     })}
-                    {rows.length === 0 && <tr><td colSpan="7" className="px-3 py-6 text-center text-slate-400">No active employees to mark.</td></tr>}
+                    {rows.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">No active employees to mark.</td></tr>}
                   </tbody>
                 </table>
               </div>

@@ -28,6 +28,7 @@ from routers.v3_hr_ops import (  # noqa: E402
     _compute_slip, _dates_between, _month_span, _pick_for_today, _totals,
     _valid_date, _valid_month,
 )
+from work_timing import clean_work_timing, late_by  # noqa: E402
 
 # 30 days, ₹30,000 — so a day is worth exactly ₹1,000 and every figure below can be read
 # without arithmetic.
@@ -171,3 +172,91 @@ class TestDateValidation:
     def test_a_month_is_checked_too(self):
         with pytest.raises(HTTPException):
             _valid_month("2026-13")
+# The other half of the same chain: the roster a register is measured against. The four
+# times are set per login in Super Admin -> Credentials and read by attendance, and the
+# rules for both live in work_timing.py -- pure, like everything else tested here, so the
+# rule that turns "09:00 rostered, 09:14 typed" into "late by 14" is pinned down in the
+# same file as the rules payroll reads.
+class TestLateness:
+    NINE = {"login_time": "09:00"}
+
+    @pytest.mark.parametrize("check_in,expected", [
+        ("09:00", 0),    # on the dot is not late
+        ("09:10", 10),
+        ("09:14", 14),
+        ("10:30", 90),
+        ("08:50", 0),    # early is not negative-late, it is simply not late
+    ])
+    def test_minutes_past_the_rostered_login(self, check_in, expected):
+        assert late_by(self.NINE, check_in) == expected
+
+    def test_a_night_shift_counts_forward_over_midnight(self):
+        """22:00 rostered, 01:00 typed is three hours late, not twenty-one hours early."""
+        assert late_by({"login_time": "22:00"}, "01:00") == 180
+
+    def test_arriving_before_a_night_shift_is_not_late(self):
+        assert late_by({"login_time": "22:00"}, "21:55") == 0
+
+    @pytest.mark.parametrize("shift,check_in", [
+        ({}, "09:45"),                       # nobody has rostered this person
+        ({"login_time": ""}, "09:45"),
+        ({"login_time": "09:00"}, ""),       # a mark with no clock on it
+        ({"login_time": "09:00"}, "half"),   # anything unparseable
+    ])
+    def test_nothing_to_measure_is_not_a_late_arrival(self, shift, check_in):
+        """A missing half of the comparison reads as 0, never as a huge overrun."""
+        assert late_by(shift, check_in) == 0
+
+
+class TestWorkTiming:
+    """What Super Admin may store as somebody's hours.
+
+    Only what could not be worked is refused. A half-filled roster is how one gets filled
+    in, so it is allowed all the way through.
+    """
+
+    def test_a_full_day_is_kept_as_typed(self):
+        assert clean_work_timing({
+            "login_time": "09:00", "logout_time": "18:00",
+            "break_in_time": "13:00", "break_out_time": "13:45",
+        }) == {
+            "login_time": "09:00", "logout_time": "18:00",
+            "break_in_time": "13:00", "break_out_time": "13:45",
+        }
+
+    def test_nothing_set_is_four_blanks_rather_than_a_refusal(self):
+        assert clean_work_timing({}) == {
+            "login_time": "", "logout_time": "", "break_in_time": "", "break_out_time": "",
+        }
+
+    def test_a_login_on_its_own_is_enough(self):
+        """It is the only one attendance needs — the register measures arrivals against it."""
+        assert clean_work_timing({"login_time": "09:00"})["login_time"] == "09:00"
+
+    def test_a_night_shift_and_its_break_are_allowed(self):
+        assert clean_work_timing({
+            "login_time": "22:00", "logout_time": "06:00",
+            "break_in_time": "02:00", "break_out_time": "02:30",
+        })["break_in_time"] == "02:00"
+
+    @pytest.mark.parametrize("bad", ["9am", "25:00", "09:60", "0900", "9", "09:00:00"])
+    def test_a_time_that_is_not_a_clock_is_refused(self, bad):
+        with pytest.raises(HTTPException) as err:
+            clean_work_timing({"login_time": bad})
+        assert err.value.status_code == 400
+
+    def test_a_shift_cannot_end_where_it_starts(self):
+        with pytest.raises(HTTPException):
+            clean_work_timing({"login_time": "09:00", "logout_time": "09:00"})
+
+    def test_half_a_break_is_refused(self):
+        with pytest.raises(HTTPException):
+            clean_work_timing({"login_time": "09:00", "logout_time": "18:00", "break_in_time": "13:00"})
+
+    @pytest.mark.parametrize("brk", [("19:00", "19:30"), ("17:45", "18:30"), ("08:00", "08:30")])
+    def test_a_break_outside_the_shift_is_refused(self, brk):
+        with pytest.raises(HTTPException):
+            clean_work_timing({
+                "login_time": "09:00", "logout_time": "18:00",
+                "break_in_time": brk[0], "break_out_time": brk[1],
+            })
