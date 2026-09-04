@@ -22,9 +22,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlarmClock, Ban, CalendarCheck, CalendarDays, CalendarOff, Check, ChevronLeft, ChevronRight,
-  Download, Filter, IndianRupee, Lock, Palmtree, Pin, PinOff, Plus, Quote, RefreshCw, Save,
-  Sun, Trash2, TriangleAlert, Undo2, Wallet, X,
+  AlarmClock, Ban, CalendarCheck, CalendarOff, Check, ChevronLeft, ChevronRight, Coffee,
+  Download, Eye, Filter, IndianRupee, Lock, Palmtree, Pin, PinOff, Plus, Quote, RefreshCw,
+  Trash2, TriangleAlert, Undo2, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,9 +35,9 @@ import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { downloadCsv } from "@/lib/printable";
 // The clock people press for themselves — see components/ClockWidget.jsx, which is where
 // the times on this register come from now.
-import { duration, prettyTime } from "@/lib/clock";
+import { duration, hours, prettyTime } from "@/lib/clock";
 import {
-  hrAttendanceDay, hrMarkAttendance, hrEmployees,
+  hrAttendanceOverview, hrMarkAttendance, hrEmployees,
   hrApprovals, hrCreateApproval, hrDecideApproval, hrDeleteApproval,
   hrPayroll, hrGeneratePayroll, hrAdjustPayslip, hrPayrollStatus,
   hrQuotes, hrAddQuote, hrUpdateQuote, hrDeleteQuote,
@@ -235,50 +235,8 @@ const MarkPicker = ({ value, disabled, onPick, testid }) => (
   </div>
 );
 
-// ---------- what the person themselves recorded ----------
-//
-// The In and Out on this register are, for anybody who used the clock in their header, the
-// times they pressed it — see backend/routers/v3_clock.py, which writes them here. HR can
-// still type over them, because a phone left at home is a real thing and the register has
-// to be able to say what happened either way.
-
-/** The marker on a row whose times were pressed rather than typed.
- *
- *  Worth showing rather than assuming: a register where most rows are clocked is one HR is
- *  checking, and one where none of them are is one they are still filling in by hand. */
-const ClockedTag = () => (
-  <span
-    className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700"
-    title="Pressed by this person from their own header"
-  >
-    <AlarmClock className="h-3 w-3" />Clocked
-  </span>
-);
-
-/** A row's breaks, with the reasons on them.
- *
- *  The reasons are the whole point of asking for one, so they belong on the register rather
- *  than only in the person's own history — "where was this person for fifty minutes" is a
- *  question HR asks of the day, and answering it should not need a second screen. */
-// A tooltip's line break. Written as a named constant because an escape inside a JSX file
-// is easy to lose to a reformat, and losing this one puts every break on one long line.
-const NEWLINE = String.fromCharCode(10);
-
-const BreaksCell = ({ breaks, minutes }) => {
-  if (!breaks || breaks.length === 0) return <span className="text-[11px] text-slate-300">—</span>;
-  const detail = breaks
-    .map((b) => `${b.reason}: ${prettyTime(b.out)} → ${b.in ? prettyTime(b.in) : "still out"}`)
-    .join(NEWLINE);
-  return (
-    <span className="block text-[11px] leading-tight" title={detail}>
-      <span className="font-semibold text-amber-700">{breaks.length} · {duration(minutes)}</span>
-      <span className="mt-0.5 block max-w-[11rem] truncate text-slate-500">
-        {breaks.map((b) => b.reason).filter(Boolean).join(", ")}
-      </span>
-    </span>
-  );
-};
-
+/** A typed time, for the detail panel's HR override. The register's own times come off
+ *  the clock; this is for the day somebody left their phone at home. */
 const TimeBox = ({ value, disabled, onChange, testid }) => (
   <input
     type="time"
@@ -290,165 +248,313 @@ const TimeBox = ({ value, disabled, onChange, testid }) => (
   />
 );
 
-export const AttendanceTab = () => {
-  const [day, setDay] = useState(todayIso());
-  const [data, setData] = useState(null);
-  // Marks typed but not yet saved, keyed by employee id. Held apart from `data` so a row
-  // can be compared against what the server last said and only the changed ones sent —
-  // and so a failed save leaves the typing on screen rather than wiping it.
-  const [draft, setDraft] = useState({});
+// ---------- the board's own vocabulary ----------
+
+// What a row can say about somebody's day. The first four come off the clock and are
+// facts; the rest are HR's marks and are decisions. Mirrors _board_status in
+// backend/routers/v3_hr_ops.py, which decides which of the two speaks for a given day.
+const BOARD_STATUS = {
+  working: { label: "Working", tone: "bg-sky-100 text-sky-700" },
+  on_break: { label: "On break", tone: "bg-amber-100 text-amber-700" },
+  done: { label: "Done", tone: "bg-emerald-100 text-emerald-700" },
+  yet_to_login: { label: "Yet to login", tone: "bg-slate-100 text-slate-500" },
+  present: { label: "Present", tone: "bg-emerald-100 text-emerald-700" },
+  late: { label: "Late", tone: "bg-amber-100 text-amber-700" },
+  half_day: { label: "Half day", tone: "bg-orange-100 text-orange-700" },
+  absent: { label: "Absent", tone: "bg-rose-100 text-rose-700" },
+  leave: { label: "Leave", tone: "bg-sky-100 text-sky-700" },
+  week_off: { label: "Week off", tone: "bg-slate-100 text-slate-600" },
+  holiday: { label: "Holiday", tone: "bg-violet-100 text-violet-700" },
+};
+
+const StatusBadge = ({ status }) => {
+  const s = BOARD_STATUS[status] || BOARD_STATUS.yet_to_login;
+  return (
+    <span className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold ${s.tone}`}>{s.label}</span>
+  );
+};
+
+// The four spans, mirroring PERIODS in backend/routers/v3_hr_ops.py.
+const PERIODS = [
+  { key: "day", label: "Day" },
+  { key: "range", label: "Range" },
+  { key: "month", label: "Month" },
+  { key: "year", label: "Year" },
+];
+
+/** The pill row that picks the span. Its own control rather than a select, because four
+ *  choices that are switched between constantly should be one click, not two. */
+const PeriodPicker = ({ value, onChange, testid }) => (
+  <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" data-testid={testid}>
+    {PERIODS.map((p) => (
+      <button
+        key={p.key}
+        type="button"
+        onClick={() => onChange(p.key)}
+        className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+          value === p.key ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+        }`}
+        data-testid={`${testid}-${p.key}`}
+      >
+        {p.label}
+      </button>
+    ))}
+  </div>
+);
+
+/** One person's day, opened from the row. Two things live here that are deliberately not
+ *  in the table: the account of their breaks, and the only way to overrule what the clock
+ *  says.
+ *
+ *  The marks used to be seven pills on every row, which put a control for the rare case —
+ *  somebody's day needs correcting — in front of the common one, which is reading who is
+ *  in. They are still reachable, still the same seven, and payroll still reads them; they
+ *  are one click further away because that is how often they are wanted. */
+const DayDetailModal = ({ row, date, onClose, onSaved }) => {
+  const [status, setStatus] = useState(row.status && BOARD_STATUS[row.status] && MARK_BY_KEY[row.status] ? row.status : "");
+  const [checkIn, setCheckIn] = useState(row.check_in || "");
+  const [checkOut, setCheckOut] = useState(row.check_out || "");
+  const [note, setNote] = useState(row.note || "");
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
-  // Department, designation and branch. Narrowing changes what is ON SCREEN and nothing
-  // else: marks already typed behind a filter stay in the draft and still save (see
-  // `dirty`, which is taken over every row), because a filter is a way of looking at the
-  // register, not a decision about it.
-  const [filters, setFilters] = useState(NO_FILTERS);
-
-  const load = useCallback((on) => {
-    setLoading(true);
-    return hrAttendanceDay(on)
-      .then((d) => { setData(d); setDraft({}); })
-      .catch(fail)
-      .finally(() => setLoading(false));
-  }, []);
-  useEffect(() => { load(day); }, [day, load]);
-
-  const rows = useMemo(() => data?.rows || [], [data]);
-  // What the table draws and what the chips count. Everything that WRITES -- dirty, save,
-  // fill blanks -- works off `rows` or off this deliberately, and each says which.
-  const shown = useMemo(() => narrow(rows, filters), [rows, filters]);
-  const filtered = shown.length !== rows.length;
-  const rowOf = (r) => ({ ...r, ...(draft[r.employee_id] || {}) });
-
-  const dirty = useMemo(() => rows.filter((r) => {
-    const d = draft[r.employee_id];
-    if (!d) return false;
-    return d.status !== r.status || (d.check_in || "") !== r.check_in || (d.check_out || "") !== r.check_out || (d.note || "") !== r.note;
-  }), [rows, draft]);
-
-  // Edits made before the filter was narrowed, now off screen. They still save -- `dirty`
-  // is taken over every row on purpose -- so the only real risk is the Save button
-  // counting changes the reader cannot see and reading like a miscount. Said out loud
-  // rather than fixed by dropping them, because dropping them would lose work.
-  const hiddenDirty = useMemo(() => dirty.filter((r) => !shown.includes(r)).length, [dirty, shown]);
-
-  const set = (id, patch) => setDraft((prev) => {
-    const base = rows.find((r) => r.employee_id === id) || {};
-    const next = { status: base.status, check_in: base.check_in, check_out: base.check_out, note: base.note, ...(prev[id] || {}), ...patch };
-    // A mark with no clock keeps no times: switching Present to Week off should not leave
-    // yesterday's 09:15 sitting on a day nobody worked.
-    if (!CLOCKED.has(next.status)) { next.check_in = ""; next.check_out = ""; }
-    return { ...prev, [id]: next };
-  });
-
-  /** Fill every row that has no mark yet — the register's fast path. Rows already marked
-   *  and rows locked by an approval are left exactly as they are.
-   *
-   *  Fills what is ON SCREEN, not the whole register. Filtering to Sales and pressing this
-   *  must not quietly mark forty people the filter is hiding: the button sits next to the
-   *  list it appears to act on, and acting on more than that is the kind of thing nobody
-   *  finds until payroll. Its label says which, whenever a filter is up. */
-  const fillBlanks = (status) => {
-    const patch = {};
-    shown.forEach((r) => {
-      const cur = rowOf(r);
-      if (cur.locked || cur.status) return;
-      patch[r.employee_id] = { status, check_in: "", check_out: "", note: cur.note || "" };
-    });
-    if (!Object.keys(patch).length) {
-      toast.info(filtered ? "Every row in this filter is already marked." : "Every row is already marked.");
-      return;
-    }
-    setDraft((prev) => ({ ...prev, ...patch }));
-  };
 
   const save = async () => {
-    if (!dirty.length) return;
     setSaving(true);
     try {
-      const entries = dirty.map((r) => {
-        const d = rowOf(r);
-        return { employee_id: r.employee_id, status: d.status || "", check_in: d.check_in || "", check_out: d.check_out || "", note: d.note || "" };
-      });
-      const res = await hrMarkAttendance(day, entries);
-      toast.success(`${prettyDate(day)} saved — ${res.saved} marked${res.cleared ? `, ${res.cleared} cleared` : ""}.`);
-      await load(day);
+      await hrMarkAttendance(date, [{
+        employee_id: row.employee_id,
+        status,
+        check_in: CLOCKED.has(status) ? checkIn : "",
+        check_out: CLOCKED.has(status) ? checkOut : "",
+        note,
+      }]);
+      toast.success(`${row.full_name}'s day saved.`);
+      onSaved();
     } catch (e) { fail(e); } finally { setSaving(false); }
   };
 
-  // The draft's own count, not the server's, so the chips move as the register is filled
-  // rather than only after a save -- and over what is on screen, so narrowing to a
-  // department answers "what does this department look like today" rather than leaving
-  // eight figures describing a list nobody is looking at.
-  const summary = useMemo(() => {
-    const out = { unmarked: 0, lop: 0 };
-    MARKS.forEach((m) => { out[m.key] = 0; });
-    shown.forEach((r) => {
-      // Read straight off the draft rather than through rowOf, which the dependency
-      // array cannot see into. Every draft entry carries a full status, so the two agree.
-      const s = (draft[r.employee_id] || r).status;
-      if (!s) { out.unmarked += 1; return; }
-      out[s] = (out[s] || 0) + 1;
-      out.lop += MARK_BY_KEY[s]?.lop || 0;
-    });
-    return out;
-  }, [shown, draft]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="hr-att-detail">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <EmployeeAvatar employee={row} size={40} />
+            <div className="min-w-0">
+              <p className="truncate font-bold text-slate-800">{row.full_name}</p>
+              <p className="truncate text-xs text-slate-400">
+                {[row.employee_code, row.designation, row.department, row.branch_name].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="shrink-0 text-slate-400 hover:text-slate-700" data-testid="hr-att-detail-close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
-  const isToday = day === (data?.today || todayIso());
-  // How much of this day filled itself in. Counted over what is on screen, like every
-  // other figure on this board, so it agrees with the rows under it when a filter is on.
-  const clockedCount = useMemo(() => shown.filter((r) => r.clocked).length, [shown]);
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <Stat label="On the clock" value={hours(row.login_minutes)} testid="hr-att-detail-login" />
+          <Stat label="Worked" value={hours(row.worked_minutes)} tone="text-emerald-600" testid="hr-att-detail-worked" />
+          <Stat label="On break" value={duration(row.break_minutes)} tone="text-amber-600" testid="hr-att-detail-break" />
+        </div>
+
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Breaks</p>
+          {(row.breaks || []).length === 0 ? (
+            <p className="mt-1 text-sm text-slate-400">No breaks taken.</p>
+          ) : (
+            <ul className="mt-1 space-y-1">
+              {row.breaks.map((b, i) => (
+                <li key={i} className="flex items-center justify-between rounded-md bg-slate-50 px-2.5 py-1.5 text-sm">
+                  <span className="text-slate-700">{b.reason || "No reason given"}</span>
+                  <span className="text-xs text-slate-500">
+                    {prettyTime(b.out)} → {b.in ? prettyTime(b.in) : <span className="font-semibold text-amber-600">still out</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="mt-4 border-t border-slate-100 pt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">HR mark</p>
+          <p className="mt-0.5 text-[11px] text-slate-400">
+            What payroll reads. Leave it unset and the day counts as worked; the clock cannot say somebody was absent.
+          </p>
+          {row.locked ? (
+            <p className="mt-2 flex items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs text-sky-800">
+              <Lock className="h-3.5 w-3.5 shrink-0" />
+              Set by an approved request — change it on Approvals.
+            </p>
+          ) : (
+            <>
+              <div className="mt-2">
+                <MarkPicker value={status} onPick={setStatus} testid="hr-att-detail-mark" />
+              </div>
+              {CLOCKED.has(status) && (
+                <div className="mt-2 flex items-center gap-2">
+                  <TimeBox value={checkIn} onChange={setCheckIn} testid="hr-att-detail-in" />
+                  <span className="text-xs text-slate-400">to</span>
+                  <TimeBox value={checkOut} onChange={setCheckOut} testid="hr-att-detail-out" />
+                </div>
+              )}
+              <Input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Note (optional)"
+                className="mt-2"
+                data-testid="hr-att-detail-note"
+              />
+            </>
+          )}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+          {!row.locked && (
+            <Button onClick={save} disabled={saving} data-testid="hr-att-detail-save">
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const AttendanceTab = () => {
+  const [period, setPeriod] = useState("day");
+  const [day, setDay] = useState(todayIso());
+  const [from, setFrom] = useState(todayIso());
+  const [to, setTo] = useState(todayIso());
+  const [month, setMonth] = useState(todayIso().slice(0, 7));
+  const [year, setYear] = useState(todayIso().slice(0, 4));
+  const [filters, setFilters] = useState(NO_FILTERS);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [opened, setOpened] = useState(null);
+
+  // Exactly the parameters the chosen span needs, so the server is never sent a month and
+  // a range at once and left to guess which was meant.
+  const params = useMemo(() => {
+    if (period === "day") return { period, date: day };
+    if (period === "range") return { period, from, to };
+    if (period === "month") return { period, month };
+    return { period, year };
+  }, [period, day, from, to, month, year]);
+
+  const load = useCallback((q) => {
+    setLoading(true);
+    return hrAttendanceOverview(q).then(setData).catch(fail).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(params); }, [params, load]);
+
+  const rows = useMemo(() => data?.rows || [], [data]);
+  const shown = useMemo(() => narrow(rows, filters), [rows, filters]);
+  const filtered = shown.length !== rows.length;
+  const single = !!data?.single_day;
+  const k = data?.kpis || {};
+
+  // The tiles count what is on screen once a filter is up: narrowing to Marketing and
+  // being told fifteen people work here answers a question nobody asked. Unfiltered they
+  // are the server's own figures, which is the same set of rows counted the same way.
+  const tiles = useMemo(() => {
+    if (!filtered) return k;
+    const present = shown.filter((r) => r.present_days > 0);
+    return {
+      total_employees: shown.length,
+      present_working: present.length,
+      work_from_home: present.filter((r) => r.remote).length,
+      absent_leave: shown.filter((r) => r.away_days > 0).length,
+      yet_to_login: single
+        ? shown.filter((r) => r.present_days === 0 && !["absent", "leave", "week_off", "holiday"].includes(r.status)).length
+        : null,
+    };
+  }, [filtered, k, shown, single]);
+
+  const exportCsv = () => {
+    const head = single
+      ? ["Employee", "Code", "Department", "Designation", "Branch", "Status", "Check in", "Check out", "Login hours", "Worked hours", "Break minutes", "Breaks"]
+      : ["Employee", "Code", "Department", "Designation", "Branch", "Days present", "Days away", "Login hours", "Worked hours", "Break minutes", "Breaks"];
+    downloadCsv([
+      head,
+      ...shown.map((r) => (single
+        ? [r.full_name, r.employee_code, r.department, r.designation, r.branch_name,
+           (BOARD_STATUS[r.status] || {}).label || r.status, r.check_in, r.check_out,
+           (r.login_minutes / 60).toFixed(2), (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count]
+        : [r.full_name, r.employee_code, r.department, r.designation, r.branch_name,
+           r.present_days, r.away_days,
+           (r.login_minutes / 60).toFixed(2), (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count])),
+    ], `attendance-${data?.from || ""}${single ? "" : `_to_${data?.to || ""}`}.csv`);
+  };
 
   return (
     <div className="space-y-4" data-testid="hr-attendance-tab">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-2 p-3">
-          <Button variant="outline" size="icon" onClick={() => setDay(shiftDay(day, -1))} title="Previous day" data-testid="hr-att-prev">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <div className="w-[190px]">
-            <MilkDateInput value={day} max={data?.today || todayIso()} accent="sky" onChange={(e) => setDay(e.target.value)} data-testid="hr-att-date" />
-          </div>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={isToday}
-            onClick={() => setDay(shiftDay(day, 1))}
-            title={isToday ? "Today is as far forward as the register goes" : "Next day"}
-            data-testid="hr-att-next"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          {!isToday && (
-            <Button variant="ghost" size="sm" onClick={() => setDay(data?.today || todayIso())} data-testid="hr-att-today">
-              <CalendarDays className="h-4 w-4" />Today
-            </Button>
+          <PeriodPicker value={period} onChange={setPeriod} testid="hr-att-period" />
+
+          {period === "day" && (
+            <div className="w-[190px]">
+              <MilkDateInput value={day} max={data?.today || todayIso()} accent="sky" onChange={(e) => setDay(e.target.value)} data-testid="hr-att-date" />
+            </div>
+          )}
+          {period === "range" && (
+            <div className="flex items-center gap-2">
+              <div className="w-[170px]">
+                <MilkDateInput value={from} max={data?.today || todayIso()} accent="sky" onChange={(e) => setFrom(e.target.value)} data-testid="hr-att-from" />
+              </div>
+              <span className="text-xs text-slate-400">to</span>
+              <div className="w-[170px]">
+                <MilkDateInput value={to} min={from} max={data?.today || todayIso()} accent="sky" onChange={(e) => setTo(e.target.value)} data-testid="hr-att-to" />
+              </div>
+            </div>
+          )}
+          {period === "month" && (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" onClick={() => setMonth(shiftMonth(month, -1))} title="Previous month" data-testid="hr-att-month-prev">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="min-w-[140px] text-center text-sm font-semibold text-slate-800" data-testid="hr-att-month">{prettyMonth(month)}</span>
+              <Button
+                variant="outline"
+                size="icon"
+                disabled={month >= todayIso().slice(0, 7)}
+                onClick={() => setMonth(shiftMonth(month, 1))}
+                title="Next month"
+                data-testid="hr-att-month-next"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+          {period === "year" && (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" onClick={() => setYear(String(Number(year) - 1))} title="Previous year" data-testid="hr-att-year-prev">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="min-w-[80px] text-center text-sm font-semibold text-slate-800" data-testid="hr-att-year">{year}</span>
+              <Button
+                variant="outline"
+                size="icon"
+                disabled={year >= todayIso().slice(0, 4)}
+                onClick={() => setYear(String(Number(year) + 1))}
+                title="Next year"
+                data-testid="hr-att-year-next"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           )}
 
-          <span className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" />
-          <Button variant="outline" size="sm" onClick={() => fillBlanks("present")} data-testid="hr-att-all-present">
-            <Check className="h-4 w-4" />{filtered ? "Fill shown blanks as Present" : "Fill blanks as Present"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => fillBlanks("week_off")} data-testid="hr-att-all-off">
-            <Sun className="h-4 w-4" />as Week off
+          <Button variant="outline" size="sm" onClick={() => load(params)} disabled={loading} data-testid="hr-att-refresh">
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
           </Button>
 
-          <div className="ml-auto flex items-center gap-2">
-            {dirty.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={() => setDraft({})} data-testid="hr-att-discard">
-                <Undo2 className="h-4 w-4" />Discard
-              </Button>
-            )}
-            <Button onClick={save} disabled={!dirty.length || saving} data-testid="hr-att-save">
-              <Save className="h-4 w-4" />
-              {saving ? "Saving..." : dirty.length ? `Save ${dirty.length} change${dirty.length > 1 ? "s" : ""}` : "Saved"}
+          <div className="ml-auto">
+            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!shown.length} data-testid="hr-att-csv">
+              <Download className="h-4 w-4" />CSV
             </Button>
           </div>
         </CardContent>
-        {/* Its own row under the controls, not squeezed in beside them: three dropdowns
-            and a day picker on one line wrap into an unreadable block on anything narrower
-            than a desktop. */}
         <CardContent className="border-t border-slate-100 p-3 pt-3">
           <RosterFilterBar
             rows={rows}
@@ -461,182 +567,136 @@ export const AttendanceTab = () => {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-        {MARKS.map((m) => (
-          <Stat key={m.key} label={m.label} value={summary[m.key] || 0} tone={m.key === "absent" ? "text-rose-600" : "text-slate-800"} testid={`hr-att-count-${m.key}`} />
-        ))}
-        <Stat label="Unmarked" value={summary.unmarked} tone={summary.unmarked ? "text-amber-600" : "text-slate-400"} testid="hr-att-count-unmarked" />
+      <div className={`grid grid-cols-2 gap-3 ${single ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
+        <Stat label="Total Employees" value={tiles.total_employees ?? 0} tone="text-indigo-600" testid="hr-att-k-total" />
+        <Stat label={single ? "Present / Working" : "Worked at all"} value={tiles.present_working ?? 0} tone="text-emerald-600" testid="hr-att-k-present" />
+        <Stat label="Work from Home" value={tiles.work_from_home ?? 0} tone="text-violet-600" testid="hr-att-k-wfh" />
+        {single && <Stat label="Yet to Login" value={tiles.yet_to_login ?? 0} tone="text-amber-500" testid="hr-att-k-yet" />}
+        <Stat label="Absent / Leave" value={tiles.absent_leave ?? 0} tone="text-rose-600" testid="hr-att-k-away" />
       </div>
 
-      {/* The Save button counts every pending change, including ones a narrowed filter is
-          hiding. That is the right behaviour -- a filter should not quietly discard work
-          -- but it makes the count disagree with the screen, so the difference is named. */}
-      {hiddenDirty > 0 && (
-        <p className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800" data-testid="hr-att-hidden-dirty-note">
-          <Filter className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {hiddenDirty} unsaved {hiddenDirty === 1 ? "change is" : "changes are"} outside the current filter. Saving still includes {hiddenDirty === 1 ? "it" : "them"}.
-        </p>
-      )}
-
-      {/* Unmarked is deliberately not a silent absence — payroll pays those days. Said
-          here so nobody discovers it at the end of the month on a payslip. */}
-      {summary.unmarked > 0 && (
-        <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="hr-att-unmarked-note">
-          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {summary.unmarked} {summary.unmarked === 1 ? "person has" : "people have"} no mark for this day. Payroll pays unmarked days in full — mark an absence to dock it.
-        </p>
-      )}
-
-      {/* Said once, at the top: most of this register may already be filled in. The times
-          on a clocked row were pressed by the person they are about, so what is left here
-          is the marks, and the rows nobody clocked. */}
-      {clockedCount > 0 && (
-        <p className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800" data-testid="hr-att-clocked-note">
-          <AlarmClock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {clockedCount} {clockedCount === 1 ? "person" : "people"} clocked in from their own header — those times and breaks are theirs, not typed here.
-        </p>
-      )}
-
-      {/* What this day costs, said on the day it is marked rather than at the end of the
-          month on a payslip. Absences and half days are the only two marks that carry a
-          figure -- see LOP_DAYS in backend/routers/v3_hr_ops.py, which is where payroll
-          gets the same number from. */}
-      {summary.lop > 0 && (
-        <p className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800" data-testid="hr-att-lop-note">
-          <IndianRupee className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {summary.lop} {summary.lop === 1 ? "day" : "days"} of pay lost on this day, once the month is run.
-        </p>
-      )}
+      {/* Work from Home is read off the person, not the day: Online vs Offline is the only
+          thing the OS records about where somebody works, and nothing marks it per-day. */}
+      <p className="text-[11px] text-slate-400" data-testid="hr-att-wfh-note">
+        Work from Home counts the people whose work mode is Online — set on the employee record, not per day.
+      </p>
 
       {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : (
-        <>
-          {/* Phone: one card per person. The pills wrap onto their own line, which is the
-              only way seven of them fit a phone without becoming a dropdown. */}
-          <div className="space-y-2 lg:hidden" data-testid="hr-att-cards">
-            {shown.map((r) => {
-              const d = rowOf(r);
-              return (
-                <div key={r.employee_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-att-card-${r.employee_id}`}>
-                  <div className="flex items-center gap-2.5">
-                    <EmployeeAvatar employee={r} size={34} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-slate-800">{r.full_name}</p>
-                      <p className="truncate text-xs text-slate-400">
-                        {[r.employee_code, r.designation, r.branch_name].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                    {d.locked && <Lock className="h-3.5 w-3.5 shrink-0 text-sky-500" title="Set by an approved request" />}
-                  </div>
-                  {r.clocked && (
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2" data-testid={`hr-att-clocked-m-${r.employee_id}`}>
-                      <ClockedTag />
-                      <BreaksCell breaks={r.breaks} minutes={r.break_minutes} />
-                    </div>
-                  )}
-                  <div className="mt-2">
-                    <MarkPicker value={d.status} disabled={d.locked} onPick={(s) => set(r.employee_id, { status: s })} testid={`hr-att-mark-m-${r.employee_id}`} />
-                  </div>
-                  {CLOCKED.has(d.status) && (
-                    <>
-                      <div className="mt-2 flex items-center gap-2">
-                        <TimeBox value={d.check_in} onChange={(v) => set(r.employee_id, { check_in: v })} testid={`hr-att-in-m-${r.employee_id}`} />
-                        <span className="text-xs text-slate-400">to</span>
-                        <TimeBox value={d.check_out} onChange={(v) => set(r.employee_id, { check_out: v })} testid={`hr-att-out-m-${r.employee_id}`} />
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-            {shown.length === 0 && <Empty>{filtered ? "Nobody matches these filters." : "No active employees to mark."}</Empty>}
-          </div>
-
-          <Card className="hidden lg:block">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Register — {prettyDate(day)}</CardTitle>
-              <p className="text-xs text-slate-500">Click a mark again to clear it. Nothing is stored until you save.</p>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2">S.No</th>
-                      <th className="px-3 py-2">Employee</th>
-                      <th className="px-3 py-2">Dept &amp; Branch</th>
-                      <th className="px-3 py-2">Mark</th>
-                      <th className="px-3 py-2">In</th>
-                      <th className="px-3 py-2">Out</th>
-                      <th className="px-3 py-2">Breaks</th>
-                      <th className="px-3 py-2">Note</th>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              Employee Attendance — {data?.label || ""}
+            </CardTitle>
+            <p className="text-xs text-slate-500">
+              {single
+                ? "Times are what each person pressed on their own clock. Open a row to see their breaks, or to overrule the day."
+                : `${data?.days_in_span || 0} days. Hours are the total each person was on the clock across the span.`}
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Employee</th>
+                    <th className="px-4 py-3">Department</th>
+                    {single ? (
+                      <>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Check In</th>
+                        <th className="px-4 py-3">Check Out</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-4 py-3 text-right">Days Present</th>
+                        <th className="px-4 py-3 text-right">Days Away</th>
+                      </>
+                    )}
+                    <th className="px-4 py-3 text-right">Total Login Hour</th>
+                    <th className="px-4 py-3 text-right">Worked Hours</th>
+                    <th className="px-4 py-3">Break Time</th>
+                    {single && <th className="px-4 py-3 text-center">Details</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((r) => (
+                    <tr key={r.employee_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-att-row-${r.employee_id}`}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <EmployeeAvatar employee={r} size={36} />
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-slate-800">{r.full_name}</p>
+                            <p className="truncate text-xs text-slate-400">{r.designation || r.employee_code}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {r.department || "—"}
+                        {r.branch_name && <span className="block text-xs text-slate-400">{r.branch_name}</span>}
+                      </td>
+                      {single ? (
+                        <>
+                          <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                          <td className="px-4 py-3 text-slate-700">{r.check_in ? prettyTime(r.check_in) : "—"}</td>
+                          <td className="px-4 py-3 text-slate-700">{r.check_out ? prettyTime(r.check_out) : "—"}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-700">{r.present_days}</td>
+                          <td className={`px-4 py-3 text-right ${r.away_days ? "font-semibold text-rose-600" : "text-slate-400"}`}>{r.away_days}</td>
+                        </>
+                      )}
+                      <td className="px-4 py-3 text-right text-slate-700">{hours(r.login_minutes)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-800">{hours(r.worked_minutes)}</td>
+                      <td className="px-4 py-3">
+                        {r.break_minutes > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-violet-600" title={`${r.break_count} break${r.break_count === 1 ? "" : "s"}`}>
+                            <Coffee className="h-3.5 w-3.5" />
+                            <span className="font-medium">{duration(r.break_minutes)}</span>
+                            <span className="text-[11px] text-slate-400">({r.break_count})</span>
+                          </span>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      {single && (
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setOpened(r)}
+                            title={`Open ${r.full_name}'s day`}
+                            className="text-slate-400 transition hover:text-sky-600"
+                            data-testid={`hr-att-open-${r.employee_id}`}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
-                  </thead>
-                  <tbody>
-                    {shown.map((r, i) => {
-                      const d = rowOf(r);
-                      const changed = dirty.some((x) => x.employee_id === r.employee_id);
-                      return (
-                        <tr key={r.employee_id} className={`border-t border-slate-100 ${changed ? "bg-sky-50/60" : "hover:bg-slate-50"}`} data-testid={`hr-att-row-${r.employee_id}`}>
-                          <td className="px-3 py-2 text-slate-500">{i + 1}</td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-2.5">
-                              <EmployeeAvatar employee={r} size={30} />
-                              <div className="min-w-0">
-                                <p className="flex items-center gap-1 font-medium text-slate-800">
-                                  {r.full_name}
-                                  {d.locked && <Lock className="h-3 w-3 text-sky-500" />}
-                                </p>
-                                <p className="text-xs text-slate-400">{r.employee_code}</p>
-                              </div>
-                            </div>
-                          </td>
-                          {/* Both, stacked: they are two of the three things the bar above
-                              filters on, so a narrowed list should show what it was
-                              narrowed by rather than leaving the reader to trust it. */}
-                          <td className="px-3 py-2 text-slate-600">
-                            {r.department || "—"}
-                            {r.branch_name && <span className="block text-xs text-slate-400">{r.branch_name}</span>}
-                          </td>
-                          <td className="px-3 py-2">
-                            <MarkPicker value={d.status} disabled={d.locked} onPick={(s) => set(r.employee_id, { status: s })} testid={`hr-att-mark-${r.employee_id}`} />
-                          </td>
-                          <td className="px-3 py-2">
-                            <TimeBox value={d.check_in} disabled={d.locked || !CLOCKED.has(d.status)} onChange={(v) => set(r.employee_id, { check_in: v })} testid={`hr-att-in-${r.employee_id}`} />
-                            {/* Under the time rather than in a column of its own: what it
-                                says is where that time came from. */}
-                            {r.clocked && <span className="mt-1 block" data-testid={`hr-att-clocked-${r.employee_id}`}><ClockedTag /></span>}
-                          </td>
-                          <td className="px-3 py-2">
-                            <TimeBox value={d.check_out} disabled={d.locked || !CLOCKED.has(d.status)} onChange={(v) => set(r.employee_id, { check_out: v })} testid={`hr-att-out-${r.employee_id}`} />
-                          </td>
-                          <td className="px-3 py-2" data-testid={`hr-att-breaks-${r.employee_id}`}>
-                            <BreaksCell breaks={r.breaks} minutes={r.break_minutes} />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              value={d.note || ""}
-                              disabled={d.locked}
-                              onChange={(e) => set(r.employee_id, { note: e.target.value })}
-                              placeholder="—"
-                              className="h-8 w-40 rounded-md border border-slate-200 px-2 text-xs outline-none transition placeholder:text-slate-300 focus:border-sky-400 focus:ring-1 focus:ring-sky-300 disabled:bg-slate-50"
-                              data-testid={`hr-att-note-${r.employee_id}`}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {shown.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">{filtered ? "Nobody matches these filters." : "No active employees to mark."}</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </>
+                  ))}
+                  {shown.length === 0 && (
+                    <tr>
+                      <td colSpan={single ? 9 : 7} className="px-4 py-10 text-center text-slate-400">
+                        {filtered ? "Nobody matches these filters." : "No active employees."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {opened && (
+        <DayDetailModal
+          row={opened}
+          date={data?.from}
+          onClose={() => setOpened(null)}
+          onSaved={() => { setOpened(null); load(params); }}
+        />
       )}
     </div>
   );
 };
-
 // ---------- Payroll ----------
 
 const RUN_TONE = {

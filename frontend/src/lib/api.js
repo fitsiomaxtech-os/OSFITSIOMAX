@@ -462,6 +462,11 @@ export const clockHistory = async (month) => (await api.get("/clock/history", { 
 export const hrAttendanceDay = async (date) => (await api.get("/hr/attendance", { params: date ? { date } : {} })).data;
 export const hrMarkAttendance = async (date, entries) => (await api.post("/hr/attendance", { date, entries })).data;
 export const hrAttendanceMonth = async (month) => (await api.get("/hr/attendance/month", { params: month ? { month } : {} })).data;
+// The attendance board. `params` carries the span being asked for: { period: "day", date }
+// for one day, or period range/month/year with from+to, month, or year beside it. The
+// server decides the span and sends back what it settled on, so the screen never has to
+// work out how long a month is.
+export const hrAttendanceOverview = async (params = {}) => (await api.get("/hr/attendance/overview", { params })).data;
 
 export const hrApprovals = async (params = {}) => (await api.get("/hr/approvals", { params })).data;
 export const hrCreateApproval = async (payload) => (await api.post("/hr/approvals", payload)).data;

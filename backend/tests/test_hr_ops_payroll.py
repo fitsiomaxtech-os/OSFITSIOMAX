@@ -29,11 +29,12 @@ from fastapi import HTTPException  # noqa: E402
 from utils import CLINIC_UTC_OFFSET  # noqa: E402
 
 from routers.v3_hr_ops import (  # noqa: E402
-    _compute_slip, _dates_between, _month_span, _pick_for_today, _totals,
-    _valid_date, _valid_month,
+    _board_status, _compute_slip, _dates_between, _month_span, _period_span,
+    _pick_for_today, _totals, _valid_date, _valid_month,
 )
 from routers.v3_clock import (  # noqa: E402
     ACTIONS, DONE, ON_BREAK, OUT, WORKING, _break_minutes, _minutes_between, _public, _state,
+    day_totals,
 )
 
 # 30 days, ₹30,000 — so a day is worth exactly ₹1,000 and every figure below can be read
@@ -287,3 +288,140 @@ class TestClockArithmetic:
     def test_break_minutes_count_an_open_break_up_to_the_moment_asked(self):
         day = _day(clock_in="09:00", breaks=[_brk("13:00")])
         assert _break_minutes(day, _at("13:30")) == 30
+
+
+# The attendance board -- routers/v3_hr_ops.py. Three pure pieces decide what it shows: how
+# long a day was (day_totals, shared with the header widget), which of the clock and HR's
+# mark speaks for a day, and how far each span reaches.
+
+
+class TestDayTotals:
+    """What one clocked day adds up to. The header and the board both read this, so a
+    disagreement here is two screens contradicting each other about the same person."""
+
+    def test_a_finished_day_is_measured_to_the_clock_out(self):
+        t = day_totals(_day(clock_in="09:00", clock_out="18:00"), _at("20:00"))
+        assert (t["login_minutes"], t["worked_minutes"]) == (540, 540)
+        assert t["state"] == DONE
+
+    def test_a_running_day_is_measured_up_to_now(self):
+        """This is what makes the figures move through the morning — the screens say
+        "so far" rather than pretending the day is done."""
+        t = day_totals(_day(clock_in="10:07"), _at("17:19"))
+        assert t["login_minutes"] == 432
+        assert t["state"] == WORKING
+
+    def test_a_break_comes_off_worked_but_not_off_login(self):
+        """The two columns answer different questions: how long somebody was on the clock,
+        and how much of that they were actually at it."""
+        t = day_totals(_day(clock_in="09:00", clock_out="18:00", breaks=[_brk("13:00", back="13:45")]), _at("20:00"))
+        assert t["login_minutes"] == 540
+        assert t["worked_minutes"] == 495
+        assert (t["break_minutes"], t["break_count"]) == (45, 1)
+
+    def test_a_break_still_running_counts_up_to_now(self):
+        t = day_totals(_day(clock_in="10:00", breaks=[_brk("13:00")]), _at("13:50"))
+        assert t["break_minutes"] == 50
+        assert t["state"] == ON_BREAK
+
+    def test_several_breaks_add_up(self):
+        day = _day(clock_in="09:00", clock_out="18:00", breaks=[_brk("11:00", "Tea break", back="11:15"), _brk("13:00", back="13:45")])
+        t = day_totals(day, _at("20:00"))
+        assert (t["break_minutes"], t["break_count"]) == (60, 2)
+        assert t["worked_minutes"] == 480
+
+    def test_nobody_clocked_in_has_no_day(self):
+        """Zeros rather than a guess from a roster: not having pressed the button is
+        exactly what the board needs to see."""
+        t = day_totals(None, _at("12:00"))
+        assert t == {"state": OUT, "login_minutes": 0, "worked_minutes": 0,
+                     "break_minutes": 0, "break_count": 0}
+
+    def test_worked_never_goes_negative(self):
+        """A break left running past a clock-out would otherwise subtract more than the
+        day contained."""
+        day = _day(clock_in="09:00", clock_out="18:00", breaks=[_brk("09:30", back="23:00")])
+        assert day_totals(day, _at("20:00"))["worked_minutes"] == 0
+
+    def test_the_widget_and_the_board_agree(self):
+        """_public is the header's shape and day_totals the board's. Same day, same
+        numbers — that is the whole reason the arithmetic lives in one function."""
+        day = _day(clock_in="09:00", clock_out="18:00", breaks=[_brk("13:00", back="13:45")])
+        pub = _public(day, "2026-09-04")
+        tot = day_totals(day, _at("18:00"))
+        assert pub["worked_minutes"] == tot["worked_minutes"]
+        assert pub["break_minutes"] == tot["break_minutes"]
+        assert pub["login_minutes"] == tot["login_minutes"]
+
+
+class TestBoardStatus:
+    """Which of the two sources speaks for a day."""
+
+    def test_the_clock_beats_a_stale_mark(self):
+        """Somebody at their desk right now is Working whatever a mark says — the board
+        reports what is happening, not what was expected."""
+        assert _board_status(WORKING, "absent") == "working"
+
+    def test_on_break_is_still_at_work(self):
+        assert _board_status(ON_BREAK, "") == "on_break"
+
+    def test_a_mark_speaks_when_the_clock_is_silent(self):
+        """Leave and absent are decisions, and a clock cannot make them."""
+        assert _board_status(OUT, "leave") == "leave"
+        assert _board_status(OUT, "absent") == "absent"
+
+    def test_neither_means_yet_to_login(self):
+        """Not "absent": absent has pay attached, and nine in the morning is too early to
+        have decided it."""
+        assert _board_status(OUT, "") == "yet_to_login"
+
+    def test_a_finished_day_stands_on_its_own(self):
+        assert _board_status(DONE, "") == "done"
+
+
+class TestPeriodSpans:
+    def test_a_day_is_itself(self):
+        assert _period_span("day", "2026-09-04", None, None, None, None) == (
+            "2026-09-04", "2026-09-04", "04 Sep 2026")
+
+    def test_a_month_spans_its_own_length(self):
+        assert _period_span("month", None, None, None, "2026-02", None)[:2] == (
+            "2026-02-01", "2026-02-28")
+
+    def test_a_leap_february_reaches_the_29th(self):
+        assert _period_span("month", None, None, None, "2024-02", None)[1] == "2024-02-29"
+
+    def test_a_year_is_the_whole_year(self):
+        assert _period_span("year", None, None, None, None, "2026")[:2] == (
+            "2026-01-01", "2026-12-31")
+
+    def test_a_range_keeps_both_ends(self):
+        assert _period_span("range", None, "2026-09-01", "2026-09-05", None, None)[:2] == (
+            "2026-09-01", "2026-09-05")
+
+    def test_a_range_with_no_end_is_one_day(self):
+        """The common case is looking at a single day through the range control, so the
+        second date is optional rather than an error to correct."""
+        assert _period_span("range", None, "2026-09-01", None, None, None)[:2] == (
+            "2026-09-01", "2026-09-01")
+
+    def test_a_backwards_range_is_refused(self):
+        with pytest.raises(HTTPException) as err:
+            _period_span("range", None, "2026-09-05", "2026-09-01", None, None)
+        assert err.value.status_code == 400
+
+    @pytest.mark.parametrize("bad", ["26", "twenty", "20266", ""])
+    def test_a_year_that_is_not_four_digits_is_refused(self, bad):
+        # "" falls back to the current year rather than failing, so it is the one case
+        # that must NOT raise.
+        if bad == "":
+            assert len(_period_span("year", None, None, None, None, bad)[2]) == 4
+            return
+        with pytest.raises(HTTPException):
+            _period_span("year", None, None, None, None, bad)
+
+    def test_a_span_is_inclusive_at_both_ends(self):
+        assert len(_dates_between("2026-09-01", "2026-09-05")) == 5
+
+    def test_a_leap_year_has_366_days(self):
+        assert len(_dates_between("2024-01-01", "2024-12-31")) == 366

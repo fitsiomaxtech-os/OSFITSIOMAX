@@ -53,6 +53,10 @@ from utils import clinic_today, now_iso
 # out of here, and imports them inside the handler precisely because of this line -- a
 # top-level import there would close the loop.
 from routers.v3_hr import resolve_employee_branches
+# And one from the clock: how long a day adds up to. The board reports hours people
+# pressed for themselves, so the arithmetic behind them belongs where the presses are
+# handled -- see day_totals in routers/v3_clock.py. That module imports nothing from here.
+from routers.v3_clock import day_totals
 
 router = APIRouter(prefix="/api/v3/hr")
 
@@ -161,6 +165,9 @@ async def _roster() -> List[Dict[str, Any]]:
     fields = {
         "_id": 0, "id": 1, "full_name": 1, "employee_code": 1, "department": 1,
         "designation": 1, "photo_url": 1, "gross_salary": 1, "net_salary": 1,
+        # Online vs offline is the only thing the OS records about WHERE somebody works,
+        # so it is what the board's Work from Home figure is drawn from.
+        "work_type": 1,
         # Both, because branch_id alone is not the whole answer: a multi-branch desk holds
         # branch_ids, and an employee with neither may still have one on their account.
         # resolve_employee_branches settles all three cases.
@@ -226,6 +233,219 @@ async def attendance_day(
 
     return {"date": on, "today": clinic_today(), "rows": rows, "summary": summary}
 
+
+
+# ---------- the attendance board ----------
+
+# The four spans the board is read over. A day is the register; the other three are the
+# same rows added up, which is a different question -- "who is in today" against "who has
+# been in this month" -- and so a different set of columns.
+PERIOD_DAY, PERIOD_RANGE, PERIOD_MONTH, PERIOD_YEAR = "day", "range", "month", "year"
+PERIODS = (PERIOD_DAY, PERIOD_RANGE, PERIOD_MONTH, PERIOD_YEAR)
+
+# What the board calls somebody who has pressed nothing and whom nobody has marked.
+# Deliberately not "absent": absent is a decision with pay attached (see LOP_DAYS), and
+# nine in the morning is too early to have made it.
+YET_TO_LOGIN = "yet_to_login"
+
+# The marks that mean somebody is not expected in. Counted apart from Yet to Login so the
+# figure that says "chase these people" does not include the ones nobody is waiting for.
+AWAY_STATUSES = (ABSENT, LEAVE)
+NOT_EXPECTED = (ABSENT, LEAVE, WEEK_OFF, HOLIDAY)
+
+
+def prettify_day(iso: str) -> str:
+    return date.fromisoformat(iso).strftime("%d %b %Y")
+
+
+def prettify_month(month: str) -> str:
+    return date.fromisoformat(month + "-01").strftime("%B %Y")
+
+
+def _period_span(period: str, day, start, end, month, year) -> tuple:
+    """(from, to, label) for whichever span was asked for."""
+    if period == PERIOD_DAY:
+        on = _valid_date(day) if day else clinic_today()
+        return on, on, prettify_day(on)
+    if period == PERIOD_RANGE:
+        a = _valid_date(start, "from") if start else clinic_today()
+        b = _valid_date(end, "to") if end else a
+        if b < a:
+            raise HTTPException(status_code=400, detail="The last day cannot be before the first")
+        return a, b, prettify_day(a) + " - " + prettify_day(b)
+    if period == PERIOD_MONTH:
+        mon = _valid_month(month)
+        first, last, _ = _month_span(mon)
+        return first, last, prettify_month(mon)
+    text = str(year or "").strip() or clinic_today()[:4]
+    if not (text.isdigit() and len(text) == 4):
+        raise HTTPException(status_code=400, detail="year must be four digits")
+    return text + "-01-01", text + "-12-31", text
+
+
+def _board_status(clock_state: str, mark_status: str) -> str:
+    """What the board calls a person's day, from their clock and HR's mark together.
+
+    The clock wins while it says something. Somebody at their desk right now is Working
+    whatever a stale mark says, and that is the point of this board -- it reports what is
+    happening rather than what was expected.
+
+    HR's mark is what speaks when the clock is silent: a day marked leave or absent is a
+    decision, and it stands. Only when there is neither does the day read Yet to Login.
+    """
+    if clock_state and clock_state != "out":
+        return clock_state
+    if mark_status:
+        return mark_status
+    return YET_TO_LOGIN
+
+
+async def _employee_by_user() -> Dict[str, str]:
+    """user_id -> employee_id, for the accounts linked to one.
+
+    The clock is keyed by the login and the register by the employee, because a person is
+    both and neither list is the other. Somebody with no employee record clocks in for
+    themselves and simply does not appear on this board -- which is a gap in Credentials,
+    not something to invent a row for.
+    """
+    rows = await v3_col("users").find(
+        {"employee_id": {"$nin": [None, ""]}}, {"_id": 0, "id": 1, "employee_id": 1}
+    ).to_list(2000)
+    return {r["id"]: r["employee_id"] for r in rows}
+
+
+@router.get("/attendance/overview")
+async def attendance_overview(
+    period: str = Query(PERIOD_DAY),
+    day: Optional[str] = Query(None, alias="date"),
+    start: Optional[str] = Query(None, alias="from"),
+    end: Optional[str] = Query(None, alias="to"),
+    month: Optional[str] = Query(None),
+    year: Optional[str] = Query(None),
+    _: V3UserOut = Depends(require_hr),
+):
+    """Who worked, and for how long -- over a day, a range, a month or a year.
+
+    Reads the clock rather than the register's marks: the times are what people pressed,
+    and the hours come from the stamps behind them through day_totals in
+    routers/v3_clock.py, so this board and the header widget cannot disagree about how
+    long somebody has been in.
+
+    The register is still consulted, for the one thing a clock cannot say: that somebody
+    is on approved leave, or was marked absent. See _board_status for which of the two
+    speaks when.
+    """
+    if period not in PERIODS:
+        raise HTTPException(status_code=400, detail="Unknown period: " + str(period))
+    first, last, label = _period_span(period, day, start, end, month, year)
+    span_days = _dates_between(first, last)
+
+    roster = await _roster()
+    marks = await v3_col("attendance").find(
+        {"date": {"$gte": first, "$lte": last}}, {"_id": 0}
+    ).to_list(50000)
+    clocks = await v3_col("clock_days").find(
+        {"date": {"$gte": first, "$lte": last}}, {"_id": 0}
+    ).to_list(50000)
+    emp_of_user = await _employee_by_user()
+
+    # Both sides keyed the same way, so a row is assembled by employee and date without
+    # rescanning either list per person.
+    marks_by: Dict[tuple, dict] = {(m["employee_id"], m["date"]): m for m in marks}
+    clocks_by: Dict[tuple, dict] = {}
+    for c in clocks:
+        emp = emp_of_user.get(c.get("user_id") or "")
+        if emp:
+            clocks_by[(emp, c["date"])] = c
+
+    now_at = now_iso()
+    single = first == last
+    rows = []
+    for e in roster:
+        totals = {"login_minutes": 0, "worked_minutes": 0, "break_minutes": 0, "break_count": 0}
+        present_days = 0
+        away_days = 0
+        for d in span_days:
+            clock = clocks_by.get((e["id"], d))
+            mark = marks_by.get((e["id"], d)) or {}
+            t = day_totals(clock, now_at)
+            for k in totals:
+                totals[k] += t[k]
+            if t["state"] != "out":
+                present_days += 1
+            elif mark.get("status") in AWAY_STATUSES:
+                away_days += 1
+
+        row = {
+            "employee_id": e["id"],
+            "full_name": e.get("full_name") or "",
+            "employee_code": e.get("employee_code") or "",
+            "department": e.get("department") or "",
+            "designation": e.get("designation") or "",
+            "branch_name": e.get("branch_name") or "",
+            "photo_url": e.get("photo_url") or "",
+            # Online is the only "not in a room" the OS records, so it is what the board
+            # reports as working from home. It is a property of the person rather than of
+            # the day -- nothing marks it per-day anywhere -- and the tile says so.
+            "remote": str(e.get("work_type") or "").strip().lower() == "online",
+            "present_days": present_days,
+            "away_days": away_days,
+        }
+        row.update(totals)
+        if single:
+            clock = clocks_by.get((e["id"], first)) or {}
+            mark = marks_by.get((e["id"], first)) or {}
+            row.update({
+                "status": _board_status(day_totals(clock, now_at)["state"], mark.get("status") or ""),
+                "check_in": clock.get("clock_in") or mark.get("check_in") or "",
+                "check_out": clock.get("clock_out") or mark.get("check_out") or "",
+                "note": mark.get("note") or "",
+                "locked": bool(mark.get("approval_id")),
+                # The account of the gap between in and out, for the row's detail panel.
+                "breaks": [
+                    {
+                        "out": b.get("out") or "",
+                        "in": b.get("in") or "",
+                        "reason": b.get("reason") or "",
+                    }
+                    for b in (clock.get("breaks") or [])
+                ],
+            })
+        rows.append(row)
+
+    rows.sort(key=lambda r: str(r.get("full_name") or "").lower())
+
+    # Counted off the assembled rows rather than queried again, so the tiles and the table
+    # can never disagree about the same span.
+    present = [r for r in rows if r["present_days"] > 0]
+    kpis = {
+        "total_employees": len(rows),
+        "present_working": len(present),
+        "work_from_home": len([r for r in present if r["remote"]]),
+        "absent_leave": len([r for r in rows if r["away_days"] > 0]),
+        # Only meaningful for one day: over a month, somebody who came in on the 3rd is
+        # not "yet to login". Sent as null for the longer spans so the screen can drop the
+        # tile rather than print a figure that means nothing.
+        "yet_to_login": None,
+    }
+    if single:
+        kpis["yet_to_login"] = len([
+            r for r in rows
+            if r["present_days"] == 0
+            and (marks_by.get((r["employee_id"], first)) or {}).get("status") not in NOT_EXPECTED
+        ])
+
+    return {
+        "period": period,
+        "from": first,
+        "to": last,
+        "label": label,
+        "single_day": single,
+        "today": clinic_today(),
+        "days_in_span": len(span_days),
+        "kpis": kpis,
+        "rows": rows,
+    }
 
 @router.post("/attendance")
 async def mark_attendance(payload: AttendanceDay, user: V3UserOut = Depends(require_hr)):

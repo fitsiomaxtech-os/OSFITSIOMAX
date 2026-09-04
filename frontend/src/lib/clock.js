@@ -25,3 +25,12 @@ export const duration = (mins) => {
   const n = Math.max(Math.round(Number(mins) || 0), 0);
   return n >= 60 ? `${Math.floor(n / 60)}h ${String(n % 60).padStart(2, "0")}m` : `${n}m`;
 };
+
+/** 465 → "7.8h". The same minutes as `duration`, in the form a column of them can be
+ *  compared down: "7h 45m" against "7h 05m" is two numbers to read per row, and a table
+ *  of hours worked is scanned rather than read. Zero is a dash — nobody worked no hours,
+ *  they did not work, and "0.0h" states it as a measurement. */
+export const hours = (mins) => {
+  const n = Math.max(Math.round(Number(mins) || 0), 0);
+  return n === 0 ? "—" : `${(n / 60).toFixed(1)}h`;
+};

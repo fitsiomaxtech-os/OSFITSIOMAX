@@ -120,6 +120,39 @@ def _break_minutes(day: Dict[str, Any], upto_at: str) -> int:
     )
 
 
+def day_totals(day: Optional[Dict[str, Any]], upto_at: Optional[str] = None) -> Dict[str, Any]:
+    """What one clocked day adds up to: on the clock, at work, and away.
+
+    Public, and the only place these three are worked out. Two screens ask for them -- the
+    person's own header and HR's attendance board (routers/v3_hr_ops.py) -- and a board
+    that disagreed with the widget about how long somebody worked would be worse than
+    either being wrong alone.
+
+    login is the span from clocking in to clocking out; worked is that span less the
+    breaks. A day still running is measured up to `upto_at` (now, unless a caller is
+    replaying a past day), which is what makes the figures move through the morning -- the
+    screens label those "so far".
+
+    A day with no clock-in has no span, and says so with zeros rather than guessing from a
+    roster: not having pressed the button is exactly what the board needs to see.
+    """
+    day = day or {}
+    now_at = upto_at or now_iso()
+    end_at = day.get("clock_out_at") or now_at
+    breaks = day.get("breaks") or []
+    break_minutes = sum(_minutes_between(b.get("out_at"), b.get("in_at") or now_at) for b in breaks)
+    login = _minutes_between(day.get("clock_in_at"), end_at) if day.get("clock_in_at") else 0
+    return {
+        "state": _state(day),
+        "login_minutes": login,
+        # Never negative: a break left running past a clock-out would otherwise subtract
+        # more than the day contained and print a worked figure below zero.
+        "worked_minutes": max(login - break_minutes, 0),
+        "break_minutes": break_minutes,
+        "break_count": len(breaks),
+    }
+
+
 def _public(day: Optional[Dict[str, Any]], on: str) -> Dict[str, Any]:
     """One day, in the shape every screen reads.
 
@@ -128,10 +161,10 @@ def _public(day: Optional[Dict[str, Any]], on: str) -> Dict[str, Any]:
     """
     now = _clinic_now()
     day = day or {}
-    state = _state(day)
-    # A day still running is measured up to now, a finished one up to the clock-out. Both
-    # are honest -- the first says "so far", and the screen labels it that way.
-    end_at = day.get("clock_out_at") or now["at"]
+    # The three figures come from day_totals, which HR's board reads too -- see there for
+    # why they are worked out in one place. Only the per-break detail is unpacked here,
+    # because the header is the screen that lists them.
+    totals = day_totals(day, now["at"])
     breaks = [
         {
             "out": b.get("out") or "",
@@ -142,20 +175,17 @@ def _public(day: Optional[Dict[str, Any]], on: str) -> Dict[str, Any]:
         }
         for b in (day.get("breaks") or [])
     ]
-    break_minutes = sum(b["minutes"] for b in breaks)
-    worked = 0
-    if day.get("clock_in_at"):
-        worked = max(_minutes_between(day["clock_in_at"], end_at) - break_minutes, 0)
     open_break = _open_break(day) or {}
     return {
         "date": day.get("date") or on,
-        "state": state,
-        "actions": ACTIONS[state],
+        "state": totals["state"],
+        "actions": ACTIONS[totals["state"]],
         "clock_in": day.get("clock_in") or "",
         "clock_out": day.get("clock_out") or "",
         "breaks": breaks,
-        "break_minutes": break_minutes,
-        "worked_minutes": worked,
+        "break_minutes": totals["break_minutes"],
+        "worked_minutes": totals["worked_minutes"],
+        "login_minutes": totals["login_minutes"],
         # What the header shows while somebody is away, so it does not have to hunt back
         # through the list for the one break with no end on it.
         "on_break_since": open_break.get("out") or "",
