@@ -75,6 +75,21 @@ CORE_INDEXES = [
     # both fields, so the compound key answers either — and the documents tab's own
     # {lead_id} / {lead_id, kind} listings read through its prefix.
     ("lead_documents", [("lead_id", 1), ("kind", 1)], "lead_kind"),
+    # HR's running month — see routers/v3_hr_ops.py. `attendance` is the one that matters:
+    # saving a register upserts one row per employee on {date, employee_id}, so a clinic of
+    # fifty does fifty of these in a call, against a collection that gains fifty rows a day
+    # for the life of the install. The month view and payroll both scan {date} as a range,
+    # which the same compound key answers through its prefix.
+    ("attendance", [("date", 1), ("employee_id", 1)], "date_employee"),
+    # _clear_leave_marks, when an approval is revoked or deleted.
+    ("attendance", [("approval_id", 1)], "approval_id"),
+    # The approvals list: filtered by status, newest first.
+    ("approvals", [("status", 1), ("requested_at", -1)], "status_recent"),
+    ("approvals", [("id", 1)], "id"),
+    # A month's payslips, and the single line an adjustment writes to.
+    ("payslips", [("month", 1), ("employee_id", 1)], "month_employee"),
+    ("payroll_runs", [("month", 1)], "month"),
+    ("hr_quotes", [("id", 1)], "id"),
 ]
 
 

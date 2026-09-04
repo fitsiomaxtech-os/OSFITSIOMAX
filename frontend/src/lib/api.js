@@ -443,6 +443,30 @@ export const hrEmployees = async (params = {}) => {
   return (await api.get(`/hr/employees${q.toString() ? `?${q.toString()}` : ""}`)).data;
 };
 
+// HR — the running month. Attendance, approvals, payroll and the quote board, all served
+// by backend/routers/v3_hr_ops.py under the same /hr prefix as the structure endpoints
+// above. Split there and grouped here for the same reason: one is the shape of the
+// company, the other is what happened this month.
+export const hrAttendanceDay = async (date) => (await api.get("/hr/attendance", { params: date ? { date } : {} })).data;
+export const hrMarkAttendance = async (date, entries) => (await api.post("/hr/attendance", { date, entries })).data;
+export const hrAttendanceMonth = async (month) => (await api.get("/hr/attendance/month", { params: month ? { month } : {} })).data;
+
+export const hrApprovals = async (params = {}) => (await api.get("/hr/approvals", { params })).data;
+export const hrCreateApproval = async (payload) => (await api.post("/hr/approvals", payload)).data;
+export const hrDecideApproval = async (id, decision, note = "") => (await api.patch(`/hr/approvals/${id}`, { decision, note })).data;
+export const hrDeleteApproval = async (id) => (await api.delete(`/hr/approvals/${id}`)).data;
+
+export const hrPayroll = async (month) => (await api.get("/hr/payroll", { params: month ? { month } : {} })).data;
+export const hrGeneratePayroll = async (month) => (await api.post("/hr/payroll/generate", { month })).data;
+export const hrAdjustPayslip = async (month, employeeId, payload) => (await api.patch(`/hr/payroll/${month}/slips/${employeeId}`, payload)).data;
+export const hrPayrollStatus = async (month, status) => (await api.post(`/hr/payroll/${month}/status`, { status })).data;
+
+export const hrQuotes = async () => (await api.get("/hr/quotes")).data;
+export const hrQuoteToday = async () => (await api.get("/hr/quotes/today")).data;
+export const hrAddQuote = async (text, author) => (await api.post("/hr/quotes", { text, author })).data;
+export const hrUpdateQuote = async (id, payload) => (await api.patch(`/hr/quotes/${id}`, payload)).data;
+export const hrDeleteQuote = async (id) => (await api.delete(`/hr/quotes/${id}`)).data;
+
 // Branch Management
 export const bmList = async () => (await api.get("/branch-mgmt")).data;
 export const bmListArchived = async () => (await api.get("/branch-mgmt", { params: { archived: true } })).data;

@@ -72,6 +72,21 @@ def clinic_day_of(stamp) -> Optional[str]:
     return (moment + CLINIC_UTC_OFFSET).date().isoformat()
 
 
+def clinic_today() -> str:
+    """Today, on the clinic's clock, as "YYYY-MM-DD".
+
+    clinic_day_of applied to now, and written that way rather than as its own bit of
+    offset arithmetic so there is one definition of where a clinic day starts and not two
+    that can drift. The server's UTC date rolls over at 05:30 IST, so a clinic opening at
+    07:00 would otherwise file its first two and a half hours of every morning under
+    yesterday.
+
+    Attendance and payroll are counted a day at a time, so everything in HR that asks
+    which day it is asks this instead of reaching for date.today().
+    """
+    return clinic_day_of(now_iso())
+
+
 def find_enquiry_stamp(ad_record, extras) -> Optional[str]:
     """The enquiry stamp on a lead, wherever the sheet happened to leave it.
 

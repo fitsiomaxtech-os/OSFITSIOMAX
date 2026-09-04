@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, Quote } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { downloadCsv } from "@/lib/printable";
 import { ROLE_META, roleLabel, roleClasses, setCustomRoleClasses } from "@/lib/roles";
+import { AttendanceTab, PayrollTab, ApprovalsTab, QuotesTab } from "@/components/hr/HROpsTabs";
 
 // Matches ALL_BRANCHES in backend/routers/v3_hr.py, which resolves it to a name on the way
 // out. Held in branch_id where a real branch id would go, so everything that already reads
@@ -25,6 +26,18 @@ const ALL_BRANCHES = "__all__";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
+  // The running month, straight after the Dashboard whose figures come off it. These four
+  // are one chain -- an approved leave is an attendance mark, and attendance is what
+  // payroll pro-rates against -- so they sit together, and ahead of the three org-chart
+  // tabs below, which describe the company rather than the month. Their screens live in
+  // HROpsTabs.jsx; this file is already the org chart at four thousand lines.
+  //
+  // Eight tabs is two rows of four on a phone, which is the same width per tab the bar
+  // has always had -- so only the two labels that outrun it carry a `short`.
+  { key: "attendance", label: "Attendance", short: "Attend", icon: CalendarCheck },
+  { key: "payroll", label: "Payroll", icon: Wallet },
+  { key: "approvals", label: "Approvals", short: "Approve", icon: ClipboardCheck },
+  { key: "quotes", label: "Quotes", icon: Quote },
   { key: "employees", label: "Employees", icon: Users },
   { key: "roles", label: "Credentials", icon: ShieldCheck },
   // One screen over one set of records. The tab that used to carry this name was a second
@@ -218,6 +231,10 @@ export const HRBoard = () => {
       {/* No heading. The nav tab above already reads HR Admin. */}
       <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={4} />
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
+      {tab === "attendance" && <AttendanceTab />}
+      {tab === "payroll" && <PayrollTab />}
+      {tab === "approvals" && <ApprovalsTab />}
+      {tab === "quotes" && <QuotesTab />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
       {tab === "structure" && <StructureTab meta={meta} reloadMeta={reloadMeta} />}
@@ -267,18 +284,17 @@ const DashboardTab = ({ onNavigate }) => {
 
   return (
     <div className="space-y-5" data-testid="hr-dashboard-tab">
-      {/* Active Employees and Total Users open the list behind them. The three attendance
-          figures do not, because there is nothing behind them to open: present_today,
-          late_today and pending_leaves are returned as literal 0 by /hr/dashboard — no
-          attendance or leave data is recorded anywhere in the OS. They are rendered as
-          plain figures rather than buttons so they cannot promise a drill-in that would
-          land on an empty screen. */}
+      {/* All five open the rows behind them now. The last three used to be literal zeroes
+          with a caption saying so -- there was no register anywhere in the OS -- and they
+          are read off one now: Attendance for the two day figures, Approvals for the
+          third. Present counts the late arrivals inside it, the way /hr/dashboard does,
+          so the two tiles don't read as if a late employee never turned up. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <KPI icon={Users} label="Active Employees" value={k.active_employees} onClick={() => onNavigate("employees", { status: "active" })} testid="hr-kpi-active" />
         <KPI icon={ShieldCheck} label="Total Users" value={k.total_users} onClick={() => onNavigate("roles")} testid="hr-kpi-users" />
-        <KPI icon={CheckCircle2} label="Present Today" value={k.present_today} hint="Attendance not tracked yet" testid="hr-kpi-present" />
-        <KPI icon={AlertOctagon} label="Late Today" value={k.late_today} hint="Attendance not tracked yet" testid="hr-kpi-late" />
-        <KPI icon={CalendarOff} label="Pending Leaves" value={k.pending_leaves} hint="Leave not tracked yet" testid="hr-kpi-leaves" />
+        <KPI icon={CheckCircle2} label="Present Today" value={k.present_today} hint="Late arrivals included" onClick={() => onNavigate("attendance")} testid="hr-kpi-present" />
+        <KPI icon={AlertOctagon} label="Late Today" value={k.late_today} hint="Marked late on today's register" onClick={() => onNavigate("attendance")} testid="hr-kpi-late" />
+        <KPI icon={CalendarOff} label="Pending Approvals" value={k.pending_leaves} hint="Leave, advances and claims" onClick={() => onNavigate("approvals")} testid="hr-kpi-leaves" />
       </div>
 
       {/* Cards, in the same shape as the KPI row above so the page reads as one set of

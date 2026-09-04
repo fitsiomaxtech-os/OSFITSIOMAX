@@ -561,13 +561,29 @@ async def hr_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin", "m
     salary_rows = await v3_col("employees").aggregate(salary_pipeline).to_list(1)
     monthly_salary = salary_rows[0]["total"] if salary_rows else 0
 
+    # Real figures now that HR keeps a register: see routers/v3_hr_ops.py, which owns the
+    # marks these count and the statuses they are named after. Imported inside the handler
+    # rather than at module scope because that module imports nothing from here and the
+    # pair should stay that way -- a top-level import would make the direction easy to
+    # reverse by accident.
+    from routers.v3_hr_ops import LATE, PENDING, PRESENT
+    from utils import clinic_today
+
+    today = clinic_today()
+    # Late counts inside present, not against it. Somebody who arrived at 09:40 is at work,
+    # so "Present Today" is both marks together and "Late Today" is the subset of it --
+    # otherwise the two tiles would read as if the late ones never turned up at all.
+    present_today = await v3_col("attendance").count_documents({"date": today, "status": {"$in": [PRESENT, LATE]}})
+    late_today = await v3_col("attendance").count_documents({"date": today, "status": LATE})
+    pending_leaves = await v3_col("approvals").count_documents({"status": PENDING})
+
     return {
         "kpis": {
             "active_employees": active_employees,
             "total_users": total_users,
-            "present_today": 0,
-            "late_today": 0,
-            "pending_leaves": 0,
+            "present_today": present_today,
+            "late_today": late_today,
+            "pending_leaves": pending_leaves,
             "monthly_salary_budget": monthly_salary,
             "departments": departments_count,
         },
