@@ -791,7 +791,7 @@ const ARM_DEPARTMENT = {
  * set by a Branch Admin acting on the patient, and nobody acts on a branch board when a
  * course ends on a physio's or a Nutritionist's.
  */
-export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => false) => {
+export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => false, consultationOpeningStage = null) => {
   const name = stage?.name;
   const here = lead.branch_stage;
   // Cancel is an abandonment rather than an ending, so it keeps whatever it holds and is
@@ -803,12 +803,21 @@ export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => 
   // single pill backed by the sales-side field, so releasing on one would drop a lead out of
   // the Branch pills with nothing on the Consultation tab left to hold it.
   //
-  // Booking an appointment now seeds "Consultation Booked", which IS a consultation-only
-  // stage, so a freshly booked lead hands over the moment it is booked and lands on that
-  // tab's first pill. That is the whole point of the rename: while the stage was called
-  // "Follow Up" it was shared, the lead stayed under Appointment here, and the Consultation
-  // tab had no card that could show it.
-  const handedOver = !abandoned && isConsultationOnlyStage(lead.consultation_stage);
+  // Except the consultation pipeline's opening stage, which hands nothing over. Booking an
+  // appointment seeds it, and booking is the Appointment pill's own work rather than the
+  // consultant moving the patient on — so releasing on it would empty the pill of exactly
+  // the leads it exists to hold. It used to be shared with the Branch pipeline (both were
+  // called "Follow Up"), so the shared-name rule above was what kept it out of this test;
+  // once it was renamed to a name of its own it fell in, and the guard has to be said out
+  // loud instead.
+  //
+  // The name is passed in rather than written here: Pipeline Stage Management can rename
+  // it, and a literal that stopped matching would empty the pill silently.
+  const atConsultationOpening = !!consultationOpeningStage
+    && lead.consultation_stage === consultationOpeningStage;
+  const handedOver = !abandoned
+    && !atConsultationOpening
+    && isConsultationOnlyStage(lead.consultation_stage);
   // Completed is read off the lead here the way it already is on the Consultations board,
   // rather than waiting for somebody to move them. This pipeline is otherwise written
   // entirely by hand, and nothing in it was ever going to be written when a course ended
@@ -1144,6 +1153,15 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     [stages, consultationStages],
   );
 
+  // Where the consultation pipeline begins, read off the live list rather than named as a
+  // literal — Pipeline Stage Management can rename it. Handed to matchesBranchStage, which
+  // must not release a lead from the Branch pills for merely standing here: see the guard
+  // in it. The constant is the fallback for the moment before the list has arrived.
+  const consultationOpeningStage = useMemo(
+    () => consultationStages[0]?.name || BRANCH_CONSULTATION_OPENING_STAGE,
+    [consultationStages],
+  );
+
   // Which of the Branch stages get a pill on the strip. Four of them: Leads, RNR, Follow
   // Up, Appointment — the shape the branch pipeline was built to mirror in the first place
   // (see BRANCH_ADMIN_ENTRY_STAGE in the backend's constants.py).
@@ -1232,8 +1250,15 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // Branch Leads opens on the mirror pill, which is the one reading "Leads". A branch fed
     // by Pre-Sales has no mirror, so no Leads pill to open on, and keeps All Stages: the
     // whole list is the only honest opening where the strip has nothing else to offer.
+    //
+    // The Consultation tab falls back to whichever pill comes first, so it always lands on
+    // one. Named stages get renamed — that is what Pipeline Stage Management is for — and
+    // a literal that stops matching leaves this tab with no pill lit, no All Stages card
+    // to say so (see hideAllStages) and every patient in the list underneath: a bar of
+    // cards that between them count fewer people than the table below is showing, which
+    // reads as the cards being wrong rather than as nothing being selected.
     const opening = consultation
-      ? pills.find((st) => st.name === BRANCH_CONSULTATION_OPENING_STAGE)
+      ? (pills.find((st) => st.name === BRANCH_CONSULTATION_OPENING_STAGE) || pills[0])
       : mirrorStage;
     if (opening) setStageFilter(opening.name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1351,9 +1376,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // The marks are already applied by filteredLeads above, so this is the stage pill and
   // nothing else.
   const visibleLeads = useMemo(() => {
-    if (stageFilter) return filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter), isConsultationOnlyStage));
+    if (stageFilter) return filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter), isConsultationOnlyStage, consultationOpeningStage));
     return filteredLeads;
-  }, [filteredLeads, stageFilter, stages, isConsultationOnlyStage]);
+  }, [filteredLeads, stageFilter, stages, isConsultationOnlyStage, consultationOpeningStage]);
 
   // A tick survives scrolling and reopening a row, but not a change to what is on screen.
   // Searching, filtering by date or switching stage replaces the list under the selection,
@@ -1375,9 +1400,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // the table below them right now.
   const salesCounts = useMemo(() => {
     const counts = {};
-    stages.forEach((s) => { counts[s.name] = filteredLeads.filter((l) => matchesBranchStage(l, s, isConsultationOnlyStage)).length; });
+    stages.forEach((s) => { counts[s.name] = filteredLeads.filter((l) => matchesBranchStage(l, s, isConsultationOnlyStage, consultationOpeningStage)).length; });
     return counts;
-  }, [filteredLeads, stages, isConsultationOnlyStage]);
+  }, [filteredLeads, stages, isConsultationOnlyStage, consultationOpeningStage]);
   // The Consultation pills are counted by the board that draws the rows under them, not
   // here. This memo used to do it off `filteredLeads`, which is this board's own list
   // narrowed by the Date Filter on `created_at` -- and ConsultationsBoard narrows the same
@@ -1959,7 +1984,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               the side of a horizontally-scrolling table. */}
           <div className="space-y-2 md:hidden" data-testid="branch-list-mobile">
             {(() => {
-              const visible = (stageFilter ? filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter), isConsultationOnlyStage)) : filteredLeads);
+              const visible = (stageFilter ? filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter), isConsultationOnlyStage, consultationOpeningStage)) : filteredLeads);
               if (visible.length === 0) {
                 return (
                   <p className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-mobile-empty">
@@ -2329,6 +2354,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           // pill or from All Stages — and the card names the position the same way the row
           // that opened it did.
           openedFromMirror={showingMirror || atBranchOpening(selectedLead)}
+          // So the highlighted pill on the card reads the lead the same way the bar above
+          // counted it — see matchesBranchStage.
+          consultationOpeningStage={consultationOpeningStage}
           onlineArm={armScoped}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
@@ -2506,7 +2534,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 // appointment about to be confirmed. At a branch it is nothing — the consultation is held
 // in a room, the field that would set a link is not offered on that board at all, and an
 // amber panel naming a gap nobody there can fill is noise on every booking they make.
-function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, onOpenConsultationStage, openedFromMirror = false, onlineArm = false }) {
+function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, onOpenConsultationStage, consultationOpeningStage = null, openedFromMirror = false, onlineArm = false }) {
   // The board offers two entry stages — the mirrored Pre-Sales "Leads" pill and the branch's
   // own first stage — but a single lead only ever came in through one of them, so its
   // pipeline shows that one and drops the other. Everything from RNR onwards is shared.
@@ -3255,7 +3283,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     // Highlighted on the same terms the board filters by, so the pipeline
                     // here agrees with the pill the lead was listed under.
                     const isActive = isMirror
-                      ? matchesBranchStage(lead, s, isConsultationOnlyStage)
+                      ? matchesBranchStage(lead, s, isConsultationOnlyStage, consultationOpeningStage)
                       : (lead.branch_stage === stage || lead.consultation_stage === stage);
                     const consultationOnly = isConsultationOnlyStage(stage);
                     // A Consultation-only stage isn't reachable until the lead has actually
