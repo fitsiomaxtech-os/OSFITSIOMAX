@@ -1229,6 +1229,30 @@ const FEE_TABS = [
   },
 ];
 
+/**
+ * Whether the open tab's own fee is in, still owed, or not being asked about at all.
+ *
+ * The four tabs used to be four lists of who had already paid, which made three of them
+ * read as near-empty beside Consultant: everyone standing in Fee Collected has paid to be
+ * seen, and only some of them went on to buy treatment, rehab or a diet plan. So a stage
+ * badge saying five sat over a Physio tab showing two -- and the three patients whose
+ * treatment fee is still owed, the ones the desk is here to chase, were on no list at all.
+ *
+ * `all` is the default for that reason. The question the desk actually asks of this stage
+ * is "where does each of my five stand with this desk", and the other two options are that
+ * same list cut to one side of it -- what came in, and what is still out.
+ *
+ * `match` is handed the amount rather than a flag because there is no flag: the amount
+ * being present is what "collected" means, and 0 is not a collection. The two halves are
+ * written as exact complements so that the counts on the tabs always add up to `all` --
+ * a patient who is on neither list is a patient the branch cannot account for.
+ */
+const FEE_STATUSES = [
+  { key: "all", label: "All", match: () => true },
+  { key: "collected", label: "Fee Collected", match: (paid) => paid > 0 },
+  { key: "pending", label: "Fees Non Collected", match: (paid) => paid <= 0 },
+];
+
 // Deliberately not here: Fitness. A gym membership is a `fitness_registrations` row with
 // its own name and phone and no lead_id on it at all — a fitness member is not a patient
 // on this board, so there is nothing on these rows to filter by and a Fitness option would
@@ -2112,10 +2136,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const showMobileCards = mobileCards && narrow;
   const showDeskTable = !mobileCards || !narrow;
 
-  // Which of the three fees the Fee Collected list is showing. Consultation first: it is
+  // Which of the four fees the Fee Collected list is showing. Consultation first: it is
   // the fee that puts a patient in this stage, so it is the one that answers "everyone".
   const [feeTab, setFeeTab] = useState("consultation");
   const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
+
+  // And which side of that fee -- see FEE_STATUSES. `all` to open with, so each tab starts
+  // as the whole stage seen through one desk rather than as that desk's takings alone.
+  const [feeStatus, setFeeStatus] = useState("all");
+  const activeStatus = FEE_STATUSES.find((s) => s.key === feeStatus) || FEE_STATUSES[0];
 
   // The Treatment Fee, collected from the row it is owed on.
   //
@@ -2163,13 +2192,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const feeCounts = useMemo(() => {
     if (!showDiscountColumn) return {};
     const out = {};
-    for (const t of FEE_TABS) out[t.key] = inStage.filter((l) => t.paid(l) > 0).length;
+    // Counted through the dropdown, not past it. A badge that keeps saying 2 while the row
+    // under it lists 5 is the badge being read as the wrong number rather than as a
+    // different question, so the count on the tab is always the length of the list the tab
+    // would open -- on All the stage entire, on the other two the half being asked for.
+    for (const t of FEE_TABS) out[t.key] = inStage.filter((l) => activeStatus.match(t.paid(l))).length;
     return out;
-  }, [inStage, showDiscountColumn]);
-  // Everyone who paid this tab's own fee. Outside Fee Collected the tabs do not exist,
-  // so the stage's rows pass through whole.
+  }, [inStage, showDiscountColumn, activeStatus]);
+  // The stage's rows seen through the open tab's fee, cut to the side of it the dropdown
+  // is asking about. Outside Fee Collected neither the tabs nor the dropdown exist, so the
+  // stage's rows pass through whole.
   const filtered = useMemo(() => {
-    const rows = showDiscountColumn ? inStage.filter((l) => activeFee.paid(l) > 0) : inStage;
+    const rows = showDiscountColumn ? inStage.filter((l) => activeStatus.match(activeFee.paid(l))) : inStage;
     // In the order the day is actually worked: 10:45 before 2:30 before 5:00. The server
     // sends these newest-updated first, which puts whoever was last edited at the top —
     // a useful order for a change log and the wrong one for a list somebody works down.
@@ -2187,7 +2221,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       if (!b.appointment_date) return -1;
       return at(a).localeCompare(at(b));
     });
-  }, [inStage, showDiscountColumn, activeFee]);
+  }, [inStage, showDiscountColumn, activeFee, activeStatus]);
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
@@ -4195,14 +4229,22 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   // laptop row with room to spare; they wrap on a phone rather than overflow.
   const feeTabsBar = (
         <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="cons-fee-tabs">
-          {/* The phrase once, on the row, rather than four times across it. The dropdown
-              carried it as a caption and each option repeated it; as tabs, "Consultant Fee
-              Collected / Physio Fee Collected / Rehab Fee Collected / Diet Fee Collected"
-              is the same three words read four times and twice the row. What differs
-              between the tabs is the desk, so the desk is what the tab is called. */}
-          <span className="ml-1.5 mr-1 shrink-0 whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-            Fee Collected
-          </span>
+          {/* Which side of each desk's fee the row below is about, where the caption used
+              to be. A dropdown rather than three more tabs: the desk is the thing being
+              switched between all day and the four tabs stay tabs for that reason, while
+              this one is set once and read back -- and seven controls on one line is a line
+              nobody finds the desk on. It sits ahead of the tabs because it qualifies all
+              four of them at once, and it says the phrase the caption used to say, so the
+              row still names itself. */}
+          <select
+            value={feeStatus}
+            onChange={(e) => setFeeStatus(e.target.value)}
+            aria-label="Which fees to list"
+            className="ml-1 mr-1 h-8 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+            data-testid="cons-fee-status"
+          >
+            {FEE_STATUSES.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+          </select>
           {FEE_TABS.map((t) => {
             const on = t.key === activeFee.key;
             return (
@@ -4212,8 +4254,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 onClick={() => setFeeTab(t.key)}
                 aria-pressed={on}
                 // The visible label is one word now, so the full question goes on the
-                // accessible name — "Physio" alone tells a screen reader nothing.
-                aria-label={`${t.label} Fee Collected (${feeCounts[t.key] ?? 0})`}
+                // accessible name — "Physio" alone tells a screen reader nothing, and
+                // "Physio Fee Collected" is the wrong sentence on two of the three
+                // dropdown settings.
+                aria-label={`${t.label} — ${activeStatus.label} (${feeCounts[t.key] ?? 0})`}
                 // flex-1 below sm so four tabs share a phone's width evenly instead of
                 // leaving a ragged last row; at sm+ each takes only the width of its label.
                 className={`flex-1 rounded-md px-3 py-2 text-left transition sm:flex-none ${on ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
@@ -4360,12 +4404,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
         );
       })()}
 
-      {/* Which fee the Fee Collected list is showing. Only here: this stage is the one
-          place where a patient may have paid up to four separate things, and everywhere
-          else there is nothing yet to split. Each tab carries its own count, so the
-          questions the branch actually asks of this stage — what came in from the
-          consultant, from physio, from rehab, from diet — are answered without opening
-          a row, and at a glance rather than one desk per click.
+      {/* Which fee the Fee Collected list is showing, and which side of it. Only here:
+          this stage is the one place where a patient may owe or have paid up to four
+          separate things, and everywhere else there is nothing yet to split. Each tab
+          carries its own count under the current dropdown setting, so the questions the
+          branch actually asks of this stage — who still owes physio, what came in from
+          diet, where all five stand with rehab — are answered without opening a row, and
+          at a glance rather than one desk per click.
 
           A row of its own under the toolbar, not inside it. Four tabs will not share that
           line with the search box and the range buttons at any width worth designing for,
@@ -4574,7 +4619,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       // bought under it — a column of figures with no idea what was sold
                       // is a number nobody can check.
                       <td className="whitespace-nowrap px-3 py-3 align-middle text-xs" data-testid={`cons-fee-${activeFee.key}-${l.id}`}>
-                        <span className="font-semibold" style={{ color: activeFee.tone }}>{rupees(activeFee.paid(l))}</span>
+                        {activeFee.paid(l) > 0 ? (
+                          <span className="font-semibold" style={{ color: activeFee.tone }}>{rupees(activeFee.paid(l))}</span>
+                        ) : (
+                          // Nothing has come in at this desk for this patient. "Rs.0" reads
+                          // as a fee of nothing that was collected rather than as a fee
+                          // still owed, and on the Fees Non Collected list every row would
+                          // be a column of zeroes saying it.
+                          <span className="font-semibold text-amber-600" data-testid={`cons-fee-pending-${l.id}`}>Not collected</span>
+                        )}
                         {activeFee.item(l) && (
                           <span className="block max-w-full truncate text-[10px] text-slate-400" title={activeFee.item(l)}>
                             {activeFee.item(l)}
@@ -4738,9 +4791,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     ? "Loading…"
                     // An empty tab is not an empty stage: saying "no leads in consultations"
                     // under a Diet tab reads as the board being broken rather than as nobody
-                    // having bought a diet plan.
+                    // having bought a diet plan. Each dropdown setting empties for its own
+                    // reason, so each says its own -- "nothing collected" under Fees Non
+                    // Collected would be the opposite of what emptied it.
                     : showDiscountColumn
-                      ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
+                      ? feeStatus === "pending"
+                        ? `Every ${activeFee.label.toLowerCase()} fee here is collected.`
+                        : feeStatus === "collected"
+                          ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
+                          : "No patients in this stage yet."
                       : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
                 </td></tr>
               )}
