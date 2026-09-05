@@ -6403,18 +6403,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 </Button>
               ) : null;
 
-              // A panel's own tab is only a tab when there is somewhere else to go. On a
-              // patient with no diet and no rehab it was a tab bar of one: a button that
-              // takes you to the view you are already looking at, sitting in the row above
-              // the button that does the panel's actual work -- so Fee Collected showed
-              // "Assign Physio" up top and "Reassign Physio" below, and only one of them
-              // assigned anybody.
-              //
-              // The second half is what keeps it safe. Off the own view -- Documents is
-              // reachable with no diet and no rehab in sight -- this tab is the only way
-              // back, so it returns the moment it is the way back rather than a no-op.
-              const showOwnTab = !!(DietDetailButton || RehabDetailButton) || programmeDetail !== "own";
-
               // The tab for a panel's own stage. Each panel names it for what it holds —
               // "Assign Physio" on Fee Collected — because "Overview" would tell the reader
               // nothing about which of the three views they are on.
@@ -6438,64 +6426,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   <Lbl full={label} short={short || label} />
                 </Button>
               );
-
-              // The pipeline the lead already carries (diet_stage, diet_consultation_report
-              // written by the coach) made visible here — where Branch/Super Admin already
-              // are — instead of only on the Nutrition Coach's own board.
-              const DietStatus = (dietFeePaid || dietAssigned) ? (
-                <div className="mt-3 border-t border-indigo-100 pt-3" data-testid="cons-diet-status">
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-orange-600">
-                    <Salad className="h-3.5 w-3.5" /> Diet
-                  </p>
-                  <div className="space-y-1.5 text-sm">
-                    {dietFeePaid && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500">Diet Package</span>
-                        <span className="font-semibold text-slate-800">
-                          {selectedLead.diet_package_name || "—"}{selectedLead.diet_package_mode ? ` · ${selectedLead.diet_package_mode}` : ""}
-                        </span>
-                      </div>
-                    )}
-                    {dietFeePaid && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500">Diet Fee</span>
-                        <span className="font-semibold text-slate-800">
-                          Rs.{selectedLead.diet_fee_paid}
-                          <span className="ml-1 capitalize text-emerald-600">({selectedLead.diet_fee_payment_mode})</span>
-                        </span>
-                      </div>
-                    )}
-                    {selectedLead.diet_coach_name && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500">Nutritionist</span>
-                        <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
-                      </div>
-                    )}
-                    {selectedLead.diet_appointment_at && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500">Appointment</span>
-                        <span className="font-semibold text-slate-800">
-                          {dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at {to12h(selectedLead.diet_appointment_at.split("T")[1])}
-                        </span>
-                      </div>
-                    )}
-                    {selectedLead.diet_stage && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500">Stage</span>
-                        <span className="font-semibold text-slate-800">{selectedLead.diet_stage}</span>
-                      </div>
-                    )}
-                  </div>
-                  {selectedLead.diet_consultation_report ? (
-                    <div className="mt-2 rounded-md border border-orange-100 bg-orange-50/60 p-2" data-testid="cons-diet-chart">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-orange-700">Diet Chart</p>
-                      <p className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{selectedLead.diet_consultation_report}</p>
-                    </div>
-                  ) : dietAssigned && (
-                    <p className="mt-2 text-[11px] text-slate-500">Diet Chart — the Nutrition Coach hasn't written it up yet.</p>
-                  )}
-                </div>
-              ) : null;
 
               // Every fee this patient has been quoted, one card each, in the order the
               // fees are taken. It lives out here rather than inside a stage branch
@@ -6982,7 +6912,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         </div>
                         <div className="p-4">
                           {FeeSteps}
-                          {DietStatus}
                           <p className="mt-3 text-xs leading-relaxed text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
                           <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
                             <Button size="sm" className="bg-emerald-600 text-xs text-white shadow-sm transition hover:bg-emerald-700 hover:shadow" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
@@ -7037,7 +6966,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       tabs={
                         <>
                           {FeeActions}
-                          {treatmentFeePaid && showOwnTab && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
+                          {/* Only ever the way back. On the panel's own view this tab was
+                              the words "Assign Physio" sitting directly above the button of
+                              the same name that does the work, and pressing it went nowhere.
+                              Off that view -- Documents, Diet, Rehab -- it is the only road
+                              home, so that is the only time it is drawn. */}
+                          {treatmentFeePaid && programmeDetail !== "own" && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
                           {/* No Diet tab on this row. The Diet Fee card below is the way
                               into the diet programme from here — a button in the tab row
                               as well put the same view two doors apart on one screen,
@@ -7074,18 +7008,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             </div>
                           )}
 
-                          {DietStatus}
-
                           {treatmentFeePaid && (
                             <>
-                              <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                                {/* A Partial Payment plan reaches here with money in but a
-                                    balance still owed, and this line read "Both fees
-                                    collected" over a Balance Amount card saying otherwise. */}
-                                {partialPlan
-                                  ? "Consultation Fee collected, Treatment Fee part-paid. The physiotherapist can be assigned now."
-                                  : "Both fees collected. Choose the physiotherapist who will deliver the sessions."}
-                              </p>
                               {/* The act itself lives in the view, not in the tab that opens
                                   the view. A tab that also fired the picker could not be
                                   pressed to come back to what it was showing. */}
