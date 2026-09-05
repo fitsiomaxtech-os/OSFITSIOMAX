@@ -575,6 +575,10 @@ const STEEP_DISCOUNT_PCT = 25;
 // and a ladder that stops at fifty could not count it out.
 const DENOMINATIONS = [500, 200, 100, 50, 20, 10];
 
+/** The last rung of the ladder. Below it there are only coins, which no branch counts
+ *  into a fee and this grid has no box for. */
+const SMALLEST_NOTE = DENOMINATIONS[DENOMINATIONS.length - 1];
+
 /** What a counted pile of notes comes to. Blanks and anything that is not a positive
  *  whole number of notes count as none -- "3.5 x 500" is a typo, and reading it as 1750
  *  would put a figure in the drawer nobody counted. */
@@ -616,15 +620,35 @@ const noteBreakdown = (amount) => {
   return out;
 };
 
-/** Whether a cash count is in a state that may be submitted: either nothing was counted
- *  at all, or what was counted is exactly the cash being taken. A count that is short or
- *  over means one of the two numbers is wrong, and banking either would bank a figure
- *  nobody checked. */
+/** Whether a cash count is in a state that may be submitted: the notes have to be counted,
+ *  and to account for the cash being taken down to the last note. Blank, short by a note or
+ *  more, and over are all refused -- each of them banks a figure nobody physically checked,
+ *  and between a count and an amount that disagree there is no telling which of the two is
+ *  the wrong one.
+ *
+ *  True while there is no amount to count against yet. An empty or zero fee is the amount
+ *  box's complaint to make, and answering it here as well would grey the collect button out
+ *  over a count that has nothing to be right about. */
 const notesSettled = (notes, amount) => {
-  const counted = noteTotal(notes);
-  if (counted === 0) return true;
   const target = parseFloat(amount);
-  return Number.isFinite(target) && Math.abs(counted - target) < 0.01;
+  if (!Number.isFinite(target) || target <= 0) return true;
+  const counted = noteTotal(notes);
+  // Over the amount is always wrong -- there is no such thing as taking more notes than
+  // the money. Under it is only right by less than one note: a discount can put the fee
+  // on Rs.800.04, and no pile of notes comes to that, so the last few rupees are coins
+  // this grid has no box for rather than a count somebody left half-finished.
+  if (counted > target + 0.01) return false;
+  return target - counted < SMALLEST_NOTE - 0.01;
+};
+
+/** What is left when the notes are counted out and the rest is coins -- 0 when the notes
+ *  cover it exactly. Only ever under one note, because more than that is an unfinished
+ *  count rather than change. */
+const coinRemainder = (notes, amount) => {
+  const target = parseFloat(amount);
+  if (!Number.isFinite(target) || target <= 0) return 0;
+  const left = round2(target - noteTotal(notes));
+  return left > 0 && left < SMALLEST_NOTE ? left : 0;
 };
 
 // What identifies a tender, per mode. Cash has nothing to quote, so it asks for nothing.
@@ -643,10 +667,12 @@ const SPLIT_REFERENCE_LABEL = {
  * beside the figure -- and counting it out at the desk, with the patient still there, is
  * when a wrong note is cheap to notice.
  *
- * Optional by design. A branch that is busy can leave it blank and record the amount
- * alone, exactly as before. But a count that has been started has to finish: notes that
- * are short of the fee, or over it, mean one of the two numbers is wrong, and the popup
- * refuses to bank either rather than picking one.
+ * Required before cash may be banked. The count is the only thing that makes a cash figure
+ * checkable against a till, so the collect button stays inactive until the notes are in and
+ * account for the amount being taken. Blank is refused along with short and over: a fee
+ * recorded as "Rs.1200 cash" with nothing behind it is exactly the row that cannot be
+ * settled at the end of the day. What a discount leaves below the smallest note is coins,
+ * and is shown as such rather than held against the count.
  *
  * The amount stays the authority and is never driven from here. It is arrived at above,
  * through the discount the Branch Admin agreed, and letting a mistyped note count rewrite
@@ -658,13 +684,14 @@ const CashDenominations = ({ amount, notes, onChange, testPrefix }) => {
   const hasTarget = Number.isFinite(target) && target > 0;
   const short = hasTarget ? round2(target - counted) : 0;
   const settled = notesSettled(notes, amount);
+  const coins = coinRemainder(notes, amount);
 
   return (
     <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5" data-testid={`${testPrefix}-notes`}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
           Cash counted
-          <span className="ml-1 font-normal normal-case text-slate-400">— optional</span>
+          <span className="ml-1 font-normal normal-case text-rose-500">— required</span>
         </p>
         <div className="flex shrink-0 items-center gap-2">
           {hasTarget && (
@@ -706,7 +733,11 @@ const CashDenominations = ({ amount, notes, onChange, testPrefix }) => {
         ))}
       </div>
 
-      {counted > 0 && (
+      {/* Shown from the first moment there is an amount to count against, not only once
+          counting has started. The collect button is inactive until this line reads
+          settled, and a button that greys out with nothing on screen saying why sends the
+          desk hunting for the field it missed. */}
+      {(hasTarget || counted > 0) && (
         <div
           className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[11px] font-semibold ${
             settled ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
@@ -714,11 +745,15 @@ const CashDenominations = ({ amount, notes, onChange, testPrefix }) => {
           data-testid={`${testPrefix}-notes-total`}
         >
           <span className="truncate">
-            {DENOMINATIONS.filter((d) => Number(notes?.[d]) > 0).map((d) => `${notes[d]}x${d}`).join(" + ")}
+            {counted > 0
+              ? DENOMINATIONS.filter((d) => Number(notes?.[d]) > 0).map((d) => `${notes[d]}x${d}`).join(" + ")
+              : "Count the notes to collect"}
           </span>
           <span className="shrink-0">
             Rs.{counted.toLocaleString("en-IN")}
-            {settled ? "" : short > 0 ? ` — short by Rs.${short.toLocaleString("en-IN")}` : ` — Rs.${Math.abs(short).toLocaleString("en-IN")} over`}
+            {settled
+              ? coins > 0 ? ` + Rs.${coins.toLocaleString("en-IN")} in coins` : ""
+              : short > 0 ? ` — short by Rs.${short.toLocaleString("en-IN")}` : ` — Rs.${Math.abs(short).toLocaleString("en-IN")} over`}
           </span>
         </div>
       )}
@@ -2937,7 +2972,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       return null;
     }
     if (mode === "cash" && !notesSettled(treatmentConfirmDraft.cash_notes, amount)) {
-      toast.error("The cash counted does not match the amount being taken");
+      toast.error(noteTotal(treatmentConfirmDraft.cash_notes) === 0
+        ? "Count the cash being taken before collecting it"
+        : "The cash counted does not match the amount being taken");
       return null;
     }
     if (BANK_DETAIL_MODES.includes(mode)
@@ -7319,10 +7356,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           // A split answers for itself: every part above zero, and the
                           // parts adding up to the fee. The single-mode requirements
                           // below are not its to satisfy.
-                          // A count that was started has to come out right. Nothing
-                          // counted is still fine -- the grid is optional -- but notes
-                          // that are short of what is being taken, or over it, mean one
-                          // of the two figures is wrong and neither may be banked.
+                          // Cash is counted before it is banked, and the count has to come
+                          // out right. Not counted, short of what is being taken, and over
+                          // it all leave a figure going into the drawer that nobody
+                          // physically checked.
                           (packageConfirmDraft.payment_lines
                             ? (packageConfirmDraft.payment_lines.some((l) => !(parseFloat(l.amount) > 0)) ||
                                packageConfirmDraft.payment_lines.some((l) => l.mode === "cash" && !notesSettled(l.notes, l.amount)) ||
@@ -7733,8 +7770,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           (PART_SESSION_MODES.includes(mode) && treatmentHasBalance && treatmentBalanceSettled && !treatmentFeeDraft.balance_due_date) ||
                           // A discount bigger than the fee it comes off is a typo, not a gift.
                           (SETTLED_NOW_MODES.includes(mode) && treatmentNetPayable < 0) ||
-                          // A count that was started has to be finished, against the amount
-                          // of this tender rather than the fee it is a part of.
+                          // Cash is counted before it is banked, and counted against the
+                          // amount of this tender rather than the fee it is a part of.
                           (!picking && mode === "cash" && !notesSettled(treatmentConfirmDraft.cash_notes, treatmentFeeDraft.amount)) ||
                           (!picking && BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
                           (!picking && mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim())
