@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { hpReviews, hpCompleteReview, physioSessions } from "@/lib/api";
+import { to12h } from "@/lib/time";
 import { LeadDocuments } from "@/components/LeadDocuments";
 
 // Treatment days per review. Mirrors REVIEW_AFTER_DAYS in backend/routers/v3_reviews.py,
@@ -53,7 +54,7 @@ const StageBadge = ({ stage }) => (
  * an overdue review that fell out of Today would sit in a list nobody opens, which is
  * exactly how a patient's week-one review gets missed.
  */
-export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = false, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken }) => {
+export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange = null, compact = false, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken }) => {
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -68,12 +69,18 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
   const [docCount, setDocCount] = useState(0);
   const [saving, setSaving] = useState(false);
 
+  // branchId is set only by a supervisor board, and it is what makes this list answer to
+  // the branch on screen rather than to whoever is signed in. Without it a Super Admin in
+  // Operations > Consultant got an empty queue: the endpoint matched on their own
+  // consultant record, and a Super Admin has none — so a review a Branch Admin had just
+  // dispatched showed up on no board at all. A Consultant's own board passes nothing and
+  // still sees only what was sent to them.
   const load = useCallback(async () => {
     setLoading(true);
-    try { setData(await hpReviews()); }
+    try { setData(await hpReviews(branchId)); }
     catch { setData({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" }); }
     setLoading(false);
-  }, []);
+  }, [branchId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -219,7 +226,9 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
         <p className="rounded-lg border border-dashed border-slate-200 px-3 py-12 text-center text-sm text-slate-400">
           {selectedDate
             ? "No reviews on this day."
-            : "No reviews assigned to you. A Branch Admin sends them here once a Physio raises one."}
+            : branchId
+              ? "No reviews on this branch yet. A Branch Admin sends one here once a Physio raises it."
+              : "No reviews assigned to you. A Branch Admin sends them here once a Physio raises one."}
         </p>
       ) : (
         <>
@@ -239,8 +248,14 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                       <StageBadge stage={st} />
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      {r.phone || "—"} · Review {dmy(r.review_date)} · raised by {r.physio_name || "—"}
+                      {r.phone || "—"} · Review {dmy(r.review_date)}{r.review_time ? ` · ${to12h(r.review_time)}` : ""} · raised by {r.physio_name || "—"}
                     </p>
+                    {/* Only on a supervisor board, where the list runs across every
+                        Consultant on the branch and a row is otherwise silent about whose
+                        it is. On a Consultant's own board they are all theirs. */}
+                    {branchId && (
+                      <p className="mt-0.5 text-xs font-medium text-violet-700">{r.head_physio_name || "—"}</p>
+                    )}
                     {r.physio_notes && <p className="mt-1 line-clamp-2 text-xs text-slate-600">“{r.physio_notes}”</p>}
                     {r.head_physio_suggestions && (
                       <p className="mt-1 line-clamp-2 text-xs font-medium text-emerald-700">{r.head_physio_suggestions}</p>
@@ -267,6 +282,7 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                     <th className="px-4 py-2.5 font-semibold">Patient</th>
                     <th className="px-4 py-2.5 font-semibold">Phone</th>
                     <th className="px-4 py-2.5 font-semibold">Stage</th>
+                    {branchId && <th className="px-4 py-2.5 font-semibold">Consultant</th>}
                     <th className="px-4 py-2.5 font-semibold">Recommendation</th>
                     <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
                   </tr>
@@ -286,8 +302,19 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                         <td className="px-4 py-3 text-slate-600">{r.phone || "—"}</td>
                         <td className="px-4 py-3">
                           <StageBadge stage={st} />
-                          <span className="mt-0.5 block text-[11px] text-slate-400">{dmy(r.review_date)}</span>
+                          {/* The slot the review was dispatched into, not just its day —
+                              it is booked at an hour on the Consultant's calendar, and a
+                              row that only names the date sends someone to the Branch
+                              board to find out when. */}
+                          <span className="mt-0.5 block text-[11px] text-slate-400">
+                            {dmy(r.review_date)}{r.review_time ? ` · ${to12h(r.review_time)}` : ""}
+                          </span>
                         </td>
+                        {branchId && (
+                          <td className="whitespace-nowrap px-4 py-3 font-medium text-violet-700">
+                            {r.head_physio_name || "—"}
+                          </td>
+                        )}
                         {/* What the Head Physio told the treating physio to change. Empty
                             until the review is written, which is most of this column most
                             of the time — that emptiness is the queue. */}

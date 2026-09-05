@@ -483,7 +483,7 @@ const OperationsConsultantTab = ({ branches, actingUser }) => {
         )}
       </div>
       {selectedId ? (
-        <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} />
+        <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} supervising />
       ) : (
         <EmptyPrompt text="Pick a branch above to see its Consultants" testid="ops-consultant-empty" />
       )}

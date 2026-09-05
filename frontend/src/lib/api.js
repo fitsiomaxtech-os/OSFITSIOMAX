@@ -206,7 +206,10 @@ export const physioReviews = async (physioId) => (await api.get("/physio/reviews
 export const physioRaiseReview = async (leadId, payload, physioId) => (await api.post(`/physio/reviews/raise/${leadId}`, payload, { params: physioId ? { physio_id: physioId } : {} })).data;
 export const branchReviews = async (branchId, status) => (await api.get(`/branch-admin/reviews/${branchId}`, { params: status ? { status } : {} })).data;
 export const branchSendReview = async (reviewId, payload) => (await api.post(`/branch-admin/reviews/${reviewId}/send`, payload)).data;
-export const hpReviews = async () => (await api.get("/head-physio/reviews")).data;
+// branchId only from a supervisor board (Operations > Consultant, Branch Control) — it
+// asks for that branch's whole Consultant queue. A Consultant's own board sends none
+// and gets the reviews dispatched to them.
+export const hpReviews = async (branchId) => (await api.get("/head-physio/reviews", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const hpCompleteReview = async (reviewId, payload) => (await api.post(`/head-physio/reviews/${reviewId}/complete`, payload)).data;
 export const getCalendarAvailability = async (branchId, month) => (await api.get(`/branch-admin/calendar-availability/${branchId}`, { params: { month } })).data;
 export const getDaySlots = async (branchId, date) => (await api.get(`/branch-admin/day-slots/${branchId}`, { params: { date } })).data;

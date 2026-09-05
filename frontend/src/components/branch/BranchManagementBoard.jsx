@@ -419,7 +419,7 @@ const BranchControlTab = ({ actingUser }) => {
           </p>
         </div>
       ) : viewAs === "head_physio" ? (
-        <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} />
+        <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} supervising />
       ) : viewAs === "physio" ? (
         selectedPhysioId ? (
           <PhysioBoard key={`${selectedPhysioId}-ph`} physioId={selectedPhysioId} />

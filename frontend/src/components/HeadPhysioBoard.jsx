@@ -87,7 +87,14 @@ const ALL_KINDS = [
 // hardcoded "Consultation Completed" would quietly stop matching the day someone edits it.
 const isDone = (...stages) => stages.some((s) => /complete/i.test(String(s || "")));
 
-export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSearchChange }) => {
+/**
+ * `supervising` — this board is being driven by somebody other than the Consultant whose
+ * work it shows: Operations > Consultant, or Branch Control's Consultant view. It only
+ * reaches the Review tab, which is the one list here that was scoped to the signed-in
+ * login rather than to the branch. Everything else on the board has always been the
+ * branch's queue, so a supervisor saw the branch's consultations beside an empty Review.
+ */
+export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, search = "", onSearchChange }) => {
   const [workTab, setWorkTab] = useState("consultations");
   // The day every list under Consultations answers to. Starts on today.
   const [workDate, setWorkDate] = useState(todayIso());
@@ -172,10 +179,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       phone: r.phone || "",
       stage: r.status === "completed" ? "Review · Completed" : "Review",
       tone: r.status === "completed" ? "emerald" : "violet",
-      when: r.review_date || "",
-      // A review is booked on a day and not at an hour, so it sorts to the end of its own
-      // day rather than to some invented time inside it.
-      at: r.review_date ? `${r.review_date}T99:99` : "",
+      when: r.review_date ? `${r.review_date}${r.review_time ? ` ${to12h(r.review_time)}` : ""}` : "",
+      // A review dispatched into one of the Consultant's published slots holds an hour on
+      // their calendar exactly as a consultation does, so it sorts into the day at that
+      // hour. Only one sent without a slot has no time to sort on, and that one goes to
+      // the end of its own day rather than to some invented hour inside it.
+      at: r.review_date ? `${r.review_date}T${r.review_time || "99:99"}` : "",
       who: r.physio_name || "",
     })),
   ]
@@ -509,6 +518,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
 
           <div className={workTab === "review" ? "" : "hidden"} data-testid="hp-work-review">
             <HeadPhysioReviewTab
+              branchId={supervising ? effectiveBranchId : null}
               selectedDate={allTime || dateRange ? null : workDate}
               dateRange={allTime ? null : dateRange}
               compact={workTab === "all"}

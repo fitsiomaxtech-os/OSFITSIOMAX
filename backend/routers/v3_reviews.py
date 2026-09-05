@@ -516,22 +516,49 @@ async def branch_send_review(
 # ------------------------------------------------------- Head Physio: complete a review
 
 @router.get("/head-physio/reviews")
-async def hp_reviews(user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+async def hp_reviews(
+    branch_id: Optional[str] = Query(
+        None,
+        description="Supervisor view: every Consultant's dispatched reviews on this branch. "
+                    "Super Admin only; a Consultant always gets their own.",
+    ),
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+):
     """Reviews dispatched to this Head Physio, split into what's due and what's done.
 
     A Head Physio assigned to several branches has one doctors record per branch, so this
     matches on every record linked to their login rather than a single doctor id.
+
+    `branch_id` switches that to the branch's whole Consultant queue, which is what a
+    Super Admin driving somebody else's board in Operations > Consultant needs. Matching
+    on the caller's own doctors records is right for a Consultant reading their own board
+    and useless for a supervisor: a Super Admin has no consultant record, so the queue
+    came back empty and a review a Branch Admin had just dispatched appeared nowhere —
+    while the Consultations list beside it, which has always been branch-scoped, showed
+    the same branch's work fine.
+
+    Undispatched reviews are deliberately left out: `head_physio_id` is what makes a review
+    somebody's to write, and the ones still waiting on a Branch Admin belong to Branch
+    Admin > Review > Send to Review, not to a Consultant's queue.
     """
     docs = await v3_col("doctors").find(
         {"user_id": user.id, "profile_type": "head_physio"}, {"_id": 0, "id": 1}
     ).to_list(50)
     my_ids = [d["id"] for d in docs]
-    if not my_ids:
+
+    supervising = bool(branch_id) and user.role == "super_admin"
+    if supervising:
+        query: dict = {"head_physio_id": {"$nin": ["", None]}}
+        # "all" is the My Consultation picker's every-branch answer, passed straight
+        # through; as a branch_id it would match nothing.
+        if branch_id != "all":
+            query["branch_id"] = branch_id
+    elif my_ids:
+        query = {"head_physio_id": {"$in": my_ids}}
+    else:
         return {"today": [], "upcoming": [], "overdue": [], "completed": [], "today_date": _today()}
 
-    rows = await v3_col("reviews").find(
-        {"head_physio_id": {"$in": my_ids}}, {"_id": 0}
-    ).sort("review_date", 1).to_list(2000)
+    rows = await v3_col("reviews").find(query, {"_id": 0}).sort("review_date", 1).to_list(2000)
 
     today = _today()
     out = {"today": [], "upcoming": [], "overdue": [], "completed": [], "today_date": today}
