@@ -23,8 +23,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlarmClock, Ban, CalendarCheck, CalendarOff, Check, ChevronLeft, ChevronRight, Coffee,
-  Download, Eye, Filter, IndianRupee, Lock, Palmtree, Pin, PinOff, Plus, Quote, RefreshCw,
-  Trash2, TriangleAlert, Undo2, Wallet, X,
+  Download, Eye, Filter, IndianRupee, Lock, Palmtree, Pencil, Pin, PinOff, Plus, Quote,
+  RefreshCw, Trash2, TriangleAlert, Undo2, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1190,12 +1190,58 @@ export const ApprovalsTab = () => {
 
 // ---------- Quotes ----------
 
+// The same cap MAX_QUOTE holds in backend/routers/v3_hr_ops.py — trimmed as it is typed
+// so the box never accepts words the save would reject.
+const MAX_QUOTE = 400;
+
+/** The box a quote is rewritten in — the same fields as the add form, opened in place of
+ *  whichever quote is being fixed. Both the board card and the list rows render this one,
+ *  so a typo reads the same wherever it is caught. */
+const QuoteEditor = ({ draft, setDraft, onSave, onCancel, saving, testid }) => (
+  <div className="space-y-2" data-testid={testid}>
+    <textarea
+      value={draft.text}
+      onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value.slice(0, MAX_QUOTE) }))}
+      onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+      rows={2}
+      autoFocus
+      placeholder="The quote itself"
+      className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
+      data-testid={`${testid}-text`}
+    />
+    <div className="flex flex-wrap items-center gap-2">
+      <Input
+        value={draft.author}
+        onChange={(e) => setDraft((d) => ({ ...d, author: e.target.value }))}
+        onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+        placeholder="Who said it (optional)"
+        className="max-w-xs bg-white"
+        data-testid={`${testid}-author`}
+      />
+      <span className="text-xs text-slate-400">{draft.text.length}/{MAX_QUOTE}</span>
+      <div className="ml-auto flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={onCancel} disabled={saving} data-testid={`${testid}-cancel`}>
+          <X className="h-4 w-4" />Cancel
+        </Button>
+        <Button size="sm" onClick={onSave} disabled={saving} data-testid={`${testid}-save`}>
+          <Check className="h-4 w-4" />Save
+        </Button>
+      </div>
+    </div>
+  </div>
+);
+
 export const QuotesTab = () => {
   const [data, setData] = useState({ quotes: [], today: null });
   const [text, setText] = useState("");
   const [author, setAuthor] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Which editor is open -- "today:<id>" for the board card, "row:<id>" for the list --
+  // and the words being edited. The place is part of the key because today's quote is
+  // also a row: without it, one click would open the same draft in two boxes at once.
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState({ text: "", author: "" });
   const boxRef = useRef(null);
 
   const load = useCallback(() => {
@@ -1221,7 +1267,25 @@ export const QuotesTab = () => {
 
   const remove = async (q) => {
     if (!window.confirm("Delete this quote?")) return;
-    try { await hrDeleteQuote(q.id); toast.success("Deleted."); load(); } catch (e) { fail(e); }
+    try { await hrDeleteQuote(q.id); toast.success("Deleted."); setEditing(null); load(); } catch (e) { fail(e); }
+  };
+
+  const startEdit = (q, at) => { setEditing(`${at}:${q.id}`); setDraft({ text: q.text || "", author: q.author || "" }); };
+  const cancelEdit = () => { setEditing(null); setDraft({ text: "", author: "" }); };
+
+  const saveEdit = async (q) => {
+    const text = draft.text.trim();
+    const author = draft.author.trim();
+    if (!text) { toast.error("A quote can't be empty."); return; }
+    // Nothing actually changed -- close the row instead of spending a request on it.
+    if (text === (q.text || "") && author === (q.author || "")) { cancelEdit(); return; }
+    setSaving(true);
+    try {
+      await hrUpdateQuote(q.id, { text, author });
+      toast.success("Saved.");
+      cancelEdit();
+      load();
+    } catch (e) { fail(e); } finally { setSaving(false); }
   };
 
   const quotes = data.quotes || [];
@@ -1236,9 +1300,33 @@ export const QuotesTab = () => {
           <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-600">
             <Quote className="h-3.5 w-3.5" />Quote of the day · {prettyDate(data.date)}
           </p>
-          {data.today ? (
+          {data.today && editing === `today:${data.today.id}` ? (
+            // Fixed here rather than hunted for in the list below: the mistake is on the
+            // board, so the board is where it gets corrected.
+            <div className="mt-3">
+              <QuoteEditor
+                draft={draft}
+                setDraft={setDraft}
+                onSave={() => saveEdit(data.today)}
+                onCancel={cancelEdit}
+                saving={saving}
+                testid="hr-quote-today-edit"
+              />
+            </div>
+          ) : data.today ? (
             <>
-              <p className="mt-2 text-lg font-semibold leading-snug text-slate-800" data-testid="hr-quote-today">“{data.today.text}”</p>
+              <div className="mt-2 flex items-start justify-between gap-3">
+                <p className="text-lg font-semibold leading-snug text-slate-800" data-testid="hr-quote-today">“{data.today.text}”</p>
+                <button
+                  type="button"
+                  onClick={() => startEdit(data.today, "today")}
+                  title="Fix this quote"
+                  className="shrink-0 rounded-md p-1.5 text-sky-500 hover:bg-sky-100 hover:text-sky-700"
+                  data-testid="hr-quote-today-edit-open"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              </div>
               <p className="mt-1.5 text-sm text-slate-500">
                 — {data.today.author || "Unknown"}
                 {data.today.pinned && <span className="ml-2 inline-flex items-center gap-1 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-sky-700"><Pin className="h-2.5 w-2.5" />Pinned</span>}
@@ -1263,7 +1351,7 @@ export const QuotesTab = () => {
           <textarea
             ref={boxRef}
             value={text}
-            onChange={(e) => setText(e.target.value.slice(0, 400))}
+            onChange={(e) => setText(e.target.value.slice(0, MAX_QUOTE))}
             rows={2}
             placeholder="The quote itself"
             className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
@@ -1271,7 +1359,7 @@ export const QuotesTab = () => {
           />
           <div className="flex flex-wrap items-center gap-2">
             <Input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Who said it (optional)" className="max-w-xs" data-testid="hr-quote-author" />
-            <span className="text-xs text-slate-400">{text.length}/400</span>
+            <span className="text-xs text-slate-400">{text.length}/{MAX_QUOTE}</span>
             <Button className="ml-auto" onClick={add} disabled={saving} data-testid="hr-quote-add"><Plus className="h-4 w-4" />Add</Button>
           </div>
         </CardContent>
@@ -1287,38 +1375,58 @@ export const QuotesTab = () => {
               className={`rounded-xl border bg-white p-3 ${q.pinned ? "border-sky-300" : "border-slate-200"} ${q.active ? "" : "opacity-60"}`}
               data-testid={`hr-quote-row-${q.id}`}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm text-slate-800">“{q.text}”</p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    — {q.author || "Unknown"} · added by {q.added_by || "—"}
-                    {!q.active && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-500">Off the board</span>}
-                  </p>
+              {editing === `row:${q.id}` ? (
+                <QuoteEditor
+                  draft={draft}
+                  setDraft={setDraft}
+                  onSave={() => saveEdit(q)}
+                  onCancel={cancelEdit}
+                  saving={saving}
+                  testid={`hr-quote-edit-${q.id}`}
+                />
+              ) : (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-slate-800">“{q.text}”</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      — {q.author || "Unknown"} · added by {q.added_by || "—"}
+                      {!q.active && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-500">Off the board</span>}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(q, "row")}
+                      title="Edit"
+                      className="p-1.5 text-slate-400 hover:text-sky-600"
+                      data-testid={`hr-quote-edit-open-${q.id}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => patch(q, { pinned: !q.pinned }, q.pinned ? "Unpinned — the board rotates again." : "Pinned as the quote of the day.")}
+                      title={q.pinned ? "Unpin" : "Pin as the quote of the day"}
+                      className={`p-1.5 ${q.pinned ? "text-sky-600" : "text-slate-400 hover:text-sky-600"}`}
+                      data-testid={`hr-quote-pin-${q.id}`}
+                    >
+                      {q.pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => patch(q, { active: !q.active })}
+                      title={q.active ? "Take off the board" : "Put back on the board"}
+                      className={`p-1.5 ${q.active ? "text-emerald-600 hover:text-slate-500" : "text-slate-400 hover:text-emerald-600"}`}
+                      data-testid={`hr-quote-toggle-${q.id}`}
+                    >
+                      {q.active ? <Check className="h-4 w-4" /> : <Ban className="h-4 w-4" />}
+                    </button>
+                    <button type="button" onClick={() => remove(q)} title="Delete" className="p-1.5 text-slate-400 hover:text-rose-600" data-testid={`hr-quote-delete-${q.id}`}>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => patch(q, { pinned: !q.pinned }, q.pinned ? "Unpinned — the board rotates again." : "Pinned as the quote of the day.")}
-                    title={q.pinned ? "Unpin" : "Pin as the quote of the day"}
-                    className={`p-1.5 ${q.pinned ? "text-sky-600" : "text-slate-400 hover:text-sky-600"}`}
-                    data-testid={`hr-quote-pin-${q.id}`}
-                  >
-                    {q.pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => patch(q, { active: !q.active })}
-                    title={q.active ? "Take off the board" : "Put back on the board"}
-                    className={`p-1.5 ${q.active ? "text-emerald-600 hover:text-slate-500" : "text-slate-400 hover:text-emerald-600"}`}
-                    data-testid={`hr-quote-toggle-${q.id}`}
-                  >
-                    {q.active ? <Check className="h-4 w-4" /> : <Ban className="h-4 w-4" />}
-                  </button>
-                  <button type="button" onClick={() => remove(q)} title="Delete" className="p-1.5 text-slate-400 hover:text-rose-600" data-testid={`hr-quote-delete-${q.id}`}>
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           ))}
         </div>
