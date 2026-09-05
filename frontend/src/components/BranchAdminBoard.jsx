@@ -1393,6 +1393,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     });
   }, []);
 
+  // Held for the same reason handleConsultationCounts above is: the consultations board is
+  // memoised, and an arrow written inline at the mount is a new prop on every render of
+  // this board -- which is often, since forty-odd pieces of state up here have nothing to
+  // do with that list. Handing it a fresh one each time would re-render the whole of it.
+  const clearAutoOpenLead = useCallback(() => setAutoOpenLeadId(null), []);
+
   // "All Stages" is the count of every lead matching the active Date Filter/search —
   // every lead in the branch when neither is set.
   const totalLeads = filteredLeads.length;
@@ -1907,7 +1913,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               // see consultationCounts.
               onCountChange={handleConsultationCounts}
               autoOpenLeadId={autoOpenLeadId}
-              onAutoOpened={() => setAutoOpenLeadId(null)}
+              onAutoOpened={clearAutoOpenLead}
               // Driven by the toolbar above: passing externalSearch hides this board's own
               // search row, which is also where its date filter and green refresh lived.
               externalSearch={searchQuery}

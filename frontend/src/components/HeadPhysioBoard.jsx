@@ -271,6 +271,19 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   const [autoOpenLead, setAutoOpenLead] = useState(null);
   const [autoOpenReview, setAutoOpenReview] = useState(null);
 
+  // Held rather than written inline at the mount below, and for two reasons. The board is
+  // memoised, and a fresh arrow on every render of this one is a prop that has changed, so
+  // an inline pair would hand it back the full re-render the memo exists to spare it. And
+  // the count report is an effect over there with its callback in the dependencies: a new
+  // identity each render made it fire on every render of this board rather than when the
+  // numbers moved.
+  const handleConsultCounts = useCallback((total, stages, names) => {
+    setConsultCount(total);
+    setConsultStages(stages || {});
+    setConsultStageNames(names || []);
+  }, []);
+  const clearAutoOpenLead = useCallback(() => setAutoOpenLead(null), []);
+
   /**
    * View on an All row. The two queues merged into that list keep their own detail popups,
    * so this routes to the right one rather than building a third that would show less than
@@ -486,10 +499,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               // stage pills as well would be the same control offered twice.
               showOwnStageBar={false}
               externalStageFilter={workTab === "consultations" ? firstStage : null}
-              onCountChange={(total, stages, names) => { setConsultCount(total); setConsultStages(stages || {}); setConsultStageNames(names || []); }}
+              onCountChange={handleConsultCounts}
               onRowsChange={setConsultRows}
               autoOpenLeadId={autoOpenLead}
-              onAutoOpened={() => setAutoOpenLead(null)}
+              onAutoOpened={clearAutoOpenLead}
               reloadToken={refreshTick}
             />
           </div>

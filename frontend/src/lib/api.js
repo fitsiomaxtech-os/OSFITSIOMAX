@@ -415,11 +415,48 @@ export const mkPerformance = async () => (await api.get("/marketing/performance"
 
 
 // Pipeline Stages
-export const stagesList = async (type) => (await api.get(`/stages${type ? `?type=${type}` : ""}`)).data;
-export const stagesCreate = async (payload) => (await api.post("/stages", payload)).data;
-export const stagesUpdate = async (id, payload) => (await api.patch(`/stages/${id}`, payload)).data;
-export const stagesDelete = async (id) => (await api.delete(`/stages/${id}`)).data;
-export const stagesReorder = async (items) => (await api.post("/stages/reorder", { items })).data;
+//
+// Held per type and shared, because every board that draws a stage bar reads this on mount
+// and several of them are on screen at once: opening Branch Leads' Consultation tab asked
+// for `consultation` twice over -- once from the board that draws the summary cards, once
+// from the ConsultationsBoard embedded underneath that counts them. The two raced, and the
+// cards are labelled from the first copy and counted from the second, so until the
+// duplicate landed the tab showed a row of zeroes over a table that plainly had rows in it.
+//
+// An in-flight request is joined rather than repeated, so simultaneous callers cost one
+// round trip; a settled list is reused for STAGES_TTL_MS, which is long enough to cover a
+// tab switch and short enough that a rename made in another window turns up on its own.
+// Every write below drops the cache outright, so Pipeline Stage Management -- which reloads
+// through here immediately after each save -- never reads back what it has just replaced.
+const STAGES_TTL_MS = 60000;
+const _stagesCache = new Map(); // type -> { at, data } while settled, { inflight } while not
+export const invalidateStages = () => { _stagesCache.clear(); };
+export const stagesList = async (type) => {
+  const key = type || "";
+  const held = _stagesCache.get(key);
+  if (held?.inflight) return held.inflight;
+  // Copied on the way out. The list is shared by every caller now, and one of them sorting
+  // or splicing its own copy would be reordering everybody else's stage bar.
+  if (held && Date.now() - held.at < STAGES_TTL_MS) return held.data.slice();
+  const inflight = api.get(`/stages${type ? `?type=${type}` : ""}`)
+    .then(({ data }) => {
+      const rows = Array.isArray(data) ? data : [];
+      _stagesCache.set(key, { at: Date.now(), data: rows });
+      return rows.slice();
+    })
+    .catch((err) => {
+      // Nothing to hold and nothing to serve a later caller: drop the entry so the next
+      // mount asks again rather than joining a promise that has already rejected.
+      _stagesCache.delete(key);
+      throw err;
+    });
+  _stagesCache.set(key, { inflight });
+  return inflight;
+};
+export const stagesCreate = async (payload) => { const { data } = await api.post("/stages", payload); invalidateStages(); return data; };
+export const stagesUpdate = async (id, payload) => { const { data } = await api.patch(`/stages/${id}`, payload); invalidateStages(); return data; };
+export const stagesDelete = async (id) => { const { data } = await api.delete(`/stages/${id}`); invalidateStages(); return data; };
+export const stagesReorder = async (items) => { const { data } = await api.post("/stages/reorder", { items }); invalidateStages(); return data; };
 export const resetAllLeads = async () => (await api.post("/admin/reset-all-leads", null, { params: { confirm: true } })).data;
 
 // HR

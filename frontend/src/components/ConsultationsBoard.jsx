@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Salad, HeartPulse, Music2, Video } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -190,6 +190,37 @@ const shareReceipt = (r) => sharePrintable(receiptText(r), `FITSIOMAX Receipt ${
 /** A phone rather than a desk: the two need opposite handoffs, below. */
 const isHandheld = () => (typeof window !== "undefined"
   && (window.matchMedia?.("(pointer: coarse)").matches || navigator.maxTouchPoints > 0));
+
+/**
+ * Whether the viewport is below Tailwind's `sm`, watched rather than read once.
+ *
+ * The board draws this list two ways -- stacked cards for a phone, a table for a desk --
+ * and it used to build both every render and let CSS hide the one that didn't apply. That
+ * is every row rendered twice, into twice the DOM, on a screen that can only ever show one
+ * of them: a branch with a few hundred consultations paid for its whole phone list on a
+ * desktop and its whole table on a phone, on the first paint and on every re-render after.
+ *
+ * So the choice is made here and only the list that will be seen is built. The classes that
+ * used to do it are left in place, which costs nothing and keeps the right one showing
+ * through the frame between a drag across the breakpoint and this listener firing.
+ */
+const SM_BREAKPOINT = "(max-width: 639.98px)";
+const useBelowSm = () => {
+  const [below, setBelow] = useState(() => (
+    typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia(SM_BREAKPOINT).matches
+      : false
+  ));
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mql = window.matchMedia(SM_BREAKPOINT);
+    const sync = () => setBelow(mql.matches);
+    sync();
+    mql.addEventListener("change", sync);
+    return () => mql.removeEventListener("change", sync);
+  }, []);
+  return below;
+};
 
 /**
  * Straight to the patient's own number with the receipt already typed.
@@ -1454,7 +1485,7 @@ const appointmentTone = (date) => {
   return on > today ? APPOINTMENT_TONE.upcoming : APPOINTMENT_TONE.past;
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false }) => {
+const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
   // worth remarking on when they are assigned. Passed in rather than worked out here for
@@ -2075,6 +2106,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   const showDiscountColumn = stageFilter === "Fee Collected";
 
+  // Which of the two renderings of `filtered` to build -- see useBelowSm. A board that was
+  // not asked for phone cards has only ever had the table, so it is unaffected.
+  const narrow = useBelowSm();
+  const showMobileCards = mobileCards && narrow;
+  const showDeskTable = !mobileCards || !narrow;
+
   // Which of the three fees the Fee Collected list is showing. Consultation first: it is
   // the fee that puts a patient in this stage, so it is the one that answers "everyone".
   const [feeTab, setFeeTab] = useState("consultation");
@@ -2173,13 +2210,41 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (onRowsChange) onRowsChange(preStageFiltered);
   }, [preStageFiltered, onRowsChange]);
 
+  // Asked for immediately, and ahead of the catalogues below. Every summary card over this
+  // board is counted per stage, so a board holding its rows and not yet its stage list has
+  // nothing to count them into -- the cards read 0 over a table with rows in it until this
+  // lands. It is served from the shared cache in lib/api, so where a parent board has
+  // already asked for the same pipeline this costs no request at all.
   useEffect(() => {
-    listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
-    // Loaded up front, not just when the collect-fee popup opens: the Consultation Visit
-    // panel now quotes the Diet Fee before anyone has opened anything.
-    listDietStoreItems().then((d) => setDietItems(d || [])).catch(() => setDietItems([]));
     stagesList(isConsultant ? "head_consultation" : "consultation").then(setStages).catch(() => setStages([]));
   }, [isConsultant]);
+
+  // The three shelves, fetched after the browser has drawn the list rather than alongside
+  // it. Nothing on screen reads them: they are the Treatment Package, Rehab and Zumba
+  // choices, the Diet Fee quote and the report presets, all of which live inside the
+  // patient popup and none of which can be reached without first clicking a row. Firing
+  // them with the board put four catalogue requests in front of the one request the stage
+  // cards are waiting on, which is a slow bar over a table that had already loaded.
+  //
+  // requestIdleCallback where there is one, with a timeout so a busy tab still gets them
+  // promptly; a plain task otherwise. Either way they are in long before a row is opened.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCatalogues = () => {
+      if (cancelled) return;
+      listStoreItems().then((d) => { if (!cancelled) setStoreItems(d || []); }).catch(() => { if (!cancelled) setStoreItems([]); });
+      listDietStoreItems().then((d) => { if (!cancelled) setDietItems(d || []); }).catch(() => { if (!cancelled) setDietItems([]); });
+      getTreatmentTypes().then((d) => { if (!cancelled) setTreatmentTypes(d || []); }).catch(() => { if (!cancelled) setTreatmentTypes([]); });
+    };
+    const idle = typeof window !== "undefined" && window.requestIdleCallback;
+    const handle = idle
+      ? window.requestIdleCallback(fetchCatalogues, { timeout: 1500 })
+      : setTimeout(fetchCatalogues, 0);
+    return () => {
+      cancelled = true;
+      if (idle) window.cancelIdleCallback(handle); else clearTimeout(handle);
+    };
+  }, []);
 
   // When embedded inside another board (e.g. Branch Leads' unified stage bar), let the
   // parent drive which stage this board is filtered to.
@@ -2259,10 +2324,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, [selectedLead?.id]);
 
   useEffect(() => {
-    getTreatmentTypes().then(setTreatmentTypes).catch(() => setTreatmentTypes([]));
-  }, []);
-
-  useEffect(() => {
     if (!selectedLead?.id || detailTab !== "timeline") return;
     getLeadRemarks(selectedLead.id).then(setTimelineRemarks).catch(() => setTimelineRemarks([]));
     getLeadActivity(selectedLead.id).then(setTimelineActivity).catch(() => setTimelineActivity([]));
@@ -2295,14 +2356,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // bare item_type check offered a Zumba class as a Treatment Package. An item saved
   // before the other shelves existed carries no category and is a treatment package by
   // definition, so it keeps its place here.
-  const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session" && (i.category || "physiotherapy") === "physiotherapy").sort(byDuration);
+  const treatmentPackageItems = useMemo(() => storeItems.filter((i) => i.item_type === "session" && (i.category || "physiotherapy") === "physiotherapy").sort(byDuration), [storeItems]);
   // The Rehab shelf, offered beside the referral itself. A rehab course is a session item
   // under its own category and is priced the same way — a per-session rate whose total is
   // the rate times the course's session count.
-  const rehabPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "rehab").sort(byDuration);
+  const rehabPackageItems = useMemo(() => storeItems.filter((i) => i.item_type === "session" && i.category === "rehab").sort(byDuration), [storeItems]);
   // The Zumba shelf. Its plan amount is stored divided down to a per-class rate, exactly
   // like a rehab course, so the same rate-times-count arithmetic returns the plan price.
-  const zumbaPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "zumba").sort(byDuration);
+  const zumbaPackageItems = useMemo(() => storeItems.filter((i) => i.item_type === "session" && i.category === "zumba").sort(byDuration), [storeItems]);
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
@@ -4302,7 +4363,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           `filtered`, which each of them renders. */}
       {showDiscountColumn && feeTabsBar}
 
-      {mobileCards && (
+      {showMobileCards && (
         <div className="space-y-2 sm:hidden" data-testid="cons-mobile-cards">
           {filtered.length === 0 ? (
             <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
@@ -4389,6 +4450,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       )}
 
       {/* Table */}
+      {showDeskTable && (
       <Card className={`overflow-hidden border-slate-200 ${mobileCards ? "hidden sm:block" : ""}`}>
         {/* The rows scroll, the header does not. Capping the height here is what makes
             that possible: a sticky header sticks to its nearest scrolling ancestor, and
@@ -4673,6 +4735,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           </table>
         </CardContent>
       </Card>
+      )}
 
       {/* Detail / move-stage dialog */}
       {selectedLead && (
@@ -10344,5 +10407,24 @@ function LockableTextBox({
     </div>
   );
 }
+
+/**
+ * Memoised, because of who mounts it and what it costs.
+ *
+ * Branch Leads embeds this board under a stage bar it draws itself, and is told the counts
+ * to put on that bar from in here -- so every load reports up, the parent stores the
+ * numbers, and the parent re-renders. That re-render used to walk this entire board again:
+ * every row of the list, rebuilt to produce exactly what was already on screen. The same
+ * went for the forty-odd other pieces of parent state -- a tick in its select-all box, its
+ * own popup opening -- none of which this board is told about or affected by.
+ *
+ * Every prop it is given is a primitive, a literal, or memoised by the parent, so the
+ * comparison is a cheap one and it holds: the board re-renders when the filters, the search
+ * or the reload token actually move, and sits still the rest of the time. Parents passing
+ * an inline arrow for onCountChange or onAutoOpened would defeat it, which is why the two
+ * that mount it hold theirs in useCallback.
+ */
+export const ConsultationsBoard = memo(ConsultationsBoardInner);
+ConsultationsBoard.displayName = "ConsultationsBoard";
 
 export default ConsultationsBoard;
