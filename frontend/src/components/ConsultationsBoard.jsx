@@ -6437,16 +6437,21 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     </div>
                   )}
 
-                  {/* Only once the course has changed hands. On a course one physio has
-                      held throughout, their name is already two rows above this and a card
-                      repeating it would be the same fact told twice. A reassignment is the
-                      case worth drawing: the previous physio keeps the days they ran, and
-                      the branch reading this is usually asking exactly where they left
-                      off. */}
-                  {rehabProgress.reassigned && (
+                  {/* Who is delivering the course, drawn the way the treatment panel draws
+                      it — on a course one physio has held throughout as much as on one that
+                      has changed hands. The name two rows above says who holds the course;
+                      this card says what they have done with it: days completed, which day
+                      numbers are theirs, how many are still booked, and since when. That is
+                      the question the desk opens rehab to answer, and gating it on a
+                      reassignment meant the ordinary course — one physio, mid-delivery —
+                      was the one that showed nothing. A handover only adds the physios
+                      before them, oldest first, and renames the heading to say how many. */}
+                  {(rehabProgress.previous.length > 0 || rehabProgress.current) && (
                     <div className="mt-3 space-y-1.5" data-testid="cons-rehab-journey">
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        Physio History · {rehabProgress.previous.length + (rehabProgress.current ? 1 : 0)} physios
+                        {rehabProgress.reassigned
+                          ? `Physio History · ${rehabProgress.previous.length + (rehabProgress.current ? 1 : 0)} physios`
+                          : "Delivered By"}
                       </p>
                       {rehabProgress.previous.map((spell, i) => (
                         <PhysioSpell
