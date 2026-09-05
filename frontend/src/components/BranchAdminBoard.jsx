@@ -3500,17 +3500,23 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
             <div className="space-y-4" data-testid="branch-lead-followup">
               <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-4" data-testid="branch-followup-form">
                 <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-amber-700"><Bell className="h-3.5 w-3.5" /> Schedule Follow-Up</p>
+                {/* Every control in the row carries a label and the same h-9, so the
+                    three fields and the button sit on one line rather than the unlabelled
+                    remarks box and a shorter sm button hanging off two labelled fields. */}
                 <div className="flex flex-wrap items-end gap-2">
-                  <div>
+                  <div className="w-40">
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Date</label>
-                    <MilkDateInput  value={followUpForm.date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setFollowUpForm({ ...followUpForm, date: e.target.value })} className="w-40" data-testid="branch-followup-date" />
+                    <MilkDateInput centered title="Follow-Up Date" value={followUpForm.date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setFollowUpForm({ ...followUpForm, date: e.target.value })} className="w-full" data-testid="branch-followup-date" />
                   </div>
-                  <div>
+                  <div className="w-32">
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Time</label>
-                    <MilkTimeInput value={followUpForm.time} onChange={(e) => setFollowUpForm({ ...followUpForm, time: e.target.value })} className="w-32" data-testid="branch-followup-time" />
+                    <MilkTimeInput centered title="Follow-Up Time" value={followUpForm.time} onChange={(e) => setFollowUpForm({ ...followUpForm, time: e.target.value })} className="w-full" data-testid="branch-followup-time" />
                   </div>
-                  <Input value={followUpForm.remarks} onChange={(e) => setFollowUpForm({ ...followUpForm, remarks: e.target.value })} placeholder="Remarks (optional)" className="min-w-[10rem] flex-1" data-testid="branch-followup-remarks" />
-                  <Button size="sm" onClick={submitFollowUp} disabled={followUpBusy} className="bg-amber-600 text-white hover:bg-amber-700" data-testid="branch-followup-submit">Schedule</Button>
+                  <div className="min-w-[10rem] flex-1">
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Remarks</label>
+                    <Input value={followUpForm.remarks} onChange={(e) => setFollowUpForm({ ...followUpForm, remarks: e.target.value })} placeholder="Optional" className="w-full" data-testid="branch-followup-remarks" />
+                  </div>
+                  <Button onClick={submitFollowUp} disabled={followUpBusy} className="h-9 shrink-0 bg-amber-600 px-4 text-white hover:bg-amber-700" data-testid="branch-followup-submit">Schedule</Button>
                 </div>
               </div>
 
