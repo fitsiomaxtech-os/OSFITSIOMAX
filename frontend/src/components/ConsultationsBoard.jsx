@@ -1213,12 +1213,32 @@ const COLS_WITH_ACTION = {
  * list is everyone whose consultation money is already in, so its own fee is the one column
  * that is never outstanding and treatment is what is due from them next. That pairing is
  * what this row of buttons has always done, and it is left as it was.
+ *
+ * `scope` is who the tab is about at all -- the patients sent to that desk.
+ *
+ * Without it the four tabs were four names over one list: with the dropdown on All every
+ * tab showed the stage entire, so a stage of seven read Consultant 7 | Physio 7 | Rehab 7
+ * | Diet 7 -- the same seven counted four times -- and the Diet tab listed six people who
+ * had never been referred for a diet, each with "Not collected" against a fee they do not
+ * owe. A tab is a desk, and a desk's list has to be that desk's own patients before the
+ * dropdown can say anything useful about which of them have paid.
+ *
+ * Read off the referral the Head Physio's decision records -- the tick IS the referral,
+ * see CONSULTATION_ADDONS -- widened to anyone already carrying that desk's package or its
+ * money. A patient sold a rehab package, or one whose diet fee is already in, belongs on
+ * that desk's list whatever the flag currently says: a later edit can clear a tick and it
+ * cannot unmake a payment, and a paid row vanishing off the only tab that reports it is
+ * money the branch cannot find.
+ *
+ * Consultant's is everyone, and that is not an omission: the consultation fee is what puts
+ * a patient in this stage, so every row here was seen by that desk.
  */
 const FEE_TABS = [
   {
     key: "consultation",
     label: "Consultant",
     tone: "#0284c7",
+    scope: () => true,
     paid: (l) => Number(l.package_paid) || 0,
     item: (l) => l.package_name || l.consultation_item_name || "",
     mode: (l) => l.package_payment_mode || "",
@@ -1228,6 +1248,11 @@ const FEE_TABS = [
     key: "treatment",
     label: "Physio",
     tone: "#059669",
+    // Treatment is the one addon with a package to pick, so it is recorded as the decision
+    // itself rather than as a flag beside it -- see CONSULTATION_ADDONS.
+    scope: (l) => l.consultation_decision === "consultation_treatment"
+      || !!l.session_package_id
+      || Number(l.treatment_fee_paid) > 0,
     paid: (l) => Number(l.treatment_fee_paid) || 0,
     item: (l) => l.session_package_name || "",
     mode: (l) => l.treatment_fee_payment_mode || "",
@@ -1237,6 +1262,7 @@ const FEE_TABS = [
     key: "rehab",
     label: "Rehab",
     tone: "#0891b2",
+    scope: (l) => !!l.rehab_referred || !!l.rehab_package_id || Number(l.rehab_fee_paid) > 0,
     paid: (l) => Number(l.rehab_fee_paid) || 0,
     item: (l) => l.rehab_package_name || "",
     mode: (l) => l.rehab_fee_payment_mode || "",
@@ -1246,6 +1272,16 @@ const FEE_TABS = [
     key: "diet",
     label: "Diet",
     tone: "#d97706",
+    // Both halves of a diet referral count, and either fee does. The tab reports the Diet
+    // Consultation fee, but a patient sent away with a chart alone is still this desk's --
+    // dropping them here would leave a Diet Chart sale on no list at all. See DIET_KINDS.
+    scope: (l) => !!l.diet_recommended
+      || !!l.diet_consultation
+      || !!l.diet_chart
+      || !!l.diet_package_id
+      || !!l.diet_chart_package_id
+      || Number(l.diet_fee_paid) > 0
+      || l.diet_chart_fee_paid != null,
     paid: (l) => Number(l.diet_fee_paid) || 0,
     item: (l) => l.diet_package_name || "",
     mode: (l) => l.diet_fee_payment_mode || "",
@@ -2303,18 +2339,25 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const feeCounts = useMemo(() => {
     if (!showDiscountColumn) return {};
     const out = {};
-    // Counted through the dropdown, not past it. A badge that keeps saying 2 while the row
-    // under it lists 5 is the badge being read as the wrong number rather than as a
-    // different question, so the count on the tab is always the length of the list the tab
-    // would open -- on All the stage entire, on the other two the half being asked for.
-    for (const t of FEE_TABS) out[t.key] = inStage.filter((l) => activeStatus.match(t.paid(l))).length;
+    // Counted through the tab's own scope and then through the dropdown, in that order --
+    // the same two cuts `filtered` makes, so the badge is always the length of the list the
+    // tab would open. A badge that keeps saying 2 while the row under it lists 5 is the
+    // badge being read as the wrong number rather than as a different question.
+    //
+    // Scope first is what stops the four badges from repeating one number: they count four
+    // different sets of patients now, not the stage over and over.
+    for (const t of FEE_TABS) {
+      out[t.key] = inStage.filter((l) => t.scope(l) && activeStatus.match(t.paid(l))).length;
+    }
     return out;
   }, [inStage, showDiscountColumn, activeStatus]);
-  // The stage's rows seen through the open tab's fee, cut to the side of it the dropdown
-  // is asking about. Outside Fee Collected neither the tabs nor the dropdown exist, so the
-  // stage's rows pass through whole.
+  // The open tab's own patients -- the stage cut to the desk they were sent to, then cut
+  // again to the side of that desk's fee the dropdown is asking about. Outside Fee Collected
+  // neither the tabs nor the dropdown exist, so the stage's rows pass through whole.
   const filtered = useMemo(() => {
-    const rows = showDiscountColumn ? inStage.filter((l) => activeStatus.match(activeFee.paid(l))) : inStage;
+    const rows = showDiscountColumn
+      ? inStage.filter((l) => activeFee.scope(l) && activeStatus.match(activeFee.paid(l)))
+      : inStage;
     // In the order the day is actually worked: 10:45 before 2:30 before 5:00. The server
     // sends these newest-updated first, which puts whoever was last edited at the top —
     // a useful order for a change log and the wrong one for a list somebody works down.
@@ -3763,6 +3806,17 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     ? selectedLead?.rehab_package_name
     : selectedLead?.session_package_name) || (isRehabAssign ? "Rehab course" : "Session package");
 
+  // What the picker calls itself, and which money it quotes. The same popup books two
+  // courses, and every word of its chrome was written for the treatment one: a rehab
+  // booking opened onto "Assign Physio" over "Treatment Fee: not paid" — the wrong fee,
+  // and a false alarm besides. The Rehab tab is only reachable once the Rehab Fee is in,
+  // so the one figure this popup showed was the one figure with nothing to do with the
+  // days being booked, sitting under a heading that named the other course.
+  const assignTitle = isRehabAssign ? "Assign Rehab Physio" : "Assign Physio";
+  const assignFeeLabel = isRehabAssign ? "Rehab Fee" : "Treatment Fee";
+  const assignFeePaid = isRehabAssign ? selectedLead?.rehab_fee_paid : selectedLead?.treatment_fee_paid;
+  const assignFeeMode = isRehabAssign ? selectedLead?.rehab_fee_payment_mode : selectedLead?.treatment_fee_payment_mode;
+
   // A physio treats two or three patients in the same hour, so a slot is only off the
   // table once it is FULL — not once it has anyone in it. Capacity comes from the
   // physio's own record; a Head Physio is always 1, because a consultation is one-to-one.
@@ -4592,8 +4646,16 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
           {filtered.length === 0 ? (
             <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
               {/* Head Physio browses this a day at a time; Branch Admin arrives filtered
-                  by stage, where "on this day" would be describing a filter it isn't using. */}
-              {loading ? "Loading…" : externalDate ? "No patients on this day." : "No patients in this stage yet."}
+                  by stage, where "on this day" would be describing a filter it isn't using.
+                  A fee tab that has emptied says so first either way: on the phone as on the
+                  desk, an empty Diet tab is nobody referred for a diet, not an empty day. */}
+              {loading
+                ? "Loading…"
+                : showDiscountColumn && activeFee.key !== "consultation"
+                  ? `No patients referred to ${activeFee.label} in this stage.`
+                  : externalDate
+                    ? "No patients on this day."
+                    : "No patients in this stage yet."}
             </p>
           ) : filtered.map((l, i) => {
             const rowStage = rowStageName(l);
@@ -4993,7 +5055,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         ? `Every ${activeFee.label.toLowerCase()} fee here is collected.`
                         : feeStatus === "collected"
                           ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
-                          : "No patients in this stage yet."
+                          // On All a tab now empties because nobody was sent to that desk,
+                          // which is not the same as the stage being empty -- and the
+                          // Consultant tab, whose list is everyone here, can only mean it
+                          // the old way. See FEE_TABS' `scope`.
+                          : activeFee.key === "consultation"
+                            ? "No patients in this stage yet."
+                            : `No patients referred to ${activeFee.label} in this stage.`
                       : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
                 </td></tr>
               )}
@@ -9100,7 +9168,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-physio-modal">
                 <div className="w-full max-w-md space-y-3 rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
-                    <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Users className="h-4 w-4 text-emerald-600" /> Assign Physio</p>
+                    <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                      {/* Cyan and the Activity mark on rehab, the same pair the Rehab panel
+                          carries. This opens straight over that card, so it has to read as
+                          that card continued rather than as the treatment picker arriving. */}
+                      {isRehabAssign ? <Activity className="h-4 w-4 text-cyan-600" /> : <Users className="h-4 w-4 text-emerald-600" />}
+                      {assignTitle}
+                    </p>
                     <button onClick={() => setShowPhysioModal(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-physio-close"><X className="h-4 w-4" /></button>
                   </div>
 
@@ -9113,15 +9187,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       </p>
                     )}
                     <p className="mt-0.5">
-                      Treatment Fee: {selectedLead.treatment_fee_paid != null ? (
-                        <span className="font-semibold text-emerald-700">Rs.{selectedLead.treatment_fee_paid} paid ({selectedLead.treatment_fee_payment_mode || "—"})</span>
+                      {assignFeeLabel}: {assignFeePaid != null ? (
+                        <span className="font-semibold text-emerald-700">Rs.{Number(assignFeePaid).toLocaleString("en-IN")} paid ({assignFeeMode || "—"})</span>
                       ) : (
                         <span className="text-amber-600">not paid</span>
                       )}
                     </p>
                   </div>
 
-                  <p className="text-[11px] text-slate-500">Available physios in this branch — pick one to choose their treatment dates</p>
+                  <p className="text-[11px] text-slate-500">Available physios in this branch — pick one to choose their {isRehabAssign ? "rehab days" : "treatment dates"}</p>
 
                   {physioOptions.length === 0 ? (
                     <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">No physios found for this branch yet.</p>
@@ -9204,7 +9278,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   {physioPick && sortedPickedSlots.length > 0 && (
                     <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-physio-sessions-preview">
                       <div className="mb-1.5 flex items-center justify-between">
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">Treatment days fixed</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">{isRehabAssign ? "Rehab days fixed" : "Treatment days fixed"}</p>
                         <button
                           type="button"
                           onClick={() => setShowSlotPicker(true)}
@@ -9235,7 +9309,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       ? "Assigning..."
                       : allSessionsPicked
                       ? `Assign & Book ${openEndedRehab ? sortedPickedSlots.length : totalSessionsNeeded} ${isRehabAssign ? "Rehab Days" : "Sessions"}`
-                      : "Choose Treatment Dates & Times"}
+                      : isRehabAssign ? "Choose Rehab Dates & Times" : "Choose Treatment Dates & Times"}
                   </Button>
                 </div>
               </div>
@@ -9263,7 +9337,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         </p>
                         <p className="text-[11px] leading-snug text-white/75 sm:text-[13px]">
                           {courseName}{totalSessionsNeeded ? ` · ${totalSessionsNeeded} ${dayNoun}s` : ""} ·
-                          {" "}one session a day · {sessionMinutes} min each · {openSlotCount} slots open
+                          {" "}{isRehabAssign ? "one a day" : "one session a day"} · {sessionMinutes} min each · {openSlotCount} slots open
                         </p>
                         {/* Where these days will be held, on the screen that fixes them.
                             A link rather than plain text: whoever is booking can check the
@@ -9300,7 +9374,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       and the day range inside it stay on one line. */}
                   <div className="border-b-2 border-slate-200 bg-slate-100 px-3 py-2 sm:px-6 sm:py-3.5" data-testid="cons-slot-picker-payment">
                     <div className="mb-2 hidden items-baseline justify-between gap-2 sm:flex">
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Treatment Fee</span>
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500">{assignFeeLabel}</span>
                       {sessionPayment.price > 0 && (
                         <span className="shrink-0 text-[12px] font-bold text-slate-600 sm:text-[13px]">
                           Rs.{sessionPayment.paidAmount} of Rs.{sessionPayment.price} collected
@@ -9315,13 +9389,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         {openEndedRehab ? `${sortedPickedSlots.length} ${dayNoun}${sortedPickedSlots.length === 1 ? "" : "s"} fixed` : `${sortedPickedSlots.length} of ${totalSessionsNeeded} ${dayNoun}s fixed`}
                       </span>
                       <span className="hidden w-full rounded-lg border-2 border-emerald-400 bg-emerald-50 sm:block px-3 py-1.5 text-center text-xs font-bold text-emerald-700 shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm" data-testid="cons-payment-paid">
-                        {sessionPayment.paid} session{sessionPayment.paid === 1 ? "" : "s"} PAID
+                        {sessionPayment.paid} {dayNoun}{sessionPayment.paid === 1 ? "" : "s"} PAID
                         {sessionPayment.paidAmount > 0 && <span className="ml-2 font-semibold text-emerald-600">Rs.{sessionPayment.paidAmount}</span>}
                         {sessionPayment.paid > 0 && <span className="ml-2 font-medium text-emerald-500">Day 1–{sessionPayment.paid}</span>}
                       </span>
                       {sessionPayment.unpaid > 0 ? (
                         <span className="hidden w-full rounded-lg border-2 border-rose-400 bg-rose-50 sm:block px-3 py-1.5 text-center text-xs font-bold text-rose-700 shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm" data-testid="cons-payment-unpaid">
-                          {sessionPayment.unpaid} session{sessionPayment.unpaid === 1 ? "" : "s"} UNPAID
+                          {sessionPayment.unpaid} {dayNoun}{sessionPayment.unpaid === 1 ? "" : "s"} UNPAID
                           {sessionPayment.dueAmount > 0 && <span className="ml-2 font-semibold text-rose-600">Rs.{sessionPayment.dueAmount}</span>}
                           <span className="ml-2 font-medium text-rose-500">
                             Day {sessionPayment.paid + 1}–{sessionPayment.total}
@@ -9425,7 +9499,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             One {dayNoun} a day — {totalSessionsNeeded} means {totalSessionsNeeded} separate
                             days. Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Pick a
                             time and it <b>jumps to the next open date</b> on its own, so the plan is laid out in one
-                            run. Picking another time on a day already fixed <b>moves</b> that day's session and stays put.
+                            run. Picking another time on a day already fixed <b>moves</b> that day and stays put.
                           </p>
                         </div>
                       </div>
@@ -9441,7 +9515,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           <div className="flex h-full items-center justify-center">
                             <div className="text-center">
                               <Calendar className="mx-auto mb-2 h-10 w-10 text-slate-200" />
-                              <p className="text-sm text-slate-400">Pick a treatment date to see this physio's open times</p>
+                              <p className="text-sm text-slate-400">Pick a {isRehabAssign ? "rehab" : "treatment"} date to see this physio's open times</p>
                             </div>
                           </div>
                         ) : (
@@ -9554,7 +9628,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             {treatmentPlan.length > 0 && (
                               <div className="mt-4 rounded-xl border-2 border-violet-200 bg-violet-50/70 p-4" data-testid="cons-treatment-plan">
                                 <div className="mb-2 flex items-center justify-between">
-                                  <p className="text-sm font-bold uppercase tracking-wider text-violet-700">Treatment plan</p>
+                                  <p className="text-sm font-bold uppercase tracking-wider text-violet-700">{isRehabAssign ? "Rehab plan" : "Treatment plan"}</p>
                                   <button
                                     type="button"
                                     onClick={() => setPickedSessionSlots([])}
