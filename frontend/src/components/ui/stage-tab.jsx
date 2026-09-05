@@ -36,7 +36,7 @@ export const StageTab = ({ label, count, active, onClick, color, testid, gridded
       } ${
         plain
           ? (active
-            ? "bg-sky-50 text-sky-700 shadow-sm"
+            ? "bg-sky-100 text-sky-800 ring-2 ring-inset ring-sky-500 shadow-md"
             : "bg-white text-slate-600 shadow-sm hover:bg-slate-50")
           : ""
       } ${plain ? borderClass : ""}`}
