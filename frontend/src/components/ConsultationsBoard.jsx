@@ -7741,10 +7741,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         onClick={() => setPackageConfirmDraft({
                           ...packageConfirmDraft,
                           payment_lines: [
-                            // Notes already counted come across with the mode that was
-                            // counted in. Pressing "Add another payment" is not a reason
-                            // to make somebody count the same drawer twice.
-                            { mode, amount: collectFeeDraft.amount, reference: mode === "upi" ? packageConfirmDraft.upi_transaction_id : "", notes: mode === "cash" ? packageConfirmDraft.cash_notes : {} },
+                            // Notes already counted, and the reference already typed,
+                            // come across with the mode they were entered under. Pressing
+                            // "Add another payment" is not a reason to make somebody count
+                            // the same drawer twice, or read the same UTR off the statement
+                            // again. Card carries nothing because this popup never asked it
+                            // for a reference of its own -- only the four bank fields, which
+                            // a split has no line to keep and drops on submit either way.
+                            { mode, amount: collectFeeDraft.amount, reference: mode === "upi" ? packageConfirmDraft.upi_transaction_id : mode === "account_transfer" ? packageConfirmDraft.transfer_reference : "", notes: mode === "cash" ? packageConfirmDraft.cash_notes : {} },
                             { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "", notes: {} },
                           ],
                         })}
