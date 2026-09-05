@@ -3920,34 +3920,13 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-3 py-3 sm:gap-3 sm:px-6 sm:py-3.5">
-              {/* Marking the lead Cancelled is a destructive move — it frees the slot and
-                  drops the lead out of the consultation pipeline — so it reads red the
-                  moment it's ticked, and carries the primary button's colour with it. */}
-              {(() => {
-                const cancelled = apptDraft.final_stage === "Cancelled";
-                return (
-                  <button
-                    type="button"
-                    onClick={() => setApptDraft({ ...apptDraft, final_stage: cancelled ? "Appointment Date & Time" : "Cancelled" })}
-                    className={`shrink rounded-lg border-2 px-3 py-2.5 text-xs font-bold uppercase tracking-wide transition sm:px-6 sm:text-sm ${
-                      cancelled
-                        ? "border-rose-700 bg-rose-600 text-white shadow-sm"
-                        : "border-rose-200 bg-white text-rose-600 hover:border-rose-400 hover:bg-rose-50"
-                    }`}
-                    data-testid="branch-appt-cancel-toggle"
-                    aria-pressed={cancelled}
-                  >
-                    Cancelled
-                  </button>
-                );
-              })()}
+            {/* No cancelling from here. This dialog books a slot; dropping the lead out of
+                the pipeline is the Cancelled stage pill's job, and that one asks first. */}
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-100 px-3 py-3 sm:gap-3 sm:px-6 sm:py-3.5">
               <div className="flex shrink-0 items-center gap-2">
               <Button variant="outline" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
               <Button
-                className={apptDraft.final_stage === "Cancelled"
-                  ? "bg-rose-600 text-white hover:bg-rose-700"
-                  : "bg-teal-600 text-white hover:bg-teal-700"}
+                className="bg-teal-600 text-white hover:bg-teal-700"
                 onClick={async () => {
                   if (!apptDraft.appointment_date) { toast.error("Pick a date"); return; }
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
@@ -3962,14 +3941,9 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     toast.success(`Appointment ${apptDraft.appointment_date} ${to12h(apptDraft.appointment_time)} → ${apptDraft.final_stage}`);
                     const stage = apptDraft.final_stage;
                     setApptDraft(null);
-                    // A cancellation has nothing to hand over, so it closes straight away.
-                    // A booking shows its confirmation first and only tells the parent to
-                    // close once that's dismissed — onMoved unmounts this whole card, and
-                    // the confirmation has to survive long enough to be shared or printed.
-                    if (stage === "Cancelled") {
-                      onMoved && onMoved(stage);
-                      return;
-                    }
+                    // The confirmation shows first and only tells the parent to close once
+                    // it's dismissed — onMoved unmounts this whole card, and the
+                    // confirmation has to survive long enough to be shared or printed.
                     const hp = apptExperts.experts.find((d) => d.id === apptDraft.physio_id);
                     setApptConfirm({
                       finalStage: stage,
@@ -4002,7 +3976,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                 }}
                 data-testid="branch-appt-save"
               >
-                {apptDraft.final_stage === "Cancelled" ? "Confirm Cancellation" : "Confirm"}
+                Confirm
               </Button>
               </div>
             </div>
