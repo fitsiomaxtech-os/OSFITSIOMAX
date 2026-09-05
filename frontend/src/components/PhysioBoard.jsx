@@ -1621,21 +1621,30 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     return earlier.length ? Math.min(...earlier) : null;
   };
 
-  // Straight day order: Day 1, then Day 2, then Day 3, down to the last one — whatever
-  // has been completed and whatever date the strip behind the popup sits on.
+  // Work at the top, history under it: every day still to be worked first, then every
+  // day already signed off. Straight day order inside each half.
   //
-  // The list used to be cut into work-then-history with the day opened from the strip
-  // pinned above both, which read as the sequence being broken: a patient who had not
-  // started yet showed Day 3 first and Day 1 under it. A course of treatment is a
-  // numbered run and is worked in that order, so it is listed in that order; which day
-  // is currently open is said on the day's own row instead of by moving it.
+  // One numbered run pushed the day that asks for something further down the list with
+  // every day finished — seven days into a twelve-day course this tab opened onto seven
+  // Complete badges, and the one row carrying a button was below the fold. The day
+  // marked Opened is why the tab is being read, so it is the first row; the finished
+  // days are a record and read perfectly well at the foot of the list.
+  //
+  // Nothing is pinned to get it there. The numbers still ascend within each half, and
+  // the open day is by definition the lowest-numbered unfinished day of its course, so
+  // ordering on that alone lands it at the top and leaves the days after it in the
+  // order they will be worked.
   //
   // Treatment and rehab are separate courses that each number from 1, so they are kept
   // apart rather than interleaved into an impossible Day 1, Day 1, Day 2, Day 2.
   const orderedSessions = useMemo(() => {
+    const doneRank = (s) => (s.status === "completed" ? 1 : 0);
     const trackRank = (s) => ((s.track || "treatment") === "rehab" ? 1 : 0);
     return [...sessions].sort(
-      (a, b) => trackRank(a) - trackRank(b) || (a.session_number || 0) - (b.session_number || 0)
+      (a, b) =>
+        doneRank(a) - doneRank(b) ||
+        trackRank(a) - trackRank(b) ||
+        (a.session_number || 0) - (b.session_number || 0)
     );
   }, [sessions]);
 
@@ -1978,9 +1987,10 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                           {s.track === "rehab" ? "Rehab " : ""}Day {s.session_number} of {s.total_sessions}
                           {s.track !== "rehab" && s.week_number ? ` · Week ${s.week_number}` : ""}
                           {/* Marks the one day of the course that is open to be worked.
-                              The rows are in day order now, so this is what tells the
-                              physio where the treatment has got to — it no longer shows
-                              by the row being pinned above the rest. */}
+                              It sorts to the head of the list, but a position is not a
+                              label — a day still awaiting a date from the Branch Admin
+                              heads the list too and cannot be worked — so the row says
+                              in words which day this is. */}
                           {isOpenDay && (
                             <span className="rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700">
                               Opened
@@ -2080,9 +2090,10 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                 not the one whose date happens to be picked behind the popup. */}
             <div className="mt-4 border-t border-slate-200 pt-3">
               <p className="text-[11px] text-slate-500">
-                Days run in order — only the day marked Opened can be completed, and
-                finishing it opens the one after it. Completing a day also sends that
-                week's session to Review for a weekly write-up.
+                Days run in order — only the day marked Opened can be completed. Finishing
+                it opens the day after it and drops the finished one to the bottom of this
+                list. Completing a day also sends that week's session to Review for a
+                weekly write-up.
               </p>
             </div>
           </div>
