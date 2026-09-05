@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell } from "lucide-react";
+import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -739,105 +739,281 @@ const DiscountAppliedBoard = ({ rows, onView }) => {
   );
 };
 
-const RevenueDetailTable = ({ title, rows, onView }) => (
-  <Card data-testid="accountant-manage-revenue-detail">
-    <CardContent className="p-4">
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
-      {/* Cards on a phone. Nine columns behind a 52rem scroll means every one of them is
-          off-screen except the first two, and a transaction is only useful read whole —
-          who paid, how much, by what, when. */}
-      <div className="space-y-2 md:hidden" data-testid="revenue-detail-mobile">
-        {rows.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</p>
-        ) : rows.map((tx, i) => (
-          <div
-            key={tx.id}
-            role={onView ? "button" : undefined}
-            tabIndex={onView ? 0 : undefined}
-            onClick={() => onView && onView(tx.lead_id)}
-            onKeyDown={(e) => {
-              if (onView && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onView(tx.lead_id); }
-            }}
-            className={`rounded-xl border border-slate-200 bg-white p-3 ${onView ? "cursor-pointer active:bg-slate-50" : ""}`}
-            data-testid={`revenue-detail-card-${tx.id}`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="truncate font-semibold text-slate-800">
-                  <span className="mr-1.5 font-normal text-slate-400">{i + 1}.</span>
-                  {tx.client_name || "Unknown"}
-                </p>
-                <p className="truncate text-xs text-slate-500">{tx.phone || "—"}</p>
-              </div>
-              <span className="shrink-0 text-sm font-bold text-emerald-600">{fmt(tx.gross)}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-500">
-              <span className="capitalize">{tx.source}</span>
-              <PaymentModeBadge mode={tx.payment_mode} />
-              <span>{(tx.date || "").slice(0, 10)}</span>
-              {tx.branch_name && <span className="truncate">· {tx.branch_name}</span>}
-              {onView && <Eye className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-300" />}
-            </div>
-          </div>
-        ))}
-      </div>
+// One row per client, not one per collection. A lead who paid a consultation fee, then a
+// session package, then rehab arrived here as three rows that read as three different
+// people on the one page whose job is "who has paid us what". The money is the client's,
+// so the row is the client's, with the collections behind it folded underneath and opened
+// on demand — nothing is dropped, it is only stacked.
+//
+// Money with no lead behind it — a counter sale, a Zumba or Fitness registration — carries
+// no lead_id at all (see the store/zumba/fitness loops in v3_finance.py's revenue-overview),
+// so it keys on its own record and stays the single row it has always been rather than
+// collapsing a day of counter sales into one client called "Counter sale".
+const groupPaymentsByClient = (rows) => {
+  const acc = new Map();
+  rows.forEach((tx, i) => {
+    const key = tx.lead_id || `txn:${tx.id || i}`;
+    let g = acc.get(key);
+    if (!g) {
+      g = {
+        key,
+        lead_id: tx.lead_id || "",
+        client_name: tx.client_name || "Unknown",
+        phone: "",
+        total: 0,
+        payments: [],
+        sources: [],
+        modes: [],
+        branches: [],
+      };
+      acc.set(key, g);
+    }
+    g.total += Number(tx.gross) || 0;
+    g.payments.push(tx);
+    if (!g.phone && tx.phone) g.phone = tx.phone;
+    // Distinct, in the order they were met: one client can pay for three things three
+    // ways across two branches, and the collapsed row has to say so without printing
+    // "Cash" once per collection.
+    if (tx.source && !g.sources.includes(tx.source)) g.sources.push(tx.source);
+    if (tx.payment_mode && !g.modes.includes(tx.payment_mode)) g.modes.push(tx.payment_mode);
+    if (tx.branch_name && !g.branches.includes(tx.branch_name)) g.branches.push(tx.branch_name);
+  });
+  return [...acc.values()]
+    .map((g) => {
+      const payments = [...g.payments].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+      return { ...g, payments, latest: payments[0]?.date || "", oldest: payments[payments.length - 1]?.date || "" };
+    })
+    // A client sits where their newest collection puts them — the same newest-first order
+    // the ungrouped list arrived in, which is the order a day's takings are read in.
+    .sort((a, b) => String(b.latest).localeCompare(String(a.latest)));
+};
 
-      <div className="hidden overflow-x-auto md:block">
-        {/* table-fixed at w-full squeezes ten columns into a phone's width rather than
-            letting the wrapper scroll — the min-width is what makes it scroll instead. */}
-        <table className="w-full min-w-[52rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
-          <thead>
-            <tr>
-              <th className="w-[4%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
-              <th className="w-[14%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
-              <th className="w-[14%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Transaction ID</th>
-              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Consultation/Session</th>
-              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Phone</th>
-              <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
-              <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
-              <th className="w-[9%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
-              <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
-              <th className="w-[7%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
-            ) : rows.map((tx, i) => (
-              <tr key={tx.id} data-testid={`revenue-detail-row-${tx.id}`}>
-                <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 text-center text-slate-400">{i + 1}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
-                {/* Blank for collections taken before transaction ids existed — those
-                    rows are real money and must still list, so this shows a dash rather
-                    than being filtered out. */}
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center">
-                  {tx.transaction_id
-                    ? <span className="font-mono text-[11px] text-slate-700" title={tx.transaction_id}>{tx.transaction_id}</span>
-                    : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center capitalize text-slate-600">{tx.source}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.phone || "—"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-emerald-600">{fmt(tx.gross)}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center"><PaymentModeBadge mode={tx.payment_mode} /></td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{(tx.date || "").slice(0, 10)}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.branch_name || "—"}</td>
-                <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
-                  <button
-                    type="button"
-                    onClick={() => onView && onView(tx.lead_id)}
-                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
-                    data-testid={`revenue-detail-view-${tx.id}`}
-                  >
-                    <Eye className="h-4 w-4" />
-                  </button>
-                </td>
+const dayOf = (d) => (d || "").slice(0, 10);
+const titleCase = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+// Two of anything is what these columns hold; the rest are one click away with a row each,
+// so the collapsed cell counts them rather than wrapping to four lines.
+const firstTwo = (list) => ({ shown: list.slice(0, 2), extra: Math.max(0, list.length - 2) });
+
+const RevenueDetailTable = ({ title, rows, onView }) => {
+  const groups = useMemo(() => groupPaymentsByClient(rows), [rows]);
+  // Keyed by group, so narrowing the list above leaves stale keys behind harmlessly
+  // rather than opening the wrong client.
+  const [open, setOpen] = useState(() => new Set());
+
+  const expandable = useMemo(() => groups.filter((g) => g.payments.length > 1), [groups]);
+  const allOpen = expandable.length > 0 && expandable.every((g) => open.has(g.key));
+
+  const toggle = (key) => setOpen((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  });
+  const toggleAll = () => setOpen(allOpen ? new Set() : new Set(expandable.map((g) => g.key)));
+
+  return (
+    <Card data-testid="accountant-manage-revenue-detail">
+      <CardContent className="p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
+          <div className="flex items-center gap-3">
+            {/* The row count and the payment count are no longer the same number, so both
+                are stated rather than left to be counted off a list that now collapses. */}
+            <p className="text-[11px] text-slate-400" data-testid="revenue-detail-counts">
+              {countLabel(groups.length, "client")} · {countLabel(rows.length, "payment")}
+            </p>
+            {expandable.length > 0 && (
+              <button
+                type="button"
+                onClick={toggleAll}
+                className="rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600 transition hover:border-sky-300 hover:text-sky-600"
+                data-testid="revenue-detail-toggle-all"
+              >
+                {allOpen ? "Collapse all" : "Expand all"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Cards on a phone. Ten columns behind a 52rem scroll means every one of them is
+            off-screen except the first two, and a transaction is only useful read whole —
+            who paid, how much, by what, when. The collections are listed inside the card
+            rather than behind an expander: a phone row is already a block, and one line
+            per payment is cheaper than a tap. */}
+        <div className="space-y-2 md:hidden" data-testid="revenue-detail-mobile">
+          {groups.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</p>
+          ) : groups.map((g, i) => (
+            <div
+              key={g.key}
+              role={onView ? "button" : undefined}
+              tabIndex={onView ? 0 : undefined}
+              onClick={() => onView && onView(g.lead_id)}
+              onKeyDown={(e) => {
+                if (onView && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onView(g.lead_id); }
+              }}
+              className={`rounded-xl border border-slate-200 bg-white p-3 ${onView ? "cursor-pointer active:bg-slate-50" : ""}`}
+              data-testid={`revenue-detail-card-${g.key}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-slate-800">
+                    <span className="mr-1.5 font-normal text-slate-400">{i + 1}.</span>
+                    {g.client_name}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">{g.phone || "—"}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-bold text-emerald-600">{fmt(g.total)}</p>
+                  {g.payments.length > 1 && (
+                    <p className="text-[10px] text-slate-400">{countLabel(g.payments.length, "payment")}</p>
+                  )}
+                </div>
+              </div>
+              <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+                {g.payments.map((p) => (
+                  <div key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                    <span className="capitalize">{p.source}</span>
+                    <PaymentModeBadge mode={p.payment_mode} />
+                    <span>{dayOf(p.date)}</span>
+                    {g.payments.length > 1 && <span className="ml-auto font-semibold text-slate-600">{fmt(p.gross)}</span>}
+                  </div>
+                ))}
+                {g.branches.length > 0 && (
+                  <p className="truncate pt-0.5 text-[11px] text-slate-400">{g.branches.join(" · ")}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
+          {/* table-fixed at w-full squeezes ten columns into a phone's width rather than
+              letting the wrapper scroll — the min-width is what makes it scroll instead. */}
+          <table className="w-full min-w-[52rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+            <thead>
+              <tr>
+                <th className="w-[4%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
+                <th className="w-[15%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
+                <th className="w-[14%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Transaction ID</th>
+                <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Consultation/Session</th>
+                <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Phone</th>
+                <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
+                <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
+                <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
+                <th className="w-[9%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+                <th className="w-[5%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </CardContent>
-  </Card>
-);
+            </thead>
+            <tbody>
+              {groups.length === 0 ? (
+                <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
+              ) : groups.map((g, i) => {
+                const many = g.payments.length > 1;
+                const isOpen = open.has(g.key);
+                const sources = firstTwo(g.sources);
+                const modes = firstTwo(g.modes);
+                const spansDays = dayOf(g.latest) !== dayOf(g.oldest);
+                return [
+                  <tr
+                    key={g.key}
+                    onClick={many ? () => toggle(g.key) : undefined}
+                    className={many ? "cursor-pointer" : undefined}
+                    data-testid={`revenue-detail-row-${g.key}`}
+                  >
+                    <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 text-center text-slate-400">{i + 1}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">
+                      {g.client_name}
+                      {many && (
+                        <span className="block text-[10px] font-normal text-slate-400">{countLabel(g.payments.length, "payment")}</span>
+                      )}
+                    </td>
+                    {/* One collection still shows its own id. Several cannot, so the cell
+                        becomes the way into them instead and each id gets its own row
+                        underneath. Blank for collections taken before transaction ids
+                        existed — those rows are real money and must still list, so this
+                        shows a dash rather than being filtered out. */}
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center">
+                      {many ? (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); toggle(g.key); }}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:border-sky-300 hover:text-sky-600"
+                          data-testid={`revenue-detail-expand-${g.key}`}
+                        >
+                          {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                          {countLabel(g.payments.length, "payment")}
+                        </button>
+                      ) : g.payments[0]?.transaction_id ? (
+                        <span className="font-mono text-[11px] text-slate-700" title={g.payments[0].transaction_id}>{g.payments[0].transaction_id}</span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">
+                      {sources.shown.map(titleCase).join(" · ") || "—"}
+                      {sources.extra > 0 && <span className="text-slate-400"> +{sources.extra}</span>}
+                    </td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{g.phone || "—"}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-emerald-600">{fmt(g.total)}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center">
+                      <div className="flex flex-wrap items-center justify-center gap-1">
+                        {g.modes.length === 0
+                          ? <PaymentModeBadge mode="" />
+                          : modes.shown.map((m) => <PaymentModeBadge key={m} mode={m} />)}
+                        {modes.extra > 0 && <span className="text-[10px] text-slate-400">+{modes.extra}</span>}
+                      </div>
+                    </td>
+                    {/* The newest collection dates the row; a client whose payments span
+                        days says so underneath rather than reading as if they all landed
+                        on the one date. */}
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">
+                      {dayOf(g.latest) || "—"}
+                      {spansDays && <span className="block text-[10px] text-slate-400">since {dayOf(g.oldest)}</span>}
+                    </td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">
+                      {g.branches[0] || "—"}
+                      {g.branches.length > 1 && <span className="text-slate-400"> +{g.branches.length - 1}</span>}
+                    </td>
+                    <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); if (onView) onView(g.lead_id); }}
+                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+                        data-testid={`revenue-detail-view-${g.key}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>,
+                  // Each collection exactly as it listed before, minus the client identity
+                  // the row above already carries.
+                  ...(many && isOpen ? g.payments.map((p) => (
+                    <tr key={`${g.key}-${p.id}`} data-testid={`revenue-detail-payment-${p.id}`}>
+                      <td className="rounded-l-[5px] border-y border-l-2 border-y-slate-100 border-l-sky-300 bg-slate-50 px-3 py-1.5" />
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5" />
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center">
+                        {p.transaction_id
+                          ? <span className="font-mono text-[11px] text-slate-600" title={p.transaction_id}>{p.transaction_id}</span>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center capitalize text-slate-600">{p.source}</td>
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5" />
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center font-semibold text-emerald-600">{fmt(p.gross)}</td>
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center"><PaymentModeBadge mode={p.payment_mode} /></td>
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center text-slate-600">{dayOf(p.date)}</td>
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center text-slate-600">{p.branch_name || "—"}</td>
+                      <td className="rounded-r-[5px] border-y border-r border-slate-100 bg-slate-50 px-3 py-1.5" />
+                    </tr>
+                  )) : []),
+                ];
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
 
 export default AccountantManageTab;
