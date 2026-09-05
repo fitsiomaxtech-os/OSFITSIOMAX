@@ -499,6 +499,15 @@ export const clockBreakIn = async () => (await api.post("/clock/break-in")).data
 export const clockOut = async () => (await api.post("/clock/out")).data;
 export const clockHistory = async (month) => (await api.get("/clock/history", { params: month ? { month } : {} })).data;
 
+// ---------- my own page: profile and month ----------
+//
+// Same rule as the clock above and for the same reason: no id is accepted by either, so
+// there is no request shape here that reads another person's record. What HR's endpoints
+// answer for everybody, these two answer for whoever holds the token — which is why every
+// role may call them.
+export const myProfile = async () => (await api.get("/me/profile")).data;
+export const myAttendance = async (month) => (await api.get("/me/attendance", { params: month ? { month } : {} })).data;
+
 export const hrAttendanceDay = async (date) => (await api.get("/hr/attendance", { params: date ? { date } : {} })).data;
 export const hrMarkAttendance = async (date, entries) => (await api.post("/hr/attendance", { date, entries })).data;
 export const hrAttendanceMonth = async (month) => (await api.get("/hr/attendance/month", { params: month ? { month } : {} })).data;

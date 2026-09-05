@@ -9,7 +9,6 @@ import {
   Headphones,
   LayoutDashboard,
   LogOut,
-  Mail,
   Megaphone,
   MoreHorizontal,
   Salad,
@@ -96,6 +95,11 @@ const OperationsBoard = lazy(() => import("@/components/OperationsBoard").then((
 const AccountantBoard = lazy(() => import("@/components/finance/AccountantBoard").then((m) => ({ default: m.AccountantBoard })));
 const ZumbaMasterBoard = lazy(() => import("@/components/ZumbaMasterBoard").then((m) => ({ default: m.ZumbaMasterBoard })));
 const FeedbackBoard = lazy(() => import("@/components/branch/FeedbackBoard").then((m) => ({ default: m.FeedbackBoard })));
+// Everybody's own page — their month, and their record. Lazy like the boards it stands in
+// for: it is opened from the header a few times a month, and it is the only screen here
+// that every single role can reach, so bundling it would put it in front of every first
+// paint in the building.
+const MyProfilePage = lazy(() => import("@/components/MyProfilePage").then((m) => ({ default: m.MyProfilePage })));
 
 /**
  * What sits under the header while a board's chunk is on the wire.
@@ -979,7 +983,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                       <button
                         key={t.key}
                         type="button"
-                        onClick={() => setPresalesView(t.key)}
+                        onClick={() => { setShowProfile(false); setPresalesView(t.key); }}
                         className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition sm:px-3 sm:py-2 ${
                           active ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"
                         }`}
@@ -1097,10 +1101,6 @@ export const CRMPage = ({ auth, onLogout }) => {
             of a page for something that has not opened yet. */}
         <Suspense fallback={null}>
 
-        {showProfile && (
-          <MyProfileModal user={auth.user} roleLabel={roleLabel} branchName={myBranchName} onClose={() => setShowProfile(false)} />
-        )}
-
         {showFeedback && (
           <FeedbackBoard
             // Only a Branch Admin is pinned to a branch. Super Admin opens it unscoped and
@@ -1149,7 +1149,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             {SUPER_ADMIN_TABS.map((t) => (
               <button
                 key={t.key}
-                onClick={() => setSuperAdminView((v) => (t.key === "settings" ? (SETTINGS_SUB_VIEWS.includes(v) ? v : "marketing") : t.key))}
+                onClick={() => { setShowProfile(false); setSuperAdminView((v) => (t.key === "settings" ? (SETTINGS_SUB_VIEWS.includes(v) ? v : "marketing") : t.key)); }}
                 className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isSuperAdminTabActive(superAdminView, t.key) ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
                 data-testid={`super-admin-tab-${t.key}`}
               >
@@ -1178,7 +1178,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                   <button
                     key={t.key}
                     type="button"
-                    onClick={() => { setSuperAdminView(t.key); setShowSuperAdminMenu(false); }}
+                    onClick={() => { setShowProfile(false); setSuperAdminView(t.key); setShowSuperAdminMenu(false); }}
                     aria-label={t.label}
                     aria-current={active ? "page" : undefined}
                     title={t.label}
@@ -1227,6 +1227,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                     key={t.key}
                     type="button"
                     onClick={() => {
+                      setShowProfile(false);
                       setSuperAdminView((v) => (t.key === "settings" ? (SETTINGS_SUB_VIEWS.includes(v) ? v : "marketing") : t.key));
                       setShowSuperAdminMenu(false);
                     }}
@@ -1241,6 +1242,18 @@ export const CRMPage = ({ auth, onLogout }) => {
             </div>
           </div>
         )}
+
+        {/* My Profile stands in place of the board rather than over it.
+            It used to be a dialog, and what is on it now — a month of attendance eleven
+            columns wide, and every field HR holds — is a page's worth of screen. The nav
+            above stays put, and every tab in it closes this on the way out, so the page is
+            left the same way any board is: by going somewhere else. */}
+        {showProfile ? (
+          <Suspense fallback={<BoardFallback />}>
+            <MyProfilePage user={auth.user} roleLabel={roleLabel} onBack={() => setShowProfile(false)} />
+          </Suspense>
+        ) : (
+        <>
 
         {/* Below the nav, not around it: the tabs and the role bar stay on screen
             while a board chunk is fetched, so switching boards reads as the board
@@ -1346,6 +1359,9 @@ export const CRMPage = ({ auth, onLogout }) => {
         {showZumbaBoard && <ZumbaMasterBoard />}
 
         </Suspense>
+
+        </>
+        )}
         </div>
       </div>
 
@@ -1358,58 +1374,3 @@ export const CRMPage = ({ auth, onLogout }) => {
   );
 };
 
-const MyProfileModal = ({ user, roleLabel, branchName, onClose }) => {
-  if (!user) return null;
-  const joinedOn = user.created_at
-    ? new Date(user.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
-    : "—";
-  const fields = [
-    { label: "Employee ID", value: user.id ? `#${user.id.slice(-8).toUpperCase()}` : "—" },
-    { label: "Role", value: roleLabel || user.role },
-    ...(branchName ? [{ label: "Branch", value: branchName }] : []),
-    { label: "Joined On", value: joinedOn },
-  ];
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
-      data-testid="my-profile-modal"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-5 flex items-start justify-between">
-          <h3 className="text-base font-semibold text-slate-900">My Profile</h3>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            data-testid="my-profile-modal-close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="mb-5 flex items-center gap-3">
-          {/* The face from the header, larger. Clicking your own picture and being shown
-              a letter instead reads as the wrong profile having opened. */}
-          <EmployeeAvatar employee={user} size={56} className="text-xl" />
-          <div>
-            <p className="text-base font-semibold text-slate-800">{user.full_name}</p>
-            <p className="flex items-center gap-1 text-xs text-slate-400"><Mail className="h-3 w-3" />{user.email}</p>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          {fields.map((f) => (
-            <div key={f.label} className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <span className="text-xs text-slate-400">{f.label}</span>
-              <span className="text-sm font-medium text-slate-700">{f.value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
