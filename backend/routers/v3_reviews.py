@@ -30,7 +30,8 @@ from physio_scope import physio_lead_ids, resolve_physio_doctor
 
 router = APIRouter(prefix="/api/v3")
 
-# A patient becomes due a review once they've been in treatment this long.
+# A patient becomes due a review once they've been in treatment this many days. Days on the
+# calendar, not sessions attended -- see _completed_day_counts.
 REVIEW_AFTER_DAYS = 7
 
 SEND_TO_REVIEW = "send_to_review"
@@ -75,28 +76,64 @@ async def _review_or_404(review_id: str) -> dict:
 
 
 async def _treatment_days(lead_id: str) -> int:
-    """Completed treatment sessions for this patient (the field is still named
-    treatment_days for compatibility with what's already stored on review docs).
+    """Distinct calendar days this patient has attended treatment on (the field is still
+    named treatment_days for compatibility with what's already stored on review docs).
 
-    Counted as completed sessions rather than distinct calendar days — a milestone at
-    exactly the 7th/14th/etc completed session, matching the same session_number the
-    Treatment tab's own review badge is built on. Also counted from completed sessions
-    rather than from the assignment date — a package booked three weeks out is not three
-    weeks of treatment, and the review is about what the patient has been through, not
-    how long ago they paid.
+    Days, not sessions. A patient on a rehab course and a treatment package at once is
+    booked twice on the same morning -- 8:00 for one, 8:30 for the other -- and counting
+    completed rows called that two days of treatment. Four mornings read as eight, the
+    week-one review came due on the patient's fourth day, and every milestone after it
+    arrived at double speed. The review is about how long the patient has been under
+    treatment, and that is a question about the calendar.
 
-    Counted per course, and the course furthest along decides the milestone. Never the
-    two added together: v3_rehab's docstring sets out why, and it is the whole reason
-    rehab days were given their own collection — four treatment days and three rehab days
-    are not a week of treatment, and summing them would fire the week-one review three
-    treatment days early. Taking the larger leaves each course to reach its own milestone
-    on its own days, and lets a patient sent to rehab having never bought a session
-    package reach one at all: counting `sessions` alone left them on nought for ever,
-    listed on the Review tab and never becoming due.
+    Counted from completed days rather than from the assignment date -- a package booked
+    three weeks out is not three weeks of treatment, and the review is about what the
+    patient has been through, not how long ago they paid.
+
+    One set across both courses rather than the larger of the two counts. Same-day double
+    bookings collapse into one date on their own now, which is the double-counting the
+    old max() was there to avoid; taking the union on top of that means a patient seen for
+    rehab on Monday and treatment on Tuesday has had two days of treatment, which they
+    have. It also lets a patient sent to rehab having never bought a session package reach
+    a milestone at all: counting `sessions` alone left them on nought for ever, listed on
+    the Review tab and never becoming due.
     """
-    treatment = await v3_col("sessions").count_documents({"lead_id": lead_id, "status": "completed"})
-    rehab = await v3_col("rehab_sessions").count_documents({"lead_id": lead_id, "status": "completed"})
-    return max(treatment, rehab)
+    return (await _completed_day_counts([lead_id])).get(lead_id, 0)
+
+
+async def _completed_day_counts(lead_ids: List[str]) -> dict:
+    """Per patient, how many distinct calendar days of treatment are behind them.
+
+    One read per collection for the whole list rather than a pair of counts per
+    patient: the Review tab asks this of every patient a physio holds, and one at a time
+    that is a round trip each.
+
+    The date is the first ten characters of slot_time, which normalize_slot_time stores as
+    YYYY-MM-DDTHH:MM -- the same slice _first_session_date takes. A day still waiting on a
+    date from the Branch Admin has no slot_time and cannot be completed, but a falsy one is
+    dropped rather than trusted to be absent: an empty string would otherwise count as a day
+    of its own for every patient who had one.
+
+    Dates fetched and counted here rather than folded into the $group with $substrBytes.
+    That operator raises on a value that is not a string and would take the whole Review tab
+    down with a 500 over one odd row, and nothing else in this codebase leans on an
+    aggregation string operator to say what the deployed server supports. Two fields per
+    completed day is little enough to carry.
+    """
+    lead_ids = [lid for lid in lead_ids if lid]
+    if not lead_ids:
+        return {}
+    days: dict = {}
+    for name in ("sessions", "rehab_sessions"):
+        rows = await v3_col(name).find(
+            {"lead_id": {"$in": lead_ids}, "status": "completed"},
+            {"_id": 0, "lead_id": 1, "slot_time": 1},
+        ).to_list(100000)
+        for r in rows:
+            day = str(r.get("slot_time") or "")[:10]
+            if day:
+                days.setdefault(r["lead_id"], set()).add(day)
+    return {lid: len(d) for lid, d in days.items()}
 
 
 async def _first_session_date(lead_id: str) -> Optional[str]:
@@ -119,9 +156,10 @@ async def _course_progress(lead_ids: List[str]) -> dict:
     people, and the Review tab asks it of every patient a physio holds -- counted one at a
     time that is a round trip each, twice over.
 
-    Keyed by track rather than summed, because the two questions read them differently: a
-    course is finished when BOTH tracks are, and a review milestone is reached when EITHER
-    one gets there. See _treatment_days and _finished_course_ids for why each is so.
+    Booked-against-done rows, which is what "has this course finished" is asking; how far
+    through treatment the patient is, is a count of calendar days and lives in
+    _completed_day_counts. Keyed by track because a course is finished only when BOTH
+    tracks are -- see _course_finished.
     """
     lead_ids = [lid for lid in lead_ids if lid]
     if not lead_ids:
@@ -158,11 +196,6 @@ def _course_finished(tracks: dict) -> bool:
     if sum(t["booked"] for t in tracks.values()) <= 0:
         return False
     return all(t["completed"] >= t["booked"] for t in tracks.values())
-
-
-def _days_of(tracks: dict) -> int:
-    """The completed-day count _treatment_days reports, off already-fetched numbers."""
-    return max((t["completed"] for t in tracks.values()), default=0)
 
 
 async def _finished_course_ids(lead_ids: List[str]) -> set:
@@ -207,9 +240,15 @@ async def leads_awaiting_review(lead_ids: List[str]) -> set:
     for r in rows:
         by_lead.setdefault(r["lead_id"], []).append(r)
 
+    # Asked only of the finished courses, and in one go. The count has to come off the
+    # calendar rather than off the booked/completed rows above: a patient booked twice on
+    # one morning has done one day, not two, and reading it from the row counts is what
+    # brought the closing review a week early.
+    day_counts = await _completed_day_counts(list(finished))
+
     waiting = set()
-    for lid, tracks in finished.items():
-        elig = _review_eligibility(by_lead.get(lid, []), _days_of(tracks), True)
+    for lid in finished:
+        elig = _review_eligibility(by_lead.get(lid, []), day_counts.get(lid, 0), True)
         if elig["eligible"]:
             waiting.add(lid)
         elif (elig["review"] or {}).get("status") in (SEND_TO_REVIEW, SENT):
@@ -261,8 +300,12 @@ def review_numbers_for_lead(reviews: List[dict]) -> dict:
 
 def _review_eligibility(existing_for_lead: List[dict], treatment_days: int, course_finished: bool = False) -> dict:
     """A new review becomes raisable every REVIEW_AFTER_DAYS treatment days — 7, 14, 21,
-    28... not just "7 or more" — so a 28-session package gets exactly 4 review points,
-    one per completed week of treatment, rather than staying permanently "due" past day 7.
+    28... not just "7 or more" — so a 28-day course gets exactly 4 review points, one per
+    completed week of treatment, rather than staying permanently "due" past day 7.
+
+    treatment_days is a count of calendar days the patient has attended on, from
+    _completed_day_counts, not a count of completed rows: two courses running side by side
+    put two rows on one morning and that is still one day of treatment.
 
     milestone: the highest 7-multiple reached so far (0 if none yet), or the final day
     count once the course is over and its last days fall short of another whole week.
@@ -335,9 +378,12 @@ async def physio_reviews(
         by_lead.setdefault(r["lead_id"], []).append(r)
 
     finished = await _finished_course_ids(lead_ids)
+    # One read for the whole list rather than a round trip per patient — see
+    # _completed_day_counts, which is also what leads_awaiting_review reads.
+    day_counts = await _completed_day_counts(lead_ids)
     patients = []
     for l in leads:
-        days = await _treatment_days(l["id"])
+        days = day_counts.get(l["id"], 0)
         elig = _review_eligibility(by_lead.get(l["id"], []), days, l["id"] in finished)
         rev = elig["review"]
         patients.append({
@@ -365,8 +411,9 @@ async def physio_raise_review(
     user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
 ):
     """Physio sends a patient up for review. Lands in Branch Admin > Review > Send to Review.
-    Only raisable at a fresh 7-treatment-day milestone (7, 14, 21...) — mirrors the same
-    _review_eligibility check /physio/reviews uses to decide who shows under New Review."""
+    Only raisable at a fresh 7-treatment-day milestone (7, 14, 21...), counted in calendar
+    days attended rather than completed rows — mirrors the same _review_eligibility check
+    /physio/reviews uses to decide who shows under New Review."""
     # Enforced here as well as in the form: the Head Physio writes their review off the
     # back of these notes, so a review raised without them cannot be acted on.
     if not (payload.physio_notes or "").strip():
@@ -378,7 +425,7 @@ async def physio_raise_review(
     if not elig["eligible"]:
         if elig["review"] and elig["review"].get("status") in (SEND_TO_REVIEW, SENT):
             raise HTTPException(status_code=409, detail="This patient already has a review in progress")
-        raise HTTPException(status_code=400, detail=f"This patient hasn't reached a new review milestone yet (every {REVIEW_AFTER_DAYS} completed sessions)")
+        raise HTTPException(status_code=400, detail=f"This patient hasn't reached a new review milestone yet (every {REVIEW_AFTER_DAYS} treatment days)")
 
     doctor = await v3_col("doctors").find_one(
         {"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1, "full_name": 1}
@@ -398,7 +445,7 @@ async def physio_raise_review(
         "head_physio_name": "",
         "reason": (payload.reason or "").strip(),
         "physio_notes": (payload.physio_notes or "").strip(),
-        "treatment_days": await _treatment_days(lead_id),
+        "treatment_days": days,
         "session_package_name": lead.get("session_package_name", ""),
         "review_date": "",
         "status": SEND_TO_REVIEW,
@@ -416,7 +463,7 @@ async def physio_raise_review(
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "review_raised",
-        "details": f"Physio raised a review after {review['treatment_days']} completed sessions"
+        "details": f"Physio raised a review after {review['treatment_days']} treatment days"
                    + (f" · {review['reason']}" if review["reason"] else ""),
         "created_by": user.full_name,
         "created_by_role": user.role,

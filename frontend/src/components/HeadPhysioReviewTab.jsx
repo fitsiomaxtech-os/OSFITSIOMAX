@@ -8,9 +8,10 @@ import { hpReviews, hpCompleteReview, physioSessions } from "@/lib/api";
 import { to12h } from "@/lib/time";
 import { LeadDocuments } from "@/components/LeadDocuments";
 
-// Treatment days per review. Mirrors REVIEW_AFTER_DAYS in backend/routers/v3_reviews.py,
-// which is what decides when a review is raised — this only decides how many days the
-// write-up shows behind it. Move it if that one moves.
+// Treatment days per review — calendar days the patient attended on, which is what the
+// treatment_days a review carries counts. Mirrors REVIEW_AFTER_DAYS in
+// backend/routers/v3_reviews.py, which is what decides when a review is raised; this only
+// decides how many days the write-up shows behind it. Move it if that one moves.
 const REVIEW_EVERY = 7;
 
 const dmy = (d) => {
@@ -171,20 +172,31 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
   }, [draft?.review?.lead_id]);
 
   /**
-   * The completed days this review is a judgement on — the block of REVIEW_EVERY ending at
-   * the day count the review was raised at, not the whole course.
+   * The completed days this review is a judgement on — the block of REVIEW_EVERY calendar
+   * days ending at the day count the review was raised at, not the whole course.
    *
-   * Taken from the completed days in order rather than by matching session numbers to that
-   * count: an absence pushes a day's date without changing its number, and a course that
-   * started before day numbering settled can have gaps. Position among the completed days
-   * is the thing that actually corresponds to "the seventh day of treatment".
+   * Windowed by date rather than by position in the session list, because the count the
+   * review carries is a count of dates: a patient on rehab and a treatment package at once
+   * has two rows on one morning, and slicing seven rows off the list would hand the Head
+   * Physio three and a half days to write up. Every row falling on a day in the window is
+   * shown, so both of that morning's rows are read together.
+   *
+   * Ordered by slot_time rather than session number for the same reason — the two courses
+   * each number their days from 1, so the numbers alone do not put the days in order.
    */
   const windowDays = useMemo(() => {
     const done = (sessionState.sessions || [])
-      .filter((s) => s.status === "completed")
-      .sort((a, b) => (a.session_number || 0) - (b.session_number || 0));
-    const upTo = Number(draft?.review?.treatment_days) || done.length;
-    return done.slice(Math.max(0, upTo - REVIEW_EVERY), upTo);
+      .filter((s) => s.status === "completed" && s.slot_time)
+      .sort((a, b) => String(a.slot_time).localeCompare(String(b.slot_time)));
+    const dates = [...new Set(done.map((s) => String(s.slot_time).slice(0, 10)))];
+    const upTo = Number(draft?.review?.treatment_days) || dates.length;
+    const from = Math.max(0, upTo - REVIEW_EVERY);
+    const window = new Set(dates.slice(from, upTo));
+    return {
+      rows: done.filter((s) => window.has(String(s.slot_time).slice(0, 10))),
+      firstDay: from + 1,
+      lastDay: Math.min(upTo, dates.length),
+    };
   }, [sessionState.sessions, draft?.review?.treatment_days]);
 
   const submit = async () => {
@@ -363,7 +375,7 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
             <div className="flex shrink-0 gap-1 border-b border-slate-200 px-5 py-2" data-testid="hp-review-modal-tabs">
               {[
                 { key: "write", label: reviewDone ? "The Review" : "Write Review" },
-                { key: "days", label: `Treatment Days${windowDays.length ? ` (${windowDays.length})` : ""}` },
+                { key: "days", label: `Treatment Days${windowDays.rows.length ? ` (${windowDays.lastDay - windowDays.firstDay + 1})` : ""}` },
                 { key: "documents", label: `Documents${docCount ? ` (${docCount})` : ""}` },
               ].map((t) => (
                 <button
@@ -445,7 +457,7 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
             <div className={`flex-1 overflow-y-auto p-5 ${draftTab === "days" ? "" : "hidden"}`} data-testid="hp-review-days">
               {sessionState.loading ? (
                 <p className="py-10 text-center text-sm text-slate-400">Loading treatment days...</p>
-              ) : windowDays.length === 0 ? (
+              ) : windowDays.rows.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
                   {sessionState.failed
                     ? "Couldn't load this patient's treatment days."
@@ -457,10 +469,10 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
                       their third review has twenty-one days behind them, and nineteen of
                       those were judged by the two reviews already written. */}
                   <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    Days {windowDays[0].session_number}–{windowDays[windowDays.length - 1].session_number} · what the physio wrote each session
+                    Days {windowDays.firstDay}–{windowDays.lastDay} · what the physio wrote each session
                   </p>
                   <div className="space-y-2">
-                    {windowDays.map((s) => (
+                    {windowDays.rows.map((s) => (
                       <div key={s.id} className="rounded-lg border border-slate-200 p-3" data-testid={`hp-review-day-${s.id}`}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-xs font-bold text-slate-700">

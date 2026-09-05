@@ -1197,15 +1197,19 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       {/* "11 / 7 sessions" was nonsense for anyone past their first
                           milestone. Show what they've done, then either that they've
-                          reached a milestone or which session brings the next one. */}
+                          reached a milestone or which day brings the next one.
+
+                          Days, not sessions: treatment_days counts the dates the patient
+                          attended on, so a rehab day and a treatment day on one morning
+                          are the one day they were. */}
                       <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold ${
                         p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
                       }`}>
-                        {p.treatment_days} session{p.treatment_days === 1 ? "" : "s"} done
+                        {p.treatment_days} day{p.treatment_days === 1 ? "" : "s"} done
                       </span>
                       {!p.due_for_review && !p.review_status && (
                         <span className="inline-flex items-center rounded-md bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                          next review at {(Math.floor(p.treatment_days / threshold) + 1) * threshold}
+                          next review on day {(Math.floor(p.treatment_days / threshold) + 1) * threshold}
                         </span>
                       )}
                       {p.review_number > 0 && (
@@ -1255,7 +1259,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                   <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
                   <th className="px-4 py-2.5 font-semibold">Patient</th>
                   <th className="px-4 py-2.5 font-semibold">Phone</th>
-                  <th className="px-4 py-2.5 font-semibold">Sessions</th>
+                  <th className="px-4 py-2.5 font-semibold">Days</th>
                   <th className="px-4 py-2.5 font-semibold">Review</th>
                   <th className="px-4 py-2.5 font-semibold">Status</th>
                   <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
@@ -1291,7 +1295,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                         </span>
                         {!p.due_for_review && !p.review_status && (
                           <span className="mt-0.5 block text-[11px] text-slate-400">
-                            next at {(Math.floor(p.treatment_days / threshold) + 1) * threshold}
+                            next on day {(Math.floor(p.treatment_days / threshold) + 1) * threshold}
                           </span>
                         )}
                       </td>
@@ -1385,7 +1389,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                 <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
                   <Line label="Phone">{viewing.phone}</Line>
                   <Line label="Package">{rev?.session_package_name || viewing.session_package_name}</Line>
-                  <Line label="Sessions Done">{viewing.treatment_days}</Line>
+                  <Line label="Treatment Days Done">{viewing.treatment_days}</Line>
                   <Line label="Status">
                     {badge
                       ? <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.cls}`}>{badge.label}</span>
@@ -1424,7 +1428,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
               <div>
                 <p className="text-lg font-bold">Send for Review</p>
                 <p className="text-xs text-white/80">
-                  {draft.patient.lead_name} · {ordinal(draft.patient.review_number)} Review · {draft.patient.treatment_days} completed sessions
+                  {draft.patient.lead_name} · {ordinal(draft.patient.review_number)} Review · {draft.patient.treatment_days} treatment days
                 </p>
               </div>
               <button onClick={() => setDraft(null)} className="rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200" data-testid="physio-raise-review-close">
@@ -1541,10 +1545,19 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   // count is no longer a multiple of seven but the review is still outstanding. The
   // records now come back with the sessions, so each milestone reports its own state.
   //
-  // A milestone with no review against it is genuinely due: reaching seven completed days
-  // is what makes one raisable, and nothing else creates the record.
+  // A milestone with no review against it is genuinely due: reaching seven days of
+  // treatment is what makes one raisable, and nothing else creates the record.
   const reviewMilestones = useMemo(() => {
-    const done = sessions.filter((s) => s.status === "completed").length;
+    // Calendar days attended, not completed rows. A patient on rehab and a treatment
+    // package at once is booked twice on the same morning, and counting rows made four
+    // mornings read as eight — the week-one banner appeared on their fourth day. Mirrors
+    // _completed_day_counts on the server, which is what actually lets a review be raised.
+    const done = new Set(
+      sessions
+        .filter((s) => s.status === "completed")
+        .map((s) => (s.slot_time || "").slice(0, 10))
+        .filter(Boolean)
+    ).size;
     const reached = Math.floor(done / reviewEvery);
     // Rank so that if a milestone somehow carries two records, the furthest-along one
     // describes it — a completed review is the more truthful thing to show.

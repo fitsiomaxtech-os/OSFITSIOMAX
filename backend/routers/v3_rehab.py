@@ -17,9 +17,9 @@ WHY rehab days live in their own collection rather than in `sessions` with a fla
 for the reason v3_diet's own docstring sets out at length, and which that module records
 has already taken this OS down once. `sessions` is read in forty-odd places by physio_id
 or lead_id with no filter on what kind of row it is. The sharpest is
-v3_reviews._treatment_days, which counts a lead's completed rows to decide when a physio
-is due a review — rehab days landing there would fire the week-one review three treatment
-days early. The treatment-day grid ("Day 03/7"), the weekly assessments and the patient
+v3_reviews._treatment_days, which counts the days a lead has attended on to decide when a
+physio is due a review — rehab days landing there would be indistinguishable from
+treatment days, and a course closing report could not tell one from the other. The treatment-day grid ("Day 03/7"), the weekly assessments and the patient
 portal all read it the same way. A separate collection makes that mistake impossible
 rather than merely avoided.
 

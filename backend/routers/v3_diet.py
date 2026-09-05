@@ -14,9 +14,9 @@ review chain here, and none is faked.
 WHY diet check-ins live in their own collection, not in `sessions` with a discriminator:
 
 `sessions` is read in several places by physio_id or lead_id with no filter on what kind
-of session a row is. The clearest is v3_reviews._treatment_days, which counts every
-completed row for a lead to decide when a physio is due a review — diet rows landing there
-would fire a physio's week-one review after four physio days and three diet check-ins. The
+of session a row is. The clearest is v3_reviews._treatment_days, which counts the days a
+lead has attended on to decide when a physio is due a review — diet rows landing there
+would put a check-in day towards a physio's review week. The
 physio calendar, the treatment-day grid and the Physio Master View counts read it the same
 way. Adding a `track` field would mean auditing every one of those and every query written
 after today. A separate collection makes that mistake impossible rather than merely
