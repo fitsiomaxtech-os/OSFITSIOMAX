@@ -2201,6 +2201,28 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   // "Treatments" (there's nothing to "leave" for it to count as a real stage move).
   const matchesStage = useCallback((lead, stageName) => {
     if (isConsultant && stageName === "Treatments") return lead.treatment_fee_paid != null;
+    // Nothing left to attend. This is the only implementation of it now: the Branch Leads
+    // bar counts its Consultation pills from this board's own rows (onCountChange) rather
+    // than from a second copy of these rules over a differently-filtered list, which is
+    // what it used to do. Branch pipeline only: the Consultant's own board has no such stage.
+    if (!isConsultant && stageName === "Completed") return isCourseComplete(lead);
+    // And a finished patient leaves every other pill on the bar, which is the half that
+    // makes the line above true. Nothing ever writes "Completed" onto a lead, so the stage
+    // field goes on reading whatever the branch last moved them to -- Fee Collected, Physio
+    // Assign -- long after there is nothing left for them to attend. Read raw, they were
+    // counted in both places at once and the row's own chip contradicted the pill that had
+    // just listed it: "moved to Completed, still in Fee Collected".
+    //
+    // Above the three cross-cutting pills below, not beneath them, so that reading holds for
+    // Diet Consultation, Diet Chart and Rehab too. They describe a patient rather than place
+    // them, and they used to go on describing one whose course was over -- a patient who had
+    // finished their diet sat under Diet Consultation for good, wearing a chip that already
+    // read Completed, which is the same contradiction one pill further along. Completed is
+    // where a finished patient is, and it is the only place they are.
+    //
+    // Cancel keeps whatever it holds. Abandoning a course is not finishing one, and the
+    // branch pipeline reads it the same way.
+    if (!isConsultant && lead[stageField] !== "Cancel" && isCourseComplete(lead)) return false;
     // Diet Consultation is a stage nothing writes: the backend sets consultation_stage to
     // Consultation Booked, Consultation Visit, Fee Collected, Physio Assign and Treatment Fee, and
     // never to this one — so the pill could only ever read 0 however many diet patients the
@@ -2226,25 +2248,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     // Rehab reads off the fee for the same reason Diet reads off its own — nothing ever
     // writes the stage. Branch pipeline only: the Consultant's own board has no such stage.
     if (!isConsultant && stageName === "Rehab") return lead.rehab_fee_paid != null;
-    // Nothing left to attend. This is the only implementation of it now: the Branch Leads
-    // bar counts its Consultation pills from this board's own rows (onCountChange) rather
-    // than from a second copy of these rules over a differently-filtered list, which is
-    // what it used to do. Branch pipeline only: the Consultant's own board has no such stage.
-    if (!isConsultant && stageName === "Completed") return isCourseComplete(lead);
-    // And a finished patient leaves every other position in the pipeline, which is the half
-    // that makes the line above true. Nothing ever writes "Completed" onto a lead, so the
-    // stage field goes on reading whatever the branch last moved them to -- Fee Collected,
-    // Physio Assign -- long after there is nothing left for them to attend. Read raw, they
-    // were counted in both places at once and the row's own chip contradicted the pill that
-    // had just listed it: "moved to Completed, still in Fee Collected".
-    //
-    // Above the three cross-cutting stages on purpose, not below them: Rehab, Diet
-    // Consultation and Diet Chart are facts about a patient rather than positions, and they
-    // run alongside the pipeline by design, so they are meant to hold whoever they describe.
-    //
-    // Cancel keeps whatever it holds. Abandoning a course is not finishing one, and the
-    // branch pipeline reads it the same way.
-    if (!isConsultant && lead[stageField] !== "Cancel" && isCourseComplete(lead)) return false;
     return lead[stageField] === stageName;
   }, [isConsultant, stageField]);
 
