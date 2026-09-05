@@ -115,6 +115,22 @@ const BRANCH_PORTFOLIO_STAGE = "Portfolio";
 // past them.
 const BRANCH_CONSULTATION_OPENING_STAGE = "Consultation Booked";
 
+// The card the Consultation tab sits on when nothing else has been chosen -- on arrival,
+// and again the moment a lit card is clicked off.
+//
+// This bar has no "All Stages" card (see hideAllStages), so an empty filter has nothing on
+// screen representing it: the cards all read unselected while the table underneath quietly
+// widens to every lead on the branch, including the ones that have never been booked for a
+// consultation at all. There is no card to press to get back, either -- the reader has to
+// guess that clicking any card and clicking it again is what they did. So the tab keeps a
+// card lit at all times and this is the one it falls back to.
+//
+// Consultation Visit rather than the opening stage above because it is where the branch's
+// own work starts: a patient who has arrived and is waiting to be seen. Falls back to
+// BRANCH_CONSULTATION_OPENING_STAGE, then to whichever card comes first, so a branch that
+// has renamed this stage in Pipeline Stage Management still lands on something.
+const BRANCH_CONSULTATION_DEFAULT_STAGE = "Consultation Visit";
+
 // ---- Appointment confirmation -------------------------------------------------------
 // What the client walks away with. Built as its own document so it can be opened, printed
 // to PDF, saved or shared — same branding, styles and mechanics the payment receipt uses,
@@ -1153,6 +1169,19 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     [stages, consultationStages],
   );
 
+  // Which card the Consultation tab defaults to -- see BRANCH_CONSULTATION_DEFAULT_STAGE.
+  // Resolved against the cards that actually exist rather than named as a literal, so a
+  // renamed stage leaves this tab landing on a card instead of on nothing. Null only while
+  // the stage list is still on its way from the server.
+  const consultationDefaultStage = useMemo(() => {
+    const pick = (name) => consultationOnlyStages.find((st) => st.name === name);
+    return (
+      pick(BRANCH_CONSULTATION_DEFAULT_STAGE)
+      || pick(BRANCH_CONSULTATION_OPENING_STAGE)
+      || consultationOnlyStages[0]
+    )?.name || null;
+  }, [consultationOnlyStages]);
+
   // Where the consultation pipeline begins, read off the live list rather than named as a
   // literal — Pipeline Stage Management can rename it. Handed to matchesBranchStage, which
   // must not release a lead from the Branch pills for merely standing here: see the guard
@@ -1198,6 +1227,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // Each tab now shows the stages its own pipeline owns, and the board under it is decided
   // by the tab rather than by which pill happens to be lit.
   const onConsultationTab = activeView === "branch_consultation";
+
+  // What the cards above the list do when one of them is clicked.
+  //
+  // StageTabBar toggles: a second click on the lit card asks for null, which on Branch
+  // Leads means All Stages and has a card of its own. The Consultation bar has no such
+  // card, so null there left every card unselected and the table showing the whole branch
+  // -- leads that were never booked for a consultation included -- with nothing on screen
+  // to press to get back. That reads as the board having lost its filter rather than as a
+  // filter having been cleared on purpose.
+  //
+  // So on the Consultation tab a clear lands on the default card instead: clicking the lit
+  // card is a no-op, clicking any other card moves the selection, and the tab is never
+  // sitting on nothing. Branch Leads keeps toggling off, which is what All Stages is for.
+  const selectStage = useCallback((next) => {
+    setStageFilter(next === null && onConsultationTab ? consultationDefaultStage : next);
+  }, [onConsultationTab, consultationDefaultStage]);
   // The same test asked of a lead's consultation_stage rather than of the lit pill: has this
   // lead reached the half of the strip the Branch pipeline does not own? Handed to
   // matchesBranchStage, which releases it from the Branch pills once it has.
@@ -1240,7 +1285,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     if (pills.length === 0) return;
 
     const ownedHere = pills.some((st) => st.name === stageFilter);
-    if (stageFilter && !ownedHere) setStageFilter(null);
+    // Drop a stage this tab has no card for. Branch Leads clears to All Stages, which has a
+    // card of its own to say so; the Consultation tab has no such card, so it drops to its
+    // default instead of to nothing (see BRANCH_CONSULTATION_DEFAULT_STAGE) -- and takes an
+    // empty filter as the same thing to be answered, whichever way it got there.
+    //
+    // Watching stageFilter rather than only the tab, because this fires long after the
+    // opening below: a reload that renames a stage, or a lead popup deep-linking to a stage
+    // with no card, both land here with the tab already opened. Left to the once-per-visit
+    // opening they would sit on an empty filter for the rest of the visit.
+    if (consultation) {
+      if (stageFilter !== consultationDefaultStage && (!stageFilter || !ownedHere)) {
+        setStageFilter(consultationDefaultStage);
+      }
+    } else if (stageFilter && !ownedHere) {
+      setStageFilter(null);
+    }
 
     if (openedOn.current === activeView) return;
     openedOn.current = activeView;
@@ -1251,18 +1311,19 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // by Pre-Sales has no mirror, so no Leads pill to open on, and keeps All Stages: the
     // whole list is the only honest opening where the strip has nothing else to offer.
     //
-    // The Consultation tab falls back to whichever pill comes first, so it always lands on
-    // one. Named stages get renamed — that is what Pipeline Stage Management is for — and
-    // a literal that stops matching leaves this tab with no pill lit, no All Stages card
-    // to say so (see hideAllStages) and every patient in the list underneath: a bar of
-    // cards that between them count fewer people than the table below is showing, which
-    // reads as the cards being wrong rather than as nothing being selected.
+    // The Consultation tab opens on its default card, which resolves to whichever pill
+    // comes first if the named ones have been renamed — that is what Pipeline Stage
+    // Management is for — so it always lands on one. A literal that stops matching would
+    // leave this tab with no pill lit, no All Stages card to say so (see hideAllStages) and
+    // every patient in the list underneath: a bar of cards that between them count fewer
+    // people than the table below is showing, which reads as the cards being wrong rather
+    // than as nothing being selected.
     const opening = consultation
-      ? (pills.find((st) => st.name === BRANCH_CONSULTATION_OPENING_STAGE) || pills[0])
+      ? pills.find((st) => st.name === consultationDefaultStage)
       : mirrorStage;
     if (opening) setStageFilter(opening.name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, consultationOnlyStages, leadPillStages, mirrorStage]);
+  }, [activeView, consultationOnlyStages, leadPillStages, mirrorStage, consultationDefaultStage, stageFilter]);
 
   // The toolbar's calendar, wired so that picking a date releases the range row back to
   // All.
@@ -1626,7 +1687,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           <StageTabBar
             stages={onConsultationTab ? consultationOnlyStages : leadPillStages}
             stageFilter={stageFilter}
-            setStageFilter={setStageFilter}
+            setStageFilter={selectStage}
             counts={onConsultationTab ? consultationCounts : salesCounts}
             totalCount={totalLeads}
             // All Stages counts every lead on the branch, which is the Branch Leads
