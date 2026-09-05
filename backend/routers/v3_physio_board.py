@@ -450,6 +450,12 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
             "reason": r.get("reason") or "",
             "physio_notes": r.get("physio_notes") or "",
             "head_physio_name": r.get("head_physio_name") or "",
+            # What the CONSULTANT actually wrote back. Sent so Overview can print the
+            # week's review beside the rest of the patient's record instead of only its
+            # status -- the write-up is the thing the whole review hand-off exists to
+            # produce, and reading it meant leaving this popup for the Review tab.
+            "head_physio_notes": r.get("head_physio_notes") or "",
+            "head_physio_suggestions": r.get("head_physio_suggestions") or "",
             "review_date": r.get("review_date") or "",
             "completed_at": r.get("completed_at") or "",
         }

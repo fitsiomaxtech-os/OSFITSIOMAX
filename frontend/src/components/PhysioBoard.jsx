@@ -1880,6 +1880,90 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
           </div>
           )}
 
+          {/* The reviews themselves, week by week, directly under the Treatment Summary.
+              Overview could only say how many weeks were outstanding -- a count, with no
+              way to read what any CONSULTANT had actually written. The write-up lived on
+              the Review tab of the board behind this popup, so the one screen that holds
+              everything else about the patient held none of it.
+
+              Every milestone the treatment has reached, in order, whatever became of it:
+              a week still waiting says what is holding it, a week that is done prints the
+              review and the suggestions that came back with it. */}
+          {tab === "overview" && (
+          <div className="mt-4 border-t border-slate-100 pt-4" data-testid="physio-overview-reviews">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+              Weekly Review
+              {reviewMilestones.length > 0 && (
+                <span className="ml-1 font-semibold text-slate-400">
+                  ({reviewMilestones.filter((m) => m.review?.status === "completed").length} of {reviewMilestones.length} written)
+                </span>
+              )}
+            </p>
+
+            {reviewMilestones.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
+                No review point reached yet — the first is due after {reviewEvery} treatment days.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {reviewMilestones.map((m) => {
+                  const look = milestoneLook(m.review);
+                  const t = MILESTONE_TONES[look.tone];
+                  const on = m.review?.status === "completed"
+                    ? fmtDate(m.review.completed_at)
+                    : m.review?.status === "sent" ? fmtDate(m.review.review_date) : null;
+                  const written = (m.review?.head_physio_notes || "").trim();
+                  const suggestions = (m.review?.head_physio_suggestions || "").trim();
+                  return (
+                    <div
+                      key={m.number}
+                      className={`rounded-lg border p-3 ${t.box}`}
+                      data-testid={`physio-overview-review-${m.number}`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className={`flex items-center gap-1.5 text-[11px] font-semibold ${t.text}`}>
+                          <look.Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            {/* Named the way the Treatment Days list names it, so the same
+                                week is not "Week 3" on one tab and something else here. */}
+                            {m.isFinal ? "Final review" : `Week ${m.number} review`} · day{m.lastDay > m.firstDay ? "s" : ""} {m.firstDay}{m.lastDay > m.firstDay ? `–${m.lastDay}` : ""}
+                            <span className={`ml-1 font-normal ${t.soft}`}>
+                              {look.line}{on ? ` · ${on}` : ""}
+                            </span>
+                          </span>
+                        </p>
+                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${t.badge}`}>
+                          {look.label}
+                        </span>
+                      </div>
+
+                      {/* White rather than tinted: the milestone box already carries the
+                          week's colour, and a violet card inside an emerald one turns
+                          both to mud. The border and the label do the naming. */}
+                      {(written || suggestions) && (
+                        <div className="mt-2 space-y-2">
+                          {written && (
+                            <div className="rounded-lg border border-violet-200 bg-white p-2.5">
+                              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">CONSULTANT&apos;s Review</p>
+                              <p className="whitespace-pre-wrap break-words text-xs text-slate-700">{written}</p>
+                            </div>
+                          )}
+                          {suggestions && (
+                            <div className="rounded-lg border border-emerald-200 bg-white p-2.5">
+                              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-emerald-600">Suggestions</p>
+                              <p className="whitespace-pre-wrap break-words text-xs text-slate-700">{suggestions}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          )}
+
           {/* Treatment days — one row per booked session, completed in order */}
           {tab === "days" && (
           <div>
