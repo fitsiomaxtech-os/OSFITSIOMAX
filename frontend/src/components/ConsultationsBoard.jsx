@@ -7081,9 +7081,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           </p>
                         )}
 
-                        {/* One solid action on the same left edge as everything above it.
-                            Diet and Cancel stay reachable as quiet outlines rather than as
-                            two more filled colours competing with the step to take. */}
+                        {/* One solid action on the same left edge as everything above it,
+                            with Cancel beside it as a quiet outline rather than a second
+                            filled colour competing with the step to take. No Diet Details
+                            here: this tab is the rehab course, and a patient reached
+                            through it is being looked at for the days of that course --
+                            the diet programme is opened from the panel that owns it. */}
                         <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
                           <Button
                             size="sm"
@@ -7094,7 +7097,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             <Activity className="mr-1.5 h-3.5 w-3.5" />
                             {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
                           </Button>
-                          {DietDetailButton}
                           {CancelButton}
                         </div>
                         {/* Opened from the row above, and shown under it for the same reason
