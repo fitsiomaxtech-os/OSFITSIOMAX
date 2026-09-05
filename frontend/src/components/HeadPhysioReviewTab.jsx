@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X, RefreshCw, AlertTriangle, Search } from "lucide-react";
+import { X, RefreshCw, AlertTriangle, Search, ChevronDown, ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import { hpReviews, hpCompleteReview, physioSessions } from "@/lib/api";
 import { to12h } from "@/lib/time";
 import { LeadDocuments } from "@/components/LeadDocuments";
+import { PhysioTreatmentChips } from "@/components/ui/physio-treatment-chips";
 
 // Treatment days per review — calendar days the patient attended on, which is what the
 // treatment_days a review carries counts. Mirrors REVIEW_AFTER_DAYS in
@@ -69,6 +70,9 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
   const [sessionState, setSessionState] = useState({ loading: false, failed: false, sessions: [] });
   const [docCount, setDocCount] = useState(0);
   const [saving, setSaving] = useState(false);
+  // Which week bars the reader has opened or shut by hand; null means "whatever this
+  // review covers", which is what a freshly opened popup should be showing.
+  const [weekOverride, setWeekOverride] = useState(null);
 
   // branchId is set only by a supervisor board, and it is what makes this list answer to
   // the branch on screen rather than to whoever is signed in. Without it a Super Admin in
@@ -163,6 +167,7 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
     if (!leadId) return;
     let cancelled = false;
     setDraftTab("write");
+    setWeekOverride(null);
     setSessionState({ loading: true, failed: false, sessions: [] });
     physioSessions(leadId)
       .then((data) => { if (!cancelled) setSessionState({ loading: false, failed: false, sessions: data.sessions || [] }); })
@@ -172,32 +177,80 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
   }, [draft?.review?.lead_id]);
 
   /**
-   * The completed days this review is a judgement on — the block of REVIEW_EVERY calendar
-   * days ending at the day count the review was raised at, not the whole course.
+   * Every completed treatment day the patient has, cut into weeks of REVIEW_EVERY days.
    *
-   * Windowed by date rather than by position in the session list, because the count the
-   * review carries is a count of dates: a patient on rehab and a treatment package at once
-   * has two rows on one morning, and slicing seven rows off the list would hand the Head
-   * Physio three and a half days to write up. Every row falling on a day in the window is
-   * shown, so both of that morning's rows are read together.
+   * The tab used to show only the block this review is a judgement on, and nothing else —
+   * so a Consultant on a patient's third review could read days 15–21 and had no way at
+   * all to see what the two weeks before them had been treated with. The earlier weeks are
+   * here now, each behind its own one-line bar, shut until it is asked for: the week this
+   * review covers is the one that opens on its own, and the rest are a click away rather
+   * than a board away.
+   *
+   * Days are numbered by DATE rather than by position in the session list, because the
+   * count a review carries is a count of dates: a patient on rehab and a treatment package
+   * at once has two rows on one morning, and counting rows would hand the Consultant three
+   * and a half days where the review says seven. Both of that morning's rows land on the
+   * same day number and are read together.
    *
    * Ordered by slot_time rather than session number for the same reason — the two courses
    * each number their days from 1, so the numbers alone do not put the days in order.
    */
-  const windowDays = useMemo(() => {
+  const dayBook = useMemo(() => {
     const done = (sessionState.sessions || [])
       .filter((s) => s.status === "completed" && s.slot_time)
       .sort((a, b) => String(a.slot_time).localeCompare(String(b.slot_time)));
     const dates = [...new Set(done.map((s) => String(s.slot_time).slice(0, 10)))];
+    const dayOf = new Map(dates.map((d, i) => [d, i + 1]));
+
+    // The block this review was raised on: the REVIEW_EVERY days ending at the day count
+    // stored when it was raised, not the whole course.
     const upTo = Number(draft?.review?.treatment_days) || dates.length;
-    const from = Math.max(0, upTo - REVIEW_EVERY);
-    const window = new Set(dates.slice(from, upTo));
-    return {
-      rows: done.filter((s) => window.has(String(s.slot_time).slice(0, 10))),
-      firstDay: from + 1,
-      lastDay: Math.min(upTo, dates.length),
-    };
+    const reviewFrom = Math.max(1, Math.min(upTo, dates.length) - REVIEW_EVERY + 1);
+    const reviewTo = Math.min(upTo, dates.length);
+
+    const byWeek = new Map();
+    for (const row of done) {
+      const day = dayOf.get(String(row.slot_time).slice(0, 10));
+      const week = Math.ceil(day / REVIEW_EVERY);
+      if (!byWeek.has(week)) byWeek.set(week, []);
+      byWeek.get(week).push({ ...row, day_index: day });
+    }
+
+    const weeks = [...byWeek.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([week, rows]) => {
+        const days = rows.map((r) => r.day_index);
+        const firstDay = Math.min(...days);
+        const lastDay = Math.max(...days);
+        return {
+          week,
+          rows,
+          firstDay,
+          lastDay,
+          dayCount: new Set(days).size,
+          from: String(rows[0].slot_time).slice(0, 10),
+          // Open on its own, and badged. A week that only overlaps the window still counts
+          // as part of it — the window slides by seven days and a fixed week does not, so
+          // days 6-12 sit across weeks one and two and both hold days being judged here.
+          inReview: lastDay >= reviewFrom && firstDay <= reviewTo,
+        };
+      });
+    return { weeks, reviewFrom, reviewTo, totalDays: dates.length };
   }, [sessionState.sessions, draft?.review?.treatment_days]);
+
+  // Null until somebody opens or shuts one, so the weeks this review covers stay open by
+  // default without an effect writing state the moment the popup loads its days.
+  const defaultOpenWeeks = useMemo(
+    () => new Set(dayBook.weeks.filter((w) => w.inReview).map((w) => w.week)),
+    [dayBook.weeks],
+  );
+  const openWeeks = weekOverride || defaultOpenWeeks;
+  const toggleWeek = (week) => {
+    const next = new Set(openWeeks);
+    if (next.has(week)) next.delete(week);
+    else next.add(week);
+    setWeekOverride(next);
+  };
 
   const submit = async () => {
     if (!draft.head_physio_notes.trim()) { toast.error("Write the review notes"); return; }
@@ -375,7 +428,7 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
             <div className="flex shrink-0 gap-1 border-b border-slate-200 px-5 py-2" data-testid="hp-review-modal-tabs">
               {[
                 { key: "write", label: reviewDone ? "The Review" : "Write Review" },
-                { key: "days", label: `Treatment Days${windowDays.rows.length ? ` (${windowDays.lastDay - windowDays.firstDay + 1})` : ""}` },
+                { key: "days", label: `Treatment Days${dayBook.totalDays ? ` (${dayBook.totalDays})` : ""}` },
                 { key: "documents", label: `Documents${docCount ? ` (${docCount})` : ""}` },
               ].map((t) => (
                 <button
@@ -457,7 +510,7 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
             <div className={`flex-1 overflow-y-auto p-5 ${draftTab === "days" ? "" : "hidden"}`} data-testid="hp-review-days">
               {sessionState.loading ? (
                 <p className="py-10 text-center text-sm text-slate-400">Loading treatment days...</p>
-              ) : windowDays.rows.length === 0 ? (
+              ) : dayBook.weeks.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
                   {sessionState.failed
                     ? "Couldn't load this patient's treatment days."
@@ -465,47 +518,123 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
                 </p>
               ) : (
                 <>
-                  {/* The window this review covers, not the whole course: a patient on
-                      their third review has twenty-one days behind them, and nineteen of
-                      those were judged by the two reviews already written. */}
-                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    Days {windowDays.firstDay}–{windowDays.lastDay} · what the physio wrote each session
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    What the physio treated each session with
                   </p>
+                  {/* The window this review is a judgement on, said once at the top rather
+                      than as a heading over the days: the list below runs the whole course
+                      now, and the reader still needs to know which of those days this
+                      review answers for. */}
+                  <p className="mb-3 mt-0.5 text-[11px] text-slate-400">
+                    This review covers Days {dayBook.reviewFrom}–{dayBook.reviewTo}. Earlier weeks are here too — open one to read it.
+                  </p>
+
                   <div className="space-y-2">
-                    {windowDays.rows.map((s) => (
-                      <div key={s.id} className="rounded-lg border border-slate-200 p-3" data-testid={`hp-review-day-${s.id}`}>
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-xs font-bold text-slate-700">
-                            Day {s.session_number}
-                            <span className="ml-1.5 font-normal text-slate-400">
-                              {s.slot_time ? dmy(s.slot_time.split("T")[0]) : "—"}
+                    {dayBook.weeks.map((w) => {
+                      const open = openWeeks.has(w.week);
+                      return (
+                        <div key={w.week} className={`overflow-hidden rounded-lg border ${w.inReview ? "border-sky-200" : "border-slate-200"}`} data-testid={`hp-review-week-${w.week}`}>
+                          {/* One line, whatever the week holds — the bars are what a reader
+                              scans down, so a week's days stay folded away until it is the
+                              week they want. */}
+                          <button
+                            type="button"
+                            onClick={() => toggleWeek(w.week)}
+                            className={`flex w-full items-center gap-2 px-3 py-2.5 text-left transition ${w.inReview ? "bg-sky-50 hover:bg-sky-100" : "bg-slate-50 hover:bg-slate-100"}`}
+                            aria-expanded={open}
+                            data-testid={`hp-review-week-toggle-${w.week}`}
+                          >
+                            {open
+                              ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                              : <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />}
+                            <span className="shrink-0 text-xs font-bold text-slate-700">Week {w.week}</span>
+                            <span className="truncate text-[11px] text-slate-500">
+                              Days {w.firstDay}{w.lastDay > w.firstDay ? `–${w.lastDay}` : ""} · {dmy(w.from)}
                             </span>
-                          </p>
-                          {s.completed_by && <span className="text-[10px] text-slate-400">{s.completed_by}</span>}
+                            {w.inReview && (
+                              <span className="shrink-0 rounded-[4px] border border-sky-200 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-700">
+                                This review
+                              </span>
+                            )}
+                            <span className="ml-auto shrink-0 text-[11px] font-semibold text-slate-400">
+                              {w.dayCount} day{w.dayCount === 1 ? "" : "s"}
+                            </span>
+                          </button>
+
+                          {open && (
+                            <div className="space-y-2 border-t border-slate-200 bg-white p-2.5" data-testid={`hp-review-week-days-${w.week}`}>
+                              {w.rows.map((s) => {
+                                const isRehab = s.track === "rehab";
+                                const inWindow = s.day_index >= dayBook.reviewFrom && s.day_index <= dayBook.reviewTo;
+                                return (
+                                  <div key={s.id} className={`rounded-lg border p-3 ${inWindow ? "border-sky-200 bg-sky-50/40" : "border-slate-200"}`} data-testid={`hp-review-day-${s.id}`}>
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <p className="text-xs font-bold text-slate-700">
+                                        {/* A rehab day is named as one. It numbers from 1
+                                            inside its own course, so printing it as a plain
+                                            "Day 3" beside treatment day 3 read as one day
+                                            written up twice. */}
+                                        {isRehab ? "Rehab Day" : "Day"} {s.session_number}
+                                        <span className="ml-1.5 font-normal text-slate-400">
+                                          {s.slot_time ? dmy(s.slot_time.split("T")[0]) : "—"}
+                                        </span>
+                                      </p>
+                                      {s.completed_by && <span className="text-[10px] text-slate-400">{s.completed_by}</span>}
+                                    </div>
+
+                                    {/* What was given, off Services and Products >
+                                        Physiotherapy Treatment. Above the notes, the way
+                                        the physio's own popup puts it above them: what was
+                                        done is read before what was written about it.
+                                        Named even when empty — a Consultant judging a week
+                                        should be able to tell a day nobody tagged from a
+                                        day this popup simply did not print. */}
+                                    <div className="mt-1.5">
+                                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Physio Treatment</p>
+                                      {(s.physio_treatments || []).length > 0 ? (
+                                        <div className="mt-1">
+                                          <PhysioTreatmentChips names={s.physio_treatments} testid={`hp-review-day-treatments-${s.id}`} />
+                                        </div>
+                                      ) : (
+                                        <p className="mt-0.5 text-xs italic text-slate-400">No treatment tagged on this day.</p>
+                                      )}
+                                    </div>
+
+                                    {/* Every note the day carries, each under its own name.
+                                        The two are written for different reasons and the
+                                        Consultant reads them apart. */}
+                                    {s.jr_physio_remarks && (
+                                      <div className="mt-2">
+                                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Treatment Remarks</p>
+                                        <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700">{s.jr_physio_remarks}</p>
+                                      </div>
+                                    )}
+                                    {s.rehab_remarks && (
+                                      <div className="mt-2">
+                                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rehab Remarks</p>
+                                        <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700">{s.rehab_remarks}</p>
+                                      </div>
+                                    )}
+                                    {!s.jr_physio_remarks && !s.rehab_remarks && (
+                                      // Said rather than skipped: a day completed without
+                                      // remarks and a day that never happened are different
+                                      // things to read past.
+                                      <p className="mt-2 text-sm italic text-slate-400">Completed without remarks.</p>
+                                    )}
+
+                                    {(s.absences || []).length > 0 && (
+                                      <p className="mt-1.5 text-[10px] font-semibold text-amber-700">
+                                        Missed {s.absences.length} time{s.absences.length === 1 ? "" : "s"} before this — moved from {dmy(s.absences[0].date)}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                        {s.jr_physio_remarks || s.rehab_remarks ? (
-                          <>
-                            {s.jr_physio_remarks && (
-                              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{s.jr_physio_remarks}</p>
-                            )}
-                            {s.rehab_remarks && (
-                              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">
-                                <span className="font-semibold text-slate-500">Rehab: </span>{s.rehab_remarks}
-                              </p>
-                            )}
-                          </>
-                        ) : (
-                          // Said rather than skipped: a day completed without remarks and a
-                          // day that never happened are different things to read past.
-                          <p className="mt-1 text-sm italic text-slate-400">Completed without remarks.</p>
-                        )}
-                        {(s.absences || []).length > 0 && (
-                          <p className="mt-1 text-[10px] font-semibold text-amber-700">
-                            Missed {s.absences.length} time{s.absences.length === 1 ? "" : "s"} before this — moved from {dmy(s.absences[0].date)}
-                          </p>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )}

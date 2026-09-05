@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Activity,
   AlertCircle,
   ArrowLeft,
   Calendar,
@@ -31,6 +30,7 @@ import { ProgressionTab } from "@/components/ProgressionTab";
 import { LeadMarks } from "@/components/ui/lead-marks";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StatTile } from "@/components/ui/stat-tile";
+import { PhysioTreatmentChips } from "@/components/ui/physio-treatment-chips";
 import { DocumentPreview, useDocumentPreview } from "@/components/ui/document-preview";
 import {
   physioConsultations,
@@ -827,20 +827,31 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="physio-treatment-list-desktop">
             <div className="overflow-x-auto">
               {/* 720 -> 820 for the Package column. The wrapper scrolls, so the columns keep their
-                  widths on a narrow desk rather than being squeezed to fit. */}
-              <table className="w-full min-w-[820px] text-sm">
+                  widths on a narrow desk rather than being squeezed to fit.
+
+                  table-fixed with stated percentages, the way the branch boards size theirs.
+                  Auto layout handed the spare width to whichever column held the longest
+                  string, so on a wide screen Patient swallowed nearly all of it and every
+                  heading after it floated a hand-width clear of the badges beneath it — and
+                  the columns shifted again each time the day brought different names. The
+                  percentages below must total 100. */}
+              <table className="w-full min-w-[820px] table-fixed text-sm">
                 <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
                   <tr>
-                    <th className="px-4 py-2.5 font-semibold">Time</th>
-                    <th className="px-4 py-2.5 font-semibold">Patient</th>
-                    <th className="px-4 py-2.5 font-semibold">Day</th>
-                    <th className="px-4 py-2.5 font-semibold">Reviews</th>
-                    <th className="px-4 py-2.5 font-semibold">Status</th>
+                    {/* Time and Patient stay left — they are the columns the eye scans down
+                        to find a row, and a ragged left edge is what makes that hard. What
+                        follows them is a single centred badge per cell, so those headings
+                        centre too rather than sitting off the end of their own column. */}
+                    <th className="w-[12%] px-4 py-2.5 font-semibold">Time</th>
+                    <th className="w-[25%] px-4 py-2.5 font-semibold">Patient</th>
+                    <th className="w-[12%] px-4 py-2.5 text-center font-semibold">Day</th>
+                    <th className="w-[14%] px-4 py-2.5 text-center font-semibold">Reviews</th>
+                    <th className="w-[16%] px-4 py-2.5 text-center font-semibold">Status</th>
                     {/* Which course the day belongs to. Treatment and Rehab share a physio,
                         a room and a calendar, so without this the two read as one list and
                         05/36 beside 05/26 says nothing about what either is. */}
-                    <th className="px-4 py-2.5 font-semibold">Package</th>
-                    <th className="px-4 py-2.5" />
+                    <th className="w-[15%] px-4 py-2.5 text-center font-semibold">Package</th>
+                    <th className="w-[6%] px-4 py-2.5" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -866,22 +877,24 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <p className="font-medium text-slate-800">{l.name}</p>
-                          {l.phone ? <p className="text-[11px] text-slate-400">{l.phone}</p> : null}
+                          {/* truncate, because table-fixed will not widen the column for a
+                              long name — without it the name runs on under Day. */}
+                          <p className="truncate font-medium text-slate-800">{l.name}</p>
+                          {l.phone ? <p className="truncate text-[11px] text-slate-400">{l.phone}</p> : null}
                         </td>
-                        <td className="px-4 py-3 text-slate-600">
+                        <td className="px-4 py-3 text-center text-slate-600">
                           {r.sessionNumber
                             ? <span className="whitespace-nowrap">{String(r.sessionNumber).padStart(2, "0")}/{r.totalSessions}</span>
                             : <span className="text-slate-400">{r.label}</span>}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 text-center">
                           {r.sessionNumber ? (
                             <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${reviewsSoFar > 0 ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-400"}`}>
                               {reviewsSoFar} Review{reviewsSoFar === 1 ? "" : "s"}
                             </span>
                           ) : <span className="text-slate-300">—</span>}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 text-center">
                           {r.done ? (
                             <span className="inline-flex whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Done</span>
                           ) : isReviewDay ? (
@@ -890,7 +903,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                             <span className="inline-flex whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Pending</span>
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 text-center">
                           {/* A consultation appointment is neither, and says so with a dash
                               rather than being called treatment by default. */}
                           {r.track === "rehab" ? (
@@ -3045,27 +3058,6 @@ function PhysioTreatmentPicker({ options, value, onChange, testPrefix }) {
       ) : (
         <p className="mt-1.5 text-[11px] text-slate-400">Tick every treatment given in this session. Optional.</p>
       )}
-    </div>
-  );
-}
-
-/**
- * What a finished day was treated with, read back.
- *
- * Renders nothing at all when there is nothing to show, rather than a heading over an
- * empty row: a day completed before this field existed, and a day the physio chose not to
- * tag, are both real days and neither should read as a record with a hole in it.
- */
-function PhysioTreatmentChips({ names, testid }) {
-  const list = (names || []).filter(Boolean);
-  if (list.length === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-1" data-testid={testid}>
-      {list.map((n) => (
-        <span key={n} className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
-          <Activity className="h-2.5 w-2.5" /> {n}
-        </span>
-      ))}
     </div>
   );
 }
