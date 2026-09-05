@@ -569,14 +569,14 @@ const TabPill = ({ active, onClick, children, testid }) => (
 );
 
 /**
- * One row of the designation dropdown.
+ * One row of a filter dropdown — the department one and the designation one both.
  *
  * The lit row is the same solid sky-600 a lit TabPill is, so the thing that is chosen
  * reads the same whichever of the two filters on the row it was chosen in. The tick is
  * not decoration — the panel scrolls, and once the selected row is scrolled out of view
  * the trigger's label is the only other thing saying what is set.
  */
-const DesignationOption = ({ label, selected, onSelect, testid }) => (
+const FilterOption = ({ label, selected, onSelect, testid }) => (
   <button
     type="button"
     onClick={onSelect}
@@ -640,7 +640,7 @@ const DesignationFilterSelect = ({ value, onChange, options, groups, testid }) =
           with a lot of departments. */}
       <PopoverContent align="start" className="w-64 p-1" data-testid={`${testid}-panel`}>
         <div className="max-h-72 overflow-y-auto">
-          <DesignationOption
+          <FilterOption
             label="All Designations"
             selected={!value}
             onSelect={() => pick("")}
@@ -654,7 +654,7 @@ const DesignationFilterSelect = ({ value, onChange, options, groups, testid }) =
                 </p>
               )}
               {g.designations.map((d) => (
-                <DesignationOption
+                <FilterOption
                   key={d}
                   label={titleCase(d)}
                   selected={!!value && nameKey(d) === nameKey(value)}
@@ -664,6 +664,71 @@ const DesignationFilterSelect = ({ value, onChange, options, groups, testid }) =
               ))}
             </div>
           ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+/**
+ * The department filter, as a dropdown.
+ *
+ * The same control as the designation filter beside it, deliberately: the two ask one
+ * question in two halves — which department, then which job inside it — and as a row of
+ * pills over a dropdown they read as two unrelated filters, the department one competing
+ * with the tab bar above it for the same horizontal band. Side by side and identically
+ * shaped, the pair reads as one narrowing.
+ *
+ * "All Departments" is a row in the list rather than a Clear button, so the default is
+ * pickable in the same place every other answer is, and the trigger says which of them is
+ * currently set instead of leaving "no filter" to be inferred from an unlit pill.
+ *
+ * The list is exactly what Department & Designation configures, in that tab's own order,
+ * so the two screens name the same departments in the same sequence.
+ */
+const DepartmentFilterSelect = ({ value, onChange, departments, testid }) => {
+  const [open, setOpen] = useState(false);
+  const pick = (next) => { onChange(next); setOpen(false); };
+  // Same guard the designation trigger carries: a filter can arrive set to a department
+  // this list no longer offers, and the trigger must still say so rather than reading
+  // "All Departments" over a list that is filtered.
+  const known = (departments || []).some((d) => nameKey(d) === nameKey(value));
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Filter by department"
+          className={`flex h-10 w-56 items-center justify-between gap-2 rounded-md border px-3 text-sm font-medium transition ${
+            value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+          }`}
+          data-testid={testid}
+        >
+          <span className="truncate">{value ? titleCase(value) : "All Departments"}</span>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-1" data-testid={`${testid}-panel`}>
+        <div className="max-h-72 overflow-y-auto">
+          <FilterOption
+            label="All Departments"
+            selected={!value}
+            onSelect={() => pick("")}
+            testid={`${testid}-all`}
+          />
+          {(departments || []).map((d) => (
+            <FilterOption
+              key={d}
+              label={titleCase(d)}
+              selected={!!value && nameKey(d) === nameKey(value)}
+              onSelect={() => pick(d)}
+              testid={`${testid}-${d}`}
+            />
+          ))}
+          {value && !known && (
+            <FilterOption label={titleCase(value)} selected onSelect={() => pick(value)} testid={`${testid}-current`} />
+          )}
         </div>
       </PopoverContent>
     </Popover>
@@ -3201,10 +3266,10 @@ const DesignationEmployeesModal = ({ designation, employees, departmentNames, on
 const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
-  // Same filters as the Employees tab — department pills over a designation dropdown —
-  // reading off each user's linked employee record. A user with no linked employee (most
-  // Branch Admin/Pre-Sales accounts still without one) won't match the department filter;
-  // the designation one still reaches them, through their role. See filteredUsers.
+  // Department then Designation, as two dropdowns of the same shape, reading off each
+  // user's linked employee record. A user with no linked employee (most Branch
+  // Admin/Pre-Sales accounts still without one) won't match the department filter; the
+  // designation one still reaches them, through their role. See filteredUsers.
   const [deptFilter, setDeptFilter] = useState("");
   const [designationFilter, setDesignationFilter] = useState("");
   const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
@@ -3309,28 +3374,36 @@ const RolesTab = ({ meta, reloadMeta }) => {
   // each hidden by class depending on breakpoint, not the hidden attribute.
   return (
     <div className="flex flex-col gap-4" data-testid="hr-roles-tab">
-      {/* Same department pills and grouped designation dropdown as the Employees tab,
-          reading off each row's linked employee — one block rather than one per
-          breakpoint, since TabPill already wraps on a narrow screen and the state behind
-          it is shared either way. */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="hr-roles-dept-filter">
-        <TabPill active={deptFilter === ""} onClick={() => selectDept("")} testid="hr-roles-dept-filter-all">
-          All Departments
-        </TabPill>
-        {meta.departments.map((d) => (
-          <TabPill key={d} active={deptFilter === d} onClick={() => selectDept(d)} testid={`hr-roles-dept-filter-${d}`}>
-            {titleCase(d)}
-          </TabPill>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-2" data-testid="hr-roles-designation-filter">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Designation</span>
-        <DesignationFilterSelect
-          value={designationFilter}
-          onChange={setDesignationFilter}
-          groups={designationGroups}
-          testid="hr-roles-designation-filter-select"
-        />
+      {/* Department then Designation, two dropdowns of the same shape on one row, reading
+          off each row's linked employee.
+
+          Department was a row of pills. Both halves of one narrowing — which department,
+          then which job in it — so as two differently shaped controls they read as two
+          unrelated filters, and the pill row sat directly under the tab bar competing with
+          it for the same band. Matched and paired, picking a department visibly narrows
+          the list beside it: that is the flow, and it is now on screen.
+
+          One block rather than one per breakpoint — the row wraps on a narrow screen and
+          the state behind it is shared either way. */}
+      <div className="flex flex-wrap items-center gap-3" data-testid="hr-roles-filters">
+        <div className="flex items-center gap-2" data-testid="hr-roles-dept-filter">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Department</span>
+          <DepartmentFilterSelect
+            value={deptFilter}
+            onChange={selectDept}
+            departments={meta.departments}
+            testid="hr-roles-dept-filter-select"
+          />
+        </div>
+        <div className="flex items-center gap-2" data-testid="hr-roles-designation-filter">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Designation</span>
+          <DesignationFilterSelect
+            value={designationFilter}
+            onChange={setDesignationFilter}
+            groups={designationGroups}
+            testid="hr-roles-designation-filter-select"
+          />
+        </div>
       </div>
 
       {/* Two questions, two shapes. The list answers "who is this person and what can
