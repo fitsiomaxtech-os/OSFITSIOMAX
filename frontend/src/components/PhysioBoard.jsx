@@ -20,7 +20,6 @@ import {
   Send,
   UserCheck,
   Users,
-  UserX,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -40,7 +39,6 @@ import {
   physioPatientDetail,
   physioSessions,
   physioCompleteSession,
-  physioMarkAbsent,
   physioReviews,
   physioRaiseReview,
   leadDocuments,
@@ -1492,7 +1490,6 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const [reviews, setReviews] = useState([]);
   const [reviewEvery, setReviewEvery] = useState(REVIEW_EVERY);
   const [completeTarget, setCompleteTarget] = useState(null);
-  const [absentTarget, setAbsentTarget] = useState(null);
   const [confirmingComplete, setConfirmingComplete] = useState(false);
   // Opens on Treatment Days. The physio reaches this dialog from the day's list in order
   // to mark someone present or absent, and Overview first meant a tab change before every
@@ -2155,25 +2152,19 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                           <Check className="mr-1 h-3 w-3" /> After Day {blockedBy}
                         </Button>
                       ) : canWork ? (
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-amber-200 text-xs text-amber-700 hover:bg-amber-50"
-                            onClick={() => setAbsentTarget(s)}
-                            data-testid={`physio-absent-day-${s.id}`}
-                          >
-                            <UserX className="mr-1 h-3 w-3" /> Absent
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="bg-sky-600 text-xs text-white hover:bg-sky-700"
-                            onClick={() => setCompleteTarget(s)}
-                            data-testid={`physio-complete-day-${s.id}`}
-                          >
-                            <Check className="mr-1 h-3 w-3" /> Complete
-                          </Button>
-                        </div>
+                        // The open day carries one action, and it is the one that moves the
+                        // course on. Marking the day absent stood beside it and pushed the
+                        // day off the end of the booked slots, leaving the patient waiting
+                        // on the Branch Admin for a new date -- too much to hand a physio
+                        // one mis-tap away from the button they came here to press.
+                        <Button
+                          size="sm"
+                          className="shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700"
+                          onClick={() => setCompleteTarget(s)}
+                          data-testid={`physio-complete-day-${s.id}`}
+                        >
+                          <Check className="mr-1 h-3 w-3" /> Complete
+                        </Button>
                       ) : (
                         <Button
                           size="sm"
@@ -2229,23 +2220,6 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
           />
         )}
 
-        {absentTarget && (
-          <MarkAbsentModal
-            session={absentTarget}
-            // The day that will come off the end — the highest-numbered day still holding a
-            // slot. Named in the warning so the physio knows which one goes back to the
-            // Branch Admin before agreeing to the move, not after.
-            lastDated={
-              sessions
-                .filter((x) => x.status !== "completed" && (x.slot_time || "").trim())
-                .reduce((hi, x) => Math.max(hi, x.session_number || 0), 0) || null
-            }
-            onClose={() => setAbsentTarget(null)}
-            // Stays open on purpose: the whole schedule just moved, and closing would hide
-            // the one thing worth checking. The parent list reloads when the popup closes.
-            onDone={() => { setAbsentTarget(null); loadSessions(); }}
-          />
-        )}
       </div>
     </div>
   );
@@ -3236,16 +3210,6 @@ function CompleteSessionModal({ session, onClose, onDone }) {
 }
 
 /**
- * The patient did not turn up. The day is not written off — it takes the next day's slot,
- * that day takes the one after, and so on, so the package still delivers the number of
- * treatment days it was sold as.
- *
- * Says so before the press rather than after: this rewrites the dates of every remaining
- * day, which is not something to discover from a list that quietly looks different. And it
- * names the day that comes off the end, because that one stops being the physio's to work
- * until the Branch Admin has given it a date.
- */
-/**
  * Asked before a course of treatment is closed out.
  *
  * There is no undo on this screen: physioCompleteConsultation moves the patient to
@@ -3288,68 +3252,6 @@ function ConfirmTreatmentCompleteModal({ lead, days, submitting, onCancel, onCon
             data-testid="confirm-treatment-complete-submit"
           >
             {submitting ? "Marking..." : "Yes, mark complete"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MarkAbsentModal({ session, lastDated, onClose, onDone }) {
-  const [remarks, setRemarks] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    try {
-      const res = await physioMarkAbsent(session.id, { remarks });
-      toast.success(res?.message || "Marked absent");
-      onDone();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Couldn't mark this day absent");
-    }
-    setSubmitting(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="mark-absent-modal">
-        <div className="border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">Mark Day {session.session_number} Absent</h3>
-          <p className="text-[10px] text-slate-400">
-            {session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}
-          </p>
-        </div>
-        <div className="space-y-3 p-5">
-          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-800">
-            <UserX className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>
-              Day {session.session_number} takes the next day's slot, and every day after it moves
-              down one. The patient still gets all {session.total_sessions} days — nothing is lost.
-              {lastDated && lastDated !== session.session_number && (
-                <>
-                  {" "}
-                  <b>Day {lastDated}</b> comes off the end and goes to the Branch Admin for a new date.
-                </>
-              )}
-            </span>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Reason (optional)</label>
-            <textarea
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              rows={3}
-              placeholder="Did not turn up, called in sick..."
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-              data-testid="absent-remarks"
-            />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t p-4">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-amber-600 text-white hover:bg-amber-700" data-testid="absent-submit">
-            {submitting ? "Moving..." : "Mark Absent & Move"}
           </Button>
         </div>
       </div>
