@@ -54,11 +54,20 @@ BRANCH_ADMIN_RNR_STAGE = "RNR"
 # two pipelines, two stages, and the Branch Leads card shows both.
 BRANCH_CANCELLED_STAGE = "Cancelled"
 
-# Branch's own consultation pipeline. "New Appointment" was retired — consultations
-# now begin at Follow Up (see seed.migrate_consultation_stages). The Head Physio's
-# independent pipeline below still has its own New Appointment stage.
+# Branch's own consultation pipeline. "New Appointment" was retired, and the stage that
+# replaced it — "Follow Up" — has since been renamed "Consultation Booked" (see
+# seed.migrate_consultation_stages). The Head Physio's independent pipeline below still
+# has its own New Appointment stage.
+#
+# The rename is not cosmetic. This is where a lead lands the moment Branch Leads books its
+# appointment, and while it was called "Follow Up" it shared a name with the Branch
+# ("sales") pipeline's own Follow Up stage — which meant the Consultation tab dropped it
+# from its pill bar (one name, one pill, kept on the Branch side; see
+# consultationOnlyStages in BranchAdminBoard.jsx). Every freshly booked patient therefore
+# sat on a stage that tab had no pill for: in the list, counted in All Stages, and under
+# none of the cards above it. A name of its own gives the stage a pill of its own.
 V3_CONSULTATION_STAGES = [
-    "Follow Up",
+    "Consultation Booked",
     "Consultation Visit",
     "Fee Collected",
     "Physio Assign",

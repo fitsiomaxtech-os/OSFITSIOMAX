@@ -104,10 +104,16 @@ const BRANCH_CANCELLED_STAGE = "Cancelled";
 // longer one of the pills on the Branch Leads strip. See leadPillStages.
 const BRANCH_PORTFOLIO_STAGE = "Portfolio";
 
-// Where the Consultation tab opens. "Follow Up" comes first in the branch consultation
-// pipeline but is shared with the Branch strip, so it is not one of that tab's own pills;
-// Consultation Visit is the first that is, and is where the tab's work starts.
-const BRANCH_CONSULTATION_OPENING_STAGE = "Consultation Visit";
+// Where the Consultation tab opens: the head of the branch consultation pipeline, which is
+// where booking an appointment in Branch Leads puts a patient.
+//
+// It used to open on Consultation Visit, because the stage before it was called "Follow
+// Up" -- a name the Branch strip already owned, which cost it its pill here (see
+// consultationOnlyStages). Opening one stage in was the closest this tab could get to
+// opening at the beginning. The stage is called "Consultation Booked" now and has a pill
+// of its own, so the tab opens on the patients waiting to be seen rather than one step
+// past them.
+const BRANCH_CONSULTATION_OPENING_STAGE = "Consultation Booked";
 
 // ---- Appointment confirmation -------------------------------------------------------
 // What the client walks away with. Built as its own document so it can be opened, printed
@@ -793,10 +799,15 @@ export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => 
   // consultation one is named "Cancel", and the two pill sets are shown in one row.
   const abandoned = here === "Cancelled" || here === "Cancel";
   const finished = !abandoned && isCourseComplete(lead);
-  // Only the Consultation-ONLY stages hand a lead over. A name both pipelines share
-  // ("Follow Up") gets a single pill backed by the sales-side field, and booking an
-  // appointment seeds exactly that stage — releasing on it would drop every freshly booked
-  // lead out of Appointment with no pill left to land in.
+  // Only the Consultation-ONLY stages hand a lead over — a name both pipelines share gets a
+  // single pill backed by the sales-side field, so releasing on one would drop a lead out of
+  // the Branch pills with nothing on the Consultation tab left to hold it.
+  //
+  // Booking an appointment now seeds "Consultation Booked", which IS a consultation-only
+  // stage, so a freshly booked lead hands over the moment it is booked and lands on that
+  // tab's first pill. That is the whole point of the rename: while the stage was called
+  // "Follow Up" it was shared, the lead stayed under Appointment here, and the Consultation
+  // tab had no card that could show it.
   const handedOver = !abandoned && isConsultationOnlyStage(lead.consultation_stage);
   // Completed is read off the lead here the way it already is on the Consultations board,
   // rather than waiting for somebody to move them. This pipeline is otherwise written
@@ -1124,8 +1135,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const entryStageNames = [mirrorStage?.name, realEntryStage?.name].filter(Boolean);
 
   // A stage the Consultation pipeline owns and the Branch one does not. Any name the two
-  // share (e.g. "Follow Up") stays on the Branch side and is backed by the sales field, so
-  // one name never gets a pill on both bars answering off different columns.
+  // share stays on the Branch side and is backed by the sales field, so one name never gets
+  // a pill on both bars answering off different columns. This is why the consultation
+  // pipeline's opening stage had to stop being called "Follow Up" — see
+  // BRANCH_CONSULTATION_OPENING_STAGE above.
   const consultationOnlyStages = useMemo(
     () => consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name)),
     [stages, consultationStages],

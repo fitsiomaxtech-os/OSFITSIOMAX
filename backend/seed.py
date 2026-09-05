@@ -205,6 +205,50 @@ async def ensure_branch_cancelled_stage() -> None:
     })
 
 
+async def ensure_consultation_booked_stage() -> None:
+    """Give the Branch consultation pipeline its opening pill, at the head of the bar.
+
+    Normally this stage is already there under its new name -- migrate_consultation_stages
+    renames the old "Follow Up" into it. This is for the pipelines where there is nothing
+    to rename: a branch whose Super Admin had deleted that stage from Pipeline Stage
+    Management back when it was the nameless one with no pill of its own.
+
+    It cannot be left missing. Booking an appointment in Branch Leads lands a lead on
+    whichever stage sits first in this pipeline (see v3_schedule_branch_appointment), so
+    without this one the booking goes straight into Consultation Visit -- a patient
+    recorded as having attended a consultation nobody has held yet, and the whole reason
+    the flow reads wrong from the Consultation tab.
+
+    Inserted at order 0 rather than positioned against a neighbour, because being first IS
+    what this stage is: everything else in the pipeline happens after the booking.
+    Idempotent, and a no-op until the consultation stages exist.
+    """
+    existing = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": "Consultation Booked"}, {"_id": 0, "id": 1}
+    )
+    if existing:
+        return
+    # Nothing to be first of yet -- migrate_consultation_stages has not seeded the pipeline.
+    # It runs before this on startup, so this only holds on a database with no consultation
+    # pipeline at all, where inserting a lone opening stage would be inventing one.
+    if await v3_col("pipeline_stages").count_documents({"type": "consultation"}) == 0:
+        return
+    await v3_col("pipeline_stages").update_many(
+        {"type": "consultation"}, {"$inc": {"order": 1}}
+    )
+    await v3_col("pipeline_stages").insert_one({
+        "id": str(uuid.uuid4()),
+        "name": "Consultation Booked",
+        # Blue, the colour the pipeline's first stage has always been seeded in
+        # (CONSULTATION_COLORS[0] in migrate_consultation_stages).
+        "color": "#3b82f6",
+        "type": "consultation",
+        "order": 0,
+        "is_final": False,
+        "created_at": now_iso(),
+    })
+
+
 async def ensure_rehab_stage() -> None:
     """Give the Branch consultation pipeline its Rehab pill, right after Physio Assign.
 
@@ -633,8 +677,19 @@ _LEGACY_CONSULTATION_STAGE_MAP = {
     "Treatment Fee": "Physio Assign",
     "Consultation Fee Collected": "Fee Collected",
     "Treatment Fee Collected": "Physio Assign",
-    "RNR": "Follow Up",
+    # RNR folded into the pipeline's opening stage when it was retired, and follows that
+    # stage through its rename rather than naming a stage that no longer exists.
+    "RNR": "Consultation Booked",
 }
+
+# Deliberately NOT a _LEGACY_CONSULTATION_STAGE_MAP entry, even though it is a rename like
+# every other line in it. That map is also the trigger for a full re-seed: finding any of
+# its keys as a live pipeline_stages doc deletes the whole consultation stage list and
+# rebuilds it from V3_CONSULTATION_STAGES, which would take Rehab, Diet Consultation, Diet
+# Chart and Completed down with it -- and every colour, order or label Super Admin has set
+# on the stages that survive. This is one stage being renamed in place, so it renames one
+# stage in place.
+_RENAMED_CONSULTATION_ENTRY = ("Follow Up", "Consultation Booked")
 
 
 async def migrate_consultation_stages() -> None:
@@ -680,14 +735,59 @@ async def migrate_consultation_stages() -> None:
     await v3_col("pipeline_stages").delete_many({"type": "consultation", "name": "Consultation Pack"})
 
     # Retire "New Appointment" from Branch's own consultation pipeline — consultations
-    # now begin at Follow Up. Backfill any lead still sitting on it first so nothing is
+    # now begin at Consultation Booked (renamed from Follow Up just below, which is why the
+    # backfill names the new label). Backfill any lead still sitting on it first so nothing is
     # orphaned, then drop the stage doc. Scoped to type="consultation" only: the Head
     # Physio's independent pipeline keeps its own New Appointment stage.
     await v3_col("leads").update_many(
         {"consultation_stage": "New Appointment"},
-        {"$set": {"consultation_stage": "Follow Up", "updated_at": now_iso()}},
+        {"$set": {"consultation_stage": "Consultation Booked", "updated_at": now_iso()}},
     )
     await v3_col("pipeline_stages").delete_many({"type": "consultation", "name": "New Appointment"})
+
+    # Rename that opening stage "Follow Up" -> "Consultation Booked". In place, so the
+    # stage keeps its id, its order at the head of the pipeline and whatever colour Super
+    # Admin gave it -- a delete-and-insert would move it to the end and orphan every lead
+    # standing on it in the gap.
+    #
+    # Why at all: see V3_CONSULTATION_STAGES in constants.py. The Branch pipeline has a
+    # "Follow Up" of its own, and a name shared between the two pipelines gets a single
+    # pill on the Branch side -- so this stage, which is where booking an appointment puts
+    # a lead, had no pill on the Consultation tab and every freshly booked patient landed
+    # somewhere that tab could not show.
+    #
+    # The leads move first. Between the two writes a lead may briefly hold a stage name
+    # nothing matches; doing them the other way round would leave leads on "Follow Up"
+    # after the stage doc had already stopped being called that, and the orphan backfill at
+    # the end of this function would sweep them somewhere else entirely.
+    _from, _to = _RENAMED_CONSULTATION_ENTRY
+    await v3_col("leads").update_many(
+        {"consultation_stage": _from},
+        {"$set": {"consultation_stage": _to, "updated_at": now_iso()}},
+    )
+    _old_stage = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": _from}, {"_id": 0, "id": 1, "order": 1}
+    )
+    if _old_stage:
+        _already = await v3_col("pipeline_stages").find_one(
+            {"type": "consultation", "name": _to}, {"_id": 0, "id": 1}
+        )
+        if _already:
+            # Both names live at once — a Super Admin added the new stage by hand before
+            # this ran. Renaming into it would put two identically named pills on the bar,
+            # each claiming the same leads. The leads are already on the new name (moved
+            # above), so the old doc has nothing left to hold: drop it and close the gap it
+            # leaves, rather than leaving a hole in the order the next insert positions
+            # itself against.
+            await v3_col("pipeline_stages").delete_one({"id": _old_stage["id"]})
+            await v3_col("pipeline_stages").update_many(
+                {"type": "consultation", "order": {"$gt": _old_stage["order"]}},
+                {"$inc": {"order": -1}},
+            )
+        else:
+            await v3_col("pipeline_stages").update_one(
+                {"id": _old_stage["id"]}, {"$set": {"name": _to}}
+            )
 
     # Additive: make sure newer consultation stages (added after the initial seed) exist too,
     # without disturbing any Super Admin edits (color/order/rename) made to the existing ones.
@@ -750,7 +850,7 @@ async def migrate_consultation_stages() -> None:
     # "All Stages" but invisible in every individual stage pill.
     valid_consultation_stages = set(await v3_col("pipeline_stages").distinct("name", {"type": "consultation"}))
     if valid_consultation_stages:
-        first_consultation_stage = await get_first_stage_name("consultation", "Follow Up")
+        first_consultation_stage = await get_first_stage_name("consultation", "Consultation Booked")
         await v3_col("leads").update_many(
             {"consultation_stage": {"$ne": None, "$nin": list(valid_consultation_stages)}},
             {"$set": {"consultation_stage": first_consultation_stage, "updated_at": now_iso()}},

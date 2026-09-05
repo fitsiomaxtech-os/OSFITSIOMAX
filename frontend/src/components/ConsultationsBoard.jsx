@@ -2040,7 +2040,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const matchesStage = useCallback((lead, stageName) => {
     if (isConsultant && stageName === "Treatments") return lead.treatment_fee_paid != null;
     // Diet Consultation is a stage nothing writes: the backend sets consultation_stage to
-    // Follow Up, Consultation Visit, Fee Collected, Physio Assign and Treatment Fee, and
+    // Consultation Booked, Consultation Visit, Fee Collected, Physio Assign and Treatment Fee, and
     // never to this one — so the pill could only ever read 0 however many diet patients the
     // branch had. It is read off the lead instead, and off the fee rather than the
     // recommendation: a consultation that ticks the box starts the conversation; the
@@ -5662,7 +5662,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
               // So the stages before the visit keep it and the stages from the visit on do
               // not. CancelButton is null there, which is what the {CancelButton} slots in
               // those panels already render.
-              const cancellable = ["New Appointment", "Follow Up"].includes(stage);
+              // "Follow Up" is this stage's former name — see the panel below for why both
+              // are still matched.
+              const cancellable = ["New Appointment", "Consultation Booked", "Follow Up"].includes(stage);
               // Once a lead has moved forward past a stage, it can never come back —
               // there's no manual "move backward" control anymore (see the backend's
               // matching rejection in move-consultation-stage).
@@ -6487,14 +6489,29 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   );
                 }
 
-                if (stage === "Follow Up") {
+                // "Follow Up" is the name this stage used to carry, and is still matched:
+                // the rename happens in a backend migration on its own restart, so for a
+                // window either label can be on a lead. Matching one alone would leave the
+                // patients booked in that window looking at a card with no panel under it.
+                if (stage === "Consultation Booked" || stage === "Follow Up") {
+                  // What the patient was actually booked for. A consultation follow-up
+                  // scheduled from this board writes one of these entries; an appointment
+                  // booked from Branch Leads -- which is how most patients arrive at this
+                  // stage -- writes the lead's own appointment fields and no entry at all,
+                  // so reading the entry alone left the commonest case saying nothing about
+                  // when the patient is expected.
+                  const bookedFor = activeFollowUp
+                    ? `${activeFollowUp.date} at ${activeFollowUp.time}`
+                    : selectedLead.appointment_date
+                      ? `${selectedLead.appointment_date}${selectedLead.appointment_time ? ` at ${selectedLead.appointment_time}` : ""}`
+                      : null;
                   return (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="cons-stage-panel-followup">
                       <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
-                        <Bell className="h-3.5 w-3.5" /> Consultation Scheduled
+                        <Bell className="h-3.5 w-3.5" /> Consultation Booked
                       </p>
                       <p className="mb-2 text-xs text-slate-600">
-                        {activeFollowUp ? `Scheduled for ${activeFollowUp.date} at ${activeFollowUp.time} — waiting on the CONSULTANT.` : "Waiting on the CONSULTANT."}
+                        {bookedFor ? `Booked for ${bookedFor} — waiting on the CONSULTANT.` : "Waiting on the CONSULTANT."}
                       </p>
                       <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                         <Button

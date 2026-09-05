@@ -692,7 +692,9 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     # When the appointment is booked (not cancelled), hand the lead to BOTH consultation
     # pipelines at once:
     #   - Head Physio's own board -> its first stage ("New Appointment"), where they pick it up
-    #   - Branch Admin's own board -> its first stage ("Follow Up"), kept for rescheduling
+    #   - Branch Admin's own board -> its first stage ("Consultation Booked"), which is
+    #     the pill the Consultation tab opens on and where the booking is visible until
+    #     the consultant sees the patient
     # Existing values are never overwritten, so a lead already further along stays put.
     if payload.final_stage == "Appointment Date & Time":
         updates["consultation_stage"] = lead.get("consultation_stage") or (await _consultation_stage_names())[0]
@@ -1229,7 +1231,7 @@ class V3ConsultationFollowUpRescheduleInput(BaseModel):
 
 @router.post("/leads/{lead_id}/consultation-follow-up", response_model=V3LeadOut)
 async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3ConsultationFollowUpInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
-    """Schedule a consultation follow-up. Appends to consultation_follow_ups[] and moves consultation_stage to 'Follow Up'."""
+    """Schedule a consultation follow-up. Appends to consultation_follow_ups[] and moves consultation_stage to 'Consultation Booked'."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -1246,7 +1248,7 @@ async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3Consultati
     # hand off to the Head Physio's own pipeline, seeding it only the first time so a
     # later reschedule never regresses progress the doctor has already made.
     set_fields = {
-        "consultation_stage": "Follow Up",
+        "consultation_stage": "Consultation Booked",
         "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
         "appointment_date": payload.date,
         "appointment_time": payload.time,
@@ -1300,7 +1302,7 @@ async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, p
     follow_ups.append(new_entry)
     set_fields = {
         "consultation_follow_ups": follow_ups,
-        "consultation_stage": "Follow Up",
+        "consultation_stage": "Consultation Booked",
         "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
         "appointment_date": payload.date,
         "appointment_time": payload.time,
