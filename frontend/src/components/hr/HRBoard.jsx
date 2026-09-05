@@ -959,29 +959,30 @@ const EmployeesTab = ({ meta, initialFilter }) => {
         <button onClick={() => setFilterStatus("left")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "left" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-left">Left ({left})</button>
       </div>
 
-      {/* Department row — same pill tabs as Departments & Designation, so filtering by
-          department reads the same way in both places. */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="hr-emp-dept-filter">
-        <TabPill active={department === ""} onClick={() => { setDepartment(""); setDesignation(""); }} testid="hr-emp-dept-filter-all">
-          All Departments
-        </TabPill>
-        {meta.departments.map((d) => (
-          <TabPill key={d} active={department === d} onClick={() => { setDepartment(d); setDesignation(""); }} testid={`hr-emp-dept-filter-${d}`}>
-            {titleCase(d)}
-          </TabPill>
-        ))}
-        {hasUnassigned && (
-          <TabPill active={department === "Unassigned"} onClick={() => { setDepartment("Unassigned"); setDesignation(""); }} testid="hr-emp-dept-filter-unassigned">
-            Unassigned
-          </TabPill>
-        )}
-      </div>
+      {/* Department, Designation and Work Type on one row — the same pair of dropdowns
+          Credentials uses, in the same order and the same shape.
 
-      {/* Designation and Work Type — one row of controls where there used to be two rows
-          of pills. The department row above is the axis this page is read along, and a
-          designation row as long as that one was competed with it; a dropdown that opens
-          department by department sits under it instead of beside it. */}
+          Department was a row of pills sitting directly under the tab bar, competing with
+          it for the same band, and it read as a filter unrelated to the designation
+          dropdown beside it even though the two are halves of one narrowing: which
+          department, then which job inside it. Matched and paired, picking a department
+          visibly narrows the list next to it, and Employees and Credentials now ask the
+          same question with the same control.
+
+          "Unassigned" joins the department list as an option rather than a trailing pill —
+          it is an answer to the same question, and it is still offered only when somebody
+          actually has no department. */}
       <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2" data-testid="hr-emp-dept-filter">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Department</span>
+          <DepartmentFilterSelect
+            value={department}
+            onChange={(d) => { setDepartment(d); setDesignation(""); }}
+            departments={hasUnassigned ? [...meta.departments, "Unassigned"] : meta.departments}
+            testid="hr-emp-dept-filter-select"
+          />
+        </div>
+
         <div className="flex items-center gap-2" data-testid="hr-emp-designation-filter">
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Designation</span>
           <DesignationFilterSelect
