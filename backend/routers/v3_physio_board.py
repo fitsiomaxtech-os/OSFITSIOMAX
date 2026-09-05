@@ -14,7 +14,7 @@ from schemas.v3 import (
 # The interval that actually governs when a review can be raised. Imported rather than
 # redeclared so the Treatment Days popup marks its milestones where the reviews router
 # agrees they are.
-from routers.v3_reviews import REVIEW_AFTER_DAYS, review_numbers_for_lead
+from routers.v3_reviews import REVIEW_AFTER_DAYS, review_numbers_for_lead, leads_awaiting_review
 # Which leads belong to a physio. In its own module because both this board and the
 # reviews router need it, and this one already imports from that one — a helper living
 # in either would close the loop.
@@ -311,6 +311,12 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
         # Weeks the plan spans — the highest week any of its days falls in.
         t["weeks"] = max(t["weeks"], row.get("week_number") or 1)
 
+    # Whose closing review is still owed. The Treatment Completed tile was counting a
+    # patient the moment their last day was ticked off, which is one step early: the course
+    # ends at the Head Physio's review, not at the last day of it, and the tile was calling
+    # a patient discharged while the popup behind it still read REVIEW DUE.
+    awaiting_review = await leads_awaiting_review(lead_ids)
+
     out = []
     for ld in leads:
         dumped = V3LeadOut(**ld).model_dump()
@@ -318,6 +324,7 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
         dumped["total_sessions"] = t["total"]
         dumped["completed_sessions"] = t["completed"]
         dumped["weeks"] = t["weeks"]
+        dumped["review_pending"] = ld["id"] in awaiting_review
         out.append(dumped)
 
     return {
@@ -361,6 +368,21 @@ async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = 
         raise HTTPException(status_code=404, detail="Lead not found")
     if not await physio_owns_lead(_ids_of(doctor), lead_id):
         raise HTTPException(status_code=403, detail="This lead is not assigned to you")
+
+    # Mark Treatment Complete is the one deliberate signal that closes a course -- every
+    # board reads physio_stage "Complete" as finished, whatever the days say -- so it is
+    # the one that must not run ahead of the Head Physio. Refused here as well as hidden in
+    # the popup: the button is the only way in from the UI, but the stage it writes is what
+    # the whole OS reads, and a guard that only lives in the popup is a guard the next
+    # screen to call this endpoint will not have.
+    #
+    # Only bites where a review is actually owed. A patient with no treatment days has no
+    # course to review and none of this applies to them -- see leads_awaiting_review.
+    if lead_id in await leads_awaiting_review([lead_id]):
+        raise HTTPException(
+            status_code=400,
+            detail="The CONSULTANT hasn't reviewed this patient yet — raise it from the Review tab and wait for the review to be written before closing the treatment",
+        )
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "physio_stage": "Complete",

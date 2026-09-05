@@ -25,6 +25,10 @@ from schemas.v3 import (
     V3PortfolioScheduleInput,
 )
 from routers.v3_lead_documents import leads_with_prescription
+# Whose Head Physio review is still owed. Imported rather than re-derived: the rule for
+# when a course is over lives with the reviews it is waiting on, and a second copy here
+# is how the boards came to disagree about Completed in the first place.
+from routers.v3_reviews import leads_awaiting_review
 
 router = APIRouter(prefix="/api/v3")
 
@@ -361,7 +365,15 @@ async def _stamp_session_progress(leads: list) -> None:
         }},
     ]).to_list(20000)
     progress = {r["_id"]: r for r in rows}
+    # The last day of a course is not the end of it. Every course earns a closing Head
+    # Physio review, and until that is written the patient is mid-hand-off rather than
+    # discharged -- so the Completed stage, which is read off the two counts below, moved
+    # them out of the pipeline while the Head Physio still had them on their desk. Stamped
+    # beside the counts because it qualifies them: see isCourseComplete in leadStage.js,
+    # the one rule every board reads this through.
+    awaiting_review = await leads_awaiting_review(ids)
     for lead in leads:
+        lead["review_pending"] = lead.get("id") in awaiting_review
         found = progress.get(lead.get("id"))
         if not found:
             continue

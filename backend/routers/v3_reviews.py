@@ -111,36 +111,110 @@ async def _first_session_date(lead_id: str) -> Optional[str]:
     return min(dates) if dates else None
 
 
-async def _finished_course_ids(lead_ids: List[str]) -> set:
-    """Of these patients, the ones with no day of treatment left to attend.
+async def _course_progress(lead_ids: List[str]) -> dict:
+    """Per patient, per course, how many days are booked and how many are done.
 
-    Both tracks have to be done, not the further-along one: a patient whose treatment
-    days are all completed while rehab days are still to come has not finished their
-    course, and closing the book then would close one still being written in.
+    Two aggregations for the whole list rather than a pair of counts per patient. Both
+    _finished_course_ids and leads_awaiting_review want the same numbers about the same
+    people, and the Review tab asks it of every patient a physio holds -- counted one at a
+    time that is a round trip each, twice over.
 
-    At least one day has to have existed. A patient with none booked has not finished a
-    course, they have not started one.
-
-    Two aggregations for the whole list rather than two queries per patient -- the Review
-    tab asks this about every patient a physio has, and per-patient counting would open
-    that tab with a round trip each.
+    Keyed by track rather than summed, because the two questions read them differently: a
+    course is finished when BOTH tracks are, and a review milestone is reached when EITHER
+    one gets there. See _treatment_days and _finished_course_ids for why each is so.
     """
-    booked: dict = {}
-    still_open: set = set()
-    for name in ("sessions", "rehab_sessions"):
+    lead_ids = [lid for lid in lead_ids if lid]
+    if not lead_ids:
+        return {}
+    progress: dict = {}
+    for name, track in (("sessions", "treatment"), ("rehab_sessions", "rehab")):
         rows = await v3_col(name).aggregate([
             {"$match": {"lead_id": {"$in": lead_ids}}},
             {"$group": {
                 "_id": "$lead_id",
                 "booked": {"$sum": 1},
-                "open": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 0, 1]}},
+                "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
             }},
         ]).to_list(20000)
         for r in rows:
-            booked[r["_id"]] = booked.get(r["_id"], 0) + r["booked"]
-            if r["open"]:
-                still_open.add(r["_id"])
-    return {lid for lid, n in booked.items() if n > 0 and lid not in still_open}
+            progress.setdefault(r["_id"], {})[track] = {
+                "booked": r["booked"], "completed": r["completed"],
+            }
+    return progress
+
+
+def _course_finished(tracks: dict) -> bool:
+    """Has this patient no day of treatment left to attend?
+
+    Both tracks have to be done, not the further-along one: a patient whose treatment days
+    are all completed while rehab days are still to come has not finished their course, and
+    closing the book then would close one still being written in.
+
+    At least one day has to have existed. A patient with none booked has not finished a
+    course, they have not started one.
+    """
+    if not tracks:
+        return False
+    if sum(t["booked"] for t in tracks.values()) <= 0:
+        return False
+    return all(t["completed"] >= t["booked"] for t in tracks.values())
+
+
+def _days_of(tracks: dict) -> int:
+    """The completed-day count _treatment_days reports, off already-fetched numbers."""
+    return max((t["completed"] for t in tracks.values()), default=0)
+
+
+async def _finished_course_ids(lead_ids: List[str]) -> set:
+    """Of these patients, the ones with no day of treatment left to attend."""
+    progress = await _course_progress(lead_ids)
+    return {lid for lid, tracks in progress.items() if _course_finished(tracks)}
+
+
+async def leads_awaiting_review(lead_ids: List[str]) -> set:
+    """Of these patients, the ones whose days are done but whose review is not.
+
+    Finishing the last booked day is not finishing treatment. Every course earns a closing
+    Head Physio review -- _review_eligibility raises one past the last whole week precisely
+    so the days a seven-day rule leaves over still get read -- and until that review is
+    written the patient is mid-hand-off, not discharged. The boards were calling them
+    Completed on the day count alone, which put a patient into the finished column while
+    the Head Physio still had them on their desk, and let the Physio Master View close the
+    course out from under a review it had raised itself.
+
+    Both an unraised milestone and one already in flight count as owed: `eligible` is the
+    first, a review sitting on the Branch Admin's desk or with a Head Physio is the second.
+    Neither is a review anybody has written.
+
+    Only asked of finished courses. Mid-course days past the last milestone are days still
+    being worked -- nothing calls those patients Completed, and treating a week not yet
+    reached as an outstanding review would hold every patient in treatment.
+
+    Returns ids, not a per-lead flag, so the callers that stamp this onto a board's leads
+    all ask the same question of the same rules rather than each re-deriving it.
+    """
+    lead_ids = [lid for lid in lead_ids if lid]
+    if not lead_ids:
+        return set()
+    progress = await _course_progress(lead_ids)
+    finished = {lid: tracks for lid, tracks in progress.items() if _course_finished(tracks)}
+    if not finished:
+        return set()
+    rows = await v3_col("reviews").find(
+        {"lead_id": {"$in": list(finished)}}, {"_id": 0}
+    ).to_list(20000)
+    by_lead: dict = {}
+    for r in rows:
+        by_lead.setdefault(r["lead_id"], []).append(r)
+
+    waiting = set()
+    for lid, tracks in finished.items():
+        elig = _review_eligibility(by_lead.get(lid, []), _days_of(tracks), True)
+        if elig["eligible"]:
+            waiting.add(lid)
+        elif (elig["review"] or {}).get("status") in (SEND_TO_REVIEW, SENT):
+            waiting.add(lid)
+    return waiting
 
 
 def _shape(rev: dict) -> dict:

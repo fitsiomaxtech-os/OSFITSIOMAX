@@ -479,7 +479,15 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
    */
   const finished = useMemo(() => {
     const inTreatment = leads.filter((l) => (l.total_sessions || 0) > 0);
-    const done = inTreatment.filter((l) => (l.completed_sessions || 0) >= l.total_sessions);
+    // Days done AND the review written. The tile counted the day tally alone, so a patient
+    // landed here the moment their last day was ticked off -- reading as discharged on the
+    // board while the popup one click behind it still said REVIEW DUE, and while the Head
+    // Physio had not seen them. review_pending is the server's answer to the same question
+    // (leads_awaiting_review in v3_reviews.py), so this tile, the branch's Completed stage
+    // and the Review tab cannot come apart.
+    const done = inTreatment.filter(
+      (l) => !l.review_pending && (l.completed_sessions || 0) >= l.total_sessions,
+    );
     return {
       done: done.length,
       patients: inTreatment.length,
@@ -1585,6 +1593,18 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     return rows;
   }, [sessions, reviews, reviewEvery, allDaysDone]);
 
+  // The milestone the course currently stands at — the closing one once every day is done,
+  // which is the row _review_eligibility puts one past the last whole week on the server.
+  // The list keeps every milestone the treatment ever reached; only the last of them is
+  // the one still being waited on.
+  const currentMilestone = reviewMilestones[reviewMilestones.length - 1] || null;
+  // Whether the Head Physio still owes this patient a review. Mirrors the check
+  // physio_complete_consultation now makes, so the button says no before it is pressed
+  // rather than the server saying it after. A patient with no days booked reaches no
+  // milestone and is owed nothing — they keep the button they have always had, which is
+  // the only way their consultation can be closed at all.
+  const reviewOwed = !!currentMilestone && currentMilestone.review?.status !== "completed";
+
   // The lowest still-open day before a given one, or null when it is next in line. The
   // server refuses out-of-order completion too; this is so the button can say why before
   // it is pressed rather than after.
@@ -1714,16 +1734,31 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
           <button
             type="button"
             onClick={() => setConfirmingComplete(true)}
-            disabled={isComplete || submitting}
+            disabled={isComplete || submitting || reviewOwed}
+            // Says which of the two it is waiting on. Disabled with no reason given reads
+            // as broken, and the reason is on the tab behind this one.
+            title={reviewOwed ? "The CONSULTANT hasn't reviewed this patient yet — raise it from the Review tab first" : undefined}
             className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition sm:px-3.5 sm:py-2 sm:text-xs ${
               isComplete
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                // Amber rather than greyed out: this is the state the patient is actually
+                // in — waiting on the review — not a button that happens to be off, and it
+                // matches the milestone banner on the Treatment Days tab saying the same.
+                : reviewOwed
+                  ? "cursor-not-allowed border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
             }`}
             data-testid="physio-consultation-complete"
           >
-            <Check className="h-3.5 w-3.5" />
-            {isComplete ? "Complete" : submitting ? "Marking..." : (
+            {reviewOwed && !isComplete ? <AlertCircle className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+            {isComplete ? "Complete" : submitting ? "Marking..." : reviewOwed ? (
+              // The course cannot be closed until the review is written, so the button
+              // names what it is waiting for instead of offering an action it will refuse.
+              <>
+                <span className="sm:hidden">Review Due</span>
+                <span className="hidden sm:inline">Awaiting CONSULTANT Review</span>
+              </>
+            ) : (
               // "Mark Treatment Complete" alongside three tabs overruns a phone. Shortened
               // there rather than allowed to push the tabs into a scroll they don't need.
               <>

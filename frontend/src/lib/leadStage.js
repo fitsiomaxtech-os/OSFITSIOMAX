@@ -38,6 +38,23 @@ const dietCourseComplete = (lead) => {
 };
 
 export const isCourseComplete = (lead) => {
+  // Not while the Head Physio still owes a review. Finishing the last booked day is not
+  // finishing treatment -- every course earns a closing review (v3_reviews' own
+  // _review_eligibility raises one past the last whole week precisely so the days a
+  // seven-day rule leaves over still get read), and until it is written the patient is
+  // mid-hand-off rather than discharged. Without this the branch moved them into Completed
+  // the moment the physio ticked off the last day, out of every stage anyone would look
+  // for them in, while the review sat on the Branch Admin's desk.
+  //
+  // Above the clauses below rather than folded into the last one, because it outranks all
+  // of them -- including the physio's own Mark Treatment Complete, which is now refused
+  // while a review is owed (physio_complete_consultation) but sits on leads closed out
+  // before that guard existed.
+  //
+  // Stamped by the server, so only where the server was asked -- see review_pending in
+  // schemas/v3.py. Undefined reads as "no review owed", which keeps every board that does
+  // not stamp it reading exactly as it did before.
+  if (lead.review_pending) return false;
   // The physio said so. The only deliberate signal in here -- Mark Treatment Complete in
   // the Physio Master View, which writes physio_stage -- and the one the branch could not
   // see: the physio closed the course and the patient stayed wherever the branch had last

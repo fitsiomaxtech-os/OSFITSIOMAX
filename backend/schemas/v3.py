@@ -469,6 +469,12 @@ class V3LeadOut(BaseModel):
     # ever booked, which is not zero: nobody sold that patient treatment.
     total_sessions: Optional[int] = None
     completed_sessions: Optional[int] = None
+    # Stamped the same way and for the same reason, and read alongside them: a course whose
+    # days are all done but whose closing Head Physio review is not yet written has not
+    # finished. Without it here the flag was dropped on the way out and every board went
+    # back to calling those patients Completed on the day count alone. None means nobody
+    # asked -- an endpoint that does not stamp it, rather than a review that is not owed.
+    review_pending: Optional[bool] = None
     # Every branch this patient has been moved between, oldest first. Declared for the same
     # reason as the two above -- a board that cannot see it cannot mark a transferred
     # patient as one, and the branch receiving them has no way to say where they came from.
