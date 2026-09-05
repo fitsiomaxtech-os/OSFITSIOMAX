@@ -2017,6 +2017,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               // search row, which is also where its date filter and green refresh lived.
               externalSearch={searchQuery}
               externalDateFilter={effectiveDateFilter}
+              // What a date range means over these cards. "activity" reads the range as
+              // the branch's working day rather than as a list of consultation
+              // appointments -- see the note beside it in preStageFiltered. The Head
+              // Physio's board keeps the default, because a day on their week strip is a
+              // clinic list and has to stay one.
+              dateScope="activity"
               // The mark filter above narrows this board's list the way the search and the
               // Date Filter beside it do. Without it the pills would count the VIPs and the
               // table under them would show everybody.

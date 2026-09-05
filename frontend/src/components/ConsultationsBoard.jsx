@@ -1647,7 +1647,7 @@ const appointmentTone = (date) => {
   return on > today ? APPOINTMENT_TONE.upcoming : APPOINTMENT_TONE.past;
 };
 
-const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false }) => {
+const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment" }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
   // worth remarking on when they are assigned. Passed in rather than worked out here for
@@ -2173,13 +2173,37 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
       const to = dateFilter.to?.getTime();
+      // Absent dates are NaN rather than 0, so "no appointment booked" fails every range
+      // instead of passing an open-ended one as 1 January 1970.
+      const inRange = (ts) => Number.isFinite(ts) && !(from && ts < from) && !(to && ts > to);
+      const day = (iso) => (iso ? new Date(`${iso}T00:00:00`).getTime() : NaN);
+      const stamp = (iso) => (iso ? new Date(iso).getTime() : NaN);
       rows = rows.filter((l) => {
-        if (!l.appointment_date) return false;
-        const ts = new Date(`${l.appointment_date}T00:00:00`).getTime();
-        if (!ts) return false;
-        if (from && ts < from) return false;
-        if (to && ts > to) return false;
-        return true;
+        // The consultation itself. The only reading on a board asking "who am I seeing
+        // that day" -- the Head Physio's week strip and its own range picker both mean
+        // exactly this, which is why those two keep the default scope.
+        if (inRange(day(l.appointment_date))) return true;
+        if (dateScope !== "activity") return false;
+        // ...and, on the branch's Consultation tab, the day the patient was last worked
+        // on. Most of the cards over that board are not about a consultation
+        // appointment at all: Fee Collected and Physio Assign say where the paperwork
+        // reached, Rehab, Diet Consultation and Diet Chart are read off fees that are in,
+        // and Completed is read off a finished course. None of those happen on the day the
+        // consultation was booked for, and `appointment_date` never moves off that day --
+        // nothing in the pipeline rewrites it once the patient is past their consultation.
+        //
+        // So the strict reading emptied the board: press Today and a patient who consulted
+        // on Monday and paid for their package this morning is not in the range at all, and
+        // every card reads 0 over a branch that has plainly been working. Widening the
+        // range caught them again only by reaching back to their consultation day, which is
+        // why the same bar read numbers under This Month and zeroes under Today.
+        //
+        // `updated_at` is the one field that moves on all of it -- a fee taken, a stage
+        // moved, a physio or a coach assigned -- so Today now means today's work: the
+        // consultations booked for today, plus the patients the branch has touched today.
+        // Counts and rows come from this same list, so the cards still describe exactly
+        // what a click on them opens.
+        return inRange(stamp(l.updated_at));
       });
     }
     if (search.trim()) {
@@ -2192,7 +2216,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     if (externalMarkFilter === "vip") rows = rows.filter((l) => l.is_vip);
     else if (externalMarkFilter === "attention") rows = rows.filter((l) => l.needs_attention);
     return rows;
-  }, [board.leads, dateFilter, search, externalMarkFilter]);
+  }, [board.leads, dateFilter, dateScope, search, externalMarkFilter]);
 
   // "Treatments" (Head Physio's own board only) is a cross-cutting view, not a real
   // position in the head_consultation_stage pipeline — a lead shows up here the moment
