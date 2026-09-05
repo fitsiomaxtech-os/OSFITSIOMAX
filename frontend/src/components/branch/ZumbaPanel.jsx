@@ -652,6 +652,9 @@ const CARDS = [
   // a branch wants off a card about payment, and two owing 500 between them is a different
   // afternoon from one owing 9,000. The count moves into the caption, where it is still
   // read but is no longer the answer.
+  //
+  // Payment Done is the one card that opens rather than filters — see PaymentDoneModal.
+  // The list under this strip has a column for none of what the figure is made of.
   { key: "payment_done", label: "Payment Done", color: "#059669", money: "fee_total", count: "fee_collected", countSub: (n) => `collected from ${n}` },
   { key: "due_payment", label: "Due Payment", color: "#d97706", money: "due_total", count: "due_payment", countSub: (n) => `owed by ${n}` },
   // One card, not two: Discontinue and Leave are both "not turning up", and splitting
@@ -773,6 +776,131 @@ const RevenueSplit = ({ split }) => {
           accent="border-amber-200 bg-amber-50 text-amber-800"
         />
       )}
+    </div>
+  );
+};
+
+/**
+ * The Payment Done card, opened rather than filtered.
+ *
+ * Every other card on the strip answers its question by narrowing the list beneath it,
+ * which works while the answer is a headcount. This one's answer is money, and money has a
+ * second half no column of that table can hold: whose it is. The split used to be printed
+ * into the list's header, which put the breakdown of one card inside the chrome of a list
+ * showing something else — so both halves are lifted out here, the split first and then
+ * the payments it is made of, in one place that is about the money and nothing else.
+ *
+ * The lines are read off every registration rather than off the filtered list, and drop
+ * whoever has discontinued exactly as the server's total does. A popup opened from a
+ * figure whose lines add up to less than the figure that was clicked is the one thing a
+ * card must never do, so the total is footed here and can be read back against the card
+ * that opened it. The date pills and the search box below are left alone, still working
+ * the table they belong to.
+ */
+const PaymentDoneModal = ({ rows, split, onClose }) => {
+  const collected = rows.reduce((n, r) => n + Number(r.fee_paid || 0), 0);
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-testid="zumba-payment-done-dialog"
+    >
+      {/* overflow-hidden, or the tinted header paints its own square corners over the
+          rounded ones this container draws. */}
+      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b bg-emerald-50/60 p-5">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-800">Payment Done</h3>
+            <p className="mt-1 text-2xl font-extrabold leading-none text-emerald-700" data-testid="zumba-payment-done-total">
+              {rupees(collected)}
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">collected from {pluralCustomers(rows.length)}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close" data-testid="zumba-payment-done-close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {/* Whose the collected money is, above the payments it was made of. */}
+          {split && (
+            <div className="border-b border-slate-100 px-5 py-3">
+              <RevenueSplit split={split} />
+            </div>
+          )}
+
+          {rows.length === 0 ? (
+            <p className="px-5 py-12 text-center text-sm text-slate-400" data-testid="zumba-payment-done-empty">
+              Nothing has been collected at this branch yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[44rem] text-left text-sm">
+                <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="w-[5%] px-4 py-2.5">S.No</th>
+                    <th className="w-[26%] px-4 py-2.5">Name</th>
+                    <th className="w-[20%] px-4 py-2.5">Package</th>
+                    <th className="w-[19%] px-4 py-2.5">Class</th>
+                    <th className="w-[13%] px-4 py-2.5">Mode</th>
+                    <th className="w-[17%] px-4 py-2.5 text-right">Collected</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((r, i) => {
+                    const due = Number(r.fee_amount || 0) - Number(r.fee_paid || 0);
+                    return (
+                      <tr key={r.id} className="align-top" data-testid={`zumba-payment-done-row-${r.id}`}>
+                        <td className="px-4 py-3 text-xs leading-5 text-slate-400">{i + 1}</td>
+                        <td className="px-4 py-3">
+                          <p className="max-w-full truncate text-sm font-semibold leading-5 text-slate-800" title={r.name}>{r.name || "—"}</p>
+                          <p className="text-[10px] leading-4 text-slate-400">{r.phone || "No phone"}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          {r.package_name ? (
+                            <>
+                              <p className="max-w-full truncate text-xs leading-5 text-slate-600" title={r.package_name}>{r.package_name}</p>
+                              {r.package_sessions ? <p className="text-[10px] leading-4 text-slate-400">{r.package_sessions} classes</p> : null}
+                            </>
+                          ) : <span className="text-xs leading-5 text-slate-300">—</span>}
+                        </td>
+                        {/* The slot, because it is what decides whose money this line is:
+                            the split above is this column added up. A row with none yet
+                            says so rather than showing a dash, since those rows are the
+                            reason the "No slot yet" chip is up there at all. */}
+                        <td className="px-4 py-3">
+                          {r.time_slot
+                            ? <p className="text-xs leading-5 text-slate-600">{r.time_slot}</p>
+                            : <p className="text-xs font-semibold leading-5 text-amber-600">No slot yet</p>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                            {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode || "Not recorded"}
+                          </span>
+                        </td>
+                        {/* What came in on this membership, and what is still out on it. A
+                            part-paid customer is on Due Payment as well as here, and a
+                            column that showed only the takings would read as settled. */}
+                        <td className="px-4 py-3 text-right">
+                          <p className="text-xs font-semibold leading-5 text-emerald-700">{rupees(r.fee_paid)}</p>
+                          {due > 0 ? <p className="text-[10px] leading-4 text-rose-600">{rupees(due)} still due</p> : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {/* Footed, so the lines can be read back against the card that opened them. */}
+                <tfoot className="border-t-2 border-slate-200 bg-slate-50">
+                  <tr>
+                    <td colSpan={5} className="px-4 py-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">Total collected</td>
+                    <td className="px-4 py-3 text-right text-sm font-extrabold text-emerald-700" data-testid="zumba-payment-done-foot">{rupees(collected)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -1171,6 +1299,10 @@ export const ZumbaPanel = ({ branchId }) => {
   const [renewing, setRenewing] = useState(null); // the membership being sold another term
   const [collecting, setCollecting] = useState(null); // the balance being paid down
   const [viewing, setViewing] = useState(null);   // the registration open in the detail popup
+  // Payment Done opens rather than filters — see PaymentDoneModal. Its own flag rather
+  // than a value of `card`, because the list underneath is left on whatever it was
+  // showing: reading the takings is not a reason to lose the view being worked.
+  const [paymentDoneOpen, setPaymentDoneOpen] = useState(false);
   const [accepting, setAccepting] = useState(null); // the referral being taken onto the books
   // The Zumba pipeline exactly as Super Admin has it in CI/CD ROOTS. Nothing is hardcoded
   // here: a clinic that has not set the pipeline up has no stages, and the Stage column
@@ -1257,11 +1389,9 @@ export const ZumbaPanel = ({ branchId }) => {
     // Four of the cards are not sources, so each says which rows it stands for. Where a
     // customer came from and what became of them are different questions, and only the
     // first is the `card` the server stamps on the row.
-    // Everyone who has handed something over, because that is what the card now totals.
-    // Filtering to the settled would open a list whose payments do not add up to the
-    // figure that was clicked, which is the one thing a card must never do.
-    if (card === "payment_done") list = list.filter((r) => Number(r.fee_paid || 0) > 0);
-    else if (card === "due_payment") list = list.filter((r) => amountDue(r) > 0);
+    // Payment Done is not one of them: it opens its own popup instead of narrowing this
+    // list, because its answer is money and the split of it has no column here.
+    if (card === "due_payment") list = list.filter((r) => amountDue(r) > 0);
     else if (card === "discontinued") list = list.filter((r) => (r.status || "active") !== "active");
     else if (card !== "all") list = list.filter((r) => r.card === card);
     if (dateFilter) {
@@ -1286,6 +1416,24 @@ export const ZumbaPanel = ({ branchId }) => {
     if (modeFilter) list = list.filter((r) => r.payment_mode === modeFilter);
     return list;
   }, [rows, card, search, dateFilter, needsOnly, modeFilter]);
+
+  /**
+   * Everyone who has handed something over, which is what the Payment Done card totals.
+   *
+   * Taken off every row rather than off `visible`, so a date range or a search left on the
+   * table below cannot shrink a list opened from a figure that was counted over all of
+   * them. Discontinued customers are dropped for the same reason the server drops them
+   * from fee_total — see the summary loop in v3_zumba.py — so these lines add back up to
+   * exactly the number on the card.
+   *
+   * Not filtered to the settled: the card counts what came in, and a customer halfway
+   * through a membership has still handed money over. What they still owe is printed on
+   * their line rather than being a reason to leave them out.
+   */
+  const paymentDoneRows = useMemo(
+    () => rows.filter((r) => (r.status || "active") !== "discontinued" && Number(r.fee_paid || 0) > 0),
+    [rows],
+  );
 
   // Counted off every row, not the filtered ones: the point of the badge is to say
   // there is work waiting even while a card or a date range is hiding it.
@@ -1442,8 +1590,10 @@ export const ZumbaPanel = ({ branchId }) => {
               : c.sub}
             icon={Music}
             color={c.color}
-            active={card === c.key}
-            onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
+            active={c.key === "payment_done" ? paymentDoneOpen : card === c.key}
+            onClick={() => (c.key === "payment_done"
+              ? setPaymentDoneOpen(true)
+              : setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key)))}
             testid={`zumba-card-${c.key}`}
           />
         ))}
@@ -1482,10 +1632,9 @@ export const ZumbaPanel = ({ branchId }) => {
             {/* The collected total used to be printed here because the card beside it had
                 room for a count only. The card carries the figure itself now, so repeating
                 it on the list header would state the same number twice. */}
-            {/* Whose the collected money is, on the card that counts it. Left of the search
-                box so it reads as part of what this list is about rather than as another
-                control. */}
-            {card === "payment_done" && <RevenueSplit split={summary.revenue_split} />}
+            {/* Whose the collected money is has gone with the rest of Payment Done, into
+                the popup that card opens. A breakdown of one card printed into the header
+                of a list showing something else read as a property of the list. */}
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <Input
                 value={search}
@@ -2071,6 +2220,14 @@ export const ZumbaPanel = ({ branchId }) => {
           onCollect={() => { const r = viewing; setViewing(null); setCollecting(r); }}
           onClose={() => setViewing(null)}
           onSaved={load}
+        />
+      )}
+
+      {paymentDoneOpen && (
+        <PaymentDoneModal
+          rows={paymentDoneRows}
+          split={summary.revenue_split}
+          onClose={() => setPaymentDoneOpen(false)}
         />
       )}
 
