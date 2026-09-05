@@ -7000,15 +7000,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       strong: true,
                     },
                     rehabAssigned ? { label: "Rehab Physio", value: selectedLead.rehab_physio_name } : null,
-                    // What the course has actually delivered, beside what was sold. Held
-                    // back until the days arrive rather than shown as "0 of 26", which is
-                    // a true sentence about a course that may be nearly finished.
-                    (rehabAssigned && rehabProgress) ? {
-                      label: "Days Completed",
-                      value: `${rehabProgress.completed} of ${rehabProgress.packageDays || "—"}`,
-                      note: rehabProgress.done ? "course complete" : `${rehabProgress.remaining} left`,
-                      noteClass: rehabProgress.done ? "text-emerald-600" : "text-slate-500",
-                    } : null,
+                    // No count row here. What the course was sold as is what these rows are
+                    // for; how much of it has been delivered is the bar directly below them,
+                    // which says the same two numbers as a length and then lists the days
+                    // themselves. Saying it twice, three lines apart, only invited the reader
+                    // to check whether the two agreed.
                   ].filter(Boolean);
                   return (
                     <div
@@ -7056,11 +7052,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                 <dt className="shrink-0 text-xs text-slate-500">{row.label}</dt>
                                 <dd className={`min-w-0 truncate text-right font-semibold text-slate-800 ${row.strong ? "text-[15px]" : "text-sm"}`} title={String(row.value)}>
                                   {row.value}
-                                  {/* Capitalised because the only note this row had was a
-                                      payment mode — "(Cash)". A count is not a proper noun
-                                      and reads wrong under the same rule, so a row that
-                                      carries one says which colour and case it wants. */}
-                                  {row.note && <span className={`ml-1 text-xs font-medium ${row.noteClass || "capitalize text-emerald-600"}`}>({row.note})</span>}
+                                  {/* Capitalised: the only note these rows carry is a payment
+                                      mode — "(Cash)" — which is written lowercase upstream. */}
+                                  {row.note && <span className="ml-1 text-xs font-medium capitalize text-emerald-600">({row.note})</span>}
                                 </dd>
                               </div>
                             ))}
