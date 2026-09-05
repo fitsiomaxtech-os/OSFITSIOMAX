@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -1621,25 +1621,23 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     return earlier.length ? Math.min(...earlier) : null;
   };
 
-  // Days still to do come first, then the ones already done — a finished day is a record,
-  // an unfinished one is work, and the work should not be below thirty rows of history.
-  // Both halves stay in session order, so a day is always where its number says it is
-  // within its half; only the halves move.
+  // Straight day order: Day 1, then Day 2, then Day 3, down to the last one — whatever
+  // has been completed and whatever date the strip behind the popup sits on.
   //
-  // The day actually opened from the date strip is pinned above both, whatever its
-  // status: it is the only one that can be ticked off, and once it is completed it would
-  // otherwise drop below every pending day the moment you finish it.
+  // The list used to be cut into work-then-history with the day opened from the strip
+  // pinned above both, which read as the sequence being broken: a patient who had not
+  // started yet showed Day 3 first and Day 1 under it. A course of treatment is a
+  // numbered run and is worked in that order, so it is listed in that order; which day
+  // is currently open is said on the day's own row instead of by moving it.
+  //
+  // Treatment and rehab are separate courses that each number from 1, so they are kept
+  // apart rather than interleaved into an impossible Day 1, Day 1, Day 2, Day 2.
   const orderedSessions = useMemo(() => {
-    const bySessionNumber = (a, b) => (a.session_number || 0) - (b.session_number || 0);
-    const isOpened = (s) => !!activeDate && (s.slot_time || "").startsWith(activeDate);
-    const opened = sessions.filter(isOpened).sort(bySessionNumber);
-    const rest = sessions.filter((s) => !isOpened(s));
-    return [
-      ...opened,
-      ...rest.filter((s) => s.status !== "completed").sort(bySessionNumber),
-      ...rest.filter((s) => s.status === "completed").sort(bySessionNumber),
-    ];
-  }, [sessions, activeDate]);
+    const trackRank = (s) => ((s.track || "treatment") === "rehab" ? 1 : 0);
+    return [...sessions].sort(
+      (a, b) => trackRank(a) - trackRank(b) || (a.session_number || 0) - (b.session_number || 0)
+    );
+  }, [sessions]);
 
   // Each week of days goes to the Head Physio for a review appointment; that review
   // is only "completed" once they've written it up (status flips to reviewed).
@@ -1917,33 +1915,31 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               </div>
             ) : (
               <div className="space-y-2">
-                {orderedSessions.map((s, i) => {
+                {orderedSessions.map((s) => {
                   const done = s.status === "completed";
-                  // Where the list crosses from work to history, so the jump back to
-                  // Day 1 reads as a divider rather than as the order being wrong.
-                  const firstDone = done && i > 0 && orderedSessions[i - 1].status !== "completed";
                   // The day an absence pushed off the end of the course. It holds no slot
                   // until the Branch Admin puts it on one, so there is no date on which it
                   // could be worked and nothing here to press.
                   const awaiting = !done && (s.needs_assignment || !s.slot_time);
-                  // Only the day being viewed can be ticked off — a day is completed on
-                  // the date it actually falls on, so the others stay read-only until
-                  // their own date is picked in the strip behind this popup.
-                  //
-                  // Never the dateless one: with no strip open every day counts as active,
-                  // which would offer Complete on a day that has not been booked yet.
-                  const isActiveDay = !awaiting && (!activeDate || (s.slot_time || "").startsWith(activeDate));
-                  // A day already behind is overdue rather than early, so it stays workable
-                  // from whatever date the strip is on. Days run in order, so a patient who
-                  // stopped turning up would otherwise wall off every day after them: the
-                  // opened day refuses as out of order, and the day holding it up refuses
-                  // as not today. Nothing in the popup could be pressed at all.
-                  const isPastDay = !awaiting && Boolean(s.slot_time) && s.slot_time.slice(0, 10) < todayIso;
-                  const canWork = isActiveDay || isPastDay;
                   // The earliest day still open before this one. Ordered on the day number,
                   // not the date: an absence pushes a day past the one after it until that
                   // one shifts too, and comparing dates would call the order broken.
                   const blockedBy = done ? null : firstOpenBefore(s);
+                  // The day the course currently stands on: the lowest-numbered day of this
+                  // track that is still open. Day 1 until Day 1 is signed off, then Day 2,
+                  // then Day 3 — one open day at a time, in the order they are worked.
+                  //
+                  // This used to be whichever day fell on the date picked in the strip
+                  // behind the popup, which opened Day 3 for a patient who had not had
+                  // Day 1 yet: a day the server would refuse as out of order anyway.
+                  const isOpenDay = !done && !awaiting && blockedBy === null;
+                  // Today or already behind, and it can be worked; still to come and it
+                  // waits. A day that has slipped past stays workable rather than turning
+                  // into a dead end — days run in order, so leaving it shut would wall off
+                  // every day after it as well. The strip's own date still counts, so a day
+                  // opened from the calendar on the morning it falls is workable on it.
+                  const dayIso = (s.slot_time || "").slice(0, 10);
+                  const canWork = isOpenDay && (dayIso <= todayIso || dayIso === activeDate);
                   // Says which date is holding this day up, so the block reads as somewhere
                   // to go rather than a dead end.
                   const blockedByRow = blockedBy
@@ -1955,23 +1951,12 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                     : null;
                   const blockedByDate = blockedByRow ? fmtDate(blockedByRow.slot_time) : null;
                   return (
-                    <Fragment key={s.id}>
-                    {firstDone && (
-                      <div className="flex items-center gap-2 pt-2" data-testid="physio-treatment-days-divider">
-                        <span className="h-px flex-1 bg-slate-200" />
-                        {/* Counted from here down, not the overall total — the opened day
-                            is pinned above and may already be complete. */}
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                          {orderedSessions.slice(i).filter((x) => x.status === "completed").length} completed
-                        </span>
-                        <span className="h-px flex-1 bg-slate-200" />
-                      </div>
-                    )}
                     <div
+                      key={s.id}
                       className={`flex items-center gap-3 rounded-lg border p-3 ${
                         done ? "border-emerald-200 bg-emerald-50/50"
                         : awaiting ? "border-amber-200 bg-amber-50/60"
-                        : isActiveDay ? "border-sky-200 bg-sky-50/40"
+                        : isOpenDay ? "border-sky-200 bg-sky-50/40"
                         : "border-slate-200 bg-white"
                       }`}
                       data-testid={`physio-treatment-day-${s.id}`}
@@ -1979,6 +1964,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                       <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                         done ? "bg-emerald-200 text-emerald-800"
                         : awaiting ? "bg-amber-200 text-amber-800"
+                        : isOpenDay ? "bg-sky-200 text-sky-800"
                         : "bg-slate-100 text-slate-500"
                       }`}>
                         {s.session_number}
@@ -1991,9 +1977,11 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                               this popup uses, so one patient reads the same either way. */}
                           {s.track === "rehab" ? "Rehab " : ""}Day {s.session_number} of {s.total_sessions}
                           {s.track !== "rehab" && s.week_number ? ` · Week ${s.week_number}` : ""}
-                          {/* Says why this row is at the top, which is not obvious once it
-                              has been completed and every pending day sits below it. */}
-                          {isActiveDay && activeDate && (
+                          {/* Marks the one day of the course that is open to be worked.
+                              The rows are in day order now, so this is what tells the
+                              physio where the treatment has got to — it no longer shows
+                              by the row being pinned above the rest. */}
+                          {isOpenDay && (
                             <span className="rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700">
                               Opened
                             </span>
@@ -2073,27 +2061,28 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                           size="sm"
                           disabled
                           className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
-                          title={`${fmtDate(s.slot_time)} has not come round yet — pick it in the date strip on that day`}
+                          title={`This day is next, but ${fmtDate(s.slot_time)} has not come round yet`}
                           data-testid={`physio-day-locked-${s.id}`}
                         >
                           <Check className="mr-1 h-3 w-3" /> Complete
                         </Button>
                       )}
                     </div>
-                    </Fragment>
                   );
                 })}
               </div>
             )}
 
             {/* The note stays; the button that stood beside it has gone up to the tab
-                row. Both sentences describe the per-day Complete buttons in the list
-                above, never the whole-treatment one, so this is where they belong. */}
+                row. It describes the per-day Complete buttons in the list above, never
+                the whole-treatment one, so this is where it belongs. It no longer talks
+                about the date strip: the day that is open is the next one of the course,
+                not the one whose date happens to be picked behind the popup. */}
             <div className="mt-4 border-t border-slate-200 pt-3">
               <p className="text-[11px] text-slate-500">
-                {activeDate
-                  ? "Only the day you opened can be completed — pick another date in the strip to complete that one."
-                  : "Completing a day sends that week's session to Review for a weekly write-up."}
+                Days run in order — only the day marked Opened can be completed, and
+                finishing it opens the one after it. Completing a day also sends that
+                week's session to Review for a weekly write-up.
               </p>
             </div>
           </div>
