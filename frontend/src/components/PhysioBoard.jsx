@@ -418,15 +418,18 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
   const leadById = useMemo(() => Object.fromEntries(leads.map((l) => [l.id, l])), [leads]);
 
-  // Everything booked on a given day: the branch-booked appointment, plus any treatment
-  // day scheduled that date. Both land in the same list, earliest time first.
+  // The treatment and rehab days booked against this physio on a given day, earliest
+  // time first.
+  //
+  // The lead's own appointment_date is deliberately not one of them. That is the
+  // consultation the Branch Admin booked with a Head Physio, and it stays on the lead
+  // after v3_session_assign hands the patient over to the treating physio — so every
+  // patient dragged their old consultation slot onto this list as an "Appointment" row
+  // with no day, no package and no review against it, and the physio was being asked to
+  // close off a consultation they never took. It belongs on the Head Physio's calendar,
+  // which is where appt_kind="consultation" already puts it.
   const rowsFor = useCallback((date) => {
-    const rows = leads
-      .filter((l) => l.appointment_date === date)
-      .map((l) => ({
-        key: `appt-${l.id}`, lead: l, time: l.appointment_time || "",
-        label: "Appointment", done: l.physio_stage === "Complete",
-      }));
+    const rows = [];
     sessions
       .filter((s) => (s.slot_time || "").startsWith(date))
       .forEach((s) => {
@@ -450,7 +453,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
         });
       });
     return rows.sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-  }, [leads, sessions, leadById]);
+  }, [sessions, leadById]);
 
   const dayRows = useMemo(() => rowsFor(selectedDate), [rowsFor, selectedDate]);
 
@@ -533,10 +536,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
     return { total, completed, pending: total - completed };
   }, [leads]);
 
-  const countFor = (date) => (
-    leads.filter((l) => l.appointment_date === date).length
-    + sessions.filter((s) => (s.slot_time || "").startsWith(date)).length
-  );
+  const countFor = (date) => sessions.filter((s) => (s.slot_time || "").startsWith(date)).length;
 
   // Meta Ads-style date filter for the summary tile only — separate from the week
   // strip below, which always keeps its own single selected day. Defaults to Today
@@ -586,15 +586,13 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
     const fromIso = isoOf(filterValue.from);
     const toIso = isoOf(filterValue.to);
     const inRange = (d) => d && d >= fromIso && d <= toIso;
-    const apptRows = leads.filter((l) => inRange(l.appointment_date));
     const dayRows = filterSessions.filter((s) => inRange((s.slot_time || "").slice(0, 10)));
-    const total = apptRows.length + dayRows.length;
-    const completed = apptRows.filter((l) => l.physio_stage === "Complete").length + dayRows.filter((s) => s.status === "completed").length;
-    return { total, completed, pending: total - completed };
-  }, [filterValue, leads, filterSessions, overall]);
+    const completed = dayRows.filter((s) => s.status === "completed").length;
+    return { total: dayRows.length, completed, pending: dayRows.length - completed };
+  }, [filterValue, filterSessions, overall]);
 
   // Badge is what's still outstanding today, not the whole day's total — it counts
-  // down to 0 as each session/appointment gets marked complete.
+  // down to 0 as each treatment day gets marked complete.
   useEffect(() => { onCountChange?.(filterStats.pending); }, [filterStats.pending, onCountChange]);
 
   const [searchOpen, setSearchOpen] = useState(false);
