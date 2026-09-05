@@ -2953,6 +2953,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     if (mode === "cash") {
       payload.denominations = countedNotes(packageConfirmDraft.cash_notes);
     } else if (mode === "upi") {
+      // The reference is the only thing that ties this money to the bank statement, so a
+      // blank one is refused rather than saved as a collection nobody can trace back.
+      if (!packageConfirmDraft.upi_transaction_id.trim()) {
+        toast.error("UPI Transaction ID is required");
+        return;
+      }
       payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
       if (!attachBankDetails(payload, packageConfirmDraft, mode)) return;
@@ -7257,7 +7263,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
               const mode = collectFeeDraft.payment_mode;
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-collect-fee-confirm-modal">
-                  <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold text-slate-800">Confirm Consultation Fee Payment</p>
                       <button onClick={() => setPackageConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-confirm-close"><X className="h-4 w-4" /></button>
@@ -7300,31 +7306,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       />
                     )}
 
-                    {/* Started from whatever was already chosen: the mode picked on the
-                        popup behind this one becomes the first tender, carrying the full
-                        amount, and the second opens empty for the rest. Nothing typed is
-                        thrown away by pressing it, and "Single payment" inside comes
-                        straight back. */}
-                    {!packageConfirmDraft.payment_lines && (
-                      <button
-                        type="button"
-                        onClick={() => setPackageConfirmDraft({
-                          ...packageConfirmDraft,
-                          payment_lines: [
-                            // Notes already counted come across with the mode that was
-                            // counted in. Pressing "Add another payment" is not a reason
-                            // to make somebody count the same drawer twice.
-                            { mode, amount: collectFeeDraft.amount, reference: mode === "upi" ? packageConfirmDraft.upi_transaction_id : "", notes: mode === "cash" ? packageConfirmDraft.cash_notes : {} },
-                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "", notes: {} },
-                          ],
-                        })}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-sky-400 hover:text-sky-700"
-                        data-testid="cons-collect-fee-split-add"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Add another payment
-                      </button>
-                    )}
-
                     {packageConfirmDraft.payment_lines && (
                       <>
                         <SplitPaymentLines
@@ -7351,7 +7332,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
 
                     {!packageConfirmDraft.payment_lines && mode === "upi" && (
                       <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID <span className="text-rose-500">*</span></label>
                         <Input
                           value={packageConfirmDraft.upi_transaction_id}
                           onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, upi_transaction_id: e.target.value })}
@@ -7413,6 +7394,38 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       </>
                     )}
 
+                    {/* Started from whatever was already chosen: the mode picked on the
+                        popup behind this one becomes the first tender, carrying the full
+                        amount, and the second opens empty for the rest. Nothing typed is
+                        thrown away by pressing it, and "Single payment" inside comes
+                        straight back.
+
+                        Last on the popup, under the card/transfer details rather than
+                        above them, because it is the way out of the single payment being
+                        filled in: the desk finishes the tender in front of it -- notes
+                        counted, UPI reference, account and IFSC -- and only then decides
+                        the rest is coming in something else. Sitting above those fields
+                        it read as a step to take before them. */}
+                    {!packageConfirmDraft.payment_lines && (
+                      <button
+                        type="button"
+                        onClick={() => setPackageConfirmDraft({
+                          ...packageConfirmDraft,
+                          payment_lines: [
+                            // Notes already counted come across with the mode that was
+                            // counted in. Pressing "Add another payment" is not a reason
+                            // to make somebody count the same drawer twice.
+                            { mode, amount: collectFeeDraft.amount, reference: mode === "upi" ? packageConfirmDraft.upi_transaction_id : "", notes: mode === "cash" ? packageConfirmDraft.cash_notes : {} },
+                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "", notes: {} },
+                          ],
+                        })}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-sky-400 hover:text-sky-700"
+                        data-testid="cons-collect-fee-split-add"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Add another payment
+                      </button>
+                    )}
+
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
@@ -7445,6 +7458,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                packageConfirmDraft.payment_lines.some((l) => l.mode === "cash" && !notesSettled(l.notes, l.amount)) ||
                                Math.abs(packageConfirmDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(collectFeeDraft.amount)) > 0.01)
                             : ((mode === "cash" && !notesSettled(packageConfirmDraft.cash_notes, collectFeeDraft.amount)) ||
+                               (mode === "upi" && !packageConfirmDraft.upi_transaction_id.trim()) ||
                                (BANK_DETAIL_MODES.includes(mode) && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim())) ||
                                (mode === "account_transfer" && !packageConfirmDraft.transfer_reference.trim())))
                         }
