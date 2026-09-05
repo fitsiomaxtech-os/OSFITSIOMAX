@@ -10,11 +10,13 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { LeadDocuments } from "@/components/LeadDocuments";
 import { ProgressionTab } from "@/components/ProgressionTab";
 import { LeadMarks, RescheduledTag } from "@/components/ui/lead-marks";
+import { PhysioTreatmentChips } from "@/components/ui/physio-treatment-chips";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignPhysioWithSessions, assignRehab, getDoctorCalendar, getLeadPhysioProgress,
+  rehabSessionsForLead,
   listNutritionCoaches, bookDietAppointment, collectDietFee, collectDietChartFee,
   listDietStoreItems,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
@@ -25,7 +27,7 @@ import {
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
 import { loadSession } from "@/lib/session";
-import { endTime12h, to12h } from "@/lib/time";
+import { endTime12h, slotTo12h, to12h } from "@/lib/time";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, openPrintable, downloadPrintable, sharePrintable } from "@/lib/printable";
 import { isCourseComplete } from "@/lib/leadStage";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
@@ -1564,6 +1566,12 @@ const PanelCard = ({ children, testid, footer }) => (
   </div>
 );
 
+/** The two courses a spell can belong to, in the colour each of their panels is drawn in. */
+const SPELL_TONE = {
+  violet: { card: "border-violet-200 bg-violet-50/70", name: "text-violet-800", chip: "bg-violet-600 text-white", bar: "bg-violet-500" },
+  cyan: { card: "border-cyan-200 bg-cyan-50/70", name: "text-cyan-800", chip: "bg-cyan-600 text-white", bar: "bg-cyan-500" },
+};
+
 /**
  * One physio's spell with a patient: who they were, when they held it, and how much of the
  * course they got through while they did.
@@ -1575,29 +1583,35 @@ const PanelCard = ({ children, testid, footer }) => (
  *
  * `packageSessions` is the course as sold, so every spell's bar is a share of the same
  * course rather than of its own booking, and two spells side by side add up.
+ *
+ * `tone` and `dayNoun` are what let one component serve both courses. A patient can be on
+ * treatment and rehab at once, and the two panels sit one scroll apart on the same card —
+ * a rehab spell drawn in the treatment's violet reads as a treatment spell at a glance,
+ * which is the one mistake this component must not invite.
  */
-const PhysioSpell = ({ spell, packageSessions, testid }) => {
+const PhysioSpell = ({ spell, packageSessions, testid, tone = "violet", dayNoun = "sessions" }) => {
   const current = !!spell.is_current;
+  const skin = SPELL_TONE[tone] || SPELL_TONE.violet;
   const total = packageSessions || spell.sessions_assigned || 0;
   const pct = total > 0 ? Math.min(100, Math.round((spell.sessions_completed / total) * 100)) : 0;
   const from = spell.assigned_at ? dayLabel(String(spell.assigned_at).slice(0, 10)) : null;
   const to = spell.ended_at ? dayLabel(String(spell.ended_at).slice(0, 10)) : null;
   return (
     <div
-      className={`rounded-lg border p-2.5 ${current ? "border-violet-200 bg-violet-50/70" : "border-slate-200 bg-slate-50"}`}
+      className={`rounded-lg border p-2.5 ${current ? skin.card : "border-slate-200 bg-slate-50"}`}
       data-testid={testid}
     >
       <div className="flex items-center justify-between gap-2">
-        <p className={`min-w-0 truncate text-sm font-semibold ${current ? "text-violet-800" : "text-slate-600"}`} title={spell.physio_name}>
+        <p className={`min-w-0 truncate text-sm font-semibold ${current ? skin.name : "text-slate-600"}`} title={spell.physio_name}>
           {spell.physio_name || "Unknown physio"}
         </p>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${current ? "bg-violet-600 text-white" : "bg-slate-200 text-slate-600"}`}>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${current ? skin.chip : "bg-slate-200 text-slate-600"}`}>
           {current ? "Current" : "Previous"}
         </span>
       </div>
       <p className="mt-1 text-[11px] text-slate-600">
         <span className={`font-bold ${spell.sessions_completed ? "text-emerald-700" : "text-slate-400"}`}>{spell.sessions_completed}</span>
-        {` of ${total || "—"} sessions completed`}
+        {` of ${total || "—"} ${dayNoun} completed`}
         {spell.first_day && spell.last_day
           ? ` · Day ${spell.first_day}${spell.last_day !== spell.first_day ? `–${spell.last_day}` : ""}`
           : ""}
@@ -1606,10 +1620,10 @@ const PhysioSpell = ({ spell, packageSessions, testid }) => {
       {/* No days at all is not an empty row to hide — it is a physio who was replaced
           before they ran one, and saying so is the whole point of keeping the entry. */}
       {spell.sessions_assigned === 0 && (
-        <p className="mt-0.5 text-[11px] italic text-slate-400">Replaced before any session was delivered.</p>
+        <p className="mt-0.5 text-[11px] italic text-slate-400">Replaced before any day was delivered.</p>
       )}
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
-        <div className={`h-full rounded-full ${current ? "bg-violet-500" : "bg-slate-400"}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full ${current ? skin.bar : "bg-slate-400"}`} style={{ width: `${pct}%` }} />
       </div>
       {(from || to) && (
         <p className="mt-1.5 text-[10px] text-slate-500">
@@ -1638,13 +1652,220 @@ const APPOINTMENT_TONE = {
   past: "border-slate-200 bg-slate-50 text-slate-500",
 };
 
-const appointmentTone = (date) => {
+/** Today as the branch would write it — local midnight, never UTC. See the note above. */
+const localToday = () => {
   const d = new Date();
-  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+const appointmentTone = (date) => {
+  const today = localToday();
   const on = String(date || "").slice(0, 10);
   if (!on) return APPOINTMENT_TONE.past;
   if (on === today) return APPOINTMENT_TONE.today;
   return on > today ? APPOINTMENT_TONE.upcoming : APPOINTMENT_TONE.past;
+};
+
+/**
+ * One patient's rehab course read off its own days: how far through it they are, and which
+ * physio delivered which part of it.
+ *
+ * Treatment asks the server this (GET physio-progress) because its answer needs the lead's
+ * assignment history to name a physio a reassignment left behind. Rehab is derived here
+ * instead, from the days the branch already fetched in order to list them — every rehab day
+ * carries the physio_id of whoever holds it, so grouping them by that field is the whole
+ * answer, and a second endpoint would be a round trip to be told what is already on screen.
+ *
+ * `rehab_assignment_history` is the one thing the days cannot supply: a physio replaced
+ * before completing anything has no days left to be counted, because assign-rehab deletes
+ * their upcoming ones on the way out. Those spells are folded in at zero so the handover
+ * stays on the record.
+ */
+const buildRehabProgress = (rows, lead) => {
+  const days = [...(rows || [])].sort((a, b) => (a.day_number || 0) - (b.day_number || 0));
+  // The course as sold wins over the course as booked. The two agree while it is intact and
+  // stop agreeing the moment a reassignment rebooks only what was left, and the number the
+  // fee was taken against is the one the patient is owed.
+  const packageDays = lead?.rehab_package_sessions || days.length;
+  const completed = days.filter((d) => d.status === "completed").length;
+  const remaining = Math.max(0, packageDays - completed);
+  const pct = packageDays > 0 ? Math.min(100, Math.round((completed / packageDays) * 100)) : 0;
+  const currentId = lead?.rehab_physio_id || "";
+
+  const spells = new Map();
+  const spellFor = (id, name) => {
+    const held = spells.get(id);
+    if (held) {
+      held.physio_name = held.physio_name || name || "";
+      return held;
+    }
+    const made = {
+      physio_id: id,
+      physio_name: name || "",
+      sessions_assigned: 0,
+      sessions_completed: 0,
+      sessions_upcoming: 0,
+      first_day: null,
+      last_day: null,
+      first_date: "",
+      last_date: "",
+      assigned_at: null,
+      ended_at: null,
+      handed_over_by: "",
+      is_current: id === currentId,
+    };
+    spells.set(id, made);
+    return made;
+  };
+
+  // The recorded handovers first, so a spell with nothing to show for it still gets a card,
+  // and still gets it in the order it happened.
+  (lead?.rehab_assignment_history || []).forEach((entry) => {
+    if (!entry?.physio_id || entry.physio_id === currentId) return;
+    const spell = spellFor(entry.physio_id, entry.physio_name);
+    spell.assigned_at = entry.assigned_at || spell.assigned_at;
+    spell.ended_at = entry.ended_at || spell.ended_at;
+    spell.handed_over_by = entry.handed_over_by || spell.handed_over_by;
+  });
+
+  days.forEach((day) => {
+    if (!day.physio_id) return;
+    const spell = spellFor(day.physio_id, day.physio_name);
+    spell.sessions_assigned += 1;
+    if (day.status === "completed") spell.sessions_completed += 1;
+    else spell.sessions_upcoming += 1;
+    const number = day.day_number;
+    if (number) {
+      spell.first_day = spell.first_day === null ? number : Math.min(spell.first_day, number);
+      spell.last_day = spell.last_day === null ? number : Math.max(spell.last_day, number);
+    }
+    // A day still waiting on a date from the Branch Admin carries no slot, and the empty
+    // string would sort ahead of every real date as this spell's first.
+    const on = String(day.slot_time || "").slice(0, 10);
+    if (on) {
+      spell.first_date = !spell.first_date || on < spell.first_date ? on : spell.first_date;
+      spell.last_date = on > spell.last_date ? on : spell.last_date;
+    }
+  });
+
+  const list = [...spells.values()];
+  list.forEach((spell) => {
+    // A spell the history never recorded — every course booked before handovers were kept —
+    // is dated off the days it ran, which is the only record it has. The current physio
+    // takes the lead's own stamp instead: that is when they were put on the course, not
+    // when its first day happens to fall.
+    if (spell.is_current) {
+      spell.assigned_at = lead?.rehab_assigned_at || spell.first_date || null;
+      spell.ended_at = null;
+    } else {
+      spell.assigned_at = spell.assigned_at || spell.first_date || null;
+      spell.ended_at = spell.ended_at || spell.last_date || null;
+    }
+  });
+  const previous = list
+    .filter((spell) => !spell.is_current)
+    .sort((a, b) => String(a.assigned_at || "").localeCompare(String(b.assigned_at || "")));
+  const current = list.find((spell) => spell.is_current) || null;
+
+  return {
+    days,
+    packageDays,
+    booked: days.length,
+    completed,
+    remaining,
+    pct,
+    // Every day signed off. Read off the two counts rather than off rehab_stage, which says
+    // what the branch last did to the course and not whether the patient has finished it.
+    done: packageDays > 0 && remaining === 0,
+    previous,
+    current,
+    reassigned: previous.length > 0,
+  };
+};
+
+/**
+ * The rehab course as it stands, day by day.
+ *
+ * The read-back half of the physio's own day list — nothing here is a control. A rehab day
+ * is signed off on the physio's board and nowhere else, so what the desk needs from this
+ * panel is the record: which days are done, which one is today, and which one an absence
+ * has left without a date. That last state is the only row anybody has to act on, which is
+ * why it is drawn in amber rather than folded in with the days still to come.
+ */
+const RehabDayList = ({ days, showPhysio = false, testid }) => {
+  if (!days || days.length === 0) return null;
+  const today = localToday();
+  return (
+    <div className="mt-3" data-testid={testid}>
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Rehab Days</p>
+      <div className="max-h-72 space-y-1.5 overflow-y-auto pr-0.5">
+        {days.map((day) => {
+          const done = day.status === "completed";
+          const on = String(day.slot_time || "").slice(0, 10);
+          const undated = !on;
+          const isToday = !done && on === today;
+          return (
+            <div
+              key={day.id}
+              className={`flex items-start gap-2.5 rounded-lg border p-2.5 ${
+                done ? "border-emerald-200 bg-emerald-50/60"
+                : undated ? "border-amber-200 bg-amber-50/60"
+                : isToday ? "border-sky-200 bg-sky-50/50"
+                : "border-slate-200 bg-white"
+              }`}
+              data-testid={`cons-rehab-day-${day.day_number}`}
+            >
+              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                done ? "bg-emerald-200 text-emerald-800"
+                : undated ? "bg-amber-200 text-amber-800"
+                : isToday ? "bg-sky-200 text-sky-800"
+                : "bg-slate-100 text-slate-500"
+              }`}>
+                {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : day.day_number}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-slate-700">
+                  Day {day.day_number}{day.total_days ? ` of ${day.total_days}` : ""}
+                </p>
+                <p className={`text-[10px] ${undated ? "font-semibold text-amber-700" : "text-slate-400"}`}>
+                  {on
+                    ? `${dayLabel(on)} at ${slotTo12h(day.slot_time)}`
+                    : "Missed — waiting on a new date from the Branch Admin"}
+                </p>
+                {/* Who ran the day, and only where it is not already obvious. On a course
+                    one physio has held throughout, their name is at the top of the panel
+                    and a copy of it on all twenty-six rows is noise. */}
+                {showPhysio && day.physio_name && (
+                  <p className="mt-0.5 text-[10px] font-medium text-slate-500" data-testid={`cons-rehab-day-physio-${day.day_number}`}>{day.physio_name}</p>
+                )}
+                {(day.physio_treatments || []).length > 0 && (
+                  <div className="mt-1">
+                    <PhysioTreatmentChips names={day.physio_treatments} testid={`cons-rehab-day-treatments-${day.day_number}`} />
+                  </div>
+                )}
+                {day.rehab_remarks && (
+                  <p className="mt-0.5 text-[10px] leading-relaxed text-emerald-700">
+                    <span className="font-semibold">Rehab: </span>{day.rehab_remarks}
+                  </p>
+                )}
+                {done && day.completed_by && (
+                  <p className="mt-0.5 text-[10px] text-slate-400">Signed off by {day.completed_by}</p>
+                )}
+              </div>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                done ? "bg-emerald-100 text-emerald-700"
+                : undated ? "bg-amber-100 text-amber-700"
+                : isToday ? "bg-sky-100 text-sky-700"
+                : "bg-slate-100 text-slate-500"
+              }`}>
+                {done ? "Complete" : undated ? "Needs a date" : isToday ? "Today" : "Booked"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 };
 
 const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment" }) => {
@@ -1895,6 +2116,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   // completed days are still theirs. null until asked for; `null` and "no physio yet" are
   // told apart by the lead's own stage, not by this.
   const [physioProgress, setPhysioProgress] = useState(null);
+  // The same question asked of the rehab course, and asked of the days themselves. Rehab
+  // keeps no count on the lead — _stamp_session_progress counts `sessions` and nothing
+  // counts `rehab_sessions` — so a panel that wants to say how far through a course a
+  // patient is has to fetch the days. null until asked for; [] is a course with no days
+  // booked, which is not the same thing.
+  const [rehabDays, setRehabDays] = useState(null);
   // Which programme record is open in the lead panel: "diet", "rehab", or neither.
   // Which view of the lead panel is on screen: "own" (the stage itself), "diet" or
   // "rehab". A tab selects a view outright — pressing the lit one again used to hide it
@@ -2543,6 +2770,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     setEditingDecision(false);
     setAddonPicker(null);
     setPhysioProgress(null);
+    setRehabDays(null);
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -2570,6 +2798,34 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       .catch(() => { if (!cancelled) setPhysioProgress(null); });
     return () => { cancelled = true; };
   }, [selectedLead?.id, selectedLead?.consultation_stage, selectedLead?.assigned_physio_id, selectedLead?.physio_assigned_at]);
+
+  // The rehab course's own days, asked for only once there is a course to have days.
+  // rehab_physio_id is written by assign-rehab and by nothing else, so its presence is the
+  // honest test that a course was booked — no stage to consult, because rehab deliberately
+  // moves none.
+  //
+  // rehab_assigned_at is in the dependencies for the reason physio_assigned_at is in the
+  // list above: it is restamped on every assign, including a re-book with the same physio,
+  // where the id alone would not have changed and the course would have been re-dated
+  // behind a day list still showing the old dates.
+  useEffect(() => {
+    if (!selectedLead?.id || !selectedLead.rehab_physio_id) {
+      setRehabDays(null);
+      return;
+    }
+    let cancelled = false;
+    rehabSessionsForLead(selectedLead.id)
+      .then((d) => { if (!cancelled) setRehabDays(d?.sessions || []); })
+      .catch(() => { if (!cancelled) setRehabDays(null); });
+    return () => { cancelled = true; };
+  }, [selectedLead?.id, selectedLead?.rehab_physio_id, selectedLead?.rehab_assigned_at]);
+
+  // Held rather than recomputed on every keystroke elsewhere in the card: the panel reads
+  // it in four places and the grouping walks every day of the course.
+  const rehabProgress = useMemo(
+    () => (rehabDays ? buildRehabProgress(rehabDays, selectedLead) : null),
+    [rehabDays, selectedLead],
+  );
 
   // Session packages (weeks/session-count items) — the Treatment Package chosen
   // as part of the Consultation Decision (Consultation + Treatment only).
@@ -4087,9 +4343,25 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
         : `Physio assigned — ${res.sessions_booked} sessions booked`);
       setShowSlotPicker(false);
       setShowPhysioModal(false);
-      // Close the lead card instantly, same as a plain stage move.
-      setSelectedLead(null);
-      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+      // A treatment assignment moves the lead — Fee Collected to Physio Assign — so the
+      // card it was opened from is no longer the card it belongs on, and closing it is the
+      // same thing a plain stage move does.
+      //
+      // Rehab moves nothing. assign-rehab deliberately leaves consultation_stage alone, so
+      // the patient stays exactly where they were and the card that was open is still
+      // theirs. Closing it threw away the one screen that could confirm the booking: the
+      // desk pressed Assign Physio, the card vanished, and who had been given the course —
+      // and whether its days had landed — was nowhere on screen. It stays open on the
+      // lead the server just returned, which is the panel with the physio's name on it.
+      //
+      // Merged over what was open rather than swapped for it. The board stamps counts
+      // onto every lead it returns (total_sessions, completed_sessions) that no single-lead
+      // endpoint recomputes, so taking the response whole would blank them on the one lead
+      // the desk is looking at.
+      const withAssignment = (l) => (l && l.id === res.lead.id ? { ...l, ...res.lead } : l);
+      if (isRehabAssign) setSelectedLead(withAssignment);
+      else setSelectedLead(null);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map(withAssignment) }));
     } catch (err) {
       toast.error(err?.response?.data?.detail || (isRehabAssign ? "Failed to assign rehab" : "Failed to assign physio"));
     }
@@ -6138,6 +6410,74 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   : { tone: "amber", label: "Rehab Fee Due", tick: false },
               };
 
+              // How far through the course the patient is, who has delivered which part of
+              // it, and the days themselves.
+              //
+              // Built once and shown by both ways into rehab — the Rehab pill's own panel
+              // and the Rehab Details view the other panels open — because a course must
+              // not read as two different courses depending on which door was used.
+              //
+              // Nothing until the days arrive. A skeleton would be a bar at 0% over a
+              // course that is half delivered, which is worse than a panel that fills in a
+              // moment later.
+              const RehabCourseStatus = rehabProgress ? (
+                <div data-testid="cons-rehab-course-status">
+                  {/* The two numbers as one length, so how far in the patient is reads at a
+                      glance instead of by subtraction — the same bar the Physio Assign
+                      panel draws for the treatment course. */}
+                  {rehabProgress.packageDays > 0 && (
+                    <div className="mt-3" data-testid="cons-rehab-progress">
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                        <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${rehabProgress.pct}%` }} />
+                      </div>
+                      <p className="mt-1 text-[10px] font-medium text-slate-500">
+                        {rehabProgress.pct}% of the course delivered
+                        {rehabProgress.remaining > 0 ? ` · ${rehabProgress.remaining} day${rehabProgress.remaining === 1 ? "" : "s"} to go` : ""}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Only once the course has changed hands. On a course one physio has
+                      held throughout, their name is already two rows above this and a card
+                      repeating it would be the same fact told twice. A reassignment is the
+                      case worth drawing: the previous physio keeps the days they ran, and
+                      the branch reading this is usually asking exactly where they left
+                      off. */}
+                  {rehabProgress.reassigned && (
+                    <div className="mt-3 space-y-1.5" data-testid="cons-rehab-journey">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                        Physio History · {rehabProgress.previous.length + (rehabProgress.current ? 1 : 0)} physios
+                      </p>
+                      {rehabProgress.previous.map((spell, i) => (
+                        <PhysioSpell
+                          key={`${spell.physio_id}-${i}`}
+                          spell={spell}
+                          packageSessions={rehabProgress.packageDays}
+                          tone="cyan"
+                          dayNoun="days"
+                          testid={`cons-rehab-spell-previous-${i}`}
+                        />
+                      ))}
+                      {rehabProgress.current && (
+                        <PhysioSpell
+                          spell={rehabProgress.current}
+                          packageSessions={rehabProgress.packageDays}
+                          tone="cyan"
+                          dayNoun="days"
+                          testid="cons-rehab-spell-current"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  <RehabDayList
+                    days={rehabProgress.days}
+                    showPhysio={rehabProgress.reassigned}
+                    testid="cons-rehab-day-list"
+                  />
+                </div>
+              ) : null;
+
               const DietDetailBody = (
                 <>
                   <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-diet-detail">
@@ -6269,8 +6609,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         tone={rehabFeePaid ? "text-emerald-700" : "text-amber-700"}
                       />
                       <DetailRow label="Rehab Physio" value={selectedLead.rehab_physio_name || "Not assigned"} tone={selectedLead.rehab_physio_name ? "" : "text-amber-700"} />
+                      {rehabProgress && (
+                        <DetailRow
+                          label="Days Completed"
+                          value={`${rehabProgress.completed} of ${rehabProgress.packageDays || "—"}${rehabProgress.done ? "" : ` · ${rehabProgress.remaining} left`}`}
+                          tone={rehabProgress.completed > 0 ? "text-emerald-700" : ""}
+                        />
+                      )}
                     </dl>
                   </div>
+                  {/* The same course status the Rehab panel shows, because it is the same
+                      course. This view is the only way into rehab from Fee Collected and
+                      from the diet panel, and a patient opened through those doors used to
+                      get four rows and no sign of whether a single day had been run. */}
+                  {RehabCourseStatus}
                   {/* Same order and the same gate as diet: the days cannot be booked until
                       the course is paid for, which is the rule assign-rehab itself holds. */}
                   <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
@@ -6625,14 +6977,17 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 // lower, that branch returns first and the Rehab tab opens a patient onto
                 // the fee panel with no way to reach Assign Physio.
                 if (stageFilter === "Rehab" && selectedLead.rehab_fee_paid != null) {
-                  const rehabDays = selectedLead.rehab_package_sessions || 0;
+                  // Named for the course rather than the collection: `rehabDays` up in the
+                  // component is the days themselves, and one word for the two of them in
+                  // a block that reads both is how a count gets mapped over.
+                  const rehabCourseDays = selectedLead.rehab_package_sessions || 0;
                   const rehabAssigned = !!selectedLead.rehab_physio_name;
                   // Label/value pairs built once, so the rows below are a list rather than
                   // four hand-repeated flex divs — and so a row that has nothing to say is
                   // dropped instead of printing "0 days" or an empty physio.
                   const rehabRows = [
                     { label: "Course", value: selectedLead.rehab_package_name || "Rehab course" },
-                    rehabDays > 0 ? { label: "Duration", value: `${rehabDays} day${rehabDays > 1 ? "s" : ""}` } : null,
+                    rehabCourseDays > 0 ? { label: "Duration", value: `${rehabCourseDays} day${rehabCourseDays > 1 ? "s" : ""}` } : null,
                     {
                       label: "Rehab Fee",
                       value: `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}`,
@@ -6640,6 +6995,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       strong: true,
                     },
                     rehabAssigned ? { label: "Rehab Physio", value: selectedLead.rehab_physio_name } : null,
+                    // What the course has actually delivered, beside what was sold. Held
+                    // back until the days arrive rather than shown as "0 of 26", which is
+                    // a true sentence about a course that may be nearly finished.
+                    (rehabAssigned && rehabProgress) ? {
+                      label: "Days Completed",
+                      value: `${rehabProgress.completed} of ${rehabProgress.packageDays || "—"}`,
+                      note: rehabProgress.done ? "course complete" : `${rehabProgress.remaining} left`,
+                      noteClass: rehabProgress.done ? "text-emerald-600" : "text-slate-500",
+                    } : null,
                   ].filter(Boolean);
                   return (
                     <div
@@ -6656,9 +7020,25 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           </span>
                           <span className="truncate text-xs font-semibold uppercase tracking-wider text-cyan-800">Rehab</span>
                         </div>
-                        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                          <CheckCircle2 className="h-3 w-3" /> Fee Collected
-                        </span>
+                        {/* Who is delivering it, on the header line rather than only in the
+                            rows below. Assigning a physio is the one act this panel exists
+                            for, and until it says so on the line that says what the panel
+                            is, the answer to "did that go through" is four rows down. */}
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {rehabAssigned && (
+                            <span
+                              className="flex max-w-[10rem] items-center gap-1 rounded-full bg-cyan-600 px-2 py-0.5 text-[10px] font-semibold text-white"
+                              title={`Rehab Physio: ${selectedLead.rehab_physio_name}`}
+                              data-testid="cons-rehab-physio-chip"
+                            >
+                              <Users className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{selectedLead.rehab_physio_name}</span>
+                            </span>
+                          )}
+                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" /> Fee Collected
+                          </span>
+                        </div>
                       </div>
 
                       <div className="p-4">
@@ -6671,18 +7051,36 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                 <dt className="shrink-0 text-xs text-slate-500">{row.label}</dt>
                                 <dd className={`min-w-0 truncate text-right font-semibold text-slate-800 ${row.strong ? "text-[15px]" : "text-sm"}`} title={String(row.value)}>
                                   {row.value}
-                                  {row.note && <span className="ml-1 text-xs font-medium capitalize text-emerald-600">({row.note})</span>}
+                                  {/* Capitalised because the only note this row had was a
+                                      payment mode — "(Cash)". A count is not a proper noun
+                                      and reads wrong under the same rule, so a row that
+                                      carries one says which colour and case it wants. */}
+                                  {row.note && <span className={`ml-1 text-xs font-medium ${row.noteClass || "capitalize text-emerald-600"}`}>({row.note})</span>}
                                 </dd>
                               </div>
                             ))}
                           </dl>
                         </div>
 
+                        {RehabCourseStatus}
+
                         <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                          {rehabAssigned
-                            ? "The course is booked — every day sits on this physio's calendar and on their board."
-                            : "Choose the physio who will deliver the course and fix a date and time for every day."}
+                          {!rehabAssigned
+                            ? "Choose the physio who will deliver the course and fix a date and time for every day."
+                            : rehabProgress?.done
+                              ? "Every day of this course has been delivered."
+                              : "The course is booked — every day sits on this physio's calendar and on their board."}
                         </p>
+                        {/* Said before the picker is opened rather than found inside it.
+                            Reassigning re-dates only what is left — assign-rehab keeps the
+                            completed days with the physio who ran them and replaces the
+                            upcoming ones — and the branch is about to be asked for exactly
+                            that many dates. */}
+                        {rehabAssigned && rehabProgress && !rehabProgress.done && rehabProgress.completed > 0 && (
+                          <p className="mt-1 text-xs leading-relaxed text-cyan-700" data-testid="cons-rehab-reassign-note">
+                            Reassigning keeps the {rehabProgress.completed} day{rehabProgress.completed === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {rehabProgress.remaining} get new dates.
+                          </p>
+                        )}
 
                         {/* One solid action on the same left edge as everything above it.
                             Diet and Cancel stay reachable as quiet outlines rather than as

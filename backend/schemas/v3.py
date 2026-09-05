@@ -381,6 +381,24 @@ class V3LeadOut(BaseModel):
     rehab_fee_paid: Optional[float] = None
     rehab_fee_payment_mode: Optional[str] = None
     rehab_fee_payment_details: Optional[dict] = None
+    # Who is delivering the Rehab course, and when they were put on it.
+    #
+    # Declared for exactly the reason the rehab_package_* block above says it is declared:
+    # this model ignores extras, and every lead the Consultations board returns goes out
+    # through it. All four were written by assign-rehab and then dropped on the way out, so
+    # the Rehab panel's "Rehab Physio" row read "Not assigned" for a patient whose course
+    # had been booked, was on a physio's calendar, and was being delivered — and the button
+    # beside it went on offering to assign somebody who was already assigned.
+    rehab_physio_id: Optional[str] = None
+    rehab_physio_name: Optional[str] = None
+    rehab_assigned_at: Optional[str] = None
+    rehab_stage: Optional[str] = None
+    # Every physio the rehab course has been handed between, oldest first — rehab's own
+    # counterpart of physio_assignment_history, and kept for the same one reason that one
+    # is kept: a physio replaced before delivering a single day leaves no rehab_sessions
+    # row behind to be counted, because assign-rehab deletes their upcoming days on the way
+    # out. This entry is the only trace that the spell happened at all.
+    rehab_assignment_history: Optional[List[Dict[str, Any]]] = None
     consultation_decision: Optional[str] = None  # "consultation_only" | "consultation_treatment" — set by Head Physio at Save & Move
     # Whether the Head Physio also referred this patient to a Nutrition Coach. Orthogonal
     # to consultation_decision — see V3ConsultationDecisionInput.

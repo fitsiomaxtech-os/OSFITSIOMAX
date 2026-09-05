@@ -43,6 +43,38 @@ from utils import normalize_slot_time, now_iso, physio_slot_load, slot_capacity_
 router = APIRouter(prefix="/api/v3")
 
 
+def _rehab_handover(lead: dict, new_physio_id: str, user: V3UserOut, now: str) -> dict:
+    """The `$push` that closes the outgoing rehab physio's spell with this patient.
+
+    The rehab twin of _physio_handover in v3_head_physio_board, and it exists for the one
+    thing the days themselves cannot say. A rehab day keeps the physio_id of whoever holds
+    it, so who delivered what is derived from `rehab_sessions` and needs nothing kept on
+    the lead — except for a physio replaced before they completed a single day, whose
+    upcoming days are deleted a few lines below. Without this entry that spell vanishes,
+    and the branch reading the Rehab panel is told the handover never happened.
+
+    Empty when nothing changed hands: a first assignment, or a re-book with the same
+    physio, which is a re-dating of the course rather than a handover.
+
+    Unlike treatment there is no stage to qualify the test with. rehab_physio_id is written
+    by this endpoint alone — nothing else ever sets it — so its presence already means a
+    rehab physio was assigned, which is precisely what consultation_stage has to be
+    consulted for on the treatment side.
+    """
+    previous_id = lead.get("rehab_physio_id")
+    if not previous_id or previous_id == new_physio_id:
+        return {}
+    return {"$push": {"rehab_assignment_history": {
+        "physio_id": previous_id,
+        "physio_name": lead.get("rehab_physio_name") or "",
+        "assigned_at": lead.get("rehab_assigned_at"),
+        "ended_at": now,
+        "replaced_by_id": new_physio_id,
+        "handed_over_by": user.full_name,
+        "handed_over_by_role": user.role,
+    }}}
+
+
 class AssignRehabInput(BaseModel):
     lead_id: str
     # A physio, not a separate rehab therapist: rehab is delivered on the treatment floor
@@ -149,24 +181,39 @@ async def assign_rehab(
     await v3_col("rehab_sessions").insert_many([d.copy() for d in docs])
 
     day_word = "days" if len(slots) > 1 else "day"
+    # Read before the write, off the lead as it was loaded at the top of this function —
+    # the outgoing physio is on it, and the $set below is about to overwrite them.
+    handover = _rehab_handover(lead, physio["id"], user, now)
     await v3_col("leads").update_one(
         {"id": payload.lead_id},
-        {"$set": {
-            "rehab_physio_id": physio["id"],
-            "rehab_physio_name": physio["full_name"],
-            "rehab_assigned_at": now,
-            "rehab_stage": "Rehab Assigned",
-            # Deliberately not consultation_stage. Rehab runs beside the physio pipeline,
-            # and moving that pipeline as a side effect of a rehab booking would misreport
-            # where the patient actually is — the same line collect_rehab_fee holds.
-            "updated_at": now,
-        }},
+        {
+            "$set": {
+                "rehab_physio_id": physio["id"],
+                "rehab_physio_name": physio["full_name"],
+                "rehab_assigned_at": now,
+                "rehab_stage": "Rehab Assigned",
+                # Deliberately not consultation_stage. Rehab runs beside the physio
+                # pipeline, and moving that pipeline as a side effect of a rehab booking
+                # would misreport where the patient actually is — the same line
+                # collect_rehab_fee holds.
+                "updated_at": now,
+            },
+            **handover,
+        },
     )
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": payload.lead_id,
         "action": "rehab_assigned",
-        "details": f"Rehab: {physio['full_name']} and {len(slots)} {day_word} booked",
+        # A reassignment says so, and says who it was away from. "Rehab: Yamini and 26 days
+        # booked" reads identically whether it is a first booking or the third physio to
+        # hold the course, and the timeline is where somebody goes to tell those apart.
+        "details": (
+            f"Rehab reassigned from {lead.get('rehab_physio_name')} to {physio['full_name']}"
+            f" — {len(slots)} {day_word} rebooked"
+            if handover else
+            f"Rehab: {physio['full_name']} and {len(slots)} {day_word} booked"
+        ),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now,
