@@ -6561,7 +6561,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   paid: selectedLead.diet_fee_paid != null,
                   note: selectedLead.diet_fee_paid != null ? selectedLead.diet_fee_payment_mode : null,
                   show: !!selectedLead.diet_recommended,
-                  ...balanceStep("diet", () => openDetail("diet"), "Open"),
+                  // Straight into the collect popup, not across to the Diet tab. This card
+                  // sits under a heading that says Collect a Payment, on a panel opened to
+                  // take money — so "Open" spent a click moving the Branch Admin to a
+                  // programme view whose only unpaid action was the same button under
+                  // another name. The Rehab card still points at its tab because the course
+                  // is chosen there; the Diet Package is chosen inside the popup itself.
+                  ...balanceStep("diet", () => openDietFeeDraft("consultation"), "Collect"),
                   ...(feeBalances.diet ? {} : { paid: selectedLead.diet_fee_paid != null }),
                 },
                 {
