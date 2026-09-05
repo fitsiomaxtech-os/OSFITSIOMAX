@@ -2141,7 +2141,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   //
   // Off for the Consultant too. Collecting is the Branch Admin's, and the Head Physio's
   // board tracks its own pipeline rather than the branch's money.
-  const showConsultationAction = !showDiscountColumn && !isConsultant;
+  //
+  // Off on Consultation Booked as well. That stage is the appointment diary and nothing
+  // more -- the patient has a slot and has not walked in yet, so there is no consultation
+  // to charge for and the fee is not owed until they arrive. A Collect button on sixty
+  // booked rows is money taken before the visit it belongs to, and the column it needs
+  // costs the seven reporting ones a point or two each to say nothing. The fee is
+  // collected from Consultation Visit onward, where it is real.
+  const showConsultationAction = !showDiscountColumn && !isConsultant && stageFilter !== "Consultation Booked";
   const cols = showTreatmentAction
     ? COLS_WITH_ACTION
     : showDiscountColumn
