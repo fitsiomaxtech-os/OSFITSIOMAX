@@ -922,16 +922,24 @@ SESSION_ITEM_RATE_PER_SESSION_OFFLINE = 800
 
 # The shelves whose price is a whole course rather than a per-session rate.
 #
-# Zumba is sold as a membership -- 12 classes a month, priced by the month -- and Rehab as
-# one 26-session programme at one price. Both store the course total divided down, so the
-# flat rate below is not their rate and never was. Forcing it on them rewrote a Rs.3,000
-# membership as Rs.9,600 (12 x 800) on the next restart, which is what "the fees keep
-# changing" was: not the form, this migration, running on every boot.
+# Zumba is sold as a membership -- 12 classes a month, priced by the month -- Rehab as one
+# 26-session programme at one price, and Fitness as a month at the gym, 26 sessions for
+# what the month costs. Not one of the three is a per-session rate, so the flat rate below
+# is not their rate and never was. Forcing it on Zumba rewrote a Rs.3,000 membership as
+# Rs.9,600 (12 x 800) on the next restart, which is what "the fees keep changing" was: not
+# the form, this migration, running on every boot.
+#
+# Fitness was left off this list and got the same treatment from the other side. Its rows
+# hold the month as it stands, so the pass did not multiply the price out -- it wrote the
+# per-session rate straight over the month, turning an 18,000 Personal Training and a
+# 14,000 Group Training into Rs.800 apiece -- on the same startup that seeded them, since
+# the pass runs a line after the seed, and again on every one since. That is what the
+# Sessions > Fitness cards were reading as "26 Sessions" for "Rs.800".
 #
 # Kept as categories rather than as a flag on the item, because it is the shelf that is
 # sold this way, not the individual row -- a new Zumba membership must be exempt the moment
 # it is created, without anyone remembering to mark it.
-COURSE_PRICED_CATEGORIES = ("zumba", "rehab")
+COURSE_PRICED_CATEGORIES = ("zumba", "rehab", "fitness")
 
 
 async def _course_priced_item_ids() -> set:
@@ -990,6 +998,41 @@ async def ensure_fitness_packages() -> None:
             "created_at": now,
             "updated_at": now,
         })
+
+
+async def repair_flattened_fitness_prices() -> None:
+    """Put back the two gym prices that the flat-rate pass overwrote.
+
+    Fitness was missing from COURSE_PRICED_CATEGORIES, so normalize_session_item_prices()
+    reached its rows on every boot and wrote the per-session rate straight over the month:
+    Personal Training at 18,000 and Group Training at 14,000 both came out as 800 offline
+    and 1,200 online. The rows carry price_is_total, so the card then read that 800 as the
+    whole 26-session month, and two packages that cost different amounts showed the same
+    figure. The exemption above stops it happening again; this puts back what it took.
+
+    Only a row still holding the flat rate exactly is written. That figure is the
+    overwrite's own signature -- 800 for a month of twenty-six sessions is not a price
+    anybody quoted -- and a price the Super Admin has since typed is some other number,
+    left alone. Which is also what makes this safe on every boot rather than once.
+    """
+    for plan in FITNESS_PACKAGES:
+        item = await v3_col("store_items").find_one(
+            {"item_type": "session", "category": "fitness", "name": plan["name"]},
+            {"_id": 0, "id": 1, "price_online": 1, "price_offline": 1},
+        )
+        if not item:
+            continue
+        updates = {}
+        if item.get("price_offline") == SESSION_ITEM_RATE_PER_SESSION_OFFLINE:
+            updates["price_offline"] = plan["price"]
+        if item.get("price_online") == SESSION_ITEM_RATE_PER_SESSION_ONLINE:
+            updates["price_online"] = plan["price"]
+        if updates:
+            # Restated rather than assumed: a row the flat-rate pass had hold of is a row
+            # whose price is being read as a month again, and the mark is what says so.
+            updates["price_is_total"] = True
+            updates["updated_at"] = now_iso()
+            await v3_col("store_items").update_one({"id": item["id"]}, {"$set": updates})
 
 
 async def migrate_course_prices_to_totals() -> None:
