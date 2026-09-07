@@ -499,14 +499,21 @@ export const clockBreakIn = async () => (await api.post("/clock/break-in")).data
 export const clockOut = async () => (await api.post("/clock/out")).data;
 export const clockHistory = async (month) => (await api.get("/clock/history", { params: month ? { month } : {} })).data;
 
-// ---------- my own page: profile and month ----------
+// ---------- my own page: profile, month, and time off ----------
 //
-// Same rule as the clock above and for the same reason: no id is accepted by either, so
-// there is no request shape here that reads another person's record. What HR's endpoints
-// answer for everybody, these two answer for whoever holds the token — which is why every
-// role may call them.
+// Same rule as the clock above and for the same reason: no id is accepted by any of them,
+// so there is no request shape here that reads another person's record. What HR's
+// endpoints answer for everybody, these answer for whoever holds the token -- which is why
+// every role may call them.
 export const myProfile = async () => (await api.get("/me/profile")).data;
 export const myAttendance = async (month) => (await api.get("/me/attendance", { params: month ? { month } : {} })).data;
+
+// The three that write. They post into the very list HR decides on -- see
+// backend/routers/v3_me.py -- so a leave raised here and one HR logged are the same
+// record, and approving either is the same click on the same board.
+export const myRequests = async (year) => (await api.get("/me/requests", { params: year ? { year } : {} })).data;
+export const raiseMyRequest = async (payload) => (await api.post("/me/requests", payload)).data;
+export const withdrawMyRequest = async (id) => (await api.delete("/me/requests/" + id)).data;
 
 export const hrAttendanceDay = async (date) => (await api.get("/hr/attendance", { params: date ? { date } : {} })).data;
 export const hrMarkAttendance = async (date, entries) => (await api.post("/hr/attendance", { date, entries })).data;

@@ -12,7 +12,17 @@ The chain runs one way, so each desk can be read without knowing the next:
 An approved leave writes the days it covers into attendance as `leave`; attendance's
 loss-of-pay days are what payroll deducts. Nothing runs backwards: deleting a payroll run
 leaves attendance alone, and revoking an approval only clears the marks that approval put
-there (see `_clear_leave_marks`).
+there (see `_clear_marks`).
+
+A permission -- hours off inside a working day rather than the day itself -- runs down the
+same chain and stops one link short of pay. It lands on the register beside the day's
+marks, saying which hours were agreed and why, and deliberately does not set a status: the
+person came in, and a two-hour errand is not a deduction. See `_apply_permission_mark`.
+
+Requests reach the first link by two roads. HR logs one on somebody's behalf, which is how
+a phone call at seven in the morning gets recorded; or the person raises their own, from
+their profile, which is routers/v3_me.py -- a different door onto this same
+collection, with `build_request` here shaping the row for both.
 
 One thing feeds in from outside that chain: the clock in the header, which every person
 presses for themselves (routers/v3_clock.py). It writes the times and the breaks onto the
@@ -42,6 +52,11 @@ from database import v3_col
 from deps import v3_current_user, is_hr_role
 from schemas.v3 import V3UserOut
 from utils import clinic_today, now_iso
+# How the OS reads a 24-hour HH:MM, borrowed from the module that already had to -- see
+# shift_utils.py, where a shift's two ends are parsed the same way. A permission is two
+# times on one day, and a second reading of "17:30" would eventually disagree with the
+# first about what a bad one looks like.
+from shift_utils import parse_hhmm
 
 # The one thing this module takes from the org chart next door: how to read an employee's
 # branch. That answer is not a lookup -- it falls back to the linked account, and a
@@ -114,6 +129,24 @@ def _valid_date(value: str, field: str = "date") -> str:
         raise HTTPException(status_code=400, detail=f"{field} must be a date, as YYYY-MM-DD")
 
 
+def _valid_time(value: str, field: str) -> int:
+    """A 24-hour HH:MM as minutes past midnight, or a 400 naming the field.
+
+    Minutes rather than the string, because everything the caller does next is arithmetic
+    -- how long the gap is, whether it runs backwards -- and _hhmm turns the answer back
+    into the one spelling of it that gets stored.
+    """
+    minutes = parse_hhmm(str(value or "").strip())
+    if minutes is None:
+        raise HTTPException(status_code=400, detail=f"{field} must be a time, as HH:MM")
+    return minutes
+
+
+def _hhmm(minutes: int) -> str:
+    """450 -> "07:30". One spelling stored, so "9:05" and "09:05" cannot both be on record."""
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
 def _valid_month(value: str) -> str:
     """A YYYY-MM, or a 400. Blank means the month the clinic is in now."""
     text = str(value or "").strip()
@@ -178,6 +211,27 @@ async def _roster() -> List[Dict[str, Any]]:
     return sorted(rows, key=lambda e: str(e.get("full_name") or "").lower())
 
 
+def permission_of(mark: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The agreed hours off on one day's row, or None if there are none.
+
+    None rather than an empty object: "no permission on this day" and "a permission of no
+    hours" are different things, and a screen drawing the second would put an empty chip
+    on every row in the register.
+
+    Approvals are the only thing that writes these -- see _apply_permission_mark -- so a
+    row carrying them is one HR signed off, and the id is on it to say which decision.
+    """
+    if not (mark or {}).get("permission_id"):
+        return None
+    return {
+        "approval_id": mark.get("permission_id"),
+        "from": mark.get("permission_from") or "",
+        "to": mark.get("permission_to") or "",
+        "minutes": int(mark.get("permission_minutes") or 0),
+        "reason": mark.get("permission_reason") or "",
+    }
+
+
 @router.get("/attendance")
 async def attendance_day(
     day: Optional[str] = Query(None, alias="date"),
@@ -228,6 +282,9 @@ async def attendance_day(
             "clocked": bool(m.get("clocked")),
             "breaks": m.get("breaks") or [],
             "break_minutes": int(m.get("break_minutes") or 0),
+            # Hours off this person asked for and HR agreed to. Not a status -- they came
+            # in -- but the reason a gap in the middle of their day is accounted for.
+            "permission": permission_of(m),
         })
         summary[status if status in summary else "unmarked"] += 1
 
@@ -365,6 +422,8 @@ async def attendance_overview(
         totals = {"login_minutes": 0, "worked_minutes": 0, "break_minutes": 0, "break_count": 0}
         present_days = 0
         away_days = 0
+        permission_days = 0
+        permission_minutes = 0
         for d in span_days:
             clock = clocks_by.get((e["id"], d))
             mark = marks_by.get((e["id"], d)) or {}
@@ -375,6 +434,12 @@ async def attendance_overview(
                 present_days += 1
             elif mark.get("status") in AWAY_STATUSES:
                 away_days += 1
+            # Counted on its own axis rather than folded into either of the two above: a
+            # day with two hours' permission on it is a day the person was present for,
+            # and adding it to "away" would say they were not.
+            if mark.get("permission_id"):
+                permission_days += 1
+                permission_minutes += int(mark.get("permission_minutes") or 0)
 
         row = {
             "employee_id": e["id"],
@@ -390,6 +455,8 @@ async def attendance_overview(
             "remote": str(e.get("work_type") or "").strip().lower() == "online",
             "present_days": present_days,
             "away_days": away_days,
+            "permission_days": permission_days,
+            "permission_minutes": permission_minutes,
         }
         row.update(totals)
         if single:
@@ -401,6 +468,7 @@ async def attendance_overview(
                 "check_out": clock.get("clock_out") or mark.get("check_out") or "",
                 "note": mark.get("note") or "",
                 "locked": bool(mark.get("approval_id")),
+                "permission": permission_of(mark),
                 # The account of the gap between in and out, for the row's detail panel.
                 "breaks": [
                     {
@@ -423,6 +491,9 @@ async def attendance_overview(
         "present_working": len(present),
         "work_from_home": len([r for r in present if r["remote"]]),
         "absent_leave": len([r for r in rows if r["away_days"] > 0]),
+        # People with agreed hours off inside the span. Its own tile because it is the one
+        # figure here that is neither present nor away -- they were both, on the same day.
+        "on_permission": len([r for r in rows if r["permission_days"] > 0]),
         # Only meaningful for one day: over a month, somebody who came in on the 3rd is
         # not "yet to login". Sent as null for the longer spans so the screen can drop the
         # tile rather than print a figure that means nothing.
@@ -465,7 +536,7 @@ async def mark_attendance(payload: AttendanceDay, user: V3UserOut = Depends(requ
     # Marks an approval wrote are not HR's to edit here. Changing one would put the
     # register and the decision that produced it into disagreement, with payroll reading
     # whichever it found -- so the approval is the place to change it, and revoking there
-    # removes the mark (see _clear_leave_marks).
+    # removes the mark (see _clear_marks).
     locked = {
         r["employee_id"]
         for r in await v3_col("attendance").find(
@@ -489,8 +560,19 @@ async def mark_attendance(payload: AttendanceDay, user: V3UserOut = Depends(requ
     for entry, status in writable:
         # Clearing a mark is a real action -- it is how a wrong entry is taken back -- so
         # an empty status deletes the row rather than storing "" as an eighth status.
+        #
+        # Unless the row is carrying an approved permission, which is not HR's mark and
+        # not theirs to drop by clearing one. There the mark alone is taken off and the
+        # row stays, still holding the hours somebody signed off.
         if not status:
-            res = await v3_col("attendance").delete_one({"date": on, "employee_id": entry.employee_id})
+            key = {"date": on, "employee_id": entry.employee_id}
+            if await v3_col("attendance").find_one({**key, "permission_id": {"$nin": [None, ""]}}, {"_id": 1}):
+                res = await v3_col("attendance").update_one(
+                    key, {"$unset": {"status": "", "check_in": "", "check_out": "", "note": "", "marked_by": ""}}
+                )
+                cleared += res.modified_count
+                continue
+            res = await v3_col("attendance").delete_one(key)
             cleared += res.deleted_count
             continue
         await v3_col("attendance").update_one(
@@ -557,7 +639,33 @@ async def attendance_month(
 # ---------- approvals ----------
 
 LEAVE_KIND = "leave"
-KINDS = (LEAVE_KIND, "comp_off", "advance", "expense", "other")
+# Hours off inside a working day, not days off. Somebody who needs two hours at the bank
+# is asking for something a leave cannot express -- a leave takes the whole day, and
+# marking the day absent to cover a two-hour errand costs them a day's pay for it. So it
+# is its own kind, with two times on it rather than two dates, and approving it does not
+# mark the day at all: they still came in, and the register still says so.
+PERMISSION_KIND = "permission"
+KINDS = (LEAVE_KIND, PERMISSION_KIND, "comp_off", "advance", "expense", "other")
+
+# The kinds a person may raise for themselves, from their own profile -- see
+# routers/v3_me.py. The rest stay HR's to log: an advance and an expense claim are
+# money, and a comp off is a day somebody else has to agree was worked.
+SELF_SERVICE_KINDS = (LEAVE_KIND, PERMISSION_KIND)
+
+# Who put the request on the list. HR logging one on somebody's behalf is still how a
+# phone call at seven in the morning gets recorded, so both roads stay open and the row
+# says which one it came down. Rows written before this existed carry neither field and
+# read as HR's, which is what they were.
+SOURCE_SELF, SOURCE_HR = "self", "hr"
+
+# The shortest and longest a permission can be. The floor is there because a request for
+# ten minutes is a break, and the clock already records those with a reason on them. The
+# ceiling is there because four hours is half a day, and a half day is a mark with pay
+# attached -- HR's decision to make on the register, not something a permission slip
+# should quietly turn into.
+MIN_PERMISSION_MINUTES = 15
+MAX_PERMISSION_MINUTES = 240
+
 # The three states a request is ever in. There is no "cancelled": a request withdrawn
 # before anybody looked at it is deleted, and one already decided stays on the record.
 PENDING, APPROVED, REJECTED = "pending", "approved", "rejected"
@@ -568,6 +676,9 @@ class ApprovalCreate(BaseModel):
     kind: str = LEAVE_KIND
     from_date: Optional[str] = ""
     to_date: Optional[str] = ""
+    # Permission only: the hours of the day being asked for, as 24-hour HH:MM.
+    from_time: Optional[str] = ""
+    to_time: Optional[str] = ""
     amount: Optional[float] = 0
     reason: Optional[str] = ""
 
@@ -584,67 +695,35 @@ async def _employee_or_404(emp_id: str) -> Dict[str, Any]:
     return emp
 
 
-async def _apply_leave_marks(row: dict, by: str) -> int:
-    """Write an approved leave into the register, and say how many days it covered.
+def build_request(
+    emp: Dict[str, Any],
+    kind: str,
+    *,
+    from_date: str = "",
+    to_date: str = "",
+    from_time: str = "",
+    to_time: str = "",
+    amount: float = 0,
+    reason: str = "",
+    requested_by: str = "",
+    requested_by_user_id: str = "",
+    source: str = SOURCE_HR,
+) -> Dict[str, Any]:
+    """One request, checked and ready to insert. The only place a row is shaped.
 
-    An approval that does not reach attendance is a note in a drawer: payroll reads the
-    register, so a leave signed off here has to land there or the person is paid as though
-    nobody decided anything. The marks carry `approval_id`, which is what makes them
-    locked on the register and removable again if the decision is taken back.
+    Two screens raise these now -- HR logging one on somebody's behalf, and the person
+    themselves from their profile (routers/v3_me.py) -- and the rules about what a
+    leave or a permission has to carry are the same rules whichever door it came through.
+    Written once here so a leave raised by its own subject cannot end up with a shape
+    HR's list does not know how to read.
 
-    A day already marked something else is left alone -- if HR wrote `present` for the
-    12th, they were there on the 12th, and a leave approved afterwards does not undo that.
+    Public, and returns the row rather than inserting it: the self-service side has one
+    more thing to check first (whether the person already has this day booked off), and
+    that check wants the dates this function settled on.
     """
-    if row.get("kind") != LEAVE_KIND or not row.get("from_date") or not row.get("to_date"):
-        return 0
-    written = 0
-    for day in _dates_between(row["from_date"], row["to_date"]):
-        existing = await v3_col("attendance").find_one({"date": day, "employee_id": row["employee_id"]}, {"_id": 0})
-        if existing:
-            continue
-        await v3_col("attendance").insert_one({
-            "id": str(uuid.uuid4()),
-            "date": day,
-            "employee_id": row["employee_id"],
-            "status": LEAVE,
-            "check_in": "", "check_out": "",
-            "note": (row.get("reason") or "")[:200],
-            "approval_id": row["id"],
-            "marked_by": by,
-            "marked_at": now_iso(),
-        })
-        written += 1
-    return written
-
-
-async def _clear_leave_marks(approval_id: str) -> int:
-    """Take back only the marks this approval wrote. Anything HR typed by hand stays."""
-    res = await v3_col("attendance").delete_many({"approval_id": approval_id})
-    return res.deleted_count
-
-
-@router.get("/approvals")
-async def list_approvals(
-    status: Optional[str] = Query(None),
-    kind: Optional[str] = Query(None),
-    _: V3UserOut = Depends(require_hr),
-):
-    query: Dict[str, Any] = {}
-    if status in (PENDING, APPROVED, REJECTED):
-        query["status"] = status
-    if kind in KINDS:
-        query["kind"] = kind
-    rows = await v3_col("approvals").find(query, {"_id": 0}).sort("requested_at", -1).to_list(1000)
-    counts = {s: await v3_col("approvals").count_documents({"status": s}) for s in (PENDING, APPROVED, REJECTED)}
-    return {"approvals": rows, "counts": counts}
-
-
-@router.post("/approvals")
-async def create_approval(payload: ApprovalCreate, user: V3UserOut = Depends(require_hr)):
-    kind = (payload.kind or LEAVE_KIND).strip()
+    kind = (kind or LEAVE_KIND).strip()
     if kind not in KINDS:
         raise HTTPException(status_code=400, detail=f"Unknown request type: {kind}")
-    emp = await _employee_or_404(payload.employee_id)
 
     row: Dict[str, Any] = {
         "id": str(uuid.uuid4()),
@@ -656,25 +735,248 @@ async def create_approval(payload: ApprovalCreate, user: V3UserOut = Depends(req
         "department": emp.get("department") or "",
         "kind": kind,
         "from_date": "", "to_date": "", "days": 0,
-        "amount": round(float(payload.amount or 0), 2),
-        "reason": (payload.reason or "").strip(),
+        "from_time": "", "to_time": "", "minutes": 0,
+        "amount": round(float(amount or 0), 2),
+        "reason": (reason or "").strip(),
         "status": PENDING,
-        "requested_by": user.full_name,
+        "requested_by": requested_by,
+        "requested_by_user_id": requested_by_user_id,
+        "source": source,
         "requested_at": now_iso(),
         "decided_by": "", "decided_at": "", "decision_note": "",
     }
 
     if kind in (LEAVE_KIND, "comp_off"):
-        if not payload.from_date:
+        if not from_date:
             raise HTTPException(status_code=400, detail="Pick the dates this covers")
-        start = _valid_date(payload.from_date, "from_date")
-        end = _valid_date(payload.to_date or payload.from_date, "to_date")
+        start = _valid_date(from_date, "from_date")
+        end = _valid_date(to_date or from_date, "to_date")
         if end < start:
             raise HTTPException(status_code=400, detail="The last day can't be before the first")
         row.update({"from_date": start, "to_date": end, "days": len(_dates_between(start, end))})
+    elif kind == PERMISSION_KIND:
+        if not from_date:
+            raise HTTPException(status_code=400, detail="Pick the day this is for")
+        # One day, both ends. A permission that ran past midnight would be two days off
+        # in the middle of two shifts, which is a leave with extra steps.
+        day = _valid_date(from_date, "date")
+        start = _valid_time(from_time, "from_time")
+        end = _valid_time(to_time, "to_time")
+        minutes = end - start
+        if minutes <= 0:
+            raise HTTPException(status_code=400, detail="The end time has to be after the start")
+        if minutes < MIN_PERMISSION_MINUTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A permission is at least {MIN_PERMISSION_MINUTES} minutes -- anything shorter is a break",
+            )
+        if minutes > MAX_PERMISSION_MINUTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A permission tops out at {MAX_PERMISSION_MINUTES // 60} hours -- longer than that, ask for leave",
+            )
+        row.update({
+            "from_date": day, "to_date": day,
+            "from_time": _hhmm(start), "to_time": _hhmm(end),
+            "minutes": minutes,
+        })
     elif kind in ("advance", "expense") and row["amount"] <= 0:
         raise HTTPException(status_code=400, detail="Enter the amount being asked for")
 
+    return row
+
+
+async def _apply_leave_marks(row: dict, by: str) -> int:
+    """Write an approved leave into the register, and say how many days it covered.
+
+    An approval that does not reach attendance is a note in a drawer: payroll reads the
+    register, so a leave signed off here has to land there or the person is paid as though
+    nobody decided anything. The marks carry `approval_id`, which is what makes them
+    locked on the register and removable again if the decision is taken back.
+
+    A day already marked something else is left alone -- if HR wrote `present` for the
+    12th, they were there on the 12th, and a leave approved afterwards does not undo that.
+    It is the *mark* that blocks it, not the row: a day can already have a row on it
+    carrying nothing but an approved permission, and that is not somebody saying what the
+    day was.
+    """
+    if row.get("kind") != LEAVE_KIND or not row.get("from_date") or not row.get("to_date"):
+        return 0
+    written = 0
+    for day in _dates_between(row["from_date"], row["to_date"]):
+        existing = await v3_col("attendance").find_one(
+            {"date": day, "employee_id": row["employee_id"]}, {"_id": 0, "status": 1}
+        )
+        if (existing or {}).get("status"):
+            continue
+        # Upsert rather than insert, for the day that already has a permission row on it:
+        # a second document for the same person and date would leave the register reading
+        # whichever of the two it found first.
+        await v3_col("attendance").update_one(
+            {"date": day, "employee_id": row["employee_id"]},
+            {
+                "$set": {
+                    "status": LEAVE,
+                    "check_in": "", "check_out": "",
+                    "note": (row.get("reason") or "")[:200],
+                    "approval_id": row["id"],
+                    "marked_by": by,
+                    "marked_at": now_iso(),
+                },
+                "$setOnInsert": {"id": str(uuid.uuid4()), "date": day, "employee_id": row["employee_id"]},
+            },
+            upsert=True,
+        )
+        written += 1
+    return written
+
+
+# The fields an approved permission puts on a day, and the only ones taking it back
+# removes. Named once so the two halves cannot drift apart and leave a register showing
+# hours off that no request stands behind.
+PERMISSION_FIELDS = (
+    "permission_id", "permission_from", "permission_to",
+    "permission_minutes", "permission_reason", "permission_by",
+)
+
+
+async def _apply_permission_mark(row: dict, by: str) -> int:
+    """Write an approved permission onto the day it covers, without marking that day.
+
+    This is the difference between a permission and a leave, and it is the whole reason
+    the kind exists: the person is coming in. Nothing here touches `status`, so the day
+    stays whatever the register says it was -- present off their own clock, or unmarked
+    until somebody says otherwise -- and payroll, which reads statuses, does not see two
+    hours at the bank as a deduction.
+
+    What it does leave is the record that those two hours were agreed: the times, the
+    reason and the id of the request behind them, so the register can show the gap in
+    somebody's day as accounted for rather than as unexplained.
+    """
+    if row.get("kind") != PERMISSION_KIND or not row.get("from_date"):
+        return 0
+    await v3_col("attendance").update_one(
+        {"date": row["from_date"], "employee_id": row["employee_id"]},
+        {
+            "$set": {
+                "permission_id": row["id"],
+                "permission_from": row.get("from_time") or "",
+                "permission_to": row.get("to_time") or "",
+                "permission_minutes": int(row.get("minutes") or 0),
+                "permission_reason": (row.get("reason") or "")[:200],
+                "permission_by": by,
+            },
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "date": row["from_date"],
+                "employee_id": row["employee_id"],
+            },
+        },
+        upsert=True,
+    )
+    return 1
+
+
+async def _clear_marks(approval_id: str) -> int:
+    """Take back every mark this approval wrote, whichever kind it was.
+
+    Anything HR typed by hand stays. Two shapes to undo, because the two kinds write
+    differently: a leave owns the whole row it created, and a permission is a few fields
+    hung on a row that may well have been there first -- somebody's clocked day. So the
+    permission's fields are unset and the row is only deleted when nothing is left on it
+    to keep, which is the case exactly when the permission was what created it.
+    """
+    cleared = 0
+
+    leaves = await v3_col("attendance").find(
+        {"approval_id": approval_id}, {"_id": 0, "date": 1, "employee_id": 1, "permission_id": 1}
+    ).to_list(2000)
+    for r in leaves:
+        key = {"date": r["date"], "employee_id": r["employee_id"]}
+        if r.get("permission_id"):
+            # A permission was approved for a day this leave also covered. The leave is
+            # being taken back; the permission is somebody else's decision and stands.
+            await v3_col("attendance").update_one(
+                key, {"$unset": {"status": "", "approval_id": "", "note": "", "marked_by": ""}}
+            )
+        else:
+            await v3_col("attendance").delete_one(key)
+        cleared += 1
+
+    permissions = await v3_col("attendance").find(
+        {"permission_id": approval_id},
+        {"_id": 0, "date": 1, "employee_id": 1, "status": 1, "clocked": 1, "approval_id": 1},
+    ).to_list(2000)
+    for r in permissions:
+        key = {"date": r["date"], "employee_id": r["employee_id"]}
+        if r.get("status") or r.get("clocked") or r.get("approval_id"):
+            await v3_col("attendance").update_one(key, {"$unset": {f: "" for f in PERMISSION_FIELDS}})
+        else:
+            # Nothing on the row but the permission, so the permission was what put it
+            # there. Left behind, it would show on the register as a blank day somebody
+            # had bothered to open.
+            await v3_col("attendance").delete_one(key)
+        cleared += 1
+
+    return cleared
+
+
+@router.get("/approvals")
+async def list_approvals(
+    status: Optional[str] = Query(None),
+    kind: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    _: V3UserOut = Depends(require_hr),
+):
+    """Every request, newest first, narrowed by whichever of the three filters was sent.
+
+    `source` is the one that earns its place on the screen: people raise their own leave
+    and permission now (routers/v3_me.py), and "what has come in that nobody has
+    looked at" is a different question from "what did we log", answered by the same list.
+    """
+    query: Dict[str, Any] = {}
+    if status in (PENDING, APPROVED, REJECTED):
+        query["status"] = status
+    if kind in KINDS:
+        query["kind"] = kind
+    if source == SOURCE_SELF:
+        query["source"] = SOURCE_SELF
+    elif source == SOURCE_HR:
+        # Rows written before requests had a source were all HR's, and there is no
+        # backfill: this asks the question the way the data answers it.
+        query["source"] = {"$ne": SOURCE_SELF}
+    rows = await v3_col("approvals").find(query, {"_id": 0}).sort("requested_at", -1).to_list(1000)
+    counts = {s: await v3_col("approvals").count_documents({"status": s}) for s in (PENDING, APPROVED, REJECTED)}
+    # Waiting on HR *and* raised by the person it is about -- the queue somebody outside
+    # this room is actually waiting on an answer to.
+    counts["pending_from_staff"] = await v3_col("approvals").count_documents(
+        {"status": PENDING, "source": SOURCE_SELF}
+    )
+    return {"approvals": rows, "counts": counts}
+
+
+@router.post("/approvals")
+async def create_approval(payload: ApprovalCreate, user: V3UserOut = Depends(require_hr)):
+    """HR logging a request on somebody's behalf -- the phone call at seven in the morning.
+
+    The shape of the row is build_request's, the same one the person's own profile posts
+    through, so a leave logged here and a leave raised there are the same record with a
+    different name in `requested_by`.
+    """
+    emp = await _employee_or_404(payload.employee_id)
+    row = build_request(
+        emp,
+        payload.kind or LEAVE_KIND,
+        from_date=payload.from_date or "",
+        to_date=payload.to_date or "",
+        from_time=payload.from_time or "",
+        to_time=payload.to_time or "",
+        amount=payload.amount or 0,
+        reason=payload.reason or "",
+        requested_by=user.full_name,
+        requested_by_user_id=user.id,
+        source=SOURCE_HR,
+    )
     await v3_col("approvals").insert_one(row.copy())
     row.pop("_id", None)
     return row
@@ -691,6 +993,10 @@ async def decide_approval(
     Reversible on purpose. A leave approved onto the wrong person is caught on the
     register, not in the request list, and the fix has to undo the marks it wrote -- so
     every path through here settles the attendance side as well as the status.
+
+    Both kinds that reach attendance are settled here, and they reach it differently: a
+    leave writes the days it covers as `leave`, a permission hangs its hours on the day
+    without marking it. Taking either back is the one undo -- see _clear_marks.
     """
     decision = (payload.decision or "").strip()
     if decision not in (APPROVED, REJECTED, PENDING):
@@ -702,8 +1008,9 @@ async def decide_approval(
     marks = 0
     if decision == APPROVED:
         marks = await _apply_leave_marks(row, user.full_name)
+        marks += await _apply_permission_mark(row, user.full_name)
     else:
-        marks = -(await _clear_leave_marks(approval_id))
+        marks = -(await _clear_marks(approval_id))
 
     await v3_col("approvals").update_one({"id": approval_id}, {"$set": {
         "status": decision,
@@ -717,7 +1024,7 @@ async def decide_approval(
 
 @router.delete("/approvals/{approval_id}")
 async def delete_approval(approval_id: str, _: V3UserOut = Depends(require_hr)):
-    cleared = await _clear_leave_marks(approval_id)
+    cleared = await _clear_marks(approval_id)
     res = await v3_col("approvals").delete_one({"id": approval_id})
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Request not found")

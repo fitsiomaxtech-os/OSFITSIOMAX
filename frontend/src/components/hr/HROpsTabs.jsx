@@ -23,8 +23,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlarmClock, Ban, CalendarCheck, CalendarOff, Check, ChevronLeft, ChevronRight, Coffee,
-  Download, Eye, Filter, IndianRupee, LayoutGrid, List, Lock, Palmtree, Pencil, Pin,
-  PinOff, Plus, Quote, RefreshCw, Trash2, TriangleAlert, Undo2, Wallet, X,
+  Clock3, Download, Eye, Filter, IndianRupee, LayoutGrid, List, Lock, Palmtree, Pencil,
+  Pin, PinOff, Plus, Quote, RefreshCw, Trash2, TriangleAlert, Undo2, UserRound, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -376,6 +376,24 @@ const DayDetailModal = ({ row, date, onClose, onSaved }) => {
           )}
         </div>
 
+        {/* Between the breaks and the mark, which is where it belongs: it explains a gap
+            in the day the way a break does, and it is the reason not to reach for
+            "half day" on a person who was out for two hours with permission. */}
+        {row.permission && (
+          <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="hr-att-detail-permission">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-sky-700">
+              <Clock3 className="h-3.5 w-3.5" />Approved permission
+            </p>
+            <p className="mt-1 text-sm font-semibold text-sky-900">
+              {prettyTime(row.permission.from)} → {prettyTime(row.permission.to)} · {duration(row.permission.minutes)}
+            </p>
+            {row.permission.reason && <p className="mt-0.5 text-xs text-sky-800">{row.permission.reason}</p>}
+            <p className="mt-1 text-[11px] text-sky-700">
+              Hours signed off on Approvals. The day is not marked by it — they were here for the rest of it.
+            </p>
+          </div>
+        )}
+
         <div className="mt-4 border-t border-slate-100 pt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">HR mark</p>
           <p className="mt-0.5 text-[11px] text-slate-400">
@@ -466,6 +484,7 @@ export const AttendanceTab = () => {
       present_working: present.length,
       work_from_home: present.filter((r) => r.remote).length,
       absent_leave: shown.filter((r) => r.away_days > 0).length,
+      on_permission: shown.filter((r) => r.permission_days > 0).length,
       yet_to_login: single
         ? shown.filter((r) => r.present_days === 0 && !["absent", "leave", "week_off", "holiday"].includes(r.status)).length
         : null,
@@ -476,17 +495,20 @@ export const AttendanceTab = () => {
     // The same columns the table shows, so a spreadsheet of this and a screenshot of it
     // do not carry different figures.
     const head = single
-      ? ["Employee", "Code", "Department", "Designation", "Branch", "Status", "Check in", "Check out", "Worked hours", "Break minutes", "Breaks"]
-      : ["Employee", "Code", "Department", "Designation", "Branch", "Days present", "Days away", "Worked hours", "Break minutes", "Breaks"];
+      ? ["Employee", "Code", "Department", "Designation", "Branch", "Status", "Check in", "Check out", "Worked hours", "Break minutes", "Breaks", "Permission minutes", "Permission hours"]
+      : ["Employee", "Code", "Department", "Designation", "Branch", "Days present", "Days away", "Worked hours", "Break minutes", "Breaks", "Permission minutes", "Permission days"];
     downloadCsv([
       head,
       ...shown.map((r) => (single
         ? [r.full_name, r.employee_code, r.department, r.designation, r.branch_name,
            (BOARD_STATUS[r.status] || {}).label || r.status, r.check_in, r.check_out,
-           (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count]
+           (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count,
+           r.permission_minutes || 0,
+           r.permission ? `${r.permission.from} to ${r.permission.to}` : ""]
         : [r.full_name, r.employee_code, r.department, r.designation, r.branch_name,
            r.present_days, r.away_days,
-           (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count])),
+           (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count,
+           r.permission_minutes || 0, r.permission_days || 0])),
     ], `attendance-${data?.from || ""}${single ? "" : `_to_${data?.to || ""}`}.csv`);
   };
 
@@ -571,12 +593,17 @@ export const AttendanceTab = () => {
         </CardContent>
       </Card>
 
-      <div className={`grid grid-cols-2 gap-3 ${single ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
+      <div className={`grid grid-cols-2 gap-3 ${single ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
         <Stat label="Total Employees" value={tiles.total_employees ?? 0} tone="text-indigo-600" testid="hr-att-k-total" />
         <Stat label={single ? "Present / Working" : "Worked at all"} value={tiles.present_working ?? 0} tone="text-emerald-600" testid="hr-att-k-present" />
         <Stat label="Work from Home" value={tiles.work_from_home ?? 0} tone="text-violet-600" testid="hr-att-k-wfh" />
         {single && <Stat label="Yet to Login" value={tiles.yet_to_login ?? 0} tone="text-amber-500" testid="hr-att-k-yet" />}
         <Stat label="Absent / Leave" value={tiles.absent_leave ?? 0} tone="text-rose-600" testid="hr-att-k-away" />
+        {/* Its own tile because it is the one figure here that is neither present nor
+            away: an approved permission is somebody who came in and had agreed hours out
+            of the middle of it, and folding it into either of the two beside it would say
+            something about their day that is not true. */}
+        <Stat label="On Permission" value={tiles.on_permission ?? 0} tone="text-sky-600" testid="hr-att-k-permission" />
       </div>
 
       {/* Work from Home is read off the person, not the day: Online vs Offline is the only
@@ -658,6 +685,26 @@ export const AttendanceTab = () => {
                             <span className="text-[11px] text-slate-400">({r.break_count})</span>
                           </span>
                         ) : <span className="text-slate-300">—</span>}
+                        {/* Beside the breaks rather than in a column of its own: both are
+                            time out of a working day, and the only difference between a
+                            break and a permission is that somebody signed off the second.
+                            Which is what the chip says — the hours, and that they were
+                            agreed. */}
+                        {r.permission_days > 0 && (
+                          <span
+                            className="mt-1 flex items-center gap-1 text-sky-600"
+                            title={single && r.permission
+                              ? `${prettyTime(r.permission.from)} → ${prettyTime(r.permission.to)}${r.permission.reason ? ` · ${r.permission.reason}` : ""}`
+                              : `${r.permission_days} day${r.permission_days === 1 ? "" : "s"} with approved permission`}
+                            data-testid={`hr-att-permission-${r.employee_id}`}
+                          >
+                            <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                            <span className="text-[11px] font-semibold">
+                              {duration(r.permission_minutes)} permission
+                              {!single && r.permission_days > 1 ? ` (${r.permission_days}d)` : ""}
+                            </span>
+                          </span>
+                        )}
                       </td>
                       {single && (
                         <td className="px-4 py-3 text-center">
@@ -1145,15 +1192,17 @@ export const PayrollTab = () => {
 
 // ---------- Approvals ----------
 
-// Mirrors KINDS in backend/routers/v3_hr_ops.py. `dated` and `priced` decide which half
-// of the form a kind asks for — a leave wants dates, an advance wants an amount, and
-// showing both to both would make every request half empty.
+// Mirrors KINDS in backend/routers/v3_hr_ops.py. `dated`, `timed` and `priced` decide
+// which part of the form a kind asks for — a leave wants two dates, a permission wants one
+// date and two clock times, an advance wants an amount, and offering all three to all of
+// them would leave every request two thirds empty.
 const KINDS = [
-  { key: "leave", label: "Leave", dated: true, priced: false, icon: Palmtree },
-  { key: "comp_off", label: "Comp off", dated: true, priced: false, icon: CalendarOff },
-  { key: "advance", label: "Salary advance", dated: false, priced: true, icon: IndianRupee },
-  { key: "expense", label: "Expense claim", dated: false, priced: true, icon: Wallet },
-  { key: "other", label: "Other", dated: false, priced: false, icon: AlarmClock },
+  { key: "leave", label: "Leave", dated: true, timed: false, priced: false, icon: Palmtree },
+  { key: "permission", label: "Permission", dated: false, timed: true, priced: false, icon: Clock3 },
+  { key: "comp_off", label: "Comp off", dated: true, timed: false, priced: false, icon: CalendarOff },
+  { key: "advance", label: "Salary advance", dated: false, timed: false, priced: true, icon: IndianRupee },
+  { key: "expense", label: "Expense claim", dated: false, timed: false, priced: true, icon: Wallet },
+  { key: "other", label: "Other", dated: false, timed: false, priced: false, icon: AlarmClock },
 ];
 const KIND_BY_KEY = Object.fromEntries(KINDS.map((k) => [k.key, k]));
 
@@ -1164,7 +1213,10 @@ const STATUS_TONE = {
 };
 
 const NewRequestModal = ({ employees, onClose, onSaved }) => {
-  const [form, setForm] = useState({ employee_id: "", kind: "leave", from_date: "", to_date: "", amount: "", reason: "" });
+  const [form, setForm] = useState({
+    employee_id: "", kind: "leave", from_date: "", to_date: "",
+    from_time: "", to_time: "", amount: "", reason: "",
+  });
   const [saving, setSaving] = useState(false);
   const kind = KIND_BY_KEY[form.kind];
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -1176,10 +1228,15 @@ const NewRequestModal = ({ employees, onClose, onSaved }) => {
       await hrCreateApproval({
         employee_id: form.employee_id,
         kind: form.kind,
-        from_date: kind.dated ? form.from_date : "",
+        // A permission is hours of one day, so its single date arrives as both ends —
+        // the server stores the pair either way, and one field here means one date to
+        // pick rather than the same day typed twice.
+        from_date: kind.dated || kind.timed ? form.from_date : "",
         // A one-day leave is the common case, so leaving the second date blank means the
         // same day rather than being an error to correct.
-        to_date: kind.dated ? (form.to_date || form.from_date) : "",
+        to_date: kind.timed ? form.from_date : kind.dated ? (form.to_date || form.from_date) : "",
+        from_time: kind.timed ? form.from_time : "",
+        to_time: kind.timed ? form.to_time : "",
         amount: kind.priced ? Number(form.amount || 0) : 0,
         reason: form.reason,
       });
@@ -1242,6 +1299,23 @@ const NewRequestModal = ({ employees, onClose, onSaved }) => {
             </div>
           )}
 
+          {kind.timed && (
+            <div className="grid grid-cols-3 gap-3">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Day</span>
+                <MilkDateInput value={form.from_date} accent="sky" centered title="Which day?" onChange={(e) => set({ from_date: e.target.value })} data-testid="hr-approval-perm-day" />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">From</span>
+                <TimeBox value={form.from_time} onChange={(v) => set({ from_time: v })} testid="hr-approval-perm-from" />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">To</span>
+                <TimeBox value={form.to_time} onChange={(v) => set({ to_time: v })} testid="hr-approval-perm-to" />
+              </label>
+            </div>
+          )}
+
           {kind.priced && (
             <label className="block">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Amount (₹)</span>
@@ -1265,6 +1339,13 @@ const NewRequestModal = ({ employees, onClose, onSaved }) => {
               Approving this writes those days into the attendance register as leave, and payroll reads them from there.
             </p>
           )}
+
+          {kind.timed && (
+            <p className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+              Approving this does not mark the day — they are still coming in. The hours go onto the register beside it,
+              so the gap in their day reads as agreed rather than unexplained.
+            </p>
+          )}
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
@@ -1277,15 +1358,23 @@ const NewRequestModal = ({ employees, onClose, onSaved }) => {
 };
 
 export const ApprovalsTab = () => {
+  // Five filters, one control. Four are statuses and the fifth is "raised by staff",
+  // which is a different axis — but they are the same question asked of the same list
+  // ("what should I be looking at"), and two rows of tiles for one list would read as two
+  // lists. The odd one out narrows to pending on its own, because a request somebody
+  // raised and HR has already decided is not what anybody clicks that tile to find.
   const [filter, setFilter] = useState("pending");
   const [data, setData] = useState({ approvals: [], counts: {} });
   const [employees, setEmployees] = useState([]);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback((status) => {
+  const load = useCallback((which) => {
     setLoading(true);
-    return hrApprovals(status === "all" ? {} : { status })
+    const params = which === "all" ? {}
+      : which === "from_staff" ? { status: "pending", source: "self" }
+        : { status: which };
+    return hrApprovals(params)
       .then(setData).catch(fail).finally(() => setLoading(false));
   }, []);
   useEffect(() => { load(filter); }, [filter, load]);
@@ -1295,9 +1384,16 @@ export const ApprovalsTab = () => {
     try {
       const res = await hrDecideApproval(row.id, decision);
       const days = res.attendance_days_changed || 0;
+      // The same figure reads two ways. For a leave it is days marked; for a permission
+      // it is the one day the hours were written onto, and "1 day marked as leave" after
+      // approving two hours out would be the screen contradicting the register.
+      const landed = row.kind === "permission"
+        ? (decision === "approved" ? " — hours noted on the register" : " — hours cleared from the register")
+        : days > 0 ? ` — ${days} day${days > 1 ? "s" : ""} marked as leave`
+          : days < 0 ? ` — ${-days} leave day${days < -1 ? "s" : ""} cleared` : "";
       toast.success(
         decision === "pending" ? "Sent back to pending."
-          : `${decision === "approved" ? "Approved" : "Rejected"}${days > 0 ? ` — ${days} day${days > 1 ? "s" : ""} marked as leave` : days < 0 ? ` — ${-days} leave day${days < -1 ? "s" : ""} cleared` : ""}.`
+          : `${decision === "approved" ? "Approved" : "Rejected"}${landed}.`
       );
       load(filter);
     } catch (e) { fail(e); }
@@ -1312,6 +1408,12 @@ export const ApprovalsTab = () => {
   const rows = data.approvals || [];
 
   const when = (row) => {
+    // A permission is hours of one day, so it reads as one: the date, the two times, and
+    // what they add up to. Printed as a one-day span it would say the whole day was
+    // taken, which is the one thing it is not.
+    if (row.kind === "permission" && row.from_date) {
+      return `${prettyDate(row.from_date)} · ${prettyTime(row.from_time)} → ${prettyTime(row.to_time)} · ${duration(row.minutes)}`;
+    }
     if (row.from_date) {
       return row.from_date === row.to_date
         ? prettyDate(row.from_date)
@@ -1322,8 +1424,12 @@ export const ApprovalsTab = () => {
 
   return (
     <div className="space-y-4" data-testid="hr-approvals-tab">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <Stat label="Pending" value={counts.pending ?? 0} tone={counts.pending ? "text-amber-600" : "text-slate-400"} active={filter === "pending"} onClick={() => setFilter("pending")} testid="hr-appr-f-pending" />
+        {/* The queue with a person on the other end of it. Everything else on this row is
+            a state a request is in; this is the part of Pending that somebody outside
+            this room is waiting on an answer to, and it is the one worth clearing daily. */}
+        <Stat label="From staff" value={counts.pending_from_staff ?? 0} tone={counts.pending_from_staff ? "text-sky-600" : "text-slate-400"} active={filter === "from_staff"} onClick={() => setFilter("from_staff")} testid="hr-appr-f-staff" />
         <Stat label="Approved" value={counts.approved ?? 0} tone="text-emerald-600" active={filter === "approved"} onClick={() => setFilter("approved")} testid="hr-appr-f-approved" />
         <Stat label="Rejected" value={counts.rejected ?? 0} tone="text-rose-600" active={filter === "rejected"} onClick={() => setFilter("rejected")} testid="hr-appr-f-rejected" />
         <Stat label="All requests" value={(counts.pending || 0) + (counts.approved || 0) + (counts.rejected || 0)} active={filter === "all"} onClick={() => setFilter("all")} testid="hr-appr-f-all" />
@@ -1331,7 +1437,10 @@ export const ApprovalsTab = () => {
 
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-slate-500">
-          {filter === "all" ? "Every request" : `${filter[0].toUpperCase()}${filter.slice(1)} requests`} · approving a leave marks the register.
+          {filter === "all" ? "Every request"
+            : filter === "from_staff" ? "Pending requests people raised for themselves"
+              : `${filter[0].toUpperCase()}${filter.slice(1)} requests`}
+          {" · approving a leave marks the register; a permission notes the hours beside it."}
         </p>
         <Button onClick={() => setAdding(true)} data-testid="hr-appr-new"><Plus className="h-4 w-4" />New request</Button>
       </div>
@@ -1358,9 +1467,18 @@ export const ApprovalsTab = () => {
                       <span>{when(row)}</span>
                     </p>
                     {row.reason && <p className="mt-1 text-sm text-slate-500">{row.reason}</p>}
-                    <p className="mt-1 text-[11px] text-slate-400">
-                      Logged by {row.requested_by || "—"}
-                      {row.decided_by ? ` · ${row.status} by ${row.decided_by}` : ""}
+                    <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                      {/* A request its own subject raised reads differently from one HR
+                          typed: somebody is waiting on the answer, and the reason on it is
+                          theirs rather than a note taken over the phone. */}
+                      {row.source === "self" ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 font-semibold text-sky-700" data-testid={`hr-appr-self-${row.id}`}>
+                          <UserRound className="h-3 w-3" />Raised by {row.employee_name || "them"}
+                        </span>
+                      ) : (
+                        <span>Logged by {row.requested_by || "—"}</span>
+                      )}
+                      {row.decided_by ? <span>· {row.status} by {row.decided_by}</span> : null}
                     </p>
                   </div>
 

@@ -81,16 +81,24 @@ CORE_INDEXES = [
     # for the life of the install. The month view and payroll both scan {date} as a range,
     # which the same compound key answers through its prefix.
     ("attendance", [("date", 1), ("employee_id", 1)], "date_employee"),
-    # _clear_leave_marks, when an approval is revoked or deleted.
+    # _clear_marks, when an approval is revoked or deleted.
     ("attendance", [("approval_id", 1)], "approval_id"),
     # The clock in the header -- see routers/v3_clock.py. Every press reads and writes one
     # person's one document for today, which is this key exactly, and it is read again on
     # every page load by everyone signed in. Their own month scans {user_id} with date as a
     # range, which the same compound key answers through its prefix.
     ("clock_days", [("user_id", 1), ("date", 1)], "user_date"),
+    # _clear_marks again, for the other half: a permission hangs its hours on a day's
+    # existing row rather than owning one, so taking it back finds them by their own key.
+    ("attendance", [("permission_id", 1)], "permission_id"),
     # The approvals list: filtered by status, newest first.
     ("approvals", [("status", 1), ("requested_at", -1)], "status_recent"),
     ("approvals", [("id", 1)], "id"),
+    # A person's own leave and permission, read off their profile -- see
+    # routers/v3_me.py. Their year is a range scan on from_date within one employee,
+    # which this compound key answers, and the same prefix serves the clash check that
+    # runs before every leave they raise.
+    ("approvals", [("employee_id", 1), ("from_date", -1)], "employee_dates"),
     # A month's payslips, and the single line an adjustment writes to.
     ("payslips", [("month", 1), ("employee_id", 1)], "month_employee"),
     ("payroll_runs", [("month", 1)], "month"),

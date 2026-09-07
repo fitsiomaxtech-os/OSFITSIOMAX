@@ -33,10 +33,15 @@ import {
   ChevronRight,
   Clock,
   Home,
+  Palmtree,
   ShieldAlert,
   UserRound,
 } from "lucide-react";
 import { myAttendance, myProfile } from "@/lib/api";
+// The third tab, in its own file. Same reason HROpsTabs.jsx lives beside HRBoard.jsx: this
+// page is already six hundred lines of two tabs, and the one that writes is the one most
+// likely to be edited on its own.
+import { TimeOffTab } from "@/components/MyTimeOff";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 // The same formatters the header clock and HR's register read a day with, so an hour and
@@ -45,6 +50,11 @@ import { duration, hours, prettyTime } from "@/lib/clock";
 
 const TABS = [
   { key: "attendance", label: "Attendance", icon: Clock },
+  // Between the two, because that is the order the questions come in: what did I work,
+  // what am I asking for, and who am I on the books. Time Off is also the only tab that
+  // writes, and what it writes lands on the tab to its left -- an approved leave marks
+  // those days, an approved permission notes its hours on one of them.
+  { key: "timeoff", label: "Time Off", icon: Palmtree },
   { key: "profile", label: "My Profile", icon: UserRound },
 ];
 
@@ -192,6 +202,10 @@ const TodayStrip = ({ row, standard }) => {
  *  how many days, and how many hours — and one row of twelve tiles answers neither. */
 const MonthSummary = ({ totals, month, today }) => {
   const behind = (totals?.balance_minutes || 0) < 0;
+  // Only when there is some. A "0.0h" permission tile on every month of every person who
+  // has never asked for an hour off would be a column of zeroes explaining a feature
+  // rather than a figure reporting a month.
+  const permission = (totals?.permission_minutes || 0) > 0;
   return (
     <>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6" data-testid="my-attendance-counts">
@@ -208,7 +222,7 @@ const MonthSummary = ({ totals, month, today }) => {
           <CalendarClock className="h-4 w-4 text-slate-400" />
           Hours — {monthLabel(month)}
         </h3>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${permission ? "lg:grid-cols-7" : "lg:grid-cols-6"}`}>
           <Tile
             label="Expected"
             value={plainHours(totals?.expected_minutes)}
@@ -218,6 +232,18 @@ const MonthSummary = ({ totals, month, today }) => {
           <Tile label="Worked" value={plainHours(totals?.worked_minutes)} tone="text-emerald-600" sub="Actual hours" testid="my-attendance-worked" />
           <Tile label="Extra" value={signedHours(totals?.extra_minutes)} tone="text-emerald-600" sub="Overtime" testid="my-attendance-overtime" />
           <Tile label="On breaks" value={plainHours(totals?.break_minutes)} tone="text-amber-600" sub="Off the clock" testid="my-attendance-breaks" />
+          {/* Beside the breaks, because both are time out of a working day. The
+              difference is that somebody signed this one off in advance — which is also
+              why it is worth seeing next to a balance it helps explain. */}
+          {permission && (
+            <Tile
+              label="Permission"
+              value={plainHours(totals?.permission_minutes)}
+              tone="text-sky-600"
+              sub={`${totals?.permission_days ?? 0} day${totals?.permission_days === 1 ? "" : "s"}, approved`}
+              testid="my-attendance-permission"
+            />
+          )}
           <Tile
             label="Expected so far"
             value={plainHours(totals?.expected_to_date_minutes)}
@@ -282,6 +308,11 @@ const MonthTable = ({ rows }) => {
                   {signedHours(r.balance_minutes)}
                 </span>
               </p>
+              {r.permission && (
+                <p className="mt-1 text-[11px] font-semibold text-sky-600" data-testid={`my-attendance-permission-${r.date}`}>
+                  Permission {prettyTime(r.permission.from)}–{prettyTime(r.permission.to)} · {duration(r.permission.minutes)}
+                </p>
+              )}
               {r.note && <p className="mt-1 text-[11px] text-slate-400">{r.note}</p>}
             </li>
           );
@@ -332,7 +363,18 @@ const MonthTable = ({ rows }) => {
                   <td className="px-3 py-2.5">
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${style.cls}`}>{style.label}</span>
                   </td>
-                  <td className="max-w-[14rem] truncate px-4 py-2.5 text-slate-400" title={r.note || ""}>{r.note || "—"}</td>
+                  {/* A short day with an approved permission on it is a short day on
+                      purpose, and this column is where a day says why. The permission
+                      leads: it is the answer to the question the balance beside it
+                      raises. */}
+                  <td className="max-w-[16rem] truncate px-4 py-2.5 text-slate-400" title={[r.permission ? `Permission ${r.permission.from}–${r.permission.to}${r.permission.reason ? `: ${r.permission.reason}` : ""}` : "", r.note].filter(Boolean).join(" · ")}>
+                    {r.permission && (
+                      <span className="mr-1.5 whitespace-nowrap rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700" data-testid={`my-attendance-permission-${r.date}`}>
+                        {duration(r.permission.minutes)} permission
+                      </span>
+                    )}
+                    {r.note || (r.permission ? "" : "—")}
+                  </td>
                 </tr>
               );
             })}
@@ -577,11 +619,11 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
             <h2 className="truncate text-lg font-bold text-emerald-700 sm:text-xl" data-testid="my-profile-greeting">
               Hi, {user?.full_name}
             </h2>
-            <p className="truncate text-xs text-slate-500">Your attendance, hours and record — all in one place.</p>
+            <p className="truncate text-xs text-slate-500">Your attendance, hours, time off and record — all in one place.</p>
           </div>
         </div>
-        <div className="w-full sm:w-72" data-testid="my-profile-tabs-wrap">
-          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={2} />
+        <div className="w-full sm:w-96" data-testid="my-profile-tabs-wrap">
+          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={3} />
         </div>
       </div>
 
@@ -589,7 +631,9 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
           somebody opened to read one thing, so each is mounted only while it is the tab.
           Switching back re-reads, which is right for a page whose whole subject is what
           happened today. */}
-      {tab === "attendance" ? <AttendanceTab /> : <ProfileTab roleLabel={roleLabel} />}
+      {tab === "attendance" ? <AttendanceTab />
+        : tab === "timeoff" ? <TimeOffTab />
+          : <ProfileTab roleLabel={roleLabel} />}
     </div>
   );
 };
