@@ -27,6 +27,19 @@ const TYPES = [
   { key: "zumba", label: "Zumba", kpi: "Zumba Stages", title: "Zumba", tone: "pink", records: "Registrations" },
 ];
 
+// Branch stages the boards do something with, keyed by the role the backend stamps on the
+// row (see constants.SALES_STAGE_ROLES_BY_NAME). Shown as a badge so this table says which
+// rows carry behaviour: the name is safe to change -- that is the point of the role -- but
+// a Super Admin deleting one is removing the stage a booking lands on, and nothing on this
+// screen used to hint at the difference between that row and any other.
+const ROLE_LABELS = {
+  appointment: "Books appointments",
+  cancelled: "Frees the slot",
+  rnr: "Not reached",
+  portfolio: "Portfolio dialog",
+  follow_up: "Appointment exit",
+};
+
 // Tailwind only ships classes it can actually see written out, so the tones are spelled in
 // full rather than built as `border-${tone}-500`.
 const TONE_CLASSES = {
@@ -143,7 +156,14 @@ export const PipelineStageManagement = ({ onBack }) => {
         {TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
       </select>
 
-      <div className="hidden gap-2 rounded-lg bg-slate-100 p-1 sm:grid sm:grid-cols-5">
+      {/* One column per pipeline, counted from TYPES rather than written as a number: at a
+          fixed five the sixth (Zumba) wrapped onto a row of its own, reading as a stray
+          rather than as the last of six. A seventh pipeline should not need this line edited
+          again -- adding it to TYPES is the whole change. */}
+      <div
+        className="hidden gap-2 rounded-lg bg-slate-100 p-1 sm:grid"
+        style={{ gridTemplateColumns: `repeat(${TYPES.length}, minmax(0, 1fr))` }}
+      >
         {TYPES.map((t) => (
           <button
             key={t.key}
@@ -181,6 +201,19 @@ export const PipelineStageManagement = ({ onBack }) => {
                     {s.applies_to ? (
                       <span className="ml-2 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-slate-500">
                         {s.applies_to === "branch_admin" ? "Branch Admin only" : "Pre Sales only"}
+                      </span>
+                    ) : null}
+                    {/* A stage the boards act on rather than merely list. Renaming it is
+                        safe -- the behaviour is pinned to the role, not to the name -- but
+                        deleting it is not, and neither is assuming the branch will still
+                        recognise the position under a name that means something else. Said
+                        here because from this table one row looks much like another. */}
+                    {ROLE_LABELS[s.role] ? (
+                      <span
+                        className="ml-2 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-amber-700"
+                        title={`The branch boards act on this stage (${ROLE_LABELS[s.role]}). Renaming it is safe; deleting it is not.`}
+                      >
+                        {ROLE_LABELS[s.role]}
                       </span>
                     ) : null}
                   </td>

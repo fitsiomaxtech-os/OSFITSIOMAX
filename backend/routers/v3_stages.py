@@ -45,6 +45,16 @@ ZUMBA_FIELD = "stage"
 
 StageType = Literal["pre_sales", "sales", "consultation", "head_consultation", "recruitment", "zumba"]
 
+# What a role-bearing stage is for, in the words the refusal to delete it uses. The role
+# itself lives on the stage row; see constants.SALES_STAGE_ROLES_BY_NAME.
+ROLE_DESCRIPTIONS = {
+    "appointment": "hold a booked appointment",
+    "cancelled": "cancel an appointment and free the expert's slot",
+    "rnr": "park a lead nobody could reach",
+    "portfolio": "hold a patient booked through the Portfolio dialog",
+    "follow_up": "offer Follow Up as an exit from a booked appointment",
+}
+
 
 class StageCreate(BaseModel):
     name: str
@@ -206,6 +216,16 @@ async def delete_stage(stage_id: str, _: V3UserOut = Depends(v3_require_roles("s
     stage = await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0})
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
+    # A stage carrying a role is one the branch boards act on -- it is where a booking
+    # lands, or what frees the consultation slot. Renaming it is safe, which is what the
+    # role is for; deleting it leaves the behaviour with nowhere to go, and the board finds
+    # out at the moment somebody tries to book.
+    if stage.get("role"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{stage['name']}' is what the branch boards use to {ROLE_DESCRIPTIONS.get(stage['role'], 'run part of the pipeline')}. "
+                   "Rename it if you want it called something else — deleting it would stop that working.",
+        )
     if stage["type"] == RECRUITMENT_TYPE:
         # Candidates would be orphaned exactly like leads are, just via a different key.
         in_use = await v3_col("candidates").count_documents({"stage_id": stage_id})

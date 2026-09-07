@@ -8,6 +8,9 @@ from constants import (
     V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
     BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE,
     BRANCH_CANCELLED_STAGE,
+    SALES_STAGE_ROLES_BY_NAME,
+    SALES_STAGE_ROLE_CANCELLED,
+    SALES_STAGE_ROLE_RNR,
 )
 import lead_control
 from stage_utils import get_first_stage_name, first_branch_stage_for, realign_branch_stage_leads
@@ -163,6 +166,30 @@ async def ensure_rnr_stage() -> None:
     })
 
 
+async def ensure_sales_stage_roles() -> None:
+    """Stamp the behavioural Branch stages with the role that carries their behaviour.
+
+    Four of the sales stages do something rather than merely mark a position: the board
+    opens its booking dialog on Appointment, releases the consultation slot on Cancelled,
+    reads RNR as "not reached yet", and keeps Portfolio off the strip because it is entered
+    from its own scheduling dialog. Every one of those was a comparison against the stage's
+    *name*, on both sides of the wire — so renaming one in CI/CD ROOTS did not rename a
+    label, it detached the behaviour from the stage and left the booking endpoint rejecting
+    the move as an unknown final_stage.
+
+    Matched by name once and only for rows that have no role yet. A stage that already
+    carries one is never re-matched, which is the whole point: after this has run, the name
+    belongs to Super Admin and the role stays put through every rename.
+
+    Idempotent, and a no-op until the sales stages exist.
+    """
+    for name, role in SALES_STAGE_ROLES_BY_NAME.items():
+        await v3_col("pipeline_stages").update_many(
+            {"type": "sales", "name": name, "role": {"$exists": False}},
+            {"$set": {"role": role}},
+        )
+
+
 async def ensure_branch_cancelled_stage() -> None:
     """Give the Branch (sales) pipeline its Cancelled pill, last.
 
@@ -183,8 +210,16 @@ async def ensure_branch_cancelled_stage() -> None:
 
     Idempotent, and a no-op until the sales stages exist.
     """
+    # By role first, then by name for a database stamped before roles existed. Matching on
+    # the name alone re-created the stage the moment Super Admin renamed it: the rename
+    # succeeded, the next restart found no row called "Cancelled", and the branch ended up
+    # with both the renamed stage and a fresh Cancelled beside it.
     existing = await v3_col("pipeline_stages").find_one(
-        {"type": "sales", "name": BRANCH_CANCELLED_STAGE}, {"_id": 0, "id": 1}
+        {"type": "sales", "$or": [
+            {"role": SALES_STAGE_ROLE_CANCELLED},
+            {"name": BRANCH_CANCELLED_STAGE},
+        ]},
+        {"_id": 0, "id": 1},
     )
     if existing:
         return
@@ -201,6 +236,7 @@ async def ensure_branch_cancelled_stage() -> None:
         "type": "sales",
         "order": (last.get("order") or 0) + 1,
         "is_final": True,
+        "role": SALES_STAGE_ROLE_CANCELLED,
         "created_at": now_iso(),
     })
 
@@ -613,6 +649,7 @@ async def ensure_branch_admin_stages() -> None:
             "order": entry_order + 1,
             "is_final": False,
             "applies_to": lead_control.BRANCH_ADMIN,
+            "role": SALES_STAGE_ROLE_RNR,
             "created_at": now_iso(),
         },
     ])

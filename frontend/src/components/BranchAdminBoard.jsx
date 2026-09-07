@@ -48,7 +48,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { QuickDateFilterBar, intersectDateFilters, quickDatePreset } from "@/components/QuickDateFilterBar";
-import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
+import { StageTabBar } from "@/components/ui/stage-tab";
 import { RescheduledTag } from "@/components/ui/lead-marks";
 import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
 import {
@@ -90,19 +90,48 @@ import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 import { isCourseComplete } from "@/lib/leadStage";
 
-// Branch (sales) stages this file has to name out loud, kept here rather than spelled at
-// each site. They are the DB's own strings and the backend's constants.py holds the same
-// three -- a rename in Pipeline Stage Management breaks the pair together, which is at
-// least visible, where two spellings drifting apart is not.
+// The Branch (sales) stages this file has to recognise, addressed by the role the backend
+// stamps on the stage row rather than by what the stage is called.
 //
-// APPOINTMENT_STAGE reads "Appointment" on screen; the long form is the stored value.
-// See STAGE_DISPLAY_LABELS in ui/stage-tab.
-const APPOINTMENT_STAGE = "Appointment Date & Time";
-const BRANCH_RNR_STAGE = "RNR";
-const BRANCH_CANCELLED_STAGE = "Cancelled";
-// Still a stage a lead can be moved to -- schedule-portfolio puts them there -- but no
-// longer one of the pills on the Branch Leads strip. See leadPillStages.
-const BRANCH_PORTFOLIO_STAGE = "Portfolio";
+// These stages do something: the card opens its booking dialog on `appointment`, the move
+// releases the consultation slot on `cancelled`, `rnr` reads as "not reached yet", and
+// `portfolio` stays off the strip because it is entered from its own scheduling dialog.
+// Every one of those was a comparison against the stage's name, matching the literals below
+// -- so renaming one in CI/CD ROOTS did not rename a label, it detached the behaviour from
+// the stage: the pill stopped opening the booking dialog, the cancel stopped freeing the
+// hour, and the backend rejected the booking as an unknown final_stage. Super Admin could
+// see the stage in the list and could not safely touch it.
+//
+// The role travels with the row through a rename, so the name is Super Admin's now.
+// See constants.SALES_STAGE_ROLES_BY_NAME and seed.ensure_sales_stage_roles.
+const STAGE_ROLE_APPOINTMENT = "appointment";
+const STAGE_ROLE_CANCELLED = "cancelled";
+const STAGE_ROLE_RNR = "rnr";
+const STAGE_ROLE_PORTFOLIO = "portfolio";
+const STAGE_ROLE_FOLLOW_UP = "follow_up";
+
+// What each role was called when it shipped. Only ever a fallback: a stage row that predates
+// the stamping pass carries no role, and until the next backend restart stamps it, the name
+// is all there is to go on.
+const STAGE_ROLE_FALLBACK_NAMES = {
+  [STAGE_ROLE_APPOINTMENT]: "Appointment Date & Time",
+  [STAGE_ROLE_CANCELLED]: "Cancelled",
+  [STAGE_ROLE_RNR]: "RNR",
+  [STAGE_ROLE_PORTFOLIO]: "Portfolio",
+  [STAGE_ROLE_FOLLOW_UP]: "Follow Up",
+};
+
+// Does this stage row carry `role`? Trusts the stamp where there is one, so a stage renamed
+// to something that happens to match another role's old name is still itself.
+const stageHasRole = (stage, role) => (
+  stage?.role ? stage.role === role : stage?.name === STAGE_ROLE_FALLBACK_NAMES[role]
+);
+
+// What the stage carrying `role` is currently called, for the sites that compare a lead's
+// stored branch_stage string rather than a row.
+const stageNameForRole = (stages, role) => (
+  (stages || []).find((s) => stageHasRole(s, role))?.name || STAGE_ROLE_FALLBACK_NAMES[role]
+);
 
 // Where the Consultation tab opens: the head of the branch consultation pipeline, which is
 // where booking an appointment in Branch Leads puts a patient.
@@ -1214,7 +1243,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     if (!mirrorStage) return stages;
     return stages.filter((s) => s.mirrors_stage || (
       s.name !== realEntryStage?.name
-      && s.name !== BRANCH_PORTFOLIO_STAGE
+      && !stageHasRole(s, STAGE_ROLE_PORTFOLIO)
       && !s.is_final
     ));
   }, [stages, mirrorStage, realEntryStage]);
@@ -2132,7 +2161,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               if (visible.length === 0) {
                 return (
                   <p className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-mobile-empty">
-                    No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
+                    No patients {stageFilter ? `in stage "${stageFilter}"` : "yet"}.
                   </p>
                 );
               }
@@ -2166,7 +2195,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             className="shrink-0 rounded-[5px] border px-2 py-0.5 text-[10px] font-medium"
                             style={hex ? { background: `${hex}14`, color: hex, border: `1px solid ${hex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
                           >
-                            {rowStage ? stageDisplayLabel(rowStage) : "—"}
+                            {rowStage ? rowStage : "—"}
                           </span>
                         </div>
                         {lead.patient_number && <p className="truncate font-mono text-[10px] text-slate-400">{lead.patient_number}</p>}
@@ -2344,7 +2373,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             had, and a fitness arm's nine would have been a third wrong
                             answer to write down. */}
                         <td colSpan={5 + intakeQuestions.length + (showAssignedPhysio ? 1 : 0)} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
-                          No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
+                          No patients {stageFilter ? `in stage "${stageFilter}"` : "yet"}.
                         </td>
                       </tr>
                     );
@@ -2471,11 +2500,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                         </td>
                         <td className="px-4 py-3">
                           <span
-                            title={rowStage ? stageDisplayLabel(rowStage) : undefined}
+                            title={rowStage ? rowStage : undefined}
                             className="inline-block max-w-full truncate rounded-[5px] border px-2.5 py-0.5 align-middle text-xs font-medium"
                             style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
                           >
-                            {rowStage ? stageDisplayLabel(rowStage) : "—"}
+                            {rowStage ? rowStage : "—"}
                           </span>
                         </td>
                       </tr>
@@ -2713,7 +2742,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   // seeds consultation_stage server-side -- and the Consultant still drives it from their
   // own board. This is which stages this card offers to move a lead to, not which stages
   // exist.
-  const pipelineStages = entryStages.filter((s) => s.name !== BRANCH_CANCELLED_STAGE);
+  const pipelineStages = entryStages.filter((s) => !stageHasRole(s, STAGE_ROLE_CANCELLED));
   // A lead whose appointment is booked and not yet consulted. From here the branch has
   // four things it can do, and none of them is moving the patient forward: forward is the
   // consultation happening, which the Consultant drives from their own board.
@@ -2722,10 +2751,16 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   // shorter pipeline rather than as a stage with few exits, and the card is the one place
   // the whole journey is laid out -- a Branch Admin looking at it is often checking where
   // a patient is going next, not moving them.
-  const inAppointmentStage = lead.branch_stage === APPOINTMENT_STAGE;
+  const appointmentStageName = stageNameForRole(stages, STAGE_ROLE_APPOINTMENT);
+  const cancelledStageName = stageNameForRole(stages, STAGE_ROLE_CANCELLED);
+  const inAppointmentStage = lead.branch_stage === appointmentStageName;
   // The three real stages reachable from Appointment. Reschedule is the fourth exit and is
   // not in here, because it is not a stage at all -- see the pill itself.
-  const APPOINTMENT_EXITS = [BRANCH_RNR_STAGE, "Follow Up", BRANCH_CANCELLED_STAGE];
+  const APPOINTMENT_EXITS = [
+    stageNameForRole(stages, STAGE_ROLE_RNR),
+    stageNameForRole(stages, STAGE_ROLE_FOLLOW_UP),
+    cancelledStageName,
+  ];
   // `!!name` guards the matchesBranchStage call below: a lead with no consultation_stage
   // has not been handed over, and an undefined name is in neither pipelines' stage list.
   const isConsultationOnlyStage = (name) => !!name && !stages.some((s) => s.name === name);
@@ -2824,7 +2859,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
         appointment_date: handover.date,
         appointment_time: handover.time,
         physio_id: doc.id,
-        final_stage: APPOINTMENT_STAGE,
+        final_stage: appointmentStageName,
         ...(handover.duration ? { duration: handover.duration } : {}),
       });
       toast.success(`${handover.time} moved to ${doc.full_name}`);
@@ -3041,7 +3076,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   // writes it (ensure_rnr_stage). Unlike Follow Up it is not matched loosely: RNR is an
   // initialism, and a loose test for three letters catches stage names that merely contain
   // them.
-  const atRnrStage = lead.branch_stage === BRANCH_RNR_STAGE;
+  const atRnrStage = lead.branch_stage === stageNameForRole(stages, STAGE_ROLE_RNR);
   // Drawn for a lead that has been called and not answered even after it has moved on:
   // the attempts are the reason it sits where it does, and they do not stop being true.
   const showRnrCard = atRnrStage || rnrCount > 0;
@@ -3166,7 +3201,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   <span className="rounded-[5px] border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700" data-testid="branch-lead-stage">
                     {/* Named the same way the row that opened this popup was: opened from
                         Leads it reads Leads, and the pipeline below highlights Leads too. */}
-                    {headerStageName ? stageDisplayLabel(headerStageName) : "No Stage"}
+                    {headerStageName ? headerStageName : "No Stage"}
                   </span>
                   {lead.consultation_fee && <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700 ring-1 ring-teal-100">Fee Rs.{lead.consultation_fee}</span>}
                   {lead.package_amount && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100">Pkg Rs.{lead.package_amount}</span>}
@@ -3444,11 +3479,11 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                       // back on the calendar, and the lead stops here. Asked before, not
                       // reported after — the pill sits one press from Follow Up and there
                       // is nothing on this card that undoes it.
-                      if (stage === BRANCH_CANCELLED_STAGE) {
+                      if (stage === cancelledStageName) {
                         setCancelDraft(true);
                         return;
                       }
-                      if (stage === APPOINTMENT_STAGE) {
+                      if (stage === appointmentStageName) {
                         setApptDraft({
                           appointment_date: lead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
                           // Left blank on purpose — the time has to be picked from the
@@ -3458,7 +3493,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                           physio_id: lead.assigned_physio_id || "",
                           notes: "",
                           duration: null,
-                          final_stage: APPOINTMENT_STAGE,
+                          final_stage: appointmentStageName,
                         });
                         return;
                       }
@@ -3486,12 +3521,12 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                         type="button"
                         disabled={isActive || notYetReached || isMirror || blockedFromAppointment}
                         onClick={handleClick}
-                        title={blockedFromAppointment ? `${stageDisplayLabel(stage)} is not reachable from Appointment — the consultation moves the patient on from here` : undefined}
+                        title={blockedFromAppointment ? `${stage} is not reachable from Appointment — the consultation moves the patient on from here` : undefined}
                         className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed ${blockedFromAppointment ? "disabled:opacity-40" : "disabled:opacity-90"}`}
                         style={isActive ? { background: tint, color: "#ffffff" } : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }}
                         data-testid={`branch-stage-btn-${stage}`}
                       >
-                        {stageDisplayLabel(stage)}
+                        {stage}
                       </button>
                     );
                   })}
@@ -4215,7 +4250,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   setCancelling(true);
                   // Stays open if the move was refused, so the reason is read beside the
                   // button that caused it rather than over a card that has just closed.
-                  const moved = await moveStage(BRANCH_CANCELLED_STAGE);
+                  const moved = await moveStage(cancelledStageName);
                   setCancelling(false);
                   if (moved) setCancelDraft(false);
                 }}

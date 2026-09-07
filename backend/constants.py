@@ -54,6 +54,48 @@ BRANCH_ADMIN_RNR_STAGE = "RNR"
 # two pipelines, two stages, and the Branch Leads card shows both.
 BRANCH_CANCELLED_STAGE = "Cancelled"
 
+# Where a booked consultation lands. The other half of the booking dialog's two outcomes,
+# BRANCH_CANCELLED_STAGE being the first.
+BRANCH_APPOINTMENT_STAGE = "Appointment Date & Time"
+
+# ------------------------------------------------------------------ Stage roles ("sales")
+#
+# A handful of Branch stages are not just positions on a strip: the board opens the booking
+# dialog on one, frees the consultation slot on another, and hides a third from the pills
+# because it is reached by its own dialog. Every one of those behaviours used to be written
+# as a comparison against the stage's *name*, on both sides of the wire — which meant Super
+# Admin renaming the stage in CI/CD ROOTS silently detached the behaviour from the stage.
+# Renaming "Appointment Date & Time" did not rename a label; it stopped appointments being
+# bookable, and the booking endpoint rejected the move outright (see its final_stage check).
+#
+# So the behaviour hangs off a `role` stamped on the stage document instead. The name is
+# then Super Admin's to change: the role travels with the row through a rename, and every
+# site that has to recognise the stage asks for the role and gets whatever it is called now.
+#
+# This map is only the initial stamping, applied by name once to stages that predate the
+# field (see seed.ensure_sales_stage_roles). It is not consulted at runtime — a stage that
+# already carries a role is never re-matched against these names.
+SALES_STAGE_ROLE_APPOINTMENT = "appointment"
+SALES_STAGE_ROLE_CANCELLED = "cancelled"
+SALES_STAGE_ROLE_RNR = "rnr"
+SALES_STAGE_ROLE_PORTFOLIO = "portfolio"
+# Not a behaviour of its own, but one of the three exits the board offers a lead standing at
+# Appointment. Named by role for the same reason as the rest: renamed, it silently vanished
+# from that list rather than being renamed in it.
+SALES_STAGE_ROLE_FOLLOW_UP = "follow_up"
+
+SALES_STAGE_ROLES_BY_NAME = {
+    BRANCH_APPOINTMENT_STAGE: SALES_STAGE_ROLE_APPOINTMENT,
+    BRANCH_CANCELLED_STAGE: SALES_STAGE_ROLE_CANCELLED,
+    BRANCH_ADMIN_RNR_STAGE: SALES_STAGE_ROLE_RNR,
+    "Portfolio": SALES_STAGE_ROLE_PORTFOLIO,
+    "Follow Up": SALES_STAGE_ROLE_FOLLOW_UP,
+}
+
+# What each role falls back to when no stage carries it — a database that predates the
+# stamping, or one where Super Admin has deleted the stage outright.
+SALES_STAGE_ROLE_FALLBACKS = {v: k for k, v in SALES_STAGE_ROLES_BY_NAME.items()}
+
 # Branch's own consultation pipeline. "New Appointment" was retired, and the stage that
 # replaced it — "Follow Up" — has since been renamed "Consultation Booked" (see
 # seed.migrate_consultation_stages). The Head Physio's independent pipeline below still

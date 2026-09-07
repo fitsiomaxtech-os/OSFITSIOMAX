@@ -16,7 +16,8 @@ from deps import (
 import lead_control
 from constants import (
     V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
-    BRANCH_CANCELLED_STAGE,
+    BRANCH_CANCELLED_STAGE, BRANCH_APPOINTMENT_STAGE,
+    SALES_STAGE_ROLE_APPOINTMENT, SALES_STAGE_ROLE_CANCELLED, SALES_STAGE_ROLE_FALLBACKS,
 )
 from stage_utils import branch_stage_names_for_branch, first_branch_stage_for_branch, get_first_stage_name
 from schemas.v3 import (
@@ -47,6 +48,20 @@ async def _branch_stage_names(branch_id: Optional[str] = None) -> list:
     rows = await v3_col("pipeline_stages").find({"type": "sales"}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
     names = [r["name"] for r in rows]
     return names or V3_BRANCH_STAGES
+
+
+async def _sales_stage_for_role(role: str) -> str:
+    """The current name of the Branch stage carrying `role`.
+
+    The stage a behaviour belongs to is identified by its role, not by what it is called,
+    so Super Admin can rename it in CI/CD ROOTS without the behaviour coming off it. Falls
+    back to the name the role shipped under, for a database whose stages predate the
+    stamping pass (seed.ensure_sales_stage_roles) or where the stage has been deleted.
+    """
+    row = await v3_col("pipeline_stages").find_one(
+        {"type": "sales", "role": role}, {"_id": 0, "name": 1}
+    )
+    return row["name"] if row else SALES_STAGE_ROLE_FALLBACKS[role]
 
 
 async def _branch_stages(branch_id: str) -> list:
@@ -507,7 +522,7 @@ async def v3_move_branch_stage(lead_id: str, payload: V3BranchStageInput, user: 
     # appointment behind it is off. Idempotent, since a lead already cancelled has no rows
     # left in new_appointment to match.
     freed = 0
-    if payload.branch_stage == BRANCH_CANCELLED_STAGE:
+    if payload.branch_stage == await _sales_stage_for_role(SALES_STAGE_ROLE_CANCELLED):
         res = await v3_col("appointments").update_many(
             {"lead_id": lead_id, "status": "new_appointment"},
             {"$set": {"status": "cancelled", "updated_at": now_iso()}},
@@ -598,7 +613,7 @@ async def v3_assign_physio(lead_id: str, payload: V3AssignPhysioInput, user: V3U
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
         "physio_assigned_at": now_iso(),
-        "branch_stage": "Appointment Date & Time",
+        "branch_stage": await _sales_stage_for_role(SALES_STAGE_ROLE_APPOINTMENT),
         "consultation_stage": consultation_stage,
         "updated_at": now_iso(),
     }})
@@ -621,7 +636,11 @@ class V3BranchAppointmentInput(BaseModel):
     appointment_time: str   # HH:MM
     physio_id: str
     notes: Optional[str] = ""
-    final_stage: str = "Appointment Date & Time"   # "Appointment Date & Time" or "Cancelled"
+    # The two outcomes of the booking dialog, named by whatever Super Admin currently calls
+    # the stages carrying the `appointment` and `cancelled` roles. The default is the name
+    # the appointment stage shipped under; the endpoint accepts that spelling whatever the
+    # stage has since been renamed to, so a browser holding a stale chunk keeps booking.
+    final_stage: str = BRANCH_APPOINTMENT_STAGE
     # Length of the picked slot, carried from the expert's published calendar so the
     # Calendar tab can render the real end time (09:30–10:00) rather than assuming 30.
     duration: Optional[int] = None
@@ -635,8 +654,25 @@ class V3BranchAppointmentInput(BaseModel):
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
 async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointmentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Schedule appointment date/time, assign physio, add notes, then move to final stage."""
-    if payload.final_stage not in ("Appointment Date & Time", "Cancelled"):
-        raise HTTPException(status_code=400, detail="final_stage must be 'Appointment Date & Time' or 'Cancelled'")
+    # Resolved from the pipeline rather than compared against literals: this check used to
+    # read `not in ("Appointment Date & Time", "Cancelled")`, so renaming either stage in
+    # CI/CD ROOTS made every booking a 400 — the board sent the stage's real name and the
+    # endpoint only knew the one it shipped with.
+    appointment_stage = await _sales_stage_for_role(SALES_STAGE_ROLE_APPOINTMENT)
+    cancelled_stage = await _sales_stage_for_role(SALES_STAGE_ROLE_CANCELLED)
+    # The shipped names stay accepted as aliases for their roles, so a browser still running
+    # a chunk from before a rename books onto the renamed stage instead of being rejected.
+    aliases = {
+        BRANCH_APPOINTMENT_STAGE: appointment_stage,
+        BRANCH_CANCELLED_STAGE: cancelled_stage,
+    }
+    final_stage = aliases.get(payload.final_stage, payload.final_stage)
+    if final_stage not in (appointment_stage, cancelled_stage):
+        raise HTTPException(
+            status_code=400,
+            detail=f"final_stage must be '{appointment_stage}' or '{cancelled_stage}'",
+        )
+    booking = final_stage == appointment_stage
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -665,7 +701,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     # or hand the appointment to another expert, and calling that a reschedule would put
     # the tag on patients who were never moved at all.
     is_reschedule = bool(
-        payload.final_stage == "Appointment Date & Time"
+        booking
         and prior_appt
         and prior_appt.get("slot_time")
         and prior_appt["slot_time"] != slot_time
@@ -674,7 +710,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     # Someone else already holding this exact slot blocks the booking — the slot belongs
     # to whichever client took it. Re-picking the same slot for the SAME lead is fine
     # (that's a reschedule onto itself / a notes edit), so this lead is excluded.
-    if payload.final_stage == "Appointment Date & Time":
+    if booking:
         clash = await v3_col("appointments").find_one(
             {
                 "doctor_id": payload.physio_id,
@@ -698,7 +734,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
         "physio_assigned_at": now_iso(),
-        "branch_stage": payload.final_stage,
+        "branch_stage": final_stage,
         "updated_at": now_iso(),
     }
     # When the appointment is booked (not cancelled), hand the lead to BOTH consultation
@@ -708,7 +744,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     #     the pill the Consultation tab opens on and where the booking is visible until
     #     the consultant sees the patient
     # Existing values are never overwritten, so a lead already further along stays put.
-    if payload.final_stage == "Appointment Date & Time":
+    if booking:
         updates["consultation_stage"] = lead.get("consultation_stage") or (await _consultation_stage_names())[0]
         updates["head_consultation_stage"] = lead.get("head_consultation_stage") or (await _head_consultation_stage_names())[0]
     if is_reschedule:
@@ -728,7 +764,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     # is what the Calendar tab renders and what marks the expert's slot as Booked on the
     # Consultant Calendar. Both must be written or the booking is invisible to scheduling.
     existing_appt = prior_appt
-    if payload.final_stage == "Cancelled":
+    if not booking:
         # Frees the slot again for everyone else.
         await v3_col("appointments").update_many(
             {"lead_id": lead_id, "status": "new_appointment"},
@@ -801,7 +837,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             (f"Appointment moved from {prior_appt['slot_time'].replace('T', ' ')} to "
              f"{payload.appointment_date} {payload.appointment_time} with {physio['full_name']}"
              if is_reschedule else
-             f"Appointment {payload.appointment_date} {payload.appointment_time} with {physio['full_name']} → {payload.final_stage}")
+             f"Appointment {payload.appointment_date} {payload.appointment_time} with {physio['full_name']} → {final_stage}")
             + (f" · Notes: {payload.notes.strip()}" if payload.notes else "")
         ),
         "created_by": user.full_name,

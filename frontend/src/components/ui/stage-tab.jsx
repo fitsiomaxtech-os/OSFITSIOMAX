@@ -1,7 +1,13 @@
-// Some stage names are long-form internal labels; shorten them for on-screen display
-// only — the underlying stage value (used for filtering/API calls) stays unchanged.
-const STAGE_DISPLAY_LABELS = { "Appointment Date & Time": "Appointment" };
-export const stageDisplayLabel = (name) => STAGE_DISPLAY_LABELS[name] || name;
+// A stage is called what Super Admin calls it in CI/CD ROOTS, here and everywhere else.
+//
+// There used to be a rename table on this line -- `{ "Appointment Date & Time":
+// "Appointment" }` -- shortening one stage for display while the stored value stayed long.
+// It meant the pill on a branch's board and the row in CI/CD ROOTS disagreed about the name
+// of the same stage, with no way to tell from either screen which one the pipeline actually
+// held: Super Admin read "Appointment Date & Time", the branch read "Appointment", and
+// renaming it in CI/CD ROOTS changed the second but could not change the first back.
+//
+// Shortening a long stage name is now done by renaming the stage.
 
 // Sticky segmented pill tab used to filter a leads list by stage — shared between
 // Branch Admin's Branch Leads pipeline and Consultations boards.
@@ -99,7 +105,7 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
       {stages.map((s) => (
         <StageTab
           key={s.id}
-          label={stageDisplayLabel(s.name)}
+          label={s.name}
           count={counts?.[s.name] || 0}
           active={stageFilter === s.name}
           onClick={() => setStageFilter(stageFilter === s.name ? null : s.name)}
