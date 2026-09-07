@@ -9758,17 +9758,24 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   {/* Wraps on a phone: the title keeps the first line with the close button
                       and the status badge drops to its own beneath. Side by side the badge
                       refuses to shrink and squeezes the name into a one-word column. */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 px-3 py-2 text-white sm:flex-nowrap sm:gap-3 sm:px-4 sm:py-2.5">
+                  {/* Plain header, on the theme's own white. The solid slate band was the
+                      darkest thing on a screen whose subject is the calendar underneath, and
+                      it made a title bar out of what is really just a caption: whose days
+                      these are and with which physio. Every piece in it had been picked to
+                      survive that background -- white on 15% white, text at 70% opacity --
+                      so each is restated in slate against the page, with a rule taking over
+                      the job the dark fill was doing of ending the header. */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2 text-slate-900 sm:flex-nowrap sm:gap-3 sm:px-4 sm:py-2.5">
                     <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-2.5">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-bold text-white sm:h-8 sm:w-8 sm:text-sm">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 ring-1 ring-slate-200 sm:h-8 sm:w-8 sm:text-sm">
                         {(physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "P").charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <p className="truncate text-[13px] font-semibold leading-tight sm:text-[15px]" data-testid="cons-slot-picker-physio">
-                          {selectedLead.name} <span className="font-normal text-white/70">with</span>{" "}
+                        <p className="truncate text-[13px] font-semibold leading-tight text-slate-900 sm:text-[15px]" data-testid="cons-slot-picker-physio">
+                          {selectedLead.name} <span className="font-normal text-slate-400">with</span>{" "}
                           {physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "Physio"}
                         </p>
-                        <p className="text-[10px] leading-snug text-white/70 sm:text-[11px]">
+                        <p className="text-[10px] leading-snug text-slate-500 sm:text-[11px]">
                           {courseName}{totalSessionsNeeded ? ` · ${totalSessionsNeeded} ${dayNoun}s` : ""} ·
                           {" "}{isRehabAssign ? "one a day" : "one session a day"} · {sessionMinutes} min each · {openSlotCount} slots open
                         </p>
@@ -9782,7 +9789,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             href={pickedMeetLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded bg-white/15 px-1.5 py-0.5 text-[9px] font-semibold text-white hover:bg-white/25 sm:text-[10px]"
+                            className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[9px] font-semibold text-sky-700 hover:bg-sky-100 sm:text-[10px]"
                             data-testid="cons-slot-picker-meet-link"
                           >
                             <Video className="h-3 w-3 shrink-0" />
@@ -9791,7 +9798,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         )}
                       </div>
                     </div>
-                    <button onClick={() => setShowSlotPicker(false)} className="shrink-0 rounded-full p-1 text-white/70 hover:bg-white/20" data-testid="cons-slot-picker-close">
+                    <button onClick={() => setShowSlotPicker(false)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" data-testid="cons-slot-picker-close">
                       <X className="h-4 w-4" />
                     </button>
                   </div>
