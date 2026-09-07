@@ -238,19 +238,38 @@ export const BranchExpensesPanel = ({ onChanged }) => {
 
   return (
     <div className="space-y-4" data-testid="branch-expenses-panel">
-      {/* The two figures that matter, in the shape the revenue cards above use: what is
-          waiting on somebody, and what has been settled. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4" data-testid="branch-expense-card-pending">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Approval</p>
-          <p className="mt-1 text-2xl font-bold text-amber-700">{fmt(totals.pending_total)}</p>
-          <p className="text-[11px] text-amber-600/80">{totals.pending_count} {totals.pending_count === 1 ? "request" : "requests"}</p>
-        </div>
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4" data-testid="branch-expense-card-approved">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Approved</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-700">{fmt(totals.approved_total)}</p>
-          <p className="text-[11px] text-emerald-600/80">{totals.approved_count} {totals.approved_count === 1 ? "expense" : "expenses"}</p>
-        </div>
+      {/* The two figures that matter: what is waiting on somebody, and what has been
+          settled. Two pills rather than two half-page cards — these are a pair of running
+          totals, not the revenue board, and stretched across the full width with a 24px
+          figure inside they read as the subject of the screen while the list they
+          summarise gets pushed under the fold. At pill size they sit on one short line
+          and the table starts where the eye already is.
+
+          Sized to their contents and wrapping, so a branch whose expenses run into seven
+          figures widens its own pill instead of truncating. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="branch-expense-totals">
+        <span
+          className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50/70 py-1.5 pl-3 pr-4"
+          data-testid="branch-expense-card-pending"
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+          <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Approval</span>
+          <span className="text-sm font-bold tabular-nums text-amber-700">{fmt(totals.pending_total)}</span>
+          <span className="text-[11px] text-amber-600/80">
+            · {totals.pending_count} {totals.pending_count === 1 ? "request" : "requests"}
+          </span>
+        </span>
+        <span
+          className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/70 py-1.5 pl-3 pr-4"
+          data-testid="branch-expense-card-approved"
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+          <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Approved</span>
+          <span className="text-sm font-bold tabular-nums text-emerald-700">{fmt(totals.approved_total)}</span>
+          <span className="text-[11px] text-emerald-600/80">
+            · {totals.approved_count} {totals.approved_count === 1 ? "expense" : "expenses"}
+          </span>
+        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
