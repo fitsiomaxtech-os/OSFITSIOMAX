@@ -547,7 +547,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   // of them.
   const AUDIENCE_TABS = [
     { key: "all", label: "Everything", icon: Bell, count: rows.length },
-    { key: "super_admin", label: "Direct to head office", icon: Bell, count: rows.filter((r) => (r.audience || "branch_admin") === "super_admin").length },
+    { key: "super_admin", label: "Direct to head chief", icon: Bell, count: rows.filter((r) => (r.audience || "branch_admin") === "super_admin").length },
     // Head office reads these too, and is the only side that reads all three. A physio
     // thread is not the branch's -- see BRANCH_HIDDEN_AUDIENCES -- so counting it under
     // Branch-wise, which is what "not head office's" used to do, filed it with the people

@@ -1079,9 +1079,9 @@ const feedbackTo = (physioName, hasPhysioThreads) => [
   }] : []),
   {
     key: "super_admin",
-    label: "Head office",
+    label: "Head chief",
     who: "Sumaiya Naaz",
-    blurb: "Something serious, or something about the branch itself. Goes straight to head office — your branch does not see it.",
+    blurb: "Something serious, or something about the branch itself. Goes straight to the head chief — your branch does not see it.",
   },
 ];
 
@@ -1149,9 +1149,17 @@ function FeedbackTab({ data }) {
   const messages = channelMessages([...channelRows].reverse());
   const asked = channelRows.find((f) => (f.status || "new") === "awaiting_patient") || null;
   const open = openThreadOf(channelRows);
-  const them = audience === "super_admin" ? "Head office"
+  const them = audience === "super_admin" ? "Head chief"
     : audience === "physio" ? (physioName || "Your physio")
     : "Your branch";
+  // The same side, named mid-sentence. Two of these are descriptions and fold to lower
+  // case in "with your branch"; the third is a person, and lower-casing a name reads as a
+  // typo rather than as a sentence — which is what "with abdul azis" was doing from the
+  // day the physio card went in. The head chief takes an article here and not on the
+  // card: "Nothing sent to head chief yet" is not a sentence either.
+  const themInline = audience === "physio" && physioName ? physioName
+    : audience === "super_admin" ? "the head chief"
+    : them.toLowerCase();
 
   // A patient whose physio is unassigned mid-visit would otherwise be left writing into a
   // channel whose card has gone, with no way back to one that exists.
@@ -1234,7 +1242,7 @@ function FeedbackTab({ data }) {
 
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            {messages.length > 0 ? `With ${them.toLowerCase()}` : "In your words"}
+            {messages.length > 0 ? `With ${themInline}` : "In your words"}
           </p>
           <div
             className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-3"
@@ -1242,7 +1250,7 @@ function FeedbackTab({ data }) {
           >
             {messages.length === 0 ? (
               <p className="py-6 text-center text-xs text-slate-400">
-                Nothing sent to {them.toLowerCase()} yet. Whatever you write below starts it off.
+                Nothing sent to {themInline} yet. Whatever you write below starts it off.
               </p>
             ) : messages.map((m) => {
               const own = m.author === "patient";
@@ -1312,7 +1320,7 @@ function FeedbackTab({ data }) {
           data-testid="portal-feedback-submit"
         >
           {sending ? "Sending…"
-            : audience === "super_admin" ? "Send to head office"
+            : audience === "super_admin" ? "Send to head chief"
             : audience === "physio" ? "Send to my physio"
             : "Send to my branch"}
         </Button>
