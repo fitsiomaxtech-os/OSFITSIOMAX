@@ -9806,35 +9806,30 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   {/* Treatment Fee standing — which of these treatment days are actually paid
                       for. The balance sessions still get scheduled, but they're marked unpaid
                       so nobody books them believing the money is in. */}
-                  {/* One status strip. Scheduling progress used to sit up in the purple
-                      header while the two payment badges sat down here, so the three things
-                      that describe where this booking stands were split across two bars and
-                      lined up with nothing. They read as a set now: a heading row, then the
-                      chips beneath it, each chip a full-width row on a phone so the amount
-                      and the day range inside it stay on one line. */}
+                  {/* One status strip, and one line of it. The heading and the amount used
+                      to hold a row of their own above the chips, so a strip that is five
+                      short phrases long took two rows off the top of a modal whose whole
+                      subject is the calendar underneath it. It reads left to right now --
+                      which fee, how much of it is fixed, how much is paid -- with the total
+                      collected held out at the right edge. Nothing wraps: on a screen too
+                      narrow to hold the row it scrolls sideways, rather than folding a
+                      chip's amount away from the day range it belongs to. */}
                   <div className="border-b border-slate-200 bg-slate-50 px-3 py-1.5 sm:px-4 sm:py-2" data-testid="cons-slot-picker-payment">
-                    <div className="mb-1.5 hidden items-baseline justify-between gap-2 sm:flex">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{assignFeeLabel}</span>
-                      {sessionPayment.price > 0 && (
-                        <span className="shrink-0 text-[11px] font-bold text-slate-600 sm:text-[12px]">
-                          Rs.{sessionPayment.paidAmount} of Rs.{sessionPayment.price} collected
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-stretch gap-2">
+                    <div className="flex items-stretch gap-2 overflow-x-auto whitespace-nowrap sm:gap-2.5">
+                      <span className="hidden shrink-0 self-center text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:inline">{assignFeeLabel}</span>
                       <span
-                        className="w-full rounded-md border border-emerald-900 bg-emerald-700 px-2.5 py-1 text-center text-[11px] font-bold text-white sm:w-auto sm:px-3 sm:py-1 sm:text-[12px]"
+                        className="shrink-0 rounded-md border border-emerald-900 bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white sm:px-3 sm:text-[12px]"
                         data-testid="cons-slot-picker-count"
                       >
                         {openEndedRehab ? `${sortedPickedSlots.length} ${dayNoun}${sortedPickedSlots.length === 1 ? "" : "s"} fixed` : `${sortedPickedSlots.length} of ${totalSessionsNeeded} ${dayNoun}s fixed`}
                       </span>
-                      <span className="hidden w-full rounded-md border border-emerald-300 bg-emerald-50 sm:block px-2.5 py-1 text-center text-[11px] font-bold text-emerald-700 sm:w-auto sm:px-3 sm:py-1 sm:text-left sm:text-[12px]" data-testid="cons-payment-paid">
+                      <span className="hidden shrink-0 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 sm:inline sm:px-3 sm:text-[12px]" data-testid="cons-payment-paid">
                         {sessionPayment.paid} {dayNoun}{sessionPayment.paid === 1 ? "" : "s"} PAID
                         {sessionPayment.paidAmount > 0 && <span className="ml-2 font-semibold text-emerald-600">Rs.{sessionPayment.paidAmount}</span>}
                         {sessionPayment.paid > 0 && <span className="ml-2 font-medium text-emerald-500">Day 1–{sessionPayment.paid}</span>}
                       </span>
                       {sessionPayment.unpaid > 0 ? (
-                        <span className="hidden w-full rounded-md border border-rose-300 bg-rose-50 sm:block px-2.5 py-1 text-center text-[11px] font-bold text-rose-700 sm:w-auto sm:px-3 sm:py-1 sm:text-left sm:text-[12px]" data-testid="cons-payment-unpaid">
+                        <span className="hidden shrink-0 rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700 sm:inline sm:px-3 sm:text-[12px]" data-testid="cons-payment-unpaid">
                           {sessionPayment.unpaid} {dayNoun}{sessionPayment.unpaid === 1 ? "" : "s"} UNPAID
                           {sessionPayment.dueAmount > 0 && <span className="ml-2 font-semibold text-rose-600">Rs.{sessionPayment.dueAmount}</span>}
                           <span className="ml-2 font-medium text-rose-500">
@@ -9843,8 +9838,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           </span>
                         </span>
                       ) : (
-                        <span className="hidden w-full rounded-md border border-emerald-300 bg-emerald-100 px-2.5 py-1 text-center text-[11px] font-bold text-emerald-800 sm:block sm:w-auto sm:px-3 sm:py-1 sm:text-left sm:text-[12px]">
+                        <span className="hidden shrink-0 rounded-md border border-emerald-300 bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800 sm:inline sm:px-3 sm:text-[12px]">
                           Package fully paid
+                        </span>
+                      )}
+                      {sessionPayment.price > 0 && (
+                        <span className="ml-auto shrink-0 self-center pl-1 text-[11px] font-bold text-slate-600 sm:text-[12px]">
+                          Rs.{sessionPayment.paidAmount} of Rs.{sessionPayment.price} collected
                         </span>
                       )}
                     </div>
