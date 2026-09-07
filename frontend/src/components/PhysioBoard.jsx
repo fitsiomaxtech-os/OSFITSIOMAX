@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertCircle,
@@ -46,6 +46,8 @@ import {
   leadDocuments,
   openLeadDocument,
   getPhysioTypes,
+  physioPatientFeedback,
+  physioReplyFeedback,
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
@@ -2649,11 +2651,152 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
   );
 }
 
+// The portal stamps its own copy of this on the patient side. Local rather than shared:
+// two screens showing a time in the same format is not a reason for a module.
+const feedbackSentOn = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+};
+/** What this patient wrote to their physio, read by the physio.
+ *
+ *  One conversation, not a stack of numbered complaints. The records underneath are
+ *  separate rows -- a branch works through its board one card at a time -- but a patient
+ *  does not hold it that way and neither does the person treating them: this is somebody
+ *  you see twice a week, and the last thing they said is the part that matters.
+ *
+ *  Only what was addressed to a physio ever arrives here. What the same patient sent
+ *  their branch is a different post-bag, and the server will not hand it over -- see
+ *  physio_patient_feedback. A physio reading a complaint about the branch would be being
+ *  put in the middle of something the patient deliberately did not put them in.
+ */
+function PatientFeedbackTab({ leadId, physioId, patientName, onCountChange }) {
+  const [rows, setRows] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [sending, setSending] = useState(false);
+  const endRef = useRef(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await physioPatientFeedback(leadId, physioId);
+      setRows(data?.feedback || []);
+      setFailed(false);
+      onCountChange?.(data?.unread || 0);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [leadId, physioId, onCountChange]);
+  useEffect(() => { load(); }, [load]);
+
+  // Newest first out of the server, which is right for a list and backwards for a
+  // conversation.
+  const messages = [...rows].reverse()
+    .flatMap((f) => (f.messages || []).map((m) => ({ ...m, thread_id: f.id })))
+    .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+  // The most recent thread still going. Answering carries on where it left off rather
+  // than opening a second conversation about the same shoulder.
+  const open = rows.find((f) => (f.status || "new") !== "resolved") || null;
+
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [messages.length]);
+
+  const send = async (askResolved) => {
+    const body = draft.trim();
+    if (!body) { toast.error("Write something to send"); return; }
+    if (!open) { toast.error("Nothing open to answer"); return; }
+    setSending(true);
+    try {
+      await physioReplyFeedback(open.id, { body, ask_resolved: askResolved }, physioId);
+      setDraft("");
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not send that. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (loading) return <p className="py-12 text-center text-xs text-slate-400">Loading…</p>;
+  if (failed) {
+    // Not "nothing sent". That is a claim about the patient; this is a failure to ask.
+    return (
+      <div className="rounded-xl border border-dashed border-rose-200 bg-rose-50/50 py-10 text-center" data-testid="physio-patient-feedback-failed">
+        <p className="text-xs font-semibold text-rose-700">Couldn't load this patient's feedback</p>
+        <button type="button" onClick={load} className="mt-2 text-[11px] font-semibold text-rose-600 underline">Try again</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-testid="physio-patient-feedback-tab">
+      <div className="max-h-96 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        {messages.length === 0 ? (
+          <p className="py-10 text-center text-xs text-slate-400">
+            {patientName || "This patient"} has not written to you.
+          </p>
+        ) : messages.map((m) => {
+          const mine = m.author === "staff";
+          return (
+            <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] rounded-xl px-3 py-2 ${mine ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
+                data-testid={`physio-feedback-msg-${m.id}`}
+              >
+                <p className="whitespace-pre-wrap text-xs leading-relaxed">{m.body}</p>
+                <p className={`mt-1 text-[10px] ${mine ? "text-sky-100" : "text-slate-400"}`}>
+                  {m.author_name}{m.created_at ? ` · ${feedbackSentOn(m.created_at)}` : ""}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={endRef} />
+      </div>
+
+      {open ? (
+        <div className="space-y-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.slice(0, 2000))}
+            rows={3}
+            placeholder="Answer them…"
+            className="w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none transition focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
+            data-testid="physio-feedback-draft"
+          />
+          <div className="flex flex-wrap justify-end gap-2">
+            {/* The physio does not close it. They say what they did and ask whether that
+                settled it; the patient's answer is what resolves the thread. Same door
+                the branch uses -- see move_feedback, which refuses `resolved` outright. */}
+            <Button variant="outline" size="sm" disabled={sending || !draft.trim()} onClick={() => send(true)} data-testid="physio-feedback-ask">
+              Send and ask if that settled it
+            </Button>
+            <Button size="sm" disabled={sending || !draft.trim()} onClick={() => send(false)} data-testid="physio-feedback-send">
+              <Send className="h-3.5 w-3.5" />{sending ? "Sending…" : "Send"}
+            </Button>
+          </div>
+        </div>
+      ) : messages.length > 0 && (
+        <p className="rounded-lg border border-dashed border-slate-200 py-3 text-center text-[11px] text-slate-400" data-testid="physio-feedback-closed">
+          Settled. Anything further starts a new conversation from their side.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Full page (not a popup) — Sessions / Treatment / Payment History / Profile.
 // Same fixed inset-0 full-bleed pattern as CalendarPage, opened from a patient card
 // in PatientsTab instead of a modal.
 export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
   const [detailTab, setDetailTab] = useState("sessions");
+  // What the patient has said that nobody has answered. Held here rather than in the tab
+  // so the count shows on the tab strip while another tab is the one open — a physio has
+  // no reason to go looking in Feedback, so it has to say when there is something in it.
+  const [feedbackWaiting, setFeedbackWaiting] = useState(0);
   const [lead, setLead] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [sessionFilter, setSessionFilter] = useState("all"); // all | pending | completed
@@ -2706,6 +2849,9 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
     // runs, so it belongs with the work. Profile is the reference page you check, and
     // reads last for the same reason.
     { key: "progression", label: "Progression" },
+    // Before Profile for the same reason Progression is: this is the course as it is
+    // running, and Profile is the page you go and check.
+    { key: "feedback", label: "Feedback", count: feedbackWaiting },
     { key: "profile", label: "Profile" },
   ];
 
@@ -2764,6 +2910,11 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
               data-testid={`physio-patient-tab-${t.key}`}
             >
               {t.label}
+              {t.count > 0 && (
+                <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700" data-testid={`physio-patient-tab-count-${t.key}`}>
+                  {t.count}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -2771,6 +2922,14 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6">
+        {detailTab === "feedback" && (
+          <PatientFeedbackTab
+            leadId={patient.lead_id}
+            physioId={physioId}
+            patientName={patient.lead_name}
+            onCountChange={setFeedbackWaiting}
+          />
+        )}
         {detailTab === "sessions" && (
           <div className="space-y-3" data-testid="physio-patient-sessions-tab">
             <div className="grid grid-cols-3 gap-2">

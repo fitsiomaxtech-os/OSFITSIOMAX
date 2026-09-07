@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Bell, Building2, CheckCircle2, Clock, Inbox, MessageCircle, RefreshCw, Search, Send, Star, Ticket } from "lucide-react";
+import { ArrowLeft, Bell, Building2, CheckCircle2, Clock, Inbox, MessageCircle, RefreshCw, Search, Send, Star, Stethoscope, Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
@@ -391,7 +391,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   const [showThreadOnMobile, setShowThreadOnMobile] = useState(false);
   // Head office reads two different post-bags and they are not the same job. Only shown to
   // them: a branch has one, its own, and a tab strip over a single thing is furniture.
-  const [audience, setAudience] = useState("all"); // "all" | "super_admin" | "branch_admin"
+  const [audience, setAudience] = useState("all"); // "all" | "super_admin" | "branch_admin" | "physio"
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -413,7 +413,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
 
   // Only head office ever sees both kinds, so the strip only exists for them. A branch is
   // already held to its own by the server and would be choosing between one thing and it.
-  const isHeadOffice = !branchId && rows.some((r) => (r.audience || "branch_admin") === "super_admin");
+  const isHeadOffice = !branchId && rows.some((r) => ["super_admin", "physio"].includes(r.audience || "branch_admin"));
   const byAudience = useMemo(
     () => (audience === "all" ? rows : rows.filter((r) => (r.audience || "branch_admin") === audience)),
     [rows, audience],
@@ -548,7 +548,12 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   const AUDIENCE_TABS = [
     { key: "all", label: "Everything", icon: Bell, count: rows.length },
     { key: "super_admin", label: "Direct to head office", icon: Bell, count: rows.filter((r) => (r.audience || "branch_admin") === "super_admin").length },
-    { key: "branch_admin", label: "Branch-wise", icon: Building2, count: rows.filter((r) => (r.audience || "branch_admin") !== "super_admin").length },
+    // Head office reads these too, and is the only side that reads all three. A physio
+    // thread is not the branch's -- see BRANCH_HIDDEN_AUDIENCES -- so counting it under
+    // Branch-wise, which is what "not head office's" used to do, filed it with the people
+    // who cannot open it.
+    { key: "physio", label: "Direct to a physio", icon: Stethoscope, count: rows.filter((r) => (r.audience || "branch_admin") === "physio").length },
+    { key: "branch_admin", label: "Branch-wise", icon: Building2, count: rows.filter((r) => (r.audience || "branch_admin") === "branch_admin").length },
   ];
 
   return (

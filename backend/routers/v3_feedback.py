@@ -57,7 +57,27 @@ MAX_MESSAGE = 2000
 # were sent and where they have been read since.
 AUDIENCE_BRANCH = "branch_admin"
 AUDIENCE_SUPER = "super_admin"
-AUDIENCES = (AUDIENCE_BRANCH, AUDIENCE_SUPER)
+# The person actually treating them. A patient who wants to say something to their physio
+# was writing it to the Branch Admin and hoping it was passed on, which is a slow way to
+# say "you hurt my shoulder on Tuesday" -- and a strange one, since the physio is the one
+# who can do something about it on Thursday.
+#
+# Addressed by name rather than by role: the portal shows whose name it is going to, and a
+# patient with no physio is not offered it at all. Which physio is decided by
+# physio_of_lead, the inverse of the helper their own Patients list is built from, so the
+# thread cannot land with somebody who does not have the patient.
+AUDIENCE_PHYSIO = "physio"
+AUDIENCES = (AUDIENCE_BRANCH, AUDIENCE_SUPER, AUDIENCE_PHYSIO)
+
+# What a Branch Admin's board must not show, for two different reasons that come to the
+# same query. Super Admin's post is kept from them because half of it is about them.
+# The physio's is kept from them because the patient picked a person: routing a private
+# word to the physio through their manager is not the thing the patient asked for.
+#
+# Head office still reads both. That asymmetry is the existing one -- confidentiality runs
+# upward, not down -- and a physio thread nobody but the physio could see would be a
+# complaint about care with no oversight on it at all.
+BRANCH_HIDDEN_AUDIENCES = (AUDIENCE_SUPER, AUDIENCE_PHYSIO)
 
 
 def _audience(value) -> str:
@@ -156,10 +176,10 @@ async def list_feedback(
         if not user.branch_id:
             return {"feedback": [], "counts": {s: 0 for s in STATUSES}, "unread": 0}
         query["branch_id"] = user.branch_id
-        # Anything addressed to Super Admin is kept off this board. It is there because the
-        # patient did not want the branch to be the one who read it, and half of those are
-        # about the Branch Admin themselves.
-        query["audience"] = {"$ne": AUDIENCE_SUPER}
+        # Anything the patient addressed past the branch is kept off this board -- head
+        # office because half of it is about the Branch Admin, the physio because the
+        # patient wrote to a person. See BRANCH_HIDDEN_AUDIENCES.
+        query["audience"] = {"$nin": list(BRANCH_HIDDEN_AUDIENCES)}
     else:
         # Head office reads everything: what was addressed to it, and what every branch
         # received. It owns the branches, and feedback about a branch it cannot see is
@@ -228,8 +248,14 @@ async def move_feedback(
     existing = await v3_col("patient_feedback").find_one({"id": feedback_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="No such feedback")
-    if is_branch_admin_role(user.role) and existing.get("branch_id") != user.branch_id:
-        raise HTTPException(status_code=403, detail="Not your branch")
+    if is_branch_admin_role(user.role):
+        if existing.get("branch_id") != user.branch_id:
+            raise HTTPException(status_code=403, detail="Not your branch")
+        # The wall the board is built on, applied to the door beside it. Only the reply
+        # endpoint checked this, so a thread a branch could not read or answer could still
+        # be dragged between their columns by id.
+        if _audience(existing.get("audience")) in BRANCH_HIDDEN_AUDIENCES:
+            raise HTTPException(status_code=403, detail="Not your branch")
 
     status = str(payload.status or "").strip().lower()
     if status not in STATUSES:
@@ -297,8 +323,8 @@ async def reply_to_feedback(
         if existing.get("branch_id") != user.branch_id:
             raise HTTPException(status_code=403, detail="Not your branch")
         # The same wall the board is built on: what a patient sent past their branch is
-        # not theirs to answer, and half of it is about the Branch Admin themselves.
-        if _audience(existing.get("audience")) == AUDIENCE_SUPER:
+        # not theirs to answer, whether it went over their head or straight to the physio.
+        if _audience(existing.get("audience")) in BRANCH_HIDDEN_AUDIENCES:
             raise HTTPException(status_code=403, detail="Not your branch")
 
     now = now_iso()
