@@ -818,14 +818,34 @@ const lineMissingReference = (lines) => (lines || []).find(
   (l) => lineTotal(l) > 0 && COLLECT_REFERENCE_LABELS[l.mode] && !(l.reference || "").trim(),
 );
 
-/** Whether a cash line has been counted. Collecting cash means counting it: a typed figure
- *  is a number nobody can check the till against, so the count is what makes the line real
- *  and the Collect button live. Non-cash lines have nothing to count and are always ready. */
+/** Whether a cash line has been counted. Collecting cash means counting it: a figure with
+ *  no notes behind it is one nobody can check the till against. Non-cash lines have nothing
+ *  to count and are always ready. */
 const lineIsCounted = (l) => l?.mode !== "cash" || noteTotal(l) > 0;
 
 /** The first cash line taken without a count, so the desk is told to count it before the
  *  round trip rather than after it. */
 const lineMissingCount = (lines) => (lines || []).find((l) => !lineIsCounted(l));
+
+/** What the Amount box shows for a cash line.
+ *
+ * Typed if the desk typed one, otherwise the running count it mirrors. The box stays open
+ * either way -- a desk that already knows the figure types it and counts against it, and a
+ * desk emptying a drawer counts and watches the figure arrive. Locking the box left the
+ * second flow working and the first one with nowhere to put the number it started from.
+ */
+const cashAmountShown = (l) => (l?.amountTyped ? l.amount : (noteTotal(l) > 0 ? String(noteTotal(l)) : ""));
+
+/** The first cash line whose typed figure and counted notes disagree.
+ *
+ * Neither silently wins. When the two differ one of them is wrong, and the desk holding the
+ * notes is the only one who knows which -- so both stay on screen, the gap is named, and
+ * Collect waits. This is also what makes typing the amount safe to allow again: the count
+ * still has to back it up before anything is banked.
+ */
+const lineCountMismatch = (lines) => (lines || []).find(
+  (l) => l.mode === "cash" && noteTotal(l) > 0 && l.amountTyped && (Number(l.amount) || 0) !== noteTotal(l),
+);
 
 /**
  * Another term on a membership that is nearly up.
@@ -1089,9 +1109,17 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
   // whole collection rather than slipping through at zero, and a desk that does not want
   // to take cash changes the line's mode or drops it instead of leaving it blank.
   const uncounted = lineMissingCount(lines);
+  // A typed figure and a count that disagree. Held rather than resolved: picking one for
+  // the desk would bank a number nobody confirmed, and which of the two is wrong is only
+  // knowable by whoever is holding the notes.
+  const mismatch = lineCountMismatch(lines);
 
   const submit = async () => {
     if (uncounted) { toast.error("Count the cash notes before collecting"); return; }
+    if (mismatch) {
+      toast.error(`The notes come to ${rupees(noteTotal(mismatch))}, not the ${rupees(Number(mismatch.amount) || 0)} entered`);
+      return;
+    }
     if (total <= 0) { toast.error("Enter an amount to collect"); return; }
     if (over) { toast.error(`That is ${rupees(total)} against ${rupees(outstanding)} outstanding`); return; }
     setSaving(true);
@@ -1127,11 +1155,13 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
               <div className="flex flex-wrap items-end gap-3">
                 <div className="min-w-[150px] flex-1">
                   <FieldLabel>Paid By</FieldLabel>
-                  {/* Switching to cash clears the typed figure too — cash is settled by its
-                      count, and a number left behind from UPI would be one nobody counted. */}
+                  {/* A figure typed under UPI survives the switch to cash — it is a real
+                      amount somebody meant, and it now has a count to be checked against
+                      rather than being the only number on the line. The notes reset,
+                      because they belong to the mode that was counted in. */}
                   <FormSelect
                     value={l.mode}
-                    onChange={(v) => setLine(i, { mode: v, notes: {}, ...(v === "cash" ? { amount: "" } : {}) })}
+                    onChange={(v) => setLine(i, { mode: v, notes: {} })}
                     testid={`fitness-collect-mode-${i}`}
                   >
                     {COLLECT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
@@ -1142,14 +1172,12 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
                   <Input
                     type="number"
                     min="0"
-                    value={l.mode === "cash" ? (noteTotal(l) > 0 ? noteTotal(l) : "") : l.amount}
-                    onChange={(e) => setLine(i, { amount: e.target.value })}
-                    // Cash is only ever the counted notes. The box is read-only for it from
-                    // the start rather than once a note is entered, so there is never a
-                    // moment where a figure can be typed in that no one counted out.
-                    readOnly={l.mode === "cash"}
-                    placeholder={l.mode === "cash" ? "From the count below" : ""}
-                    className={l.mode === "cash" ? "bg-slate-50" : ""}
+                    value={l.mode === "cash" ? cashAmountShown(l) : l.amount}
+                    // Typeable for cash as well. Clearing the box hands it back to the
+                    // count, so a figure entered by mistake is undone by emptying it
+                    // rather than by having to match what is in the drawer.
+                    onChange={(e) => setLine(i, { amount: e.target.value, amountTyped: e.target.value !== "" })}
+                    placeholder={l.mode === "cash" ? "Type it, or count below" : ""}
                     data-testid={`fitness-collect-amount-${i}`}
                   />
                 </div>
@@ -1176,7 +1204,7 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                     Notes counted <span className="text-rose-500">*</span>
                     <span className="ml-1 font-normal normal-case text-slate-400">
-                      — required; the cash amount is whatever is counted here
+                      — required, and has to come to the amount above
                     </span>
                   </p>
                   <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
@@ -1195,10 +1223,21 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
                     ))}
                   </div>
                   {noteTotal(l) > 0 ? (
-                    <p className="mt-2 text-right text-[11px] text-slate-500" data-testid={`fitness-collect-note-total-${i}`}>
-                      {DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => `${l.notes[d]}×₹${d}`).join("  +  ")}
-                      {" = "}<b className="text-slate-700">{rupees(noteTotal(l))}</b>
-                    </p>
+                    <div className="mt-2 text-right text-[11px]">
+                      <p className="text-slate-500" data-testid={`fitness-collect-note-total-${i}`}>
+                        {DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => `${l.notes[d]}×₹${d}`).join("  +  ")}
+                        {" = "}<b className="text-slate-700">{rupees(noteTotal(l))}</b>
+                      </p>
+                      {/* The gap named where the two numbers are, rather than one of them
+                          quietly overwriting the other somewhere off screen. */}
+                      {l.amountTyped && (Number(l.amount) || 0) !== noteTotal(l) && (
+                        <p className="mt-1 text-rose-500" data-testid={`fitness-collect-note-mismatch-${i}`}>
+                          {rupees(Math.abs(noteTotal(l) - (Number(l.amount) || 0)))}
+                          {noteTotal(l) < (Number(l.amount) || 0) ? " short of" : " more than"}
+                          {` the ${rupees(Number(l.amount) || 0)} entered above.`}
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     // Says why Collect is still greyed out, at the line that is holding it,
                     // rather than leaving the desk to guess which box is empty.
@@ -1229,11 +1268,13 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
             <p className="mt-1 text-[11px] text-slate-600" data-testid="fitness-collect-summary">
               {over
                 ? `That is more than the ${rupees(outstanding)} outstanding.`
-                : uncounted
-                  ? "Count the cash notes above before collecting."
-                  : remaining > 0
-                    ? `${rupees(remaining)} will still be due after this.`
-                    : total > 0 ? "This clears the membership." : "Nothing entered yet."}
+                : mismatch
+                  ? `The notes come to ${rupees(noteTotal(mismatch))}, not the ${rupees(Number(mismatch.amount) || 0)} entered above.`
+                  : uncounted
+                    ? "Count the cash notes above before collecting."
+                    : remaining > 0
+                      ? `${rupees(remaining)} will still be due after this.`
+                      : total > 0 ? "This clears the membership." : "Nothing entered yet."}
             </p>
           </div>
         </div>
@@ -1243,9 +1284,9 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
           <Button
             size="sm"
             onClick={submit}
-            disabled={saving || over || total <= 0 || !!uncounted}
+            disabled={saving || over || total <= 0 || !!uncounted || !!mismatch}
             className="bg-emerald-600 text-white hover:bg-emerald-700"
-            title={uncounted ? "Count the cash notes first" : undefined}
+            title={uncounted ? "Count the cash notes first" : mismatch ? "The count does not match the amount entered" : undefined}
             data-testid="fitness-collect-submit"
           >
             {saving ? "Collecting..." : `Collect ${rupees(total)}`}
