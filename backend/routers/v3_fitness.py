@@ -258,6 +258,135 @@ def _unpaid_this_month(row: dict, month_start: str, month_end: str) -> bool:
     return (not due) or due < month_end
 
 
+# ------------------------------------------------------- The Consultant's referrals
+#
+# Fitness is one of the services a Head Physio ticks on a consultation's decision, and that
+# tick used to go nowhere: the flag was written onto the lead and no board read it, so a
+# patient sent to the gym never reached the gym. This is the other end of it.
+#
+# Read live off the leads rather than copied here at Move to Admin, exactly as the Zumba
+# desk beside it reads its own. Un-ticking Fitness on the consultation takes the row back
+# out on its own, and there is no second copy of the patient to keep in step with the
+# first. The cost is that a live row cannot be edited from this tab, which is why
+# accept_referral exists: the branch takes the patient over, and from then on the
+# membership is the row and this stops reading the lead.
+
+
+# A referral's row carries the lead's id behind this prefix, so an id arriving with it is
+# not a membership that has gone missing -- it is a row that was never in this collection,
+# and "not found" would send the reader hunting for a deletion that never happened.
+LEAD_ROW_PREFIX = "lead:"
+
+
+def _extra(lead: dict, *keys):
+    """Age and address are configured lead fields rather than columns, so they arrive in
+    extra_fields under whatever key the branch set up. Try the likely ones and give up
+    quietly -- a blank age is a gap in the record, not a reason to fail the list."""
+    extra = lead.get("extra_fields") or {}
+    for k in keys:
+        for candidate in (k, k.title(), k.upper(), k.replace("_", " ").title()):
+            if extra.get(candidate) not in (None, ""):
+                return extra[candidate]
+    return ""
+
+
+def _referral_row(lead: dict, referred_at: str) -> dict:
+    """One lead as a row of the gym's roll.
+
+    Unpriced, deliberately. A Fitness referral is a tick on a consultation, not a
+    membership sold -- there is no package on the lead to copy, and inventing a fee here
+    would put an arrear on the branch's Not Paid card for money nobody has agreed to.
+    """
+    return {
+        # Prefixed so it cannot collide with a membership's uuid, and so the tab can tell
+        # at a glance that this row is not one of its own.
+        "id": f"{LEAD_ROW_PREFIX}{lead['id']}",
+        "lead_id": lead["id"],
+        "branch_id": lead.get("branch_id"),
+        "name": lead.get("name") or "",
+        "phone": lead.get("phone") or "",
+        "age": _age(_extra(lead, "age")),
+        "gender": "",
+        "email": "",
+        "address": str(_extra(lead, "address", "city", "location") or ""),
+        "source": "consultations",
+        "package_id": "",
+        "package_name": "",
+        "package_mode": "",
+        "package_sessions": None,
+        "fee_amount": 0.0,
+        "fee_paid": 0.0,
+        "payment_mode": "",
+        "payment_reference": "",
+        "joined_date": "",
+        "due_date": "",
+        "status": STATUS_ACTIVE,
+        "notes": "",
+        "created_at": referred_at,
+        "created_by": "Consultation",
+        # The tab reads this and offers Accept in place of Edit: the consultation owns
+        # this record until the branch takes it over.
+        "origin": "consultation",
+    }
+
+
+async def _referred_rows(branch_id: Optional[str]) -> list:
+    """Fitness referrals made by a CONSULTANT and not yet taken onto the branch's books."""
+    query: dict = {"fitness_recommended": True}
+    if branch_id:
+        query["branch_id"] = branch_id
+    leads = await v3_col("leads").find(query, {
+        "_id": 0, "id": 1, "name": 1, "phone": 1, "branch_id": 1, "extra_fields": 1,
+        "updated_at": 1,
+    }).to_list(2000)
+    if not leads:
+        return []
+
+    # Dropped once the branch has taken them over. Read from the memberships rather than
+    # written back onto the lead, so the consultation's own record is never edited by this
+    # tab and un-ticking Fitness there still means what it always did.
+    taken = set(await v3_col("fitness_registrations").distinct(
+        "lead_id", {"lead_id": {"$in": [l["id"] for l in leads]}}
+    ))
+    leads = [l for l in leads if l["id"] not in taken]
+    if not leads:
+        return []
+
+    lead_ids = [l["id"] for l in leads]
+
+    # When the referral was made: the moment the decision holding it was last saved. Read
+    # off the activity trail rather than a field, so nothing has to be written into the
+    # consultation's own save path to support this tab.
+    activities = await v3_col("lead_activity").find(
+        {"lead_id": {"$in": lead_ids}, "action": "consultation_decision_saved"},
+        {"_id": 0, "lead_id": 1, "created_at": 1},
+    ).to_list(4000)
+    saved_at: dict = {}
+    for a in activities:
+        prev = saved_at.get(a["lead_id"])
+        if not prev or (a.get("created_at") or "") > prev:
+            saved_at[a["lead_id"]] = a.get("created_at") or ""
+
+    # Referrals the branch has turned away. Held against the moment the referral was made
+    # rather than against the lead alone: a consultation that recommends Fitness again
+    # later is a new referral and comes back, where a flat "never show this lead" would
+    # bury it for good.
+    dismissed = {
+        d["lead_id"]: d.get("referred_at") or ""
+        for d in await v3_col("fitness_referral_dismissals").find(
+            {"lead_id": {"$in": lead_ids}}, {"_id": 0, "lead_id": 1, "referred_at": 1}
+        ).to_list(4000)
+    }
+
+    rows = []
+    for l in leads:
+        referred_at = saved_at.get(l["id"]) or l.get("updated_at") or ""
+        if l["id"] in dismissed and referred_at <= dismissed[l["id"]]:
+            continue
+        rows.append(_referral_row(l, referred_at))
+    return rows
+
+
 @router.get("/branch/fitness")
 async def list_fitness(
     branch_id: Optional[str] = Query(None),
@@ -274,6 +403,11 @@ async def list_fitness(
         query["branch_id"] = scoped
 
     rows = await v3_col("fitness_registrations").find(query, {"_id": 0}).to_list(2000)
+    # The Consultant's referrals sit on the same roll rather than on a list of their own.
+    # A branch works one list of people the gym has to deal with, and a patient the
+    # consultation sent is on it from the moment the decision was saved -- the Referred
+    # card is how they are picked out of it, not a separate place they wait in.
+    rows = rows + await _referred_rows(scoped)
     rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     shaped = [_shape(r) for r in rows]
 
@@ -284,7 +418,15 @@ async def list_fitness(
         # dropped from the board, so anybody still carrying it counts as on the roll —
         # the alternative is a row that belongs to neither card and is findable only
         # under All.
-        "current": sum(1 for r in shaped if _status(r.get("status")) != STATUS_DISCONTINUED),
+        # Referrals are excluded here and counted on their own card below. A patient the
+        # consultation sent is not "training now" -- nobody has sold them a membership or
+        # taken a rupee off them yet -- and letting them swell Current would have the card
+        # report gym members the gym does not have.
+        "current": sum(1 for r in shaped
+                       if _status(r.get("status")) != STATUS_DISCONTINUED
+                       and r.get("origin") != "consultation"),
+        # Sent by a Consultant and waiting for this branch to take them on.
+        "referred": sum(1 for r in shaped if r.get("origin") == "consultation"),
         "leave": sum(1 for r in shaped if _status(r.get("status")) == STATUS_LEAVE),
         "unpaid_this_month": sum(1 for r in rows if _unpaid_this_month(r, month_start, month_end)),
         "discontinued": sum(1 for r in shaped if _status(r.get("status")) == STATUS_DISCONTINUED),
@@ -308,6 +450,15 @@ async def list_fitness(
 
 
 async def _row_or_404(registration_id: str, user: V3UserOut) -> dict:
+    # A referral is not a row of this collection, and the answer for one is the same in
+    # every route that reaches for an id: it is not missing, it is owned elsewhere. Said
+    # once here so a client running an older bundle is told what happened rather than sent
+    # looking for a membership that was never written.
+    if str(registration_id or "").startswith(LEAD_ROW_PREFIX):
+        raise HTTPException(
+            status_code=400,
+            detail="This is a Consultant's referral, read live from the consultation that made it. Take it onto the branch's books first — un-ticking Fitness on the lead takes it off this tab.",
+        )
     row = await v3_col("fitness_registrations").find_one({"id": registration_id}, {"_id": 0})
     if not row:
         raise HTTPException(status_code=404, detail="Membership not found")
@@ -335,6 +486,68 @@ async def add_fitness(
         "created_at": now_iso(),
         "created_by": user.full_name or user.email,
     }
+    await v3_col("fitness_registrations").insert_one(dict(row))
+    return _shape(row)
+
+
+@router.post("/branch/fitness/accept/{lead_id}")
+async def accept_fitness_referral(
+    lead_id: str,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Take a CONSULTANT's Fitness referral onto the branch's own books.
+
+    Until this is called the row on the tab is the lead, read live, and there is nothing to
+    sell a membership against, set a term on, or collect a fee for -- which is the whole of
+    what the branch does next with a referred patient. This writes the membership those
+    answers can live on, seeded from the patient the consultation sent.
+
+    The lead is not touched. The link runs one way, from the membership back to the lead,
+    so the consultation's record still says what it always said and un-ticking Fitness
+    there still means what it meant. What changes is that this tab stops reading the lead
+    for a row and reads the membership instead.
+
+    Nothing is priced here: a Fitness referral is a tick on a consultation, not a package
+    sold, so the membership arrives unpriced and the branch chooses off the Fitness shelf.
+    That is why the tab opens the member form on what this made rather than filing it
+    silently -- an unpriced membership is a question, not a finished record.
+    """
+    lead = await v3_col("leads").find_one(
+        {"id": lead_id, "fitness_recommended": True},
+        {"_id": 0, "id": 1, "name": 1, "phone": 1, "branch_id": 1, "extra_fields": 1},
+    )
+    if not lead:
+        raise HTTPException(status_code=404, detail="No Fitness referral on that lead")
+
+    branch_id = lead.get("branch_id")
+    if _own_branch_only(user) and branch_id != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="That lead is not posted to a branch")
+
+    existing = await v3_col("fitness_registrations").find_one({"lead_id": lead_id}, {"_id": 0})
+    if existing:
+        # Not an error: two people opening the same row is ordinary, and the second one
+        # wants the membership rather than a complaint about the first.
+        return _shape(existing)
+
+    row = {
+        **_referral_row(lead, now_iso()),
+        # A membership of this collection now, with an id of its own. Everything above
+        # comes from the referral so the two rows read alike; these are what taking it on
+        # actually changes.
+        "id": str(uuid.uuid4()),
+        # The link back, and the reason _referred_rows stops reading this lead.
+        "lead_id": lead_id,
+        # The day the branch took them on. The term itself is set when the membership is
+        # sold, which is the form this opens.
+        "joined_date": date.today().isoformat(),
+        "created_at": now_iso(),
+        "created_by": user.full_name or user.email,
+    }
+    # Read live no longer: from here the record is this collection's, and the tab offers
+    # Edit, Collect and Renew on it like any other membership.
+    row.pop("origin", None)
     await v3_col("fitness_registrations").insert_one(dict(row))
     return _shape(row)
 
@@ -405,11 +618,58 @@ async def set_fitness_status(
     return {"message": f"{row.get('name', 'Member')} marked {status}", "registration": _shape(updated)}
 
 
+async def _dismiss_referral(lead_id: str, user: V3UserOut) -> dict:
+    """Take a consultation's Fitness referral off this tab without touching the consultation.
+
+    The row is read live off the lead, so there is nothing here to delete -- and deleting
+    from the lead is not this tab's to do: un-ticking Fitness is a decision the
+    consultation owns, and rewriting it from here would leave the two records disagreeing
+    about what was recommended. What is recorded instead is that the branch turned this
+    referral away.
+
+    Stamped with the referral it turned away rather than with the lead alone. A
+    consultation that recommends Fitness again later is a new referral and comes back on
+    this tab, where a flat "never show this lead" would bury it for good.
+    """
+    lead = await v3_col("leads").find_one(
+        {"id": lead_id, "fitness_recommended": True},
+        {"_id": 0, "id": 1, "name": 1, "branch_id": 1, "updated_at": 1},
+    )
+    if not lead:
+        raise HTTPException(status_code=404, detail="No Fitness referral on that lead")
+    if _own_branch_only(user) and lead.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+
+    latest = await v3_col("lead_activity").find(
+        {"lead_id": lead_id, "action": "consultation_decision_saved"}, {"_id": 0, "created_at": 1}
+    ).sort("created_at", -1).to_list(1)
+    referred_at = (latest[0].get("created_at") if latest else "") or lead.get("updated_at") or ""
+
+    await v3_col("fitness_referral_dismissals").update_one(
+        {"lead_id": lead_id},
+        {"$set": {
+            "lead_id": lead_id,
+            "branch_id": lead.get("branch_id"),
+            "referred_at": referred_at,
+            "dismissed_at": now_iso(),
+            "dismissed_by": user.full_name or user.email,
+        }},
+        upsert=True,
+    )
+    return {"message": f"{lead.get('name') or 'Referral'} turned away", "dismissed": True}
+
+
 @router.delete("/branch/fitness/{registration_id}")
 async def delete_fitness(
     registration_id: str,
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
 ):
+    # A referral carries the lead's id behind a prefix rather than a membership's, and
+    # there is no row of this collection to remove. Turning it away is recorded instead --
+    # see _dismiss_referral, which is the only id route that does something with one
+    # rather than refusing it.
+    if str(registration_id or "").startswith(LEAD_ROW_PREFIX):
+        return await _dismiss_referral(registration_id[len(LEAD_ROW_PREFIX):], user)
     row = await _row_or_404(registration_id, user)
     await v3_col("fitness_registrations").delete_one({"id": registration_id})
     return {"message": f"{row.get('name', 'Membership')} removed"}

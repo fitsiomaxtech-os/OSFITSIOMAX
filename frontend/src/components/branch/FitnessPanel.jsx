@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dumbbell, IndianRupee, Pencil, Plus, RefreshCw, Search, Trash2, X, PlayCircle, LogOut } from "lucide-react";
+import { Dumbbell, IndianRupee, Pencil, Plus, RefreshCw, Search, Trash2, X, PlayCircle, LogOut, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
-import { listFitness, addFitness, updateFitness, setFitnessStatus, deleteFitness, collectFitnessPayment, renewFitness, listStoreItems } from "@/lib/api";
+import { listFitness, addFitness, updateFitness, setFitnessStatus, deleteFitness, collectFitnessPayment, renewFitness, acceptFitnessReferral, listStoreItems } from "@/lib/api";
 
 /**
  * Branch Admin > Fitness — the gym's membership roll.
@@ -38,6 +38,11 @@ const MODE_LABELS = Object.fromEntries(PAYMENT_MODES.map((m) => [m.value, m.labe
 // Cash leaves no number behind; the other three do, and it is worth keeping.
 const REFERENCE_MODES = ["upi", "card", "account_transfer"];
 const REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
+
+// Not a status of a membership, because there is no membership yet -- it is where the row
+// came from. Kept out of STATUS_META for that reason and stood in front of it in the status
+// column, so a patient the consultation sent never reads as somebody already training.
+const REFERRED_META = { label: "Referred", classes: "border-sky-200 bg-sky-50 text-sky-700" };
 
 const STATUS_META = {
   active: { label: "Training", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
@@ -111,6 +116,7 @@ export const FitnessPanel = ({ branchId }) => {
   const [renewing, setRenewing] = useState(null); // the membership being sold another term
   const [viewing, setViewing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [accepting, setAccepting] = useState(null); // the referral being taken onto the roll
 
   // Rises with every roll fetch started here, so a reply that is no longer the newest is
   // dropped rather than written. Refresh going dead while busy stops two presses racing,
@@ -168,7 +174,14 @@ export const FitnessPanel = ({ branchId }) => {
   // the server's numbers, so a card that filtered differently would show a count and a list
   // that disagree.
   const CARDS = [
-    { key: "all", label: "All", value: counts.all, color: "#6366f1", sub: "on the roll" },
+    // Everyone on the tab, referrals included -- so the number always matches the list
+    // this card opens. "On the roll" stopped being true of all of them the moment
+    // referrals joined it: a patient waiting to be taken on is not a member yet.
+    { key: "all", label: "All", value: counts.all, color: "#6366f1", sub: "everyone here" },
+    // Sent by a Consultant who ticked Fitness on the consultation, and waiting for this
+    // branch to take them on. Second so it sits beside All: it is the card a branch opens
+    // the tab to check, and the only one with something waiting to be done on every row.
+    { key: "referred", label: "Referred", value: counts.referred, color: "#0284c7", sub: "from a consultation" },
     { key: "current", label: "Current", value: counts.current, color: "#059669", sub: "training now" },
     { key: "unpaid", label: "Not Paid", value: counts.unpaid_this_month, color: "#dc2626", sub: "due this month" },
     { key: "paid", label: "Paid Up", value: counts.paid, color: "#0284c7", sub: "nothing owed" },
@@ -190,7 +203,10 @@ export const FitnessPanel = ({ branchId }) => {
     let list = rows;
     // Matches the server's own counting — a card whose list filtered differently would
     // show a number and a set of rows that disagree.
-    if (card === "current") list = list.filter((r) => r.status !== "discontinued");
+    if (card === "referred") list = list.filter((r) => r.origin === "consultation");
+    // Referrals are excluded here for the same reason the server leaves them out of its
+    // own count: nobody has sold them a membership, so they are not training now.
+    else if (card === "current") list = list.filter((r) => r.status !== "discontinued" && r.origin !== "consultation");
     else if (card === "discontinued") list = list.filter((r) => r.status === "discontinued");
     else if (card === "paid") list = list.filter((r) => r.fully_paid);
     else if (card === "unpaid") list = list.filter(isUnpaidThisMonth);
@@ -219,10 +235,33 @@ export const FitnessPanel = ({ branchId }) => {
     }
   };
 
+  /**
+   * Take a referral onto the gym's roll and open the membership form on what it made.
+   *
+   * One press for both, because nobody asks for a referral to be "accepted" as an end in
+   * itself -- they ask because they are about to sell the patient a membership, and the
+   * row the accept writes is deliberately unpriced until they do.
+   */
+  const acceptAndEdit = async (row) => {
+    if (accepting) return;
+    setAccepting(row.id);
+    try {
+      const created = await acceptFitnessReferral(row.lead_id);
+      await load();
+      setEditing(created);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not take this referral on");
+    } finally {
+      setAccepting(null);
+    }
+  };
+
   const remove = async (row) => {
     try {
+      // A referral has no row of this collection to delete. The same call records that the
+      // branch turned it away, and the consultation's own record is left alone.
       await deleteFitness(row.id);
-      toast.success(`${row.name} removed`);
+      toast.success(row.origin === "consultation" ? "Referral turned away" : `${row.name} removed`);
       setConfirmDelete(null);
       load();
     } catch (e) {
@@ -232,11 +271,12 @@ export const FitnessPanel = ({ branchId }) => {
 
   return (
     <div className="space-y-4" data-testid="branch-fitness-panel">
-      {/* Five columns for five cards. It asked for six, so on a wide screen the row
-          stopped a column short of the page and left a gap that read as a card yet to
-          load. Written as a literal because Tailwind reads class names out of the source:
-          a count built from CARDS.length at runtime compiles to nothing. */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+      {/* One column per card, exactly. A row that stops a column short of the page leaves
+          a gap that reads as a card yet to load, which is what happened when this asked
+          for six and there were five. Written as a literal because Tailwind reads class
+          names out of the source: a count built from CARDS.length at runtime compiles to
+          nothing. Six now, with Referred among them -- keep the two in step. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {CARDS.map((c) => (
           <StatTile
             key={c.key}
@@ -347,7 +387,8 @@ export const FitnessPanel = ({ branchId }) => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {visible.map((r, i) => {
-                  const meta = STATUS_META[r.status] || STATUS_META.active;
+                  const referral = r.origin === "consultation";
+                  const meta = referral ? REFERRED_META : (STATUS_META[r.status] || STATUS_META.active);
                   const due = Number(r.fee_due || 0);
                   return (
                     <tr
@@ -403,79 +444,111 @@ export const FitnessPanel = ({ branchId }) => {
                           should not also open the row behind the dialog it just opened. */}
                       <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-wrap items-center justify-end gap-1">
-                          {/* Wherever there is a balance, whatever the membership's state.
-                              This was gated on the member not having discontinued, which hid
-                              the button on exactly the people a gym chases hardest: somebody
-                              who left owing money still owes it, and the endpoint takes the
-                              payment perfectly well — it refuses an unpriced or a paid-up
-                              membership, not a closed one. Nothing to take is the only
-                              reason to hide it. */}
-                          {due > 0 && (
-                            <button
-                              onClick={() => setCollecting(r)}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
-                              title={`Collect ${rupees(due)}`}
-                              data-testid={`fitness-collect-${r.id}`}
-                            >
-                              <IndianRupee className="h-3.5 w-3.5" /> Collect
-                            </button>
-                          )}
-                          {/* Only once the term is nearly up. A renewal offered in the first
-                              week of a month is a button nobody presses, and one offered the
-                              day after it lapses is a conversation already missed. */}
-                          {r.renewal_due && (
-                            <button
-                              onClick={() => setRenewing(r)}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-100"
-                              title={typeof r.days_left === "number" && r.days_left < 0
-                                ? `Ran out ${Math.abs(r.days_left)} days ago — sell them another term`
-                                : `${r.days_left} days left — sell them another term`}
-                              data-testid={`fitness-renew-${r.id}`}
-                            >
-                              <RefreshCw className="h-3.5 w-3.5" /> Renew
-                            </button>
-                          )}
-                          {/* Bringing somebody back is the move that needed finding, so it
-                              carries a word rather than an icon — a bare glyph on a
-                              discontinued row reads as "play" and nothing says it restores
-                              the membership. Going the other way stays an icon: it sits
-                              beside Edit and Delete on every active row and would crowd
-                              them out labelled. */}
-                          {r.status === "active" ? (
-                            <button
-                              onClick={() => changeStatus(r, "discontinued")}
-                              className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                              title="Discontinue"
-                              data-testid={`fitness-discontinue-${r.id}`}
-                            >
-                              <LogOut className="h-4 w-4" />
-                            </button>
+                          {/* A referral is a decision recorded on the consultation, read
+                              live off the lead rather than copied here. Nothing has been
+                              sold against it, so Collect, Renew and Discontinue have
+                              nothing to act on -- the two moves that exist are taking the
+                              patient onto the roll and turning the referral away. */}
+                          {referral ? (
+                            <>
+                              <button
+                                disabled={accepting === r.id}
+                                onClick={() => acceptAndEdit(r)}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-60"
+                                title="Referred on the consultation — take them onto the roll to sell a membership and collect the fee"
+                                data-testid={`fitness-accept-${r.id}`}
+                              >
+                                <Stethoscope className="h-3.5 w-3.5" />
+                                {accepting === r.id ? "Taking on…" : "Referred"}
+                              </button>
+                              {/* Off this list without the consultation's record changing,
+                                  and a fresh Fitness recommendation there brings them back. */}
+                              <button
+                                onClick={() => setConfirmDelete(r)}
+                                className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                                title="Take this referral off the Fitness list"
+                                data-testid={`fitness-delete-${r.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </>
                           ) : (
+                            <>
+                            {/* Wherever there is a balance, whatever the membership's state.
+                                This was gated on the member not having discontinued, which hid
+                                the button on exactly the people a gym chases hardest: somebody
+                                who left owing money still owes it, and the endpoint takes the
+                                payment perfectly well — it refuses an unpriced or a paid-up
+                                membership, not a closed one. Nothing to take is the only
+                                reason to hide it. */}
+                            {due > 0 && (
+                              <button
+                                onClick={() => setCollecting(r)}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                                title={`Collect ${rupees(due)}`}
+                                data-testid={`fitness-collect-${r.id}`}
+                              >
+                                <IndianRupee className="h-3.5 w-3.5" /> Collect
+                              </button>
+                            )}
+                            {/* Only once the term is nearly up. A renewal offered in the first
+                                week of a month is a button nobody presses, and one offered the
+                                day after it lapses is a conversation already missed. */}
+                            {r.renewal_due && (
+                              <button
+                                onClick={() => setRenewing(r)}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-100"
+                                title={typeof r.days_left === "number" && r.days_left < 0
+                                  ? `Ran out ${Math.abs(r.days_left)} days ago — sell them another term`
+                                  : `${r.days_left} days left — sell them another term`}
+                                data-testid={`fitness-renew-${r.id}`}
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" /> Renew
+                              </button>
+                            )}
+                            {/* Bringing somebody back is the move that needed finding, so it
+                                carries a word rather than an icon — a bare glyph on a
+                                discontinued row reads as "play" and nothing says it restores
+                                the membership. Going the other way stays an icon: it sits
+                                beside Edit and Delete on every active row and would crowd
+                                them out labelled. */}
+                            {r.status === "active" ? (
+                              <button
+                                onClick={() => changeStatus(r, "discontinued")}
+                                className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                                title="Discontinue"
+                                data-testid={`fitness-discontinue-${r.id}`}
+                              >
+                                <LogOut className="h-4 w-4" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => changeStatus(r, "active")}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                                title="Put this membership back on the roll"
+                                data-testid={`fitness-resume-${r.id}`}
+                              >
+                                <PlayCircle className="h-3.5 w-3.5" /> Make Current
+                              </button>
+                            )}
                             <button
-                              onClick={() => changeStatus(r, "active")}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
-                              title="Put this membership back on the roll"
-                              data-testid={`fitness-resume-${r.id}`}
+                              onClick={() => setEditing(r)}
+                              className="rounded p-1.5 text-slate-400 hover:bg-sky-50 hover:text-sky-600"
+                              title="Edit"
+                              data-testid={`fitness-edit-${r.id}`}
                             >
-                              <PlayCircle className="h-3.5 w-3.5" /> Make Current
+                              <Pencil className="h-4 w-4" />
                             </button>
+                            <button
+                              onClick={() => setConfirmDelete(r)}
+                              className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              title="Delete"
+                              data-testid={`fitness-delete-${r.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                            </>
                           )}
-                          <button
-                            onClick={() => setEditing(r)}
-                            className="rounded p-1.5 text-slate-400 hover:bg-sky-50 hover:text-sky-600"
-                            title="Edit"
-                            data-testid={`fitness-edit-${r.id}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => setConfirmDelete(r)}
-                            className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                            title="Delete"
-                            data-testid={`fitness-delete-${r.id}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -494,6 +567,7 @@ export const FitnessPanel = ({ branchId }) => {
           onEdit={() => { setEditing(viewing); setViewing(null); }}
           onCollect={() => { setCollecting(viewing); setViewing(null); }}
           onStatus={(status) => { const m = viewing; setViewing(null); changeStatus(m, status); }}
+          onAccept={() => { const m = viewing; setViewing(null); acceptAndEdit(m); }}
         />
       )}
 
@@ -528,16 +602,19 @@ export const FitnessPanel = ({ branchId }) => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) setConfirmDelete(null); }}>
           <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl" data-testid="fitness-delete-dialog">
             <div className="border-b p-5">
-              <h3 className="text-base font-semibold text-slate-800">Delete {confirmDelete.name}?</h3>
+              <h3 className="text-base font-semibold text-slate-800">
+                {confirmDelete.origin === "consultation" ? `Turn away ${confirmDelete.name}?` : `Delete ${confirmDelete.name}?`}
+              </h3>
               <p className="mt-1 text-[11px] text-slate-500">
-                The membership and its payment record go with it. To keep the record and just stop the
-                membership, use Discontinue instead.
+                {confirmDelete.origin === "consultation"
+                  ? "They come off the Fitness list without the consultation's own record changing — and if a later consultation recommends Fitness again, they come back."
+                  : "The membership and its payment record go with it. To keep the record and just stop the membership, use Discontinue instead."}
               </p>
             </div>
             <div className="flex justify-end gap-2 border-t p-4">
               <Button variant="outline" size="sm" onClick={() => setConfirmDelete(null)}>Cancel</Button>
               <Button size="sm" onClick={() => remove(confirmDelete)} className="bg-rose-600 text-white hover:bg-rose-700" data-testid="fitness-delete-confirm">
-                Yes, delete
+                {confirmDelete.origin === "consultation" ? "Yes, turn away" : "Yes, delete"}
               </Button>
             </div>
           </div>
@@ -1312,8 +1389,12 @@ const DetailLine = ({ label, children }) => (
   </div>
 );
 
-const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect, onStatus }) => {
-  const meta = STATUS_META[member.status] || STATUS_META.active;
+const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect, onStatus, onAccept }) => {
+  // Read live off the consultation that made it, with no membership behind it yet. The
+  // balance block above already says "Nothing sold yet" on its own, because a referral
+  // carries no fee -- what changes here is the badge and what the footer offers.
+  const referral = member.origin === "consultation";
+  const meta = referral ? REFERRED_META : (STATUS_META[member.status] || STATUS_META.active);
   const due = Number(member.fee_due || 0);
   // Newest first: the last thing that happened is the thing being looked for.
   const payments = [...(member.payments || [])].reverse();
@@ -1488,34 +1569,45 @@ const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect, onStatus }) =
             settles, and a second copy down here was the same button twice. */}
         <div className="flex flex-wrap items-center justify-end gap-2 border-t p-4">
           <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
-          <Button variant="outline" size="sm" onClick={onEdit} data-testid="fitness-detail-edit">
-            <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
-          </Button>
-          {member.status === "active" ? (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                onClick={() => onStatus("discontinued")}
-                data-testid="fitness-detail-discontinue"
-              >
-                Discontinue
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-amber-200 text-amber-700 hover:bg-amber-50"
-                onClick={() => onStatus("leave")}
-                data-testid="fitness-detail-leave"
-              >
-                Leave
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" variant="outline" onClick={() => onStatus("active")} data-testid="fitness-detail-restore">
-              <PlayCircle className="mr-1 h-3.5 w-3.5" /> Back to training
+          {/* Edit, Discontinue and Leave all act on a membership, and a referred patient
+              has not been sold one -- so a referral is offered the move that gives it one
+              and nothing else. */}
+          {referral ? (
+            <Button size="sm" className="bg-sky-600 text-white hover:bg-sky-700" onClick={onAccept} data-testid="fitness-detail-accept">
+              <Stethoscope className="mr-1 h-3.5 w-3.5" /> Take onto the roll
             </Button>
+          ) : (
+            <>
+            <Button variant="outline" size="sm" onClick={onEdit} data-testid="fitness-detail-edit">
+              <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+            </Button>
+            {member.status === "active" ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                  onClick={() => onStatus("discontinued")}
+                  data-testid="fitness-detail-discontinue"
+                >
+                  Discontinue
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                  onClick={() => onStatus("leave")}
+                  data-testid="fitness-detail-leave"
+                >
+                  Leave
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => onStatus("active")} data-testid="fitness-detail-restore">
+                <PlayCircle className="mr-1 h-3.5 w-3.5" /> Back to training
+              </Button>
+            )}
+            </>
           )}
         </div>
       </div>
