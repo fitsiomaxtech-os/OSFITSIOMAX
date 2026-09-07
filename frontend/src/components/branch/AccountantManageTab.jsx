@@ -372,12 +372,17 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
           {/* The one question this tab opens on: money in, or money out. Alone on its
               line — what used to share it filters the income side and now sits with it. */}
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-ledger-filter">
+            {/* The width of the boards it switches between, not the width of the two
+                words on it. It is the first choice on the tab and everything below
+                belongs to whichever side is picked, so a control hugging its own labels
+                in the corner read as a minor filter rather than the top of the page.
+                The two split it evenly, so neither reads as the bigger half. */}
+            <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-ledger-filter">
               {LEDGER_VIEWS.map((v) => (
                 <button
                   key={v.key}
                   onClick={() => setLedger(v.key)}
-                  className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${ledger === v.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
+                  className={`flex-1 rounded-md px-4 py-2 text-xs font-semibold transition ${ledger === v.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
                   data-testid={`accountant-manage-ledger-${v.key}`}
                 >
                   {v.label}
