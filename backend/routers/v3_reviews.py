@@ -256,6 +256,71 @@ async def leads_awaiting_review(lead_ids: List[str]) -> set:
     return waiting
 
 
+async def review_hold_for_lead(lead_id: str) -> Optional[dict]:
+    """The written-up review this patient's NEXT day of treatment is waiting on, if any.
+
+    A week of treatment is read before the next one is worked. Reaching REVIEW_AFTER_DAYS
+    days is what makes a review raisable, and until a Head Physio has actually written that
+    one up the week just finished has not been read by anybody -- so the days after it are
+    held. Without this the milestone was only ever a banner: a physio could work day 8
+    through day 14 with week one still sitting on the Review tab untouched, and the review
+    that was supposed to shape those days arrived after they had all been given.
+
+    Both an unraised milestone and one in flight hold: a review on the Branch Admin's desk
+    or booked with a Head Physio is still a review nobody has written. Same test
+    leads_awaiting_review makes of a finished course, asked mid-course instead -- which is
+    why course_finished is False here. The closing review covers the days a whole-week rule
+    leaves over, and there is no next day for it to hold.
+
+    Returns None when nothing is owed -- fewer than seven days behind them, or the week
+    already reviewed -- so the caller reads it as a plain "is the next day held".
+    """
+    days = await _treatment_days(lead_id)
+    if days < REVIEW_AFTER_DAYS:
+        return None
+    existing = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).to_list(200)
+    elig = _review_eligibility(existing, days, False)
+    if elig["milestone"] <= 0:
+        return None
+    status = (elig["review"] or {}).get("status")
+    if not elig["eligible"] and status not in (SEND_TO_REVIEW, SENT):
+        return None
+    return {
+        "review_number": elig["review_number"],
+        # The span of days this review covers, so the message and the button can name the
+        # week rather than telling a physio "a review" is due and leaving them to count.
+        "first_day": elig["milestone"] - REVIEW_AFTER_DAYS + 1,
+        "last_day": elig["milestone"],
+        # None when it has not been raised at all; otherwise where in the chain it stands.
+        "status": None if elig["eligible"] else status,
+    }
+
+
+def review_hold_message(hold: dict) -> str:
+    """What to tell a physio whose next day is held, named for where the review stands.
+
+    Three different things to do -- raise it, wait on the Branch Admin, wait on the
+    CONSULTANT -- so one message for all three would send two thirds of them to a tab with
+    nothing on it to press.
+    """
+    week = f"days {hold['first_day']}\u2013{hold['last_day']}"
+    if hold["status"] == SENT:
+        return (
+            f"The CONSULTANT hasn't written the week {hold['review_number']} review ({week}) yet"
+            " \u2014 the next day can be completed once it is written"
+        )
+    if hold["status"] == SEND_TO_REVIEW:
+        return (
+            f"The week {hold['review_number']} review ({week}) is raised and waiting on Branch Admin"
+            " to schedule it \u2014 the next day can be completed once the CONSULTANT has written it"
+        )
+    return (
+        f"The week {hold['review_number']} review ({week}) is due"
+        " \u2014 raise it from the Review tab and wait for the CONSULTANT to write it"
+        " before completing the next day"
+    )
+
+
 def _shape(rev: dict) -> dict:
     return {k: v for k, v in rev.items() if k != "_id"}
 

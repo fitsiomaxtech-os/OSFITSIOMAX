@@ -1491,6 +1491,13 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const [assessments, setAssessments] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [reviewEvery, setReviewEvery] = useState(REVIEW_EVERY);
+  // The review the next day of this course is waiting on, straight off the server, and the
+  // sentence it hands back to say so. Read rather than worked out here: the milestone is
+  // decided by a count of distinct calendar dates across both courses, and a browser copy
+  // of that arithmetic is a second chance for this list to offer a day the server refuses.
+  // null when no day is held.
+  const [reviewHold, setReviewHold] = useState(null);
+  const [reviewHoldMessage, setReviewHoldMessage] = useState("");
   const [completeTarget, setCompleteTarget] = useState(null);
   const [absentTarget, setAbsentTarget] = useState(null);
   const [confirmingComplete, setConfirmingComplete] = useState(false);
@@ -1508,6 +1515,10 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
       setReviews(data.reviews || []);
       // Falls back to the local constant only if an older server answers without it.
       if (data.review_after_days) setReviewEvery(data.review_after_days);
+      // An older server answers without these, and no hold is the honest reading of that:
+      // the popup would otherwise wall off every day on a deploy that has not landed yet.
+      setReviewHold(data.review_hold || null);
+      setReviewHoldMessage(data.review_hold_message || "");
     } catch { /* silent */ }
   }, [lead.id]);
 
@@ -2018,8 +2029,23 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                           </span>
                         </span>
                       </p>
-                      <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${t.badge}`}>
-                        {look.label}
+                      <span className="flex items-center gap-1.5">
+                        {/* The one milestone actually holding the course up says so on its
+                            own row. A patient several weeks in carries several of these
+                            banners and only the last of them stops anything; without this
+                            the physio has to work out which by reading all of them. */}
+                        {reviewHold?.review_number === m.number && (
+                          <span
+                            className="rounded-md bg-amber-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900"
+                            title={reviewHoldMessage}
+                            data-testid={`physio-review-hold-${m.number}`}
+                          >
+                            Days on hold
+                          </span>
+                        )}
+                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${t.badge}`}>
+                          {look.label}
+                        </span>
                       </span>
                     </div>
                   );
@@ -2042,6 +2068,13 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                   // not the date: an absence pushes a day past the one after it until that
                   // one shifts too, and comparing dates would call the order broken.
                   const blockedBy = done ? null : firstOpenBefore(s);
+                  // Held by a week nobody has written up yet. The server refuses the day
+                  // for this reason too, so the button says it rather than letting the
+                  // press come back as a red toast; it holds every day still to be worked,
+                  // on either course, because the day count the milestone is read off
+                  // counts both. Never the day that reaches the milestone -- that one is
+                  // what makes the review raisable, and holding it would be a deadlock.
+                  const heldByReview = !done && !!reviewHold;
                   // The day the course currently stands on: the lowest-numbered day of this
                   // track that is still open. Day 1 until Day 1 is signed off, then Day 2,
                   // then Day 3 — one open day at a time, in the order they are worked.
@@ -2073,6 +2106,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                       className={`flex items-center gap-3 rounded-lg border p-3 ${
                         done ? "border-emerald-200 bg-emerald-50/50"
                         : awaiting ? "border-amber-200 bg-amber-50/60"
+                        : heldByReview && isOpenDay ? "border-amber-200 bg-amber-50/40"
                         : isOpenDay ? "border-sky-200 bg-sky-50/40"
                         : "border-slate-200 bg-white"
                       }`}
@@ -2081,6 +2115,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                       <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                         done ? "bg-emerald-200 text-emerald-800"
                         : awaiting ? "bg-amber-200 text-amber-800"
+                        : heldByReview && isOpenDay ? "bg-amber-200 text-amber-800"
                         : isOpenDay ? "bg-sky-200 text-sky-800"
                         : "bg-slate-100 text-slate-500"
                       }`}>
@@ -2100,9 +2135,18 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                               heads the list too and cannot be worked — so the row says
                               in words which day this is. */}
                           {isOpenDay && (
-                            <span className="rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700">
-                              Opened
-                            </span>
+                            heldByReview ? (
+                              // The day is next in line and still cannot be worked. Saying
+                              // "Opened" over a button that refuses to open it is the one
+                              // reading that helps nobody.
+                              <span className="rounded bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700">
+                                Held for review
+                              </span>
+                            ) : (
+                              <span className="rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700">
+                                Opened
+                              </span>
+                            )
                           )}
                         </p>
                         <p className={`text-[10px] ${awaiting ? "font-semibold text-amber-700" : "text-slate-400"}`}>
@@ -2165,21 +2209,38 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                           >
                             <UserX className="mr-1 h-3 w-3" /> Absent
                           </Button>
-                          <Button
-                            size="sm"
-                            className="bg-sky-600 text-xs text-white hover:bg-sky-700"
-                            onClick={() => setCompleteTarget(s)}
-                            data-testid={`physio-complete-day-${s.id}`}
-                          >
-                            <Check className="mr-1 h-3 w-3" /> Complete
-                          </Button>
+                          {heldByReview ? (
+                            // A week of treatment is read before the next one is worked.
+                            // The same refusal the server makes, said on the button that
+                            // would otherwise offer the day and have the press thrown
+                            // back; the milestone banner above names the week and says
+                            // who is holding it.
+                            <Button
+                              size="sm"
+                              disabled
+                              className="bg-amber-100 text-xs text-amber-700 hover:bg-amber-100"
+                              title={reviewHoldMessage}
+                              data-testid={`physio-day-review-held-${s.id}`}
+                            >
+                              <AlertCircle className="mr-1 h-3 w-3" /> Review due
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              className="bg-sky-600 text-xs text-white hover:bg-sky-700"
+                              onClick={() => setCompleteTarget(s)}
+                              data-testid={`physio-complete-day-${s.id}`}
+                            >
+                              <Check className="mr-1 h-3 w-3" /> Complete
+                            </Button>
+                          )}
                         </div>
                       ) : (
                         <Button
                           size="sm"
                           disabled
                           className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
-                          title={`This day is next, but ${fmtDate(s.slot_time)} has not come round yet`}
+                          title={heldByReview ? reviewHoldMessage : `This day is next, but ${fmtDate(s.slot_time)} has not come round yet`}
                           data-testid={`physio-day-locked-${s.id}`}
                         >
                           <Check className="mr-1 h-3 w-3" /> Complete
@@ -2200,8 +2261,9 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               <p className="text-[11px] text-slate-500">
                 Days run in order — only the day marked Opened can be completed. Finishing
                 it opens the day after it and drops the finished one to the bottom of this
-                list. Completing a day also sends that week's session to Review for a
-                weekly write-up.
+                list. Every {reviewEvery} days the course stops for a CONSULTANT&apos;s review:
+                the next day stays held until that review has been written, so raise it from
+                the Review tab as soon as the week is finished.
               </p>
             </div>
           </div>

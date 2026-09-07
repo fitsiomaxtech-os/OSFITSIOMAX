@@ -14,7 +14,10 @@ from schemas.v3 import (
 # The interval that actually governs when a review can be raised. Imported rather than
 # redeclared so the Treatment Days popup marks its milestones where the reviews router
 # agrees they are.
-from routers.v3_reviews import REVIEW_AFTER_DAYS, review_numbers_for_lead, leads_awaiting_review
+from routers.v3_reviews import (
+    REVIEW_AFTER_DAYS, review_numbers_for_lead, leads_awaiting_review,
+    review_hold_for_lead, review_hold_message,
+)
 # Which leads belong to a physio. In its own module because both this board and the
 # reviews router need it, and this one already imports from that one — a helper living
 # in either would close the loop.
@@ -463,6 +466,13 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
     ]
     reviews.sort(key=lambda r: r["treatment_days"])
 
+    # Whether the next day of this course is held by a review nobody has written yet, and
+    # which one. Sent rather than re-derived in the popup: the day count that decides this
+    # is a count of distinct calendar dates across both courses, and a second copy of that
+    # arithmetic in the browser is a second chance for the button to offer a day the server
+    # will refuse. None when nothing is owed.
+    hold = await review_hold_for_lead(lead_id)
+
     # Sent so the popup marks milestones on the same interval the reviews router enforces,
     # instead of carrying its own copy of the number and drifting from it.
     return {
@@ -470,6 +480,8 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
         "assessments": assessments,
         "reviews": reviews,
         "review_after_days": REVIEW_AFTER_DAYS,
+        "review_hold": hold,
+        "review_hold_message": review_hold_message(hold) if hold else "",
     }
 
 
@@ -703,6 +715,22 @@ async def physio_complete_session(
             status_code=400,
             detail=f"Day {blocking} has not been completed yet — days are completed in order",
         )
+
+    # A week of treatment is read before the next one is worked. Every seven days attended
+    # earns a CONSULTANT's review, and until that one is written up the week just finished
+    # has been seen by nobody but the physio who gave it — so the day after it waits.
+    #
+    # The popup already refuses this before the press, but the day count behind the review
+    # milestones is written here: a day completed straight through the API would move the
+    # next milestone with nothing having read the last one. Same rule leads_awaiting_review
+    # applies at the end of a course, applied at each week inside it.
+    #
+    # Day 7 itself is never held — six days are behind it and no milestone has been
+    # reached — so the week can always be finished, which is what makes the review
+    # raisable in the first place.
+    hold = await review_hold_for_lead(session["lead_id"])
+    if hold:
+        raise HTTPException(status_code=400, detail=review_hold_message(hold))
 
     # The day's own note is the report. Checked here and not only in the popup: this is
     # what the day-report views read to tell a day that was written up from one that was
