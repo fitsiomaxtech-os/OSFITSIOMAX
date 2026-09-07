@@ -53,24 +53,27 @@ const PAYMENT_MODES = [
 
 // The card, the table it filters to, and the label above that table are one thing, so they
 // are one list rather than three that have to be kept in step.
+// `label` names the section the detail table below is showing; `short` is what fits on a
+// card standing eight to a row, and is what the branch breakdown's column headings were
+// already making for themselves by cutting " Revenue" off the label.
 const REVENUE_VIEWS = [
-  { key: "collected", label: "Total Revenue", color: "#059669", icon: Wallet },
-  { key: "consultation", label: "Consultation Revenue", color: "#0284c7", icon: Stethoscope },
-  { key: "session", label: "Session Revenue", color: "#7c3aed", icon: Activity },
-  { key: "diet", label: "Diet Revenue", color: "#ea580c", icon: Salad },
-  { key: "store", label: "Store Revenue", color: "#d97706", icon: ShoppingBag },
+  { key: "collected", label: "Total Revenue", short: "Total", color: "#059669", icon: Wallet },
+  { key: "consultation", label: "Consultation Revenue", short: "Consultation", color: "#0284c7", icon: Stethoscope },
+  { key: "session", label: "Session Revenue", short: "Session", color: "#7c3aed", icon: Activity },
+  { key: "diet", label: "Diet Revenue", short: "Diet", color: "#ea580c", icon: Salad },
+  { key: "store", label: "Store Revenue", short: "Store", color: "#d97706", icon: ShoppingBag },
   // Zumba money lives on the registration, not in the leads' fee trail — see the
   // zumba loop in v3_finance.py's revenue-overview. It reaches this row the same way
   // store sales do, as transactions carrying source "zumba".
-  { key: "zumba", label: "Zumba Revenue", color: "#db2777", icon: Music2 },
+  { key: "zumba", label: "Zumba Revenue", short: "Zumba", color: "#db2777", icon: Music2 },
   // Real now that a rehab fee can be collected: rehab_fee_collected is its own revenue
   // category, so these transactions arrive carrying source "rehab".
-  { key: "rehab", label: "Rehab Revenue", color: "#0891b2", icon: HeartPulse },
+  { key: "rehab", label: "Rehab Revenue", short: "Rehab", color: "#0891b2", icon: HeartPulse },
   // Gym memberships, reaching this row the same way Zumba's do: v3_fitness.py keeps the
   // fee on the registration, so it arrives as a transaction carrying source "fitness"
   // rather than through the leads' fee trail. Until it was counted, this was the one desk
   // taking money that never appeared on the page an accountant reads.
-  { key: "fitness", label: "Fitness Revenue", color: "#65a30d", icon: Dumbbell },
+  { key: "fitness", label: "Fitness Revenue", short: "Fitness", color: "#65a30d", icon: Dumbbell },
 ];
 
 // What the server calls money it cannot put under a branch -- see _branch_label in
@@ -411,11 +414,11 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
           <>
           {/* Seven across from lg with Rehab among them. Two-up on a phone, which leaves
               the odd one centred rather than stranded in a column of its own. */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
             {REVENUE_VIEWS.map((v) => (
               <StatTile
                 key={v.key}
-                label={v.label}
+                label={v.short}
                 value={fmt(sums.totals[v.key])}
                 sub={countLabel(sums.counts[v.key], v.key === "store" ? "sale" : (v.key === "zumba" || v.key === "fitness") ? "registration" : "payment")}
                 icon={v.icon}
@@ -444,7 +447,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
                       <th className="px-4 py-2 text-left font-semibold">Branch</th>
                       {REVENUE_VIEWS.filter((v) => v.key !== "collected").map((v) => (
                         <th key={v.key} className="whitespace-nowrap px-3 py-2 text-right font-semibold">
-                          {v.label.replace(" Revenue", "")}
+                          {v.short}
                         </th>
                       ))}
                       <th className="px-4 py-2 text-right font-semibold">Total</th>
