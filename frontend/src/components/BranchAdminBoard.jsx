@@ -1256,6 +1256,19 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // in it, so a stage pill still means the same thing under it.
   const [markFilter, setMarkFilter] = useState(""); // "" | "vip" | "attention"
 
+  // Which end of the list opens it. In the toolbar with the search, the ranges and the
+  // marks because it is the same kind of control they are -- it says how the whole board
+  // reads, not where a patient is in it -- and it applies to both tabs from the one place,
+  // the way everything else on this row does.
+  //
+  // Newest first by default. Both lists arrive from the server in an order nobody chose to
+  // read them in (newest-updated), and the branch's question at this toolbar is nearly
+  // always about the patients who have just arrived, which on a board of eighteen booked
+  // consultations means the ones a strict date order buries at the bottom. The Head
+  // Physio's copy of ConsultationsBoard is untouched by this and still opens on the first
+  // appointment of the day -- see the note beside `filtered` there.
+  const [sortOrder, setSortOrder] = useState("newest"); // "newest" | "oldest"
+
   // Which tab has already been opened on its own stage. A ref rather than state: it only
   // decides whether the effect below acts, and a re-render because it changed would be a
   // render nobody is waiting for.
@@ -1396,8 +1409,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       if (!wanted) continue;
       list = list.filter((l) => f.answer(l).toLowerCase() === wanted);
     }
+    // The toolbar's order, applied last so it orders whatever the narrowings left rather
+    // than an order they then cut holes in.
+    //
+    // On `created_at` -- when the patient arrived -- because that is what this tab lists.
+    // The board arrives newest-updated first, which is a change log's order: a lead
+    // touched this morning to correct a phone number opens the list above one created an
+    // hour ago, and "newest" then means something the reader cannot see on the row. The
+    // date on the row is the arrival date, so that is the one the control sorts on.
+    //
+    // A copy, not a sort in place: boardData.leads is state, and Array.sort mutates. Sorting
+    // it here would reorder the array React is holding without telling it, which is how a
+    // list re-renders in an order that no longer matches the one it was given.
+    const arrived = (l) => new Date(l.created_at || 0).getTime() || 0;
+    list = [...list].sort((a, b) => (sortOrder === "newest" ? arrived(b) - arrived(a) : arrived(a) - arrived(b)));
     return list;
-  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter, listFilters, toolbarFilters]);
+  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter, listFilters, toolbarFilters, sortOrder]);
 
   /**
    * What each dropdown offers: the answers this branch has actually given, not a list
@@ -1892,6 +1919,43 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 lets the search give up the width instead; on the narrowest phones that
                 leaves the placeholder clipped, which costs less than a second row. */}
             <div className={`${searchOpen ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-3`}>
+            {/* Which end of the list opens it. First in the group of actions, immediately
+                before the marks, because it is the widest reading of the board on this row:
+                the marks, the ranges and the search all narrow WHO is listed, and this one
+                orders whoever is left. Read left to right the row now says what to show,
+                then in what order, then what to do about it.
+
+                A dropdown rather than a toggle button, and labelled in words rather than by
+                an arrow. Two arrow states on one glyph say which way it points and never
+                which way it is about to go, so the reader has to press it to find out what
+                it meant -- and "newest first" is not a direction anybody reads off a
+                chevron. The closed control says the order the list is in.
+
+                Text and a chevron, no glyph of its own, which is how the intake dropdowns
+                further up this row are already built (FilterSelect). The trigger is
+                justify-between, so an icon placed inside it would push the label into the
+                middle and leave this the one control on the row whose text does not start
+                where every other one's does.
+
+                Kept at every width, unlike those dropdowns, since it is one control rather
+                than three and the order of the list is the first thing a phone reads: a
+                phone shows four rows at a time, so which four they are is most of what that
+                screen says. It is the search that gives way for it, collapsing to its icon
+                below sm the way it already does for everything else on this row. */}
+            <Select value={sortOrder} onValueChange={setSortOrder}>
+              <SelectTrigger
+                title="Order the list by date"
+                aria-label="Sort order"
+                className="h-10 w-[112px] shrink-0 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-none transition-colors hover:bg-slate-50 focus:ring-2 focus:ring-sky-200 sm:w-[124px]"
+                data-testid="branch-sort-order"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="border-slate-200" data-testid="branch-sort-order-menu">
+                <SelectItem value="newest" className="text-xs text-slate-700">New to First</SelectItem>
+                <SelectItem value="oldest" className="text-xs text-slate-700">Old to First</SelectItem>
+              </SelectContent>
+            </Select>
             {/* Narrow the board to one mark, on every stage rather than on All Stages
                 alone. A branch that has just marked somebody on the stage they are being
                 worked on could not then ask to see only those, which is the question the
@@ -2036,6 +2100,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               // Date Filter beside it do. Without it the pills would count the VIPs and the
               // table under them would show everybody.
               externalMarkFilter={markFilter}
+              // Same toolbar, same list order. Without it the dropdown up there would
+              // order Branch Leads and leave the tab it is actually sitting over reading
+              // whichever way that board sorts on its own.
+              externalSortOrder={sortOrder}
               reloadToken={refreshTick}
               // Eight columns can't be read on a phone — without this the consultation
               // stages fall back to the desk table and every field arrives truncated.

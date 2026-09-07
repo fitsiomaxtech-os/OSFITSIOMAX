@@ -1889,7 +1889,7 @@ const RehabDayList = ({ days, showPhysio = false, testid }) => {
   );
 };
 
-const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment" }) => {
+const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment", externalSortOrder = "oldest" }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
   // worth remarking on when they are assigned. Passed in rather than worked out here for
@@ -2660,13 +2660,28 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     // which would put the unbooked at the head of the running order. A row booked on the
     // day with no time set stands in at the end of that day for the same reason: empty
     // sorts before "09:00", so it would otherwise open the list.
+    //
+    // Which end of that order opens the list is the toolbar's to say now (externalSortOrder),
+    // because the two boards that render these rows are reading them for different things.
+    // The Head Physio's is a clinic list worked down from the first appointment of the day,
+    // which is what "oldest" gives and why it stays the default here. The branch's
+    // Consultation tab is an admin view of a pipeline, where the question is nearly always
+    // "who came in most recently" -- so that board asks for "newest" and gets the same
+    // ordering read from the other end.
+    //
+    // One key either way. Reversing the comparison rather than sorting on some second field
+    // keeps the list chronological in both directions: flip it and the newest appointment
+    // opens the list, not a differently-ordered list that happens to start somewhere else.
+    // The unbooked stay pinned to the bottom in both, since "no appointment yet" is not a
+    // date and does not belong at either end of one.
     const at = (l) => `${l.appointment_date}T${l.appointment_time || "99:99"}`;
+    const dir = externalSortOrder === "newest" ? -1 : 1;
     return [...rows].sort((a, b) => {
       if (!a.appointment_date) return b.appointment_date ? 1 : 0;
       if (!b.appointment_date) return -1;
-      return at(a).localeCompare(at(b));
+      return at(a).localeCompare(at(b)) * dir;
     });
-  }, [inStage, showDiscountColumn, activeFee, activeStatus]);
+  }, [inStage, showDiscountColumn, activeFee, activeStatus, externalSortOrder]);
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
