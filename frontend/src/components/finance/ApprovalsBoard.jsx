@@ -4,6 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransaction } from "@/lib/api";
+import { ExpenseApprovalsPanel } from "@/components/finance/ExpenseApprovalsPanel";
+
+// The two things this desk signs off. Money coming in was all it ever held, because money
+// going out had no approval to give — a branch could not raise an expense, so the only
+// expenses on file were the ones the accountant had entered themselves.
+const LEDGERS = [
+  { key: "income", label: "Income Approval" },
+  { key: "expenses", label: "Expenses Approval" },
+];
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 
@@ -127,6 +136,7 @@ export const ApprovalsBoard = () => {
   const [category, setCategory] = useState("all");
   const [paymentMode, setPaymentMode] = useState("all"); // "all" | "cash" | "upi" | "card" | "account_transfer" | "cheque"
   const [view, setView] = useState("pending"); // "pending" | "approved"
+  const [ledger, setLedger] = useState("income"); // "income" | "expenses"
   const [data, setData] = useState({ transactions: [], summary: {} });
   const [loading, setLoading] = useState(false);
   const [approving, setApproving] = useState(null);
@@ -163,6 +173,27 @@ export const ApprovalsBoard = () => {
 
   return (
     <div className="space-y-4" data-testid="finance-approvals-root">
+      {/* Which of the two is being signed off. Above the cards rather than beside the
+          Pending/Approved toggle, because it changes what those cards are counting —
+          the toggle underneath cuts one ledger, this picks which ledger. */}
+      <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="finance-approvals-ledger">
+        {LEDGERS.map((l) => (
+          <button
+            key={l.key}
+            type="button"
+            onClick={() => setLedger(l.key)}
+            className={`flex-1 rounded-md px-4 py-2 text-xs font-semibold transition ${ledger === l.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
+            data-testid={`finance-approvals-ledger-${l.key}`}
+          >
+            {l.label}
+          </button>
+        ))}
+      </div>
+
+      {ledger === "expenses" && <ExpenseApprovalsPanel />}
+
+      {ledger === "income" && (
+      <>
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4" data-testid="finance-approvals-pending-card">
           <p className="text-[11px] font-medium uppercase tracking-wide text-amber-700">Pending Approval</p>
@@ -299,6 +330,9 @@ export const ApprovalsBoard = () => {
           ))}
         </div>
       </div>
+
+      </>
+      )}
 
       {approving && (
         <ApproveModal
