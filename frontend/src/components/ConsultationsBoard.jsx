@@ -9672,22 +9672,22 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 Branch Admin fixes by hand; nothing is auto-filled, and only slots that physio
                 has actually published are offered. */}
             {showPhysioModal && showSlotPicker && physioPick && (
-              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2" data-testid="cons-slot-picker-modal">
-                <div className="flex h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 sm:p-6" data-testid="cons-slot-picker-modal">
+                <div className="flex h-[calc(100vh-1.5rem)] max-h-[calc(100vh-1.5rem)] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl sm:h-[84vh] sm:max-h-[84vh]">
                   {/* Wraps on a phone: the title keeps the first line with the close button
                       and the status badge drops to its own beneath. Side by side the badge
                       refuses to shrink and squeezes the name into a one-word column. */}
-                  <div className="flex flex-wrap items-center justify-between gap-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-white sm:flex-nowrap sm:gap-3 sm:px-6 sm:py-4">
-                    <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 text-base font-bold text-white sm:h-12 sm:w-12 sm:text-lg">
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 px-3 py-2 text-white sm:flex-nowrap sm:gap-3 sm:px-4 sm:py-2.5">
+                    <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-2.5">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-bold text-white sm:h-8 sm:w-8 sm:text-sm">
                         {(physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "P").charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold sm:text-lg" data-testid="cons-slot-picker-physio">
+                        <p className="truncate text-[13px] font-semibold leading-tight sm:text-[15px]" data-testid="cons-slot-picker-physio">
                           {selectedLead.name} <span className="font-normal text-white/70">with</span>{" "}
                           {physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "Physio"}
                         </p>
-                        <p className="text-[11px] leading-snug text-white/75 sm:text-[13px]">
+                        <p className="text-[10px] leading-snug text-white/70 sm:text-[11px]">
                           {courseName}{totalSessionsNeeded ? ` · ${totalSessionsNeeded} ${dayNoun}s` : ""} ·
                           {" "}{isRehabAssign ? "one a day" : "one session a day"} · {sessionMinutes} min each · {openSlotCount} slots open
                         </p>
@@ -9701,7 +9701,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             href={pickedMeetLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="mt-1 inline-flex max-w-full items-center gap-1 rounded-md bg-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:bg-white/25 sm:text-[11px]"
+                            className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded bg-white/15 px-1.5 py-0.5 text-[9px] font-semibold text-white hover:bg-white/25 sm:text-[10px]"
                             data-testid="cons-slot-picker-meet-link"
                           >
                             <Video className="h-3 w-3 shrink-0" />
@@ -9710,8 +9710,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         )}
                       </div>
                     </div>
-                    <button onClick={() => setShowSlotPicker(false)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-slot-picker-close">
-                      <X className="h-5 w-5" />
+                    <button onClick={() => setShowSlotPicker(false)} className="shrink-0 rounded-full p-1 text-white/70 hover:bg-white/20" data-testid="cons-slot-picker-close">
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
 
@@ -9724,29 +9724,29 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       lined up with nothing. They read as a set now: a heading row, then the
                       chips beneath it, each chip a full-width row on a phone so the amount
                       and the day range inside it stay on one line. */}
-                  <div className="border-b-2 border-slate-200 bg-slate-100 px-3 py-2 sm:px-6 sm:py-3.5" data-testid="cons-slot-picker-payment">
-                    <div className="mb-2 hidden items-baseline justify-between gap-2 sm:flex">
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500">{assignFeeLabel}</span>
+                  <div className="border-b border-slate-200 bg-slate-50 px-3 py-1.5 sm:px-4 sm:py-2" data-testid="cons-slot-picker-payment">
+                    <div className="mb-1.5 hidden items-baseline justify-between gap-2 sm:flex">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{assignFeeLabel}</span>
                       {sessionPayment.price > 0 && (
-                        <span className="shrink-0 text-[12px] font-bold text-slate-600 sm:text-[13px]">
+                        <span className="shrink-0 text-[11px] font-bold text-slate-600 sm:text-[12px]">
                           Rs.{sessionPayment.paidAmount} of Rs.{sessionPayment.price} collected
                         </span>
                       )}
                     </div>
                     <div className="flex flex-wrap items-stretch gap-2">
                       <span
-                        className="w-full rounded-md border border-emerald-900 bg-emerald-700 px-3 py-1 text-center text-[11px] font-bold text-white shadow-sm sm:w-auto sm:rounded-lg sm:border-2 sm:px-4 sm:py-2 sm:text-sm"
+                        className="w-full rounded-md border border-emerald-900 bg-emerald-700 px-2.5 py-1 text-center text-[11px] font-bold text-white sm:w-auto sm:px-3 sm:py-1 sm:text-[12px]"
                         data-testid="cons-slot-picker-count"
                       >
                         {openEndedRehab ? `${sortedPickedSlots.length} ${dayNoun}${sortedPickedSlots.length === 1 ? "" : "s"} fixed` : `${sortedPickedSlots.length} of ${totalSessionsNeeded} ${dayNoun}s fixed`}
                       </span>
-                      <span className="hidden w-full rounded-lg border-2 border-emerald-400 bg-emerald-50 sm:block px-3 py-1.5 text-center text-xs font-bold text-emerald-700 shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm" data-testid="cons-payment-paid">
+                      <span className="hidden w-full rounded-md border border-emerald-300 bg-emerald-50 sm:block px-2.5 py-1 text-center text-[11px] font-bold text-emerald-700 sm:w-auto sm:px-3 sm:py-1 sm:text-left sm:text-[12px]" data-testid="cons-payment-paid">
                         {sessionPayment.paid} {dayNoun}{sessionPayment.paid === 1 ? "" : "s"} PAID
                         {sessionPayment.paidAmount > 0 && <span className="ml-2 font-semibold text-emerald-600">Rs.{sessionPayment.paidAmount}</span>}
                         {sessionPayment.paid > 0 && <span className="ml-2 font-medium text-emerald-500">Day 1–{sessionPayment.paid}</span>}
                       </span>
                       {sessionPayment.unpaid > 0 ? (
-                        <span className="hidden w-full rounded-lg border-2 border-rose-400 bg-rose-50 sm:block px-3 py-1.5 text-center text-xs font-bold text-rose-700 shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm" data-testid="cons-payment-unpaid">
+                        <span className="hidden w-full rounded-md border border-rose-300 bg-rose-50 sm:block px-2.5 py-1 text-center text-[11px] font-bold text-rose-700 sm:w-auto sm:px-3 sm:py-1 sm:text-left sm:text-[12px]" data-testid="cons-payment-unpaid">
                           {sessionPayment.unpaid} {dayNoun}{sessionPayment.unpaid === 1 ? "" : "s"} UNPAID
                           {sessionPayment.dueAmount > 0 && <span className="ml-2 font-semibold text-rose-600">Rs.{sessionPayment.dueAmount}</span>}
                           <span className="ml-2 font-medium text-rose-500">
@@ -9755,7 +9755,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           </span>
                         </span>
                       ) : (
-                        <span className="hidden w-full rounded-lg border-2 border-emerald-400 bg-emerald-100 px-3 py-1.5 text-center text-xs font-bold text-emerald-800 shadow-sm sm:block sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm">
+                        <span className="hidden w-full rounded-md border border-emerald-300 bg-emerald-100 px-2.5 py-1 text-center text-[11px] font-bold text-emerald-800 sm:block sm:w-auto sm:px-3 sm:py-1 sm:text-left sm:text-[12px]">
                           Package fully paid
                         </span>
                       )}
@@ -9767,36 +9767,36 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   ) : (
                     <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
                       {/* Month grid — a dot marks a day this physio has published slots on */}
-                      <div className="w-full flex-shrink-0 border-b border-slate-100 p-5 lg:w-[25rem] lg:border-b-0 lg:border-r lg:overflow-y-auto">
-                        <div className="mb-3 flex items-center justify-between">
+                      <div className="w-full flex-shrink-0 border-b border-slate-100 p-3 sm:p-4 lg:w-[19.5rem] lg:border-b-0 lg:border-r lg:overflow-y-auto">
+                        <div className="mb-2 flex items-center justify-between">
                           <button
                             type="button"
                             onClick={() => (pickerMonth === 0 ? (setPickerMonth(11), setPickerYear(pickerYear - 1)) : setPickerMonth(pickerMonth - 1))}
                             className="rounded p-1 hover:bg-slate-100"
                             data-testid="cons-slot-prev-month"
                           >
-                            <ChevronLeft className="h-5 w-5 text-slate-500" />
+                            <ChevronLeft className="h-4 w-4 text-slate-500" />
                           </button>
-                          <h4 className="text-base font-bold text-slate-700">{MONTH_NAMES[pickerMonth]} {pickerYear}</h4>
+                          <h4 className="text-sm font-bold text-slate-700">{MONTH_NAMES[pickerMonth]} {pickerYear}</h4>
                           <button
                             type="button"
                             onClick={() => (pickerMonth === 11 ? (setPickerMonth(0), setPickerYear(pickerYear + 1)) : setPickerMonth(pickerMonth + 1))}
                             className="rounded p-1 hover:bg-slate-100"
                             data-testid="cons-slot-next-month"
                           >
-                            <ChevronRight className="h-5 w-5 text-slate-500" />
+                            <ChevronRight className="h-4 w-4 text-slate-500" />
                           </button>
                         </div>
 
                         <div className="mb-1 grid grid-cols-7 gap-1">
                           {WEEKDAY_LABELS.map((d) => (
-                            <div key={d} className="py-1 text-center text-[13px] font-semibold text-slate-400">{d}</div>
+                            <div key={d} className="py-0.5 text-center text-[11px] font-semibold text-slate-400">{d}</div>
                           ))}
                         </div>
 
                         <div className="grid grid-cols-7 gap-1">
                           {Array.from({ length: new Date(pickerYear, pickerMonth, 1).getDay() }, (_, i) => (
-                            <div key={`pad-${i}`} className="h-12" />
+                            <div key={`pad-${i}`} className="h-9" />
                           ))}
                           {Array.from({ length: new Date(pickerYear, pickerMonth + 1, 0).getDate() }, (_, i) => {
                             const day = i + 1;
@@ -9810,7 +9810,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                 type="button"
                                 onClick={() => setPickerDate(d)}
                                 disabled={dayOpen === 0 && !planned}
-                                className={`relative h-12 rounded-lg text-base font-semibold transition-all ${
+                                className={`relative h-9 rounded-md text-[13px] font-semibold transition-all ${
                                   isFocused
                                     ? "bg-violet-600 text-white shadow-md ring-2 ring-violet-300 ring-offset-1"
                                     : planned
@@ -9828,7 +9828,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                               >
                                 {day}
                                 {planned ? (
-                                  <span className={`absolute -right-1 -top-1 flex h-[1.3rem] min-w-[1.3rem] items-center justify-center rounded-full px-1 text-[11px] font-bold shadow-sm ${
+                                  <span className={`absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[9px] font-bold shadow-sm ${
                                     isPaidSession(planned.day) ? "bg-emerald-500 text-white" : "bg-rose-500 text-white"
                                   }`}>
                                     {planned.day}
@@ -9841,13 +9841,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           })}
                         </div>
 
-                        <div className="mt-4 hidden space-y-2 border-t border-slate-100 pt-3 sm:block">
-                          <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-500">
-                            <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full bg-emerald-500" /> Paid day</span>
-                            <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full bg-rose-500" /> Unpaid day</span>
+                        <div className="mt-3 hidden space-y-1.5 border-t border-slate-100 pt-2 sm:block">
+                          <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-semibold text-slate-500">
+                            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" /> Paid day</span>
+                            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-rose-500" /> Unpaid day</span>
                             <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" /> Slots open</span>
                           </div>
-                          <p className="text-[13px] text-slate-400">
+                          <p className="text-[11px] leading-snug text-slate-400">
                             One {dayNoun} a day — {totalSessionsNeeded} means {totalSessionsNeeded} separate
                             days. Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Pick a
                             time and it <b>jumps to the next open date</b> on its own, so the plan is laid out in one
@@ -9862,7 +9862,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           phone this was a scroller inside the body's own scroller, which
                           trapped the times in a short box — the date heading was clipped and
                           the slots under it couldn't be reached at all. */}
-                      <div className="w-full flex-shrink-0 p-4 lg:flex-1 lg:overflow-y-auto">
+                      <div className="w-full flex-shrink-0 p-3 sm:p-4 lg:flex-1 lg:overflow-y-auto">
                         {!pickerDate ? (
                           <div className="flex h-full items-center justify-center">
                             <div className="text-center">
@@ -9872,9 +9872,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           </div>
                         ) : (
                           <>
-                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                              <h4 className="text-lg font-bold text-slate-800" data-testid="cons-slot-picker-date">{longDate(pickerDate)}</h4>
-                              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-400">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="text-base font-bold text-slate-800" data-testid="cons-slot-picker-date">{longDate(pickerDate)}</h4>
+                              <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-semibold text-slate-400">
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-400" /> Open</span>
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-600" /> Paid day</span>
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-rose-500" /> Unpaid day</span>
@@ -9884,7 +9884,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
 
                             {planByDate[pickerDate] && (
                               <p
-                                className={`mb-3 rounded-lg border-2 px-4 py-2.5 text-sm font-semibold shadow-sm ${
+                                className={`mb-2 rounded-md border px-3 py-1.5 text-[12px] font-semibold ${
                                   isPaidSession(planByDate[pickerDate].day)
                                     ? "border-emerald-400 bg-emerald-50 text-emerald-800"
                                     : "border-rose-400 bg-rose-50 text-rose-800"
@@ -9920,7 +9920,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                       type="button"
                                       onClick={() => togglePickedSlot(slot)}
                                       disabled={taken}
-                                      className={`overflow-hidden rounded-lg border-2 p-2 text-left transition-all sm:p-3 ${
+                                      className={`overflow-hidden rounded-lg border-2 p-2 text-left transition-all sm:p-2.5 ${
                                         taken
                                           ? "cursor-not-allowed border-amber-300 bg-amber-50 opacity-70"
                                           : picked
@@ -9942,7 +9942,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                           beside it stays at two. The first line carries only
                                           the time — a Day badge sharing it was what tipped the
                                           longest times over the width. */}
-                                      <p className={`truncate text-[13px] font-bold sm:text-base ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
+                                      <p className={`truncate text-[13px] font-bold sm:text-sm ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
                                         {to12h(time)}
                                       </p>
                                       {/* Once a slot is picked, which treatment day it became
@@ -9978,9 +9978,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             )}
 
                             {treatmentPlan.length > 0 && (
-                              <div className="mt-4 rounded-xl border-2 border-violet-200 bg-violet-50/70 p-4" data-testid="cons-treatment-plan">
+                              <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="cons-treatment-plan">
                                 <div className="mb-2 flex items-center justify-between">
-                                  <p className="text-sm font-bold uppercase tracking-wider text-violet-700">{isRehabAssign ? "Rehab plan" : "Treatment plan"}</p>
+                                  <p className="text-[12px] font-bold uppercase tracking-wider text-violet-700">{isRehabAssign ? "Rehab plan" : "Treatment plan"}</p>
                                   <button
                                     type="button"
                                     onClick={() => setPickedSessionSlots([])}
@@ -9993,7 +9993,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                 {/* Grouped the way the package is sold — "03 Week · 9 sessions" reads back
                                     as 3 weeks of treatment days, each day one session. Each day carries
                                     whether the Treatment Fee actually covers it. */}
-                                <div className="max-h-48 space-y-2.5 overflow-y-auto">
+                                <div className="max-h-40 space-y-2 overflow-y-auto">
                                   {[...new Set(treatmentPlan.map((p) => p.week))].map((week) => (
                                     <div key={week}>
                                       <p className="mb-1 text-xs font-bold uppercase tracking-wider text-violet-500">Week {week}</p>
@@ -10040,8 +10040,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
 
                   {/* Stacked on a phone. On one line the two buttons take what they need
                       and the note beside them is left a column barely a word wide. */}
-                  <div className="flex flex-col gap-2.5 border-t-2 border-slate-200 bg-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-6 sm:py-4">
-                    <div className="text-[12px] leading-snug text-slate-500 sm:text-[13px]">
+                  <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-2.5">
+                    <div className="text-[11px] leading-snug text-slate-500 sm:text-[12px]">
                       <p className="font-bold text-slate-700">
                         {allSessionsPicked
                           ? `All ${totalSessionsNeeded} ${dayNoun}s are fixed${treatmentPlan.length > 0 ? ` · ${dayLabel(treatmentPlan[0].date)} to ${dayLabel(treatmentPlan[treatmentPlan.length - 1].date)}` : ""}.`
@@ -10055,11 +10055,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       )}
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <Button variant="outline" className="flex-1 text-sm sm:flex-none" onClick={() => setShowSlotPicker(false)} data-testid="cons-slot-picker-back">
+                      <Button variant="outline" className="h-8 flex-1 px-3 text-[12px] sm:flex-none" onClick={() => setShowSlotPicker(false)} data-testid="cons-slot-picker-back">
                         Back
                       </Button>
                       <Button
-                        className="flex-[2] bg-emerald-600 text-sm hover:bg-emerald-700 sm:flex-none"
+                        className="h-8 flex-[2] bg-emerald-600 px-3 text-[12px] hover:bg-emerald-700 sm:flex-none"
                         onClick={submitPhysioAssign}
                         disabled={assigningPhysio || !allSessionsPicked}
                         data-testid="cons-slot-picker-submit"
