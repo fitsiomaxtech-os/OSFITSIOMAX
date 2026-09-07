@@ -102,6 +102,60 @@ const toIso = (d) => d.toISOString().slice(0, 10);
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const countLabel = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
+/**
+ * One revenue figure, for the row of eight this tab opens on.
+ *
+ * Its own card rather than the shared StatTile, which also draws the Physio board, the
+ * Dashboard and four others: what follows is a change of house style for a row of money,
+ * and applying it through StatTile would restyle every board in the OS off one screenshot.
+ *
+ * Colour identifies, it does not decorate. Each source keeps its hue, but it is worn by a
+ * small icon tile and the selected ring rather than by the figure — eight numbers in eight
+ * colours is a chart legend where a column of money should be, and the eye cannot compare
+ * Rs.2,43,600 in violet against Rs.44,124 in blue as quickly as it can compare two figures
+ * that look alike. The figures are one weight, one colour, and tabular, so the digits line
+ * up down the row and the widest number is the biggest number.
+ *
+ * The tinted disc behind the old icon is gone with it: at this card's size it was a
+ * quarter of the surface, and it drew the eye to the corner rather than to the number.
+ */
+const RevenueCard = ({ label, value, sub, icon: Icon, color, active, onClick, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={active}
+    className={`group relative flex flex-col overflow-hidden rounded-xl border bg-white p-3.5 text-left transition ${
+      active ? "border-transparent shadow-sm" : "border-slate-200 hover:border-slate-300 hover:shadow-sm"
+    }`}
+    style={active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}
+    data-testid={testid}
+  >
+    {/* A hairline of the source's colour along the top, so the row still reads as eight
+        different things at a glance once the figures stopped saying so themselves. */}
+    <span aria-hidden className="absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: color }} />
+
+    <div className="flex items-start justify-between gap-2">
+      <p className="min-w-0 truncate text-[11px] font-semibold uppercase tracking-wider text-slate-500" title={label}>
+        {label}
+      </p>
+      {Icon && (
+        <span
+          aria-hidden
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+          style={{ backgroundColor: `${color}14`, color }}
+        >
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+      )}
+    </div>
+
+    {/* tabular-nums so a column of these lines up on the decimal rather than wandering
+        with the width of each glyph. */}
+    <p className="mt-2 truncate text-xl font-bold tabular-nums text-slate-900" title={value}>{value}</p>
+    {sub && <p className="mt-0.5 truncate text-[11px] text-slate-400">{sub}</p>}
+  </button>
+);
+
 const PAYMENT_MODE_STYLES = {
   cash: "bg-emerald-50 text-emerald-700 border-emerald-200",
   upi: "bg-sky-50 text-sky-700 border-sky-200",
@@ -443,7 +497,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
               than the card's own text column. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
             {REVENUE_VIEWS.map((v) => (
-              <StatTile
+              <RevenueCard
                 key={v.key}
                 label={v.short}
                 value={fmt(sums.totals[v.key])}
