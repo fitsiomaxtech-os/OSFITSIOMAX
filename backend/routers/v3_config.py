@@ -10,7 +10,7 @@ from security import hash_password
 from deps import (
     v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role,
     is_physio_role, is_diet_role, is_rehab_role, consultants_serving_branch,
-    collapse_duplicate_experts,
+    collapse_duplicate_experts, names_the_online_arm,
 )
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
@@ -600,10 +600,13 @@ def _names_the_online_arm(text) -> bool:
 
     A designation and a role are one thing to this clinic, so ONLINE CONSULTANT the title
     and online_consultant the slug are the same answer written twice, and splitting them
-    into two rules is how they would come apart again. Tokenised rather than searched, so
-    a word merely containing the letters cannot pass for the arm.
+    into two rules is how they would come apart again.
+
+    The reading itself lives in deps.names_the_online_arm now, because the Branch Lead
+    pipelines ask the same question of a branch and two copies of this rule would be two
+    ways to answer it.
     """
-    return "online" in re.split(r"[^a-z0-9]+", str(text or "").strip().lower())
+    return names_the_online_arm(text)
 
 
 async def _consultants_for_vertical(rows: list, online: bool) -> list:

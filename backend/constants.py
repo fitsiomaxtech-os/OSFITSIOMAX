@@ -58,6 +58,19 @@ BRANCH_CANCELLED_STAGE = "Cancelled"
 # BRANCH_CANCELLED_STAGE being the first.
 BRANCH_APPOINTMENT_STAGE = "Appointment Date & Time"
 
+# ------------------------------------------------------------------- Branch arms ("sales")
+#
+# The clinic runs two practices — one in the room, one over video — and they do not work a
+# lead the same way, so each gets its own Branch Lead pipeline rather than sharing one list
+# and pretending the difference is cosmetic. The stage row carries `arm`; which arm a record
+# belongs to is read off its vertical (see stage_utils.sales_arm_for).
+#
+# Offline is the arm the single shared list became, so an install that has never heard of
+# arms reads as offline and nothing about it changes.
+SALES_ARM_OFFLINE = "offline"
+SALES_ARM_ONLINE = "online"
+SALES_ARMS = (SALES_ARM_OFFLINE, SALES_ARM_ONLINE)
+
 # ------------------------------------------------------------------ Stage roles ("sales")
 #
 # A handful of Branch stages are not just positions on a strip: the board opens the booking

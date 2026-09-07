@@ -195,6 +195,21 @@ def vertical_in_arm(vertical: str, practice: str) -> bool:
     return "online" in tokens and bool(tokens & PRACTICE_TOKENS.get(practice, frozenset()))
 
 
+def names_the_online_arm(text) -> bool:
+    """Whether a vertical, a role slug or a job title says "online".
+
+    The loose half of the pair: `vertical_in_arm` above answers "which of the two online
+    arms is this", and needs a practice token to tell physio from fitness. This one only
+    answers "online or offline", which is the question a *branch* asks — a branch belongs
+    to one arm or the other whatever practice it runs, and its own Branch Lead pipeline
+    follows from that.
+
+    Tokenised on whole words, not searched, so a value merely containing the letters
+    cannot pass for the arm.
+    """
+    return "online" in re.split(r"[^a-z0-9]+", str(text or "").strip().lower())
+
+
 def vertical_names_an_arm(vertical: str) -> bool:
     """Whether a vertical puts a lead on either online arm's board.
 

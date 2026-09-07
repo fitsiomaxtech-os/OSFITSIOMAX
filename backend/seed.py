@@ -11,6 +11,7 @@ from constants import (
     SALES_STAGE_ROLES_BY_NAME,
     SALES_STAGE_ROLE_CANCELLED,
     SALES_STAGE_ROLE_RNR,
+    SALES_ARM_OFFLINE, SALES_ARM_ONLINE,
 )
 import lead_control
 from stage_utils import get_first_stage_name, first_branch_stage_for, realign_branch_stage_leads
@@ -188,6 +189,50 @@ async def ensure_sales_stage_roles() -> None:
             {"type": "sales", "name": name, "role": {"$exists": False}},
             {"$set": {"role": role}},
         )
+
+
+async def ensure_sales_arm_split() -> None:
+    """Give the online arm a Branch Lead pipeline of its own, copied from the offline one.
+
+    Until now there was one `sales` list and every branch answered to it, which meant Super
+    Admin had one Branch Lead control for a clinic that runs two practices: an online arm
+    could not be given a stage the offline branches did not also get, or have one renamed
+    without renaming it on the floor as well.
+
+    The split is a copy rather than a fresh shape on purpose. The online arm already has
+    live leads standing on these stage names, and seeding it empty -- or with an invented
+    pipeline -- would leave every one of them on a stage its board draws no pill for. Copied,
+    the day of the split changes nothing anybody can see: both arms read exactly as the one
+    list did, and they only diverge when Super Admin edits one of them.
+
+    Roles, colours, order and `applies_to` come across with each stage, so the online copy
+    books appointments and frees slots the same way the offline one does.
+
+    Idempotent: keyed on the online side already existing, so it runs once. Must run after
+    every pass that shapes the sales list -- it copies whatever they left.
+    """
+    already = await v3_col("pipeline_stages").count_documents(
+        {"type": "sales", "arm": SALES_ARM_ONLINE}
+    )
+    if already:
+        return
+    rows = await v3_col("pipeline_stages").find(
+        {"type": "sales"}, {"_id": 0}
+    ).sort("order", 1).to_list(400)
+    if not rows:
+        return  # nothing seeded yet; the pipeline passes above build it first
+    # The list as it stands becomes the offline arm.
+    await v3_col("pipeline_stages").update_many(
+        {"type": "sales"}, {"$set": {"arm": SALES_ARM_OFFLINE}}
+    )
+    copies = []
+    for row in rows:
+        copy = dict(row)
+        copy["id"] = str(uuid.uuid4())
+        copy["arm"] = SALES_ARM_ONLINE
+        copy["created_at"] = now_iso()
+        copies.append(copy)
+    await v3_col("pipeline_stages").insert_many(copies)
 
 
 async def ensure_branch_cancelled_stage() -> None:

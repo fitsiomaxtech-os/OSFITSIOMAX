@@ -445,14 +445,21 @@ export const mkPerformance = async () => (await api.get("/marketing/performance"
 const STAGES_TTL_MS = 60000;
 const _stagesCache = new Map(); // type -> { at, data } while settled, { inflight } while not
 export const invalidateStages = () => { _stagesCache.clear(); };
-export const stagesList = async (type) => {
-  const key = type || "";
+// `arm` narrows the Branch ("sales") pipeline to one practice -- the clinic runs an offline
+// list and an online one, each edited on its own CI/CD ROOTS tab. It is part of the cache
+// key, or the second tab opened would be served the first one's stages.
+export const stagesList = async (type, arm) => {
+  const key = `${type || ""}|${arm || ""}`;
   const held = _stagesCache.get(key);
   if (held?.inflight) return held.inflight;
   // Copied on the way out. The list is shared by every caller now, and one of them sorting
   // or splicing its own copy would be reordering everybody else's stage bar.
   if (held && Date.now() - held.at < STAGES_TTL_MS) return held.data.slice();
-  const inflight = api.get(`/stages${type ? `?type=${type}` : ""}`)
+  const params = new URLSearchParams();
+  if (type) params.set("type", type);
+  if (arm) params.set("arm", arm);
+  const qs = params.toString();
+  const inflight = api.get(`/stages${qs ? `?${qs}` : ""}`)
     .then(({ data }) => {
       const rows = Array.isArray(data) ? data : [];
       _stagesCache.set(key, { at: Date.now(), data: rows });

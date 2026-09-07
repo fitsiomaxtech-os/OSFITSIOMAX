@@ -16,10 +16,13 @@ from deps import (
 import lead_control
 from constants import (
     V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
-    BRANCH_CANCELLED_STAGE, BRANCH_APPOINTMENT_STAGE,
+    BRANCH_CANCELLED_STAGE, BRANCH_APPOINTMENT_STAGE, SALES_ARM_OFFLINE,
     SALES_STAGE_ROLE_APPOINTMENT, SALES_STAGE_ROLE_CANCELLED, SALES_STAGE_ROLE_FALLBACKS,
 )
-from stage_utils import branch_stage_names_for_branch, first_branch_stage_for_branch, get_first_stage_name
+from stage_utils import (
+    branch_stage_names_for_branch, first_branch_stage_for_branch, get_first_stage_name,
+    sales_arm_for,
+)
 from schemas.v3 import (
     V3UserOut, V3LeadOut,
     V3BranchStageInput, V3CollectFeeInput, V3AssignPhysioInput, V3ConsultationStageInput,
@@ -45,31 +48,51 @@ async def _branch_stage_names(branch_id: Optional[str] = None) -> list:
     """
     if branch_id:
         return await branch_stage_names_for_branch(branch_id, V3_BRANCH_STAGES)
-    rows = await v3_col("pipeline_stages").find({"type": "sales"}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
-    names = [r["name"] for r in rows]
+    rows = await v3_col("pipeline_stages").find(
+        {"type": "sales"}, {"_id": 0, "name": 1}
+    ).sort("order", 1).to_list(400)
+    # Both arms, deduped: with no branch to scope by, this is the "is that a real Branch
+    # stage at all" question, and the two arms' lists overlap wherever neither has been
+    # renamed.
+    names = list(dict.fromkeys(r["name"] for r in rows))
     return names or V3_BRANCH_STAGES
 
 
-async def _sales_stage_for_role(role: str) -> str:
-    """The current name of the Branch stage carrying `role`.
+async def _sales_stage_for_role(role: str, arm: str = SALES_ARM_OFFLINE) -> str:
+    """The current name of the Branch stage carrying `role`, on one arm.
 
     The stage a behaviour belongs to is identified by its role, not by what it is called,
     so Super Admin can rename it in CI/CD ROOTS without the behaviour coming off it. Falls
     back to the name the role shipped under, for a database whose stages predate the
     stamping pass (seed.ensure_sales_stage_roles) or where the stage has been deleted.
+
+    Scoped to an arm because the two Branch pipelines each carry their own stage for every
+    role: unscoped, an online booking would land on whatever the offline arm calls its
+    appointment stage.
     """
     row = await v3_col("pipeline_stages").find_one(
-        {"type": "sales", "role": role}, {"_id": 0, "name": 1}
+        {"type": "sales", "role": role,
+         "$or": [{"arm": arm}, {"arm": {"$exists": False}}, {"arm": None}]},
+        {"_id": 0, "name": 1},
     )
     return row["name"] if row else SALES_STAGE_ROLE_FALLBACKS[role]
 
 
-async def _branch_stages(branch_id: str) -> list:
-    """Full stage documents for one branch's board — the client needs colours and order,
-    not just names, and must not be handed the other Lead Control mode's stages."""
+async def _branch_stages(branch_id: Optional[str], arm: str = SALES_ARM_OFFLINE) -> list:
+    """Full stage documents for one board — the client needs colours and order, not just
+    names, and must not be handed the other Lead Control mode's or the other arm's stages.
+
+    Two axes now: `applies_to` says which Lead Control mode a stage belongs to, `arm` says
+    which practice. An online arm board handed the offline list would draw pills its own
+    leads never stand on.
+    """
     control = await lead_control.branch_lead_control(branch_id)
-    rows = await v3_col("pipeline_stages").find({"type": "sales"}, {"_id": 0}).sort("order", 1).to_list(200)
-    stages = [r for r in rows if not r.get("applies_to") or r.get("applies_to") == control]
+    rows = await v3_col("pipeline_stages").find({"type": "sales"}, {"_id": 0}).sort("order", 1).to_list(400)
+    stages = [
+        r for r in rows
+        if (not r.get("applies_to") or r.get("applies_to") == control)
+        and (not r.get("arm") or r.get("arm") == arm)
+    ]
     if control == lead_control.BRANCH_ADMIN:
         # Read before inserting: the branch's own opening is whatever sits first here, and
         # the mirror needs its name to know which leads it has stopped applying to.
@@ -412,7 +435,10 @@ async def _board_payload(leads: list, branch_id: Optional[str], role: str = "") 
     """
     await _stamp_session_progress(leads)
     stage_counts = {}
-    branch_stages = await _branch_stages(branch_id)
+    # Resolved from the role first, then the branch: an online arm admin has no branch at
+    # all, so asking the branch alone would hand every one of them the offline pipeline.
+    arm = await sales_arm_for(branch_id=branch_id, role=role)
+    branch_stages = await _branch_stages(branch_id, arm)
     for stage in branch_stages:
         # The Leads pill is the branch's opening: it counts everyone still sitting at
         # `unmoved_branch_stage` and lets go of them the moment the branch moves them on,
@@ -522,7 +548,8 @@ async def v3_move_branch_stage(lead_id: str, payload: V3BranchStageInput, user: 
     # appointment behind it is off. Idempotent, since a lead already cancelled has no rows
     # left in new_appointment to match.
     freed = 0
-    if payload.branch_stage == await _sales_stage_for_role(SALES_STAGE_ROLE_CANCELLED):
+    lead_arm = await sales_arm_for(branch_id=lead.get("branch_id"), vertical=lead.get("vertical"))
+    if payload.branch_stage == await _sales_stage_for_role(SALES_STAGE_ROLE_CANCELLED, lead_arm):
         res = await v3_col("appointments").update_many(
             {"lead_id": lead_id, "status": "new_appointment"},
             {"$set": {"status": "cancelled", "updated_at": now_iso()}},
@@ -613,7 +640,10 @@ async def v3_assign_physio(lead_id: str, payload: V3AssignPhysioInput, user: V3U
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
         "physio_assigned_at": now_iso(),
-        "branch_stage": await _sales_stage_for_role(SALES_STAGE_ROLE_APPOINTMENT),
+        "branch_stage": await _sales_stage_for_role(
+            SALES_STAGE_ROLE_APPOINTMENT,
+            await sales_arm_for(branch_id=lead.get("branch_id"), vertical=lead.get("vertical")),
+        ),
         "consultation_stage": consultation_stage,
         "updated_at": now_iso(),
     }})
@@ -654,12 +684,19 @@ class V3BranchAppointmentInput(BaseModel):
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
 async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointmentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Schedule appointment date/time, assign physio, add notes, then move to final stage."""
+    # Read before the stages are resolved: which of the two Branch pipelines this booking
+    # answers to is the lead's own arm, and there is no meaningful appointment stage to
+    # validate against until we know which practice the patient belongs to.
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    arm = await sales_arm_for(branch_id=lead.get("branch_id"), vertical=lead.get("vertical"))
     # Resolved from the pipeline rather than compared against literals: this check used to
     # read `not in ("Appointment Date & Time", "Cancelled")`, so renaming either stage in
     # CI/CD ROOTS made every booking a 400 — the board sent the stage's real name and the
     # endpoint only knew the one it shipped with.
-    appointment_stage = await _sales_stage_for_role(SALES_STAGE_ROLE_APPOINTMENT)
-    cancelled_stage = await _sales_stage_for_role(SALES_STAGE_ROLE_CANCELLED)
+    appointment_stage = await _sales_stage_for_role(SALES_STAGE_ROLE_APPOINTMENT, arm)
+    cancelled_stage = await _sales_stage_for_role(SALES_STAGE_ROLE_CANCELLED, arm)
     # The shipped names stay accepted as aliases for their roles, so a browser still running
     # a chunk from before a rename books onto the renamed stage instead of being rejected.
     aliases = {
@@ -673,9 +710,6 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             detail=f"final_stage must be '{appointment_stage}' or '{cancelled_stage}'",
         )
     booking = final_stage == appointment_stage
-    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
     physio = await v3_col("doctors").find_one(
         {"id": payload.physio_id}, {"_id": 0, "full_name": 1, "slot_details": 1, "meet_link": 1}
     )

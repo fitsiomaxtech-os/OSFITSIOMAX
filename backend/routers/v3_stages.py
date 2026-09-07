@@ -5,8 +5,11 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, v3_current_user
-from constants import V3_STAGES, V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
+from deps import v3_require_roles, v3_current_user, names_the_online_arm
+from constants import (
+    V3_STAGES, V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
+    SALES_ARM_OFFLINE, SALES_ARM_ONLINE, SALES_ARMS,
+)
 from schemas.v3 import V3UserOut
 
 
@@ -31,6 +34,11 @@ STAGE_TYPE_FIELD = {
 # name-based operation below a no-op for it — renaming needs no record rewrite at all —
 # but the count and the in-use check still have to look somewhere, so they look there.
 RECRUITMENT_TYPE = "recruitment"
+
+# The Branch pipeline, which is two lists rather than one: the clinic runs an offline
+# practice and an online one, each with its own stages and its own CI/CD ROOTS tab. Told
+# apart by `arm` on the row -- see constants.SALES_ARMS.
+SALES_TYPE = "sales"
 
 # The second pipeline whose records aren't leads. A Zumba registration lives in
 # zumba_registrations and holds the stage's name, so unlike recruitment a rename does
@@ -61,6 +69,10 @@ class StageCreate(BaseModel):
     color: Optional[str] = "#64748b"
     type: StageType
     is_final: Optional[bool] = False
+    # Which Branch arm the stage belongs to. Meaningless on every other pipeline, and
+    # defaulted to offline rather than left unset so a stage created before this field
+    # reached the client does not land in both arms at once.
+    arm: Optional[str] = None
 
 
 class StageUpdate(BaseModel):
@@ -96,6 +108,11 @@ async def _ensure_seed() -> None:
             "type": "sales",
             "order": idx,
             "is_final": name in ("Assigned Physio", "Cancelled"),
+            # Stamped here as well as in seed.ensure_sales_arm_split, because this seed
+            # fires on the first read rather than at startup: on a fresh install it can run
+            # before the split has, and an unstamped row belongs to both arms at once --
+            # which would show one list on both Branch tabs and edit them together.
+            "arm": SALES_ARM_OFFLINE,
             "created_at": now_iso(),
         })
     for idx, name in enumerate(V3_CONSULTATION_STAGES):
@@ -122,8 +139,23 @@ async def _ensure_seed() -> None:
         await v3_col("pipeline_stages").insert_many(docs)
 
 
+async def _arm_branch_ids(arm: str) -> List[str]:
+    """The branches on one arm, for counting that arm's leads.
+
+    Read as a token test on `vertical` rather than as an equality, the same way every other
+    reading of the arm is -- `vertical` is not a controlled field on this install.
+    """
+    rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "vertical": 1}).to_list(1000)
+    online = arm == SALES_ARM_ONLINE
+    return [r["id"] for r in rows if names_the_online_arm(r.get("vertical")) == online]
+
+
 @router.get("")
-async def list_stages(type: Optional[StageType] = None, _: V3UserOut = Depends(v3_current_user)):
+async def list_stages(
+    type: Optional[StageType] = None,
+    arm: Optional[str] = None,
+    _: V3UserOut = Depends(v3_current_user),
+):
     await _ensure_seed()
     if type == RECRUITMENT_TYPE:
         # Its own seed: _ensure_seed above only fires on a completely empty collection, so
@@ -132,6 +164,11 @@ async def list_stages(type: Optional[StageType] = None, _: V3UserOut = Depends(v
         await _ensure_recruitment_stages()
 
     query = {"type": type} if type else {}
+    # The Branch pipeline is two lists now, one per arm, each edited on its own CI/CD ROOTS
+    # tab. A row with no `arm` predates the split and belongs to whichever arm is asked for,
+    # so a database mid-upgrade shows its stages rather than an empty tab.
+    if type == SALES_TYPE and arm:
+        query["$or"] = [{"arm": arm}, {"arm": {"$exists": False}}, {"arm": None}]
     rows = await v3_col("pipeline_stages").find(query, {"_id": 0}).sort([("type", 1), ("order", 1)]).to_list(500)
 
     if type == RECRUITMENT_TYPE:
@@ -161,7 +198,16 @@ async def list_stages(type: Optional[StageType] = None, _: V3UserOut = Depends(v
     counts = {}
     if type:
         field = STAGE_TYPE_FIELD[type]
-        leads_pipeline = [{"$group": {"_id": f"${field}", "n": {"$sum": 1}}}]
+        match = {}
+        if type == SALES_TYPE and arm:
+            # Counted against the branches on this arm only. Both pipelines start life as
+            # copies of one another, so without this every stage on the online tab would
+            # report the offline arm's leads as well as its own -- two tabs showing one
+            # number and neither of them true.
+            match = {"branch_id": {"$in": await _arm_branch_ids(arm)}}
+        leads_pipeline = ([{"$match": match}] if match else []) + [
+            {"$group": {"_id": f"${field}", "n": {"$sum": 1}}}
+        ]
         async for row in v3_col("leads").aggregate(leads_pipeline):
             counts[row["_id"]] = row["n"]
     for r in rows:
@@ -172,7 +218,15 @@ async def list_stages(type: Optional[StageType] = None, _: V3UserOut = Depends(v
 @router.post("")
 async def create_stage(payload: StageCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     await _ensure_seed()
-    last = await v3_col("pipeline_stages").find({"type": payload.type}, {"_id": 0, "order": 1}).sort("order", -1).limit(1).to_list(1)
+    # Ordered within its own arm, not across both: the two Branch lists are independent, and
+    # counting the offline arm's last stage would open every new online stage at an order no
+    # pill on that board ever reaches.
+    scope = {"type": payload.type}
+    arm = None
+    if payload.type == SALES_TYPE:
+        arm = payload.arm if payload.arm in SALES_ARMS else SALES_ARM_OFFLINE
+        scope["$or"] = [{"arm": arm}, {"arm": {"$exists": False}}, {"arm": None}]
+    last = await v3_col("pipeline_stages").find(scope, {"_id": 0, "order": 1}).sort("order", -1).limit(1).to_list(1)
     next_order = (last[0]["order"] + 1) if last else 0
     doc = {
         "id": str(uuid.uuid4()),
@@ -183,6 +237,8 @@ async def create_stage(payload: StageCreate, _: V3UserOut = Depends(v3_require_r
         "is_final": bool(payload.is_final),
         "created_at": now_iso(),
     }
+    if arm:
+        doc["arm"] = arm
     await v3_col("pipeline_stages").insert_one(doc.copy())
     return doc
 
@@ -195,7 +251,9 @@ async def update_stage(stage_id: str, payload: StageUpdate, _: V3UserOut = Depen
     # If renaming, also rename references on existing leads. Recruitment is exempt:
     # candidates point at this stage by id, so there is nothing to rewrite.
     if "name" in updates:
-        old = await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0, "name": 1, "type": 1})
+        old = await v3_col("pipeline_stages").find_one(
+            {"id": stage_id}, {"_id": 0, "name": 1, "type": 1, "arm": 1}
+        )
         renaming = bool(old and old["name"] != updates["name"])
         if renaming and old["type"] == ZUMBA_TYPE:
             # Same rewrite the leads get, aimed at the collection registrations live in.
@@ -204,7 +262,14 @@ async def update_stage(stage_id: str, payload: StageUpdate, _: V3UserOut = Depen
             )
         elif renaming and old["type"] != RECRUITMENT_TYPE:
             field = STAGE_TYPE_FIELD[old["type"]]
-            await v3_col("leads").update_many({field: old["name"]}, {"$set": {field: updates["name"]}})
+            carrying = {field: old["name"]}
+            if old["type"] == SALES_TYPE and old.get("arm"):
+                # This arm's leads only. The two Branch lists started as copies, so an
+                # unscoped rewrite would drag every offline lead standing on the same stage
+                # name along with the online rename -- onto a stage their own board has no
+                # pill for, which is exactly the orphaning this rewrite exists to prevent.
+                carrying["branch_id"] = {"$in": await _arm_branch_ids(old["arm"])}
+            await v3_col("leads").update_many(carrying, {"$set": {field: updates["name"]}})
     res = await v3_col("pipeline_stages").update_one({"id": stage_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Stage not found")
@@ -242,7 +307,13 @@ async def delete_stage(stage_id: str, _: V3UserOut = Depends(v3_require_roles("s
         await v3_col("pipeline_stages").delete_one({"id": stage_id})
         return {"message": "Stage deleted"}
     field = STAGE_TYPE_FIELD[stage["type"]]
-    in_use = await v3_col("leads").count_documents({field: stage["name"]})
+    used_by = {field: stage["name"]}
+    if stage["type"] == SALES_TYPE and stage.get("arm"):
+        # Only this arm's leads count against it. The two Branch lists began as copies of
+        # one another, so an unscoped check would let the offline arm's leads block the
+        # deletion of an identically named stage the online arm has finished with.
+        used_by["branch_id"] = {"$in": await _arm_branch_ids(stage["arm"])}
+    in_use = await v3_col("leads").count_documents(used_by)
     if in_use > 0:
         raise HTTPException(status_code=409, detail=f"Stage in use by {in_use} leads. Reassign first.")
     await v3_col("pipeline_stages").delete_one({"id": stage_id})

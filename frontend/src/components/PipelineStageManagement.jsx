@@ -15,9 +15,17 @@ const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e
 // Recruitment is the odd one out: its records are candidates in their own collection, not
 // leads, and they reference a stage by id — so renaming one here rewrites nothing and
 // cannot orphan anybody.
+//
+// `key` is this table's own id for the tab; `type` is what the API calls the pipeline. They
+// are the same for every pipeline except the Branch one, which is two lists -- the clinic
+// runs an offline practice and an online one, and they do not work a lead the same way, so
+// each has its own stages under one `sales` type told apart by `arm`.
 const TYPES = [
   { key: "pre_sales", label: "Pre-Sales", kpi: "Pre-Sales Stages", title: "Pre-Sales", tone: "indigo", records: "Leads" },
-  { key: "sales", label: "Branch Lead Stages", kpi: "Branch Lead Stages", title: "Branch Lead", tone: "green", records: "Leads" },
+  { key: "sales", arm: "offline", label: "Offline Branch Lead", kpi: "Offline Branch Lead Stages", title: "Offline Branch Lead", tone: "green", records: "Leads" },
+  // Its own list, not a view of the one above. Renaming a stage here renames it for the
+  // online arm's boards and rewrites only the online arm's leads.
+  { key: "sales_online", type: "sales", arm: "online", label: "Online Branch Lead", kpi: "Online Branch Lead Stages", title: "Online Branch Lead", tone: "cyan", records: "Leads" },
   { key: "consultation", label: "Branch Consultation", kpi: "Branch Consultation Stages", title: "Branch Consultation", tone: "orange", records: "Leads" },
   { key: "head_consultation", label: "Head Consultation", kpi: "Head Consultation Stages", title: "Head Consultation", tone: "sky", records: "Leads" },
   { key: "recruitment", label: "Recruitment", kpi: "Recruitment Stages", title: "Recruitment", tone: "violet", records: "Candidates" },
@@ -45,6 +53,7 @@ const ROLE_LABELS = {
 const TONE_CLASSES = {
   indigo: { border: "border-indigo-500", text: "text-indigo-600" },
   green: { border: "border-green-500", text: "text-green-600" },
+  cyan: { border: "border-cyan-500", text: "text-cyan-600" },
   orange: { border: "border-orange-500", text: "text-orange-600" },
   sky: { border: "border-sky-500", text: "text-sky-600" },
   violet: { border: "border-violet-500", text: "text-violet-600" },
@@ -59,13 +68,20 @@ export const PipelineStageManagement = ({ onBack }) => {
   const [form, setForm] = useState({ name: "", color: "#6366f1", is_final: false });
   const [resetting, setResetting] = useState(false);
 
+  // The tab being looked at, resolved once: `type` is this table's tab id, and for the
+  // Branch pair it is not the same string as the pipeline's API type — both tabs are
+  // `sales`, told apart by the arm.
+  const active = TYPES.find((t) => t.key === type) || TYPES[0];
+  const apiType = active.type || active.key;
+  const arm = active.arm;
+
   // One request, for the pipeline being looked at. It used to fetch all five and keep only
   // the active list, the other four existing solely to put a count in a tab label — with
   // the counts gone so is the reason, so a load and every pipeline switch costs one call
   // instead of five.
   const load = useCallback(async () => {
-    setStages(await stagesList(type));
-  }, [type]);
+    setStages(await stagesList(apiType, arm));
+  }, [apiType, arm]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -76,7 +92,7 @@ export const PipelineStageManagement = ({ onBack }) => {
         await stagesUpdate(editing.id, form);
         toast.success("Stage updated");
       } else {
-        await stagesCreate({ ...form, type });
+        await stagesCreate({ ...form, type: apiType, arm });
         toast.success("Stage created");
       }
       setShowAdd(false); setEditing(null); setForm({ name: "", color: "#6366f1", is_final: false });
@@ -177,10 +193,10 @@ export const PipelineStageManagement = ({ onBack }) => {
       </div>
 
       <Card data-testid="stages-list-card">
-        <CardHeader><CardTitle className="text-base">{(TYPES.find((t) => t.key === type) || {}).title} Pipeline Stages</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{active.title} Pipeline Stages</CardTitle></CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left text-xs text-slate-500"><tr><th className="py-2">Order</th><th>Color</th><th>Stage Name</th><th>{(TYPES.find((t) => t.key === type) || {}).records}</th><th>Final</th><th>Actions</th></tr></thead>
+            <thead className="text-left text-xs text-slate-500"><tr><th className="py-2">Order</th><th>Color</th><th>Stage Name</th><th>{active.records}</th><th>Final</th><th>Actions</th></tr></thead>
             <tbody>
               {stages.map((s, i) => (
                 <tr key={s.id} className="border-t border-slate-100" data-testid={`stages-row-${s.id}`}>
