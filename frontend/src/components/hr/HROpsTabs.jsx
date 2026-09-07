@@ -23,8 +23,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlarmClock, Ban, CalendarCheck, CalendarOff, Check, ChevronLeft, ChevronRight, Coffee,
-  Download, Eye, Filter, IndianRupee, Lock, Palmtree, Pencil, Pin, PinOff, Plus, Quote,
-  RefreshCw, Trash2, TriangleAlert, Undo2, Wallet, X,
+  Download, Eye, Filter, IndianRupee, LayoutGrid, List, Lock, Palmtree, Pencil, Pin,
+  PinOff, Plus, Quote, RefreshCw, Trash2, TriangleAlert, Undo2, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -729,8 +729,187 @@ const AmountBox = ({ value, disabled, onCommit, testid }) => {
   );
 };
 
+/**
+ * The lanes a payslip can be sitting in, left to right in the order somebody signing off
+ * a run works through them: what cannot be paid at all, what nobody has checked, what the
+ * register has already docked, what HR has moved by hand, and what needs no further
+ * thought.
+ *
+ * A slip belongs to the first lane that claims it, so a line with unmarked days *and* a
+ * bonus reads as unverified rather than as done — the unchecked half is the half worth
+ * showing. The lanes are read off the slip rather than stored on it, which is why nothing
+ * drags between them: a card leaves "Loss of pay" when the register changes or a figure
+ * is typed, not when somebody drops it somewhere else. Dragging one by hand would be
+ * claiming something about the month that the month does not say.
+ */
+const PAY_LANES = [
+  {
+    key: "no_base",
+    label: "No pay set",
+    hint: "No salary on the employee record, so there is nothing to pro-rate.",
+    tone: "border-slate-300 bg-slate-100",
+    dot: "bg-slate-400",
+    match: (s) => Number(s.base || 0) <= 0,
+  },
+  {
+    key: "unverified",
+    label: "Unverified days",
+    hint: "Days nobody marked. They are paid in full until Attendance says otherwise.",
+    tone: "border-amber-200 bg-amber-50",
+    dot: "bg-amber-400",
+    match: (s) => Number(s.unmarked_days || 0) > 0,
+  },
+  {
+    key: "lop",
+    label: "Loss of pay",
+    hint: "Pro-rated down by the register — worth a look before the run is finalised.",
+    tone: "border-rose-200 bg-rose-50",
+    dot: "bg-rose-400",
+    match: (s) => Number(s.lop_days || 0) > 0,
+  },
+  {
+    key: "adjusted",
+    label: "Adjusted by hand",
+    hint: "A bonus or a deduction has been typed against these.",
+    tone: "border-violet-200 bg-violet-50",
+    dot: "bg-violet-400",
+    match: (s) => Number(s.bonus || 0) > 0 || Number(s.deduction || 0) > 0,
+  },
+  {
+    key: "ready",
+    label: "Full month",
+    hint: "Marked all month, nothing added and nothing taken away.",
+    tone: "border-emerald-200 bg-emerald-50",
+    dot: "bg-emerald-400",
+    match: () => true,
+  },
+];
+
+// The last lane matches everything, so this never falls through.
+const laneOf = (slip) => PAY_LANES.find((l) => l.match(slip));
+
+/** One employee's month as a card: who they are, what the register produced, and the two
+ *  figures a human is allowed to move. The sum is shown as a sum — earned, bonus,
+ *  deduction, net — because on a card there is no column heading to say where the last
+ *  number came from. */
+const PayslipCard = ({ slip: s, editable, onAdjust }) => (
+  <div
+    className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:shadow-md"
+    data-testid={`hr-pay-kanban-card-${s.employee_id}`}
+  >
+    <div className="flex items-start gap-2">
+      <EmployeeAvatar employee={{ full_name: s.employee_name }} size={32} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-slate-800">{s.employee_name}</p>
+        <p className="truncate text-[11px] text-slate-400">
+          {s.employee_code}{s.department ? ` · ${s.department}` : ""}
+        </p>
+      </div>
+      <span className="shrink-0 text-sm font-extrabold text-sky-700">{money(s.net_payable)}</span>
+    </div>
+
+    <div className="mt-2 flex flex-wrap gap-1">
+      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600" title={`From the employee record's ${s.base_from}`}>
+        Base {money(s.base)}
+      </span>
+      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+        {s.payable_days}/{s.days_in_month} days
+      </span>
+      {s.lop_days > 0 && (
+        <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">LOP {s.lop_days}</span>
+      )}
+      {s.unmarked_days > 0 && (
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700" title={`${s.unmarked_days} days unmarked, paid in full`}>
+          {s.unmarked_days} unmarked
+        </span>
+      )}
+    </div>
+
+    <div className="mt-2 space-y-1.5 border-t border-slate-100 pt-2 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="text-slate-500">Earned</span>
+        <span className="font-medium text-slate-700">{money(s.earned)}</span>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-slate-500">Bonus</span>
+        {editable
+          ? <AmountBox value={s.bonus} onCommit={(n) => onAdjust(s.employee_id, { bonus: n })} testid={`hr-pay-bonus-${s.employee_id}`} />
+          : <span className={s.bonus ? "font-medium text-emerald-600" : "text-slate-400"}>{money(s.bonus)}</span>}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-slate-500">Deduction</span>
+        {editable
+          ? <AmountBox value={s.deduction} onCommit={(n) => onAdjust(s.employee_id, { deduction: n })} testid={`hr-pay-ded-${s.employee_id}`} />
+          : <span className={s.deduction ? "font-medium text-rose-600" : "text-slate-400"}>{money(s.deduction)}</span>}
+      </div>
+    </div>
+  </div>
+);
+
+/** The month as a board rather than as sixty identical rows.
+ *
+ *  The table answers "what is everybody getting"; the board answers "what is still wrong
+ *  with this run", which is the question a draft is open in order to answer. Each lane
+ *  carries its own head count and its own net, so what a problem costs is legible without
+ *  anybody adding it up.
+ */
+const PayrollBoard = ({ slips, editable, onAdjust }) => {
+  const lanes = useMemo(() => {
+    const out = Object.fromEntries(PAY_LANES.map((l) => [l.key, []]));
+    for (const s of slips) out[laneOf(s).key].push(s);
+    return out;
+  }, [slips]);
+
+  return (
+    <div className="space-y-2">
+      {/* The one rule the whole board is downstream of. It lived in the table header;
+          without it here a pro-rated figure looks like an arithmetic mistake. */}
+      <p className="text-xs text-slate-500">
+        Pay is pro-rated on calendar days: a day of loss of pay costs base ÷ days in month. Bonuses and deductions are editable while the run is a draft.
+      </p>
+      <div className="flex gap-3 overflow-x-auto pb-2" data-testid="hr-pay-kanban">
+        {PAY_LANES.map((lane) => {
+          const cards = lanes[lane.key];
+          const net = cards.reduce((t, s) => t + Number(s.net_payable || 0), 0);
+          return (
+            <div
+              key={lane.key}
+              className={`flex min-w-[280px] flex-1 flex-col rounded-xl border p-3 ${lane.tone}`}
+              data-testid={`hr-pay-col-${lane.key}`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${lane.dot}`} />
+                <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{lane.label}</p>
+                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-600 shadow-sm" data-testid={`hr-pay-col-count-${lane.key}`}>
+                  {cards.length}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] leading-snug text-slate-500">{lane.hint}</p>
+              <p className="mt-1 text-[11px] font-bold text-slate-600">{money(net)} net</p>
+
+              {/* Capped rather than left to run: one heavy lane would otherwise push every
+                  other lane's cards off the bottom of a screen with room for them. */}
+              <div className="mt-3 max-h-[62vh] space-y-2 overflow-y-auto pr-0.5">
+                {cards.map((s) => (
+                  <PayslipCard key={s.employee_id} slip={s} editable={editable} onAdjust={onAdjust} />
+                ))}
+                {cards.length === 0 && (
+                  <p className="rounded-lg border border-dashed border-slate-300 bg-white/60 py-6 text-center text-xs text-slate-400">
+                    Nobody here.
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export const PayrollTab = () => {
   const [month, setMonth] = useState(todayIso().slice(0, 7));
+  const [view, setView] = useState("board");
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -801,6 +980,27 @@ export const PayrollTab = () => {
           )}
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            {/* Two readings of the same run. The board is the default because a draft is
+                open to be corrected and the board is what shows where; the table stays a
+                click away for reading every figure at once and for checking the CSV. */}
+            <div className="flex rounded-lg bg-slate-100 p-0.5" data-testid="hr-pay-view-toggle">
+              {[
+                { key: "board", label: "Board", Icon: LayoutGrid },
+                { key: "table", label: "Table", Icon: List },
+              ].map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setView(key)}
+                  className={`flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium transition ${
+                    view === key ? "bg-white text-sky-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                  data-testid={`hr-pay-view-${key}`}
+                >
+                  <Icon className="h-3.5 w-3.5" />{label}
+                </button>
+              ))}
+            </div>
             <Button variant="outline" size="sm" onClick={exportCsv} disabled={!slips.length} data-testid="hr-pay-csv">
               <Download className="h-4 w-4" />CSV
             </Button>
@@ -852,7 +1052,11 @@ export const PayrollTab = () => {
         <Stat label="Net payable" value={money(totals.net_payable)} tone="text-sky-700" testid="hr-pay-t-net" />
       </div>
 
-      {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : (
+      {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : view === "board" ? (
+        slips.length === 0
+          ? <Empty>No active employees to pay.</Empty>
+          : <PayrollBoard slips={slips} editable={editable} onAdjust={adjust} />
+      ) : (
         <>
           <div className="space-y-2 lg:hidden" data-testid="hr-pay-cards">
             {slips.map((s) => (
