@@ -319,10 +319,39 @@ export const PatientsPortalPanel = ({ branchId }) => {
         ))}
       </div>
 
-      {/* Which service, then when they joined — two narrowings of one list, so the range
-          row sits directly under the cards it re-counts rather than beside the search,
-          which only looks inside whatever the two of them leave. */}
-      <QuickDateFilterBar value={dateFilter} onChange={setDateFilter} testid="branch-patients-date" />
+      {/* Which service, then when they joined, then who — three narrowings of one list on
+          one line, in the order they cut it. The ranges sit directly under the cards they
+          re-count, and the search looks inside whatever the two of them leave.
+
+          `inline` is what lets the six ranges share a line: it tightens them to about
+          330px and stops them wrapping, so the search field beside them gives up the
+          width instead of the row breaking in two. The row still wraps as a whole on a
+          phone, where six buttons and a text field cannot honestly share 390px — the
+          field drops to its own line there rather than being squeezed to nothing. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="branch-patients-toolbar">
+        <QuickDateFilterBar value={dateFilter} onChange={setDateFilter} testid="branch-patients-date" inline />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search patient by name or phone..."
+          className="h-10 min-w-[11rem] flex-1"
+          data-testid="branch-patients-search"
+        />
+        {/* Refresh beside the search, icon-only and grey, as the other boards carry it. The
+            list is a snapshot of the branch — a patient who pays, starts treatment or joins
+            the gym in another tab appears only on a reload, and there was no way to ask
+            for one. */}
+        <Button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+          data-testid="branch-patients-refresh"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
 
       <div>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -333,30 +362,6 @@ export const PatientsPortalPanel = ({ branchId }) => {
             )}
           </h3>
           <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
-        </div>
-
-        {/* Refresh beside the search, icon-only and grey, as the other boards carry it. The
-            list is a snapshot of the branch — a patient who pays, starts treatment or joins
-            the gym in another tab appears only on a reload, and there was no way to ask
-            for one. */}
-        <div className="mb-3 flex items-center gap-2">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search patient by name or phone..."
-            className="h-10 min-w-0 flex-1 sm:max-w-sm sm:flex-none"
-            data-testid="branch-patients-search"
-          />
-          <Button
-            onClick={load}
-            disabled={loading}
-            title="Refresh"
-            aria-label="Refresh"
-            className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-            data-testid="branch-patients-refresh"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
         </div>
 
         {visible.length === 0 && !loading ? (
@@ -378,7 +383,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
               column was cut off mid-number, which is the one thing this list is used to
               look up. Call and WhatsApp sit on the card for the same reason. */}
           <div className="space-y-2 md:hidden" data-testid="branch-patients-mobile">
-            {visible.map((r) => {
+            {visible.map((r, i) => {
               const wa = waNumber(r.phone);
               // Only a lead has a record to open. A gym or class member registered at the
               // desk has none, so their card is a card and not a button — offering a popup
@@ -403,7 +408,12 @@ export const PatientsPortalPanel = ({ branchId }) => {
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
-                        <span className="truncate font-semibold text-slate-800">{r.name}</span>
+                        {/* The same running number the table column carries, so a reader
+                            switching between phone and desk is counting one list. */}
+                        <span className="truncate font-semibold text-slate-800">
+                          <span className="mr-1.5 font-normal tabular-nums text-slate-400">{i + 1}.</span>
+                          {r.name}
+                        </span>
                         <span className="shrink-0"><PaidBadge paid={r.paid} /></span>
                       </div>
                       <p className="truncate text-xs text-slate-600">{r.phone || "—"}</p>
@@ -445,6 +455,13 @@ export const PatientsPortalPanel = ({ branchId }) => {
             <table className="min-w-full text-sm">
               <thead className="bg-slate-500 text-left text-xs uppercase text-white">
                 <tr>
+                  {/* A counted list, so "the third one down" and "17 of 53" are things the
+                      reader can say out loud. The number is the row's position in what is
+                      on screen, not an identity — narrow by a card, a range or the search
+                      and it renumbers from 1, because it answers "how far down is this"
+                      rather than "which patient is this". The patient number that does
+                      identify somebody is the one on their record. */}
+                  <th className="w-14 px-4 py-2.5">S:No</th>
                   <th className="px-4 py-2.5">Patient</th>
                   <th className="px-4 py-2.5">Phone</th>
                   <th className="px-4 py-2.5">Services</th>
@@ -453,13 +470,14 @@ export const PatientsPortalPanel = ({ branchId }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visible.map((r) => (
+                {visible.map((r, i) => (
                   <tr
                     key={r.key}
                     onClick={() => openLead(r)}
                     className={`transition-colors ${r.lead ? "cursor-pointer hover:bg-slate-50" : ""}`}
                     data-testid={`branch-patient-row-${r.key}`}
                   >
+                    <td className="px-4 py-3 tabular-nums text-slate-400" data-testid={`branch-patient-sno-${r.key}`}>{i + 1}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
