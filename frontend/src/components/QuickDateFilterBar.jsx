@@ -20,11 +20,13 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
  *  - testid: string prefix for the row's test ids.
  *  - inline: true when the row is being dropped into a toolbar beside other controls
  *            rather than standing on a line of its own. It then refuses to wrap and
- *            refuses to be shrunk, so the six ranges stay on one line and whatever
- *            elastic sits beside them (a search field) gives up the width instead.
- *            It also tightens a notch — 13px labels, narrower padding, smaller gaps —
- *            which buys back about 90px for whatever else shares that toolbar, and is
- *            what lets the six of them join a row they previously could not fit in.
+ *            refuses to be shrunk, so the ranges stay on one line and whatever elastic
+ *            sits beside them (a search field) gives up the width instead.
+ *            It also tightens — 12px labels, px-2, gap-1 — which brings the five of them
+ *            to about 330px against the ~450 they take standing alone, and is what lets
+ *            them join a row they previously could not fit in. The tightening lifts at
+ *            2xl, where the toolbar has the width to spare and the smaller type would be
+ *            read as a mistake rather than as a fit.
  *            Standing on its own line the row has the width to itself and keeps full
  *            desktop sizing, so nothing changes for the boards using it that way.
  *  - showCustom: false drops the Custom trigger and leaves the five presets. Only for a
@@ -119,7 +121,7 @@ export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inl
        there breaks the one line the toolbar is, so it holds its width and the field
        beside it shrinks instead. */
     <div
-      className={`flex items-center gap-1 ${inline ? "shrink-0 flex-nowrap sm:gap-1.5" : "sm:gap-2 sm:flex-wrap"}`}
+      className={`flex items-center gap-1 ${inline ? "shrink-0 flex-nowrap 2xl:gap-1.5" : "sm:gap-2 sm:flex-wrap"}`}
       data-testid={testid}
     >
       {QUICK_DATE_PRESETS.map((p) => (
@@ -129,7 +131,7 @@ export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inl
           onClick={() => onChange(quickFilter(p))}
           aria-pressed={activeKey === p.key}
           className={`h-10 min-w-0 flex-1 truncate rounded-md px-1 text-[11px] font-medium transition sm:flex-none ${
-            inline ? "sm:px-2.5 sm:text-[13px]" : "sm:px-3 sm:text-sm"
+            inline ? "sm:px-2 sm:text-xs 2xl:px-2.5 2xl:text-[13px]" : "sm:px-3 sm:text-sm"
           } ${
             activeKey === p.key
               ? "bg-sky-600 text-white"
@@ -153,7 +155,7 @@ export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inl
           not the calendar. */}
       {showCustom && (
       <span className={`min-w-0 flex-1 sm:flex-none [&_button]:h-10 [&_button]:w-full [&_button]:justify-center [&_button]:px-1 [&_button]:text-[11px] [&_svg]:hidden sm:[&_button]:w-auto sm:[&_svg]:inline-block ${
-        inline ? "sm:[&_button]:px-3 sm:[&_button]:text-[13px]" : "sm:[&_button]:px-4 sm:[&_button]:text-sm"
+        inline ? "sm:[&_button]:px-2.5 sm:[&_button]:text-xs 2xl:[&_button]:px-3 2xl:[&_button]:text-[13px]" : "sm:[&_button]:px-4 sm:[&_button]:text-sm"
       }`}>
         <DateFilterPopover
           value={onPreset ? null : value}

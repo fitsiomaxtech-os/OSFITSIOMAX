@@ -315,11 +315,11 @@ const toolbarFiltersFor = (questions) => [
     allLabel: "All Cities",
     // Narrower than the intake dropdowns before it, on what it holds rather than on what
     // is left over. A city is one short word and "All Cities" is shorter than "All Pain
-    // Durations"; at the intake width the box would be mostly empty. It bought ~100px
-    // back when this row held four dropdowns and had to fit at 1440 -- see the arithmetic
-    // in the toolbar note further down. The row is down to three now and the pressure is
-    // off, but the size is still the honest one for what the control holds.
-    width: "w-28 2xl:w-32",
+    // Durations"; at the intake width the box would be mostly empty. w-24 still spells
+    // "All Cities" out in full, which is the floor -- the intake pair cannot come down
+    // with it without reading "All Pain Ty...", so this is where the row gives back the
+    // width the date ranges beside it now take. See the toolbar note further down.
+    width: "w-24 2xl:w-32",
     answer: cityAnswer,
   },
 ];
@@ -1770,7 +1770,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 of their own underneath: search, then ranges, then the actions, one
                 horizontal line that never wraps.
 
-                Wide screens only — the breakpoint and its arithmetic are in the note just
+                Desktop widths — the breakpoint and its arithmetic are in the note just
                 below. Narrower ones keep the stacked row underneath instead. The same
                 instance would have had to be two anyway: one row cannot be both in the
                 toolbar and under it.
@@ -1779,24 +1779,25 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 by both tabs now — Branch Leads had no range row before, only the calendar
                 icon further along, which is why the toolbar comment below still calls out
                 that history. */}
-            {/* From 1440px, not 2xl. It was 2xl (1536) because at 1280 the ranges (~570),
-                the three intake dropdowns (~400), the search (~384) and the actions (~240)
-                could not share a line — but that put the split just above the common
-                1440-and-1520 desktop, which is exactly where the row was being read as
-                broken: everything on one line and the ranges stranded on a second.
+            {/* From lg, which is where a desktop starts. It was min-[1440px], and before
+                that 2xl, both cut to the arithmetic of a row that also had to hold the
+                three intake dropdowns — so every desk between 1024 and 1440, which is most
+                of them, read the toolbar the way it was reported: one line of controls
+                with the ranges stranded on a second underneath it.
 
-                The ~90px the inline bar saves by tightening (see QuickDateFilterBar's
-                `inline`), the ~48px the dropdowns give back at this width, and the ~96px
-                freed by dropping the row's Custom trigger bring the fixed part to ~1085px,
-                so 1440 leaves the search around 290px and anything wider gives it more.
-                Below 1440 the arithmetic still doesn't work and the ranges keep their own
-                row underneath, which is where every narrower width has always had them.
+                The split is no longer where the dropdowns stop fitting, because the
+                dropdowns now wait for xl (see their note below) instead of crowding this
+                row from lg. What is left to fit at 1024 is the ranges (~330 tightened,
+                see QuickDateFilterBar's `inline`) and the actions (~290), which leaves the
+                search its full 384. At xl the dropdowns join and the search settles around
+                180px, and every width above that gives it more.
 
-                There is now enough slack that this could come down further — around 1366
-                the search would still hold ~220px. Left at 1440 until somebody is actually
-                reading the board at that width, rather than moved on the arithmetic
-                alone. */}
-            <div className="hidden shrink-0 min-[1440px]:block">
+                Both tabs, same breakpoint: the Consultation tab carries no dropdowns at
+                all, so if this fits on Branch Leads it fits there with room to spare.
+                Below lg the ranges keep their own row underneath, which is where every
+                tablet and phone width has always had them and where they still belong —
+                six controls and five ranges do not share 768px whatever they are cut to. */}
+            <div className="hidden shrink-0 lg:block">
               <QuickDateFilterBar
                 value={quickDate}
                 onChange={setQuickDate}
@@ -1832,24 +1833,32 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 the sheet's spellings, so a branch whose source has been mapped gets the
                 dropdown even where none of the intake questions are asked.
 
-                From lg. They want ~450px that no narrower width has spare: at sm the
-                search field has only just reappeared beside the actions, and adding these
-                there would drive the row into overflow rather than shrink the search,
-                which is the failure the collapse-to-an-icon was built to avoid. Under lg
-                the columns are still readable in the list; it is only asking that waits
-                for the width.
+                From xl, not lg. They want ~400px that no narrower width has spare: at sm
+                the search field has only just reappeared beside the actions, and adding
+                these there would drive the row into overflow rather than shrink the
+                search, which is the failure the collapse-to-an-icon was built to avoid.
+
+                It was lg, and the ~400px it took at 1024 was the reason the date ranges
+                could not join this row until 1440 — three dropdowns and five ranges do not
+                both fit over a search field on a 1280 desk, and something had to drop to a
+                second line. The ranges won that: they are on both tabs and every stage,
+                these are on one tab and answer a question a branch asks occasionally. So
+                between lg and xl the ranges now sit up here and these wait, and from xl
+                the row holds all four groups with the search around 180px. Under xl the
+                columns are still readable in the list; it is only asking that waits for
+                the width.
 
                 Widths are per filter (see toolbarFiltersFor) rather than one class for the
                 row. The intake dropdowns take w-36 up to 2xl and w-40 from there; City
                 takes the size below each, because its longest label is "All Cities" and
-                its answers are single words. The arithmetic these were cut to fit was for
-                four dropdowns against a ~1085px fixed part at 1440, where the row had no
-                slack at all; with Consultation Type gone it has ~130px of it, and about
-                80 of those are spent here. What the closed control reads is the all-label,
-                and at the old width that came out "All Pain Ty..." -- a filter naming no
-                column, which is the one thing this row of dropdowns is for. */}
+                its answers are single words. What the closed control reads is the
+                all-label, and cutting the intake pair below w-36 brings back "All Pain
+                Ty..." -- a filter naming no column, which is the one thing this row of
+                dropdowns is for. City is the one with room to give: at w-24 it still
+                spells "All Cities" out in full, and the ~16px that buys goes to the search
+                at xl, where the row is tightest. */}
             {!onConsultationTab && (
-              <div className="hidden shrink-0 items-center gap-1.5 lg:flex" data-testid="branch-list-filters">
+              <div className="hidden shrink-0 items-center gap-1.5 xl:flex" data-testid="branch-list-filters">
                 {toolbarFilters.map((f) => {
                   const options = listFilterOptions[f.key] || [];
                   if (options.length === 0) return null;
@@ -1974,9 +1983,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           </div>
 
           {/* The same range row as the one in the toolbar, for the widths where it will
-              not fit up there — below 1440px this is the only copy on screen, and from
-              there up this one is the one that goes. Shared by both tabs now, same as the
-              inline copy above.
+              not fit up there — below lg (1024px) this is the only copy on screen, and
+              from there up this one is the one that goes. Shared by both tabs now, same as
+              the inline copy above.
 
               A second date control, and deliberately not a replacement for the calendar
               button in the toolbar — that one still opens the shared popover with
@@ -1988,7 +1997,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               Folded into effectiveDateFilter either way, which feeds the stage counts on
               the bar above and, on the Consultation tab, the ConsultationsBoard underneath
               too — so a pill's number always describes the list that pill opens. */}
-          <div className="min-[1440px]:hidden">
+          <div className="lg:hidden">
             <QuickDateFilterBar
               value={quickDate}
               onChange={setQuickDate}
