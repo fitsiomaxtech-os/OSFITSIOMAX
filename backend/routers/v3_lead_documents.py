@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, is_physio_role
+from deps import v3_require_roles, is_physio_role, role_satisfies
 from schemas.v3 import V3UserOut
 
 router = APIRouter(prefix="/api/v3")
@@ -179,8 +179,16 @@ PROGRESSION_WRITE_ROLES = (*WRITE_ROLES, "physio")
 
 
 def may_write_kind(role: str, kind: str) -> bool:
-    """Whether this role may add something of this kind."""
-    if role in WRITE_ROLES:
+    """Whether this role may add something of this kind.
+
+    Asked through role_satisfies, not `role in WRITE_ROLES`. The names in WRITE_ROLES are
+    the canonical ones, and several desks hold that authority under another slug — an
+    Online Physio Branch Admin is `online_physio_admin`, a Consultant is `consultant`.
+    v3_require_roles lets all of them through the door; a literal membership test here
+    then refused them, which is how uploading a prescription answered "Not allowed" to the
+    branch admin whose own screen asks for it before the fee can be collected.
+    """
+    if role_satisfies(role, WRITE_ROLES):
         return True
     return is_physio_role(role) and (kind or GENERAL) in {k for k, *_ in PROGRESSION_KINDS}
 
