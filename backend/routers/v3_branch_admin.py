@@ -1233,12 +1233,156 @@ class V3ConsultationFollowUpInput(BaseModel):
     date: str  # YYYY-MM-DD
     time: str  # HH:MM (24h)
     remarks: Optional[str] = ""
+    # Who is going to take it. Optional so an older client that only sends a date and a
+    # time keeps working — the patient then stays with the consultant they already have.
+    physio_id: Optional[str] = None
+    duration: Optional[int] = None
 
 
 class V3ConsultationFollowUpRescheduleInput(BaseModel):
     date: str
     time: str
     reason: Optional[str] = ""
+    # A reschedule moves the hour, and the hour belongs to a person: the consultant who
+    # could not take the patient on the old date is often not the one free on the new one.
+    # Sent as the id of whoever the branch picked off the availability list; omitted means
+    # keep the consultant already on the lead.
+    physio_id: Optional[str] = None
+    duration: Optional[int] = None
+
+
+async def _rebook_consultation_slot(
+    lead: dict,
+    physio_id: Optional[str],
+    date_str: str,
+    time_str: str,
+    duration: Optional[int],
+    user: V3UserOut,
+) -> Dict[str, object]:
+    """Move this patient's consultation onto a new slot, and optionally a new consultant.
+
+    Returns the fields to $set on the lead. The caller writes them alongside whatever else
+    its own stage move needs, so the lead is touched once.
+
+    The `appointments` row is what the Consultant Calendar draws and what marks a slot
+    Booked, so moving only the lead's own appointment_date/appointment_time left the old
+    hour held on the consultant's day and the new one looking free to the next patient who
+    asked for it. Rebooking here is the same act v3_schedule_branch_appointment performs
+    for a first booking, and deliberately reads the same two collections in the same
+    order.
+
+    Raises 404 if the consultant asked for does not exist, and 409 if somebody else
+    already holds the slot with them.
+    """
+    lead_id = lead["id"]
+    slot_time = f"{date_str}T{time_str}"
+    fields: Dict[str, object] = {
+        "appointment_date": date_str,
+        "appointment_time": time_str,
+        "appointment_datetime": f"{date_str}T{time_str}:00",
+        "next_consultation_follow_up_at": f"{date_str}T{time_str}:00",
+    }
+
+    # Whoever the booking is going to. A reschedule that names nobody keeps the consultant
+    # already on the lead, which is what an older client sending only a date and a time
+    # means by it.
+    target_id = physio_id or lead.get("assigned_physio_id")
+    physio = None
+    if target_id:
+        physio = await v3_col("doctors").find_one(
+            {"id": target_id}, {"_id": 0, "id": 1, "full_name": 1, "slot_details": 1, "meet_link": 1}
+        )
+        if not physio and physio_id:
+            # Only an explicitly requested consultant is an error. A stale id already on
+            # the lead is not something this reschedule introduced, and refusing over it
+            # would strand the patient on a slot nobody can move.
+            raise HTTPException(status_code=404, detail="Consultant not found")
+
+    if not physio:
+        # No consultant on the lead and none picked: the date and time still move, there is
+        # simply no calendar to move them on.
+        return fields
+
+    # Somebody else's booking on this consultant at this hour blocks it — the slot belongs
+    # to whichever patient took it. Checked for the consultant being kept as well as one
+    # being changed to: this writes a row onto their calendar either way, and a move that
+    # only changed the time would otherwise be able to put two patients in one hour.
+    #
+    # This lead's own row is excluded, so moving the time while keeping the consultant (or
+    # the other way round) is never read as a clash with itself.
+    clash = await v3_col("appointments").find_one(
+        {
+            "doctor_id": physio["id"],
+            "slot_time": slot_time,
+            "status": "new_appointment",
+            "lead_id": {"$ne": lead_id},
+        },
+        {"_id": 0, "lead_name": 1},
+    )
+    if clash:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{time_str} is already booked with {physio['full_name']}"
+                   + (f" for {clash.get('lead_name')}" if clash.get("lead_name") else ""),
+        )
+    if physio_id:
+        fields["assigned_physio_id"] = physio["id"]
+        fields["assigned_physio_name"] = physio["full_name"]
+        fields["physio_assigned_at"] = now_iso()
+
+    existing = await v3_col("appointments").find_one(
+        {"lead_id": lead_id, "appt_kind": "consultation", "status": "new_appointment"},
+        {"_id": 0, "id": 1, "slot_time": 1, "duration": 1, "notes": 1, "ref_no": 1, "share_token": 1},
+    )
+    moved_from = (existing or {}).get("slot_time")
+    if not duration:
+        detail = next(
+            (d for d in (physio.get("slot_details") or []) if d.get("slot_time") == slot_time),
+            None,
+        )
+        duration = (detail or {}).get("duration") or (existing or {}).get("duration") or 30
+    appt_fields = {
+        "branch_id": lead.get("branch_id"),
+        "doctor_id": physio["id"],
+        "doctor_name": physio["full_name"],
+        "lead_id": lead_id,
+        "lead_name": lead.get("name"),
+        "patient_name": lead.get("name"),
+        "appointment_date": date_str,
+        "appointment_time": time_str,
+        "slot_time": slot_time,
+        "duration": duration,
+        "meet_link": (physio.get("meet_link") or "").strip(),
+        "status": "new_appointment",
+        "appt_kind": "consultation",
+        "updated_at": now_iso(),
+    }
+    if moved_from and moved_from != slot_time:
+        # Same three marks v3_schedule_branch_appointment writes. The Consultant Calendar
+        # reads this collection and never joins back to the lead, so without them the one
+        # screen where a moved appointment matters most cannot know it moved.
+        appt_fields["rescheduled"] = True
+        appt_fields["rescheduled_from"] = moved_from
+        appt_fields["rescheduled_at"] = now_iso()
+        fields["appointment_rescheduled"] = True
+        fields["appointment_reschedule_count"] = int(lead.get("appointment_reschedule_count") or 0) + 1
+        fields["appointment_rescheduled_at"] = now_iso()
+        fields["appointment_rescheduled_from"] = moved_from
+    if existing:
+        await v3_col("appointments").update_one({"id": existing["id"]}, {"$set": appt_fields})
+    else:
+        # Nothing on the calendar to move: this patient was booked before the appointment
+        # row existed, or arrived on the consultation board without one. Writing it now is
+        # what puts them on the consultant's day at all.
+        await v3_col("appointments").insert_one({
+            **appt_fields,
+            "id": str(uuid.uuid4()),
+            "notes": "",
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "created_at": now_iso(),
+        })
+    return fields
 
 
 @router.post("/leads/{lead_id}/consultation-follow-up", response_model=V3LeadOut)
@@ -1247,24 +1391,25 @@ async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3Consultati
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    # The confirmed Follow-Up date/time IS the patient's consultation appointment, so the
+    # consultant's calendar moves with it — see _rebook_consultation_slot.
+    booking = await _rebook_consultation_slot(lead, payload.physio_id, payload.date, payload.time, payload.duration, user)
     entry = {
         "id": str(uuid.uuid4()),
         "date": payload.date,
         "time": payload.time,
         "remarks": (payload.remarks or "").strip(),
         "status": "active",
+        "consultant_id": booking.get("assigned_physio_id") or lead.get("assigned_physio_id"),
+        "consultant_name": booking.get("assigned_physio_name") or lead.get("assigned_physio_name"),
         "created_by": user.full_name,
         "created_at": now_iso(),
     }
-    # The confirmed Follow-Up date/time IS the patient's consultation appointment —
-    # hand off to the Head Physio's own pipeline, seeding it only the first time so a
+    # Hand off to the Head Physio's own pipeline, seeding it only the first time so a
     # later reschedule never regresses progress the doctor has already made.
     set_fields = {
+        **booking,
         "consultation_stage": "Consultation Booked",
-        "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
-        "appointment_date": payload.date,
-        "appointment_time": payload.time,
-        "appointment_datetime": f"{payload.date}T{payload.time}:00",
         "updated_at": now_iso(),
     }
     if not lead.get("head_consultation_stage"):
@@ -1277,7 +1422,9 @@ async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3Consultati
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "consultation_follow_up_scheduled",
-        "details": f"Consultation follow-up on {payload.date} at {payload.time} — {entry['remarks'] or 'no remarks'}",
+        "details": (f"Consultation follow-up on {payload.date} at {payload.time}"
+                    + (f" with {entry['consultant_name']}" if entry.get("consultant_name") else "")
+                    + f" — {entry['remarks'] or 'no remarks'}"),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),
@@ -1297,6 +1444,13 @@ async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, p
     if not old:
         raise HTTPException(status_code=404, detail="Follow-up not found")
     reason = (payload.reason or "").strip()
+    prev_consultant = old.get("consultant_name") or lead.get("assigned_physio_name")
+    # The hour and the person who holds it move together. Done before the follow-up rows
+    # are written so a clash — somebody else already on that consultant at that time —
+    # refuses the whole reschedule rather than leaving the lead's history claiming a
+    # booking the calendar never took.
+    booking = await _rebook_consultation_slot(lead, payload.physio_id, payload.date, payload.time, payload.duration, user)
+    consultant_name = booking.get("assigned_physio_name") or lead.get("assigned_physio_name")
     for f in follow_ups:
         if f.get("id") == followup_id:
             f["status"] = "rescheduled"
@@ -1308,17 +1462,19 @@ async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, p
         "remarks": old.get("remarks", ""),
         "status": "active",
         "rescheduled_from": followup_id,
+        # Who the new slot is with. Stamped on the entry rather than read off the lead
+        # later, because the lead only ever carries the current consultant and this is the
+        # record of who each booking in the chain was actually made with.
+        "consultant_id": booking.get("assigned_physio_id") or lead.get("assigned_physio_id"),
+        "consultant_name": consultant_name,
         "created_by": user.full_name,
         "created_at": now_iso(),
     }
     follow_ups.append(new_entry)
     set_fields = {
+        **booking,
         "consultation_follow_ups": follow_ups,
         "consultation_stage": "Consultation Booked",
-        "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
-        "appointment_date": payload.date,
-        "appointment_time": payload.time,
-        "appointment_datetime": f"{payload.date}T{payload.time}:00",
         "updated_at": now_iso(),
     }
     if not lead.get("head_consultation_stage"):
@@ -1329,6 +1485,13 @@ async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, p
     )
     old_summary = f"{old.get('date')} at {old.get('time')}"
     details = f"Consultation follow-up rescheduled from {old_summary} to {payload.date} at {payload.time}"
+    # Named both ways round when the consultant changed, because "moved to Tuesday" and
+    # "moved to Tuesday with somebody else" are two different things to have done to a
+    # patient, and the timeline is where anyone finds out which one happened.
+    if consultant_name and prev_consultant and consultant_name != prev_consultant:
+        details += f" — consultant changed from {prev_consultant} to {consultant_name}"
+    elif consultant_name:
+        details += f" with {consultant_name}"
     if reason:
         details += f" — reason: {reason}"
     await v3_col("lead_activity").insert_one({

@@ -20,6 +20,7 @@ import {
   listNutritionCoaches, bookDietAppointment, collectDietFee, collectDietChartFee,
   listDietStoreItems,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
+  getAvailableExperts, getAvailableDates,
   getLeadRemarks, getLeadActivity, leadDocuments,
   saveConsultationDecision, markConsultationCompleted, getBranches,
   listTextPresets, addTextPreset, deleteTextPreset,
@@ -1860,6 +1861,223 @@ const RehabDayList = ({ days, showPhysio = false, testid }) => {
   );
 };
 
+/** Pick a consultation slot the way the branch actually has to pick one: a date, then
+ *  whoever is free on it, then one of that consultant's own open times.
+ *
+ *  Rescheduling used to ask only for a new date and a new time, typed free-hand. That is
+ *  half the act. The reason a consultation is being moved is usually that the consultant
+ *  could not take it, so the new slot has to be chosen against who is actually free and
+ *  the patient handed to whichever consultant that is. A date and time picked with nobody
+ *  in mind lands the patient back on the same unavailable calendar.
+ *
+ *  Read off available-dates and available-experts, the same two endpoints the Branch
+ *  Leads booking popup uses, so a day this offers is a day that booking screen would also
+ *  offer. `leadId` is passed to both: this patient's own current slot must keep showing as
+ *  free, or the popup would report the booking it is looking at as a clash with itself and
+ *  refuse to move off it.
+ */
+const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentConsultantName, testPrefix = "cons-slot" }) => {
+  const [openDates, setOpenDates] = useState({});
+  const [experts, setExperts] = useState({ rows: [], loading: false });
+  const [month, setMonth] = useState(() => {
+    const d = value?.date ? new Date(`${value.date}T00:00:00`) : new Date();
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+
+  // Which days of the shown month still have a free consultant slot, so the days worth
+  // clicking are visible without opening each one.
+  useEffect(() => {
+    if (!branchId) return;
+    const monthStr = `${month.y}-${String(month.m + 1).padStart(2, "0")}`;
+    let cancelled = false;
+    getAvailableDates(branchId, monthStr, leadId)
+      .then((res) => { if (!cancelled) setOpenDates(res?.dates || {}); })
+      .catch(() => { if (!cancelled) setOpenDates({}); });
+    return () => { cancelled = true; };
+  }, [branchId, leadId, month.y, month.m]);
+
+  // Who can take the picked date, with their own open times attached. Asked without a
+  // time so the answer carries every consultant with room that day, not only the ones
+  // free at one particular hour.
+  useEffect(() => {
+    if (!branchId || !value?.date) { setExperts({ rows: [], loading: false }); return; }
+    let cancelled = false;
+    setExperts({ rows: [], loading: true });
+    getAvailableExperts(branchId, value.date, undefined, leadId)
+      .then((res) => { if (!cancelled) setExperts({ rows: res?.experts || [], loading: false }); })
+      .catch(() => { if (!cancelled) setExperts({ rows: [], loading: false }); });
+    return () => { cancelled = true; };
+  }, [branchId, leadId, value?.date]);
+
+  const slots = useMemo(() => {
+    const doc = experts.rows.find((d) => d.id === value?.physio_id);
+    return [...((doc?.free_slots) || [])].sort((a, b) => (a.slot_time || "").localeCompare(b.slot_time || ""));
+  }, [experts.rows, value?.physio_id]);
+
+  const todayStr = localToday();
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const firstDow = new Date(month.y, month.m, 1).getDay();
+  const daysInMonth = new Date(month.y, month.m + 1, 0).getDate();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stepMonth = (delta) => setMonth(({ y, m }) => {
+    const d = new Date(y, m + delta, 1);
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2" data-testid={`${testPrefix}-picker`}>
+      {/* 1 — Date */}
+      <div>
+        <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">1 · New Date</p>
+        <div className="mb-2 flex items-center justify-between">
+          <button type="button" onClick={() => stepMonth(-1)} className="rounded p-1 hover:bg-slate-100" data-testid={`${testPrefix}-prev-month`}>
+            <ChevronLeft className="h-4 w-4 text-slate-500" />
+          </button>
+          <h4 className="text-sm font-bold text-slate-700">{monthNames[month.m]} {month.y}</h4>
+          <button type="button" onClick={() => stepMonth(1)} className="rounded p-1 hover:bg-slate-100" data-testid={`${testPrefix}-next-month`}>
+            <ChevronRight className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
+        <div className="mb-1 grid grid-cols-7 gap-1">
+          {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+            <div key={d} className="py-0.5 text-center text-[10px] font-semibold text-slate-400">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className="h-9" />)}
+          {Array.from({ length: daysInMonth }, (_, i) => {
+            const day = i + 1;
+            const dateStr = `${month.y}-${pad(month.m + 1)}-${pad(day)}`;
+            const isPast = dateStr < todayStr;
+            const isPicked = value?.date === dateStr;
+            const open = openDates[dateStr] || 0;
+            const hasSlots = !isPast && open > 0;
+            return (
+              <button
+                key={day}
+                type="button"
+                disabled={isPast}
+                // A new date invalidates the consultant and the time chosen under the old
+                // one — availability is per-day, and both have to be asked again.
+                onClick={() => onChange({ ...(value || {}), date: dateStr, physio_id: "", time: "", duration: null })}
+                className={`h-9 rounded-lg text-sm font-semibold transition ${
+                  isPicked
+                    ? "bg-sky-500 text-white shadow-sm ring-2 ring-sky-300"
+                    : isPast
+                    ? "cursor-not-allowed text-slate-300"
+                    : hasSlots
+                    ? "bg-sky-200 text-sky-900 hover:bg-sky-300"
+                    : dateStr === todayStr
+                    ? "border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+                title={hasSlots ? `${open} slot${open === 1 ? "" : "s"} open` : undefined}
+                data-testid={`${testPrefix}-day-${day}`}
+              >
+                {day}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-2 text-[10px] font-semibold text-slate-400">
+          <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-sky-200" /> Slots open</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-sky-500" /> Picked</span>
+        </div>
+      </div>
+
+      {/* 2 — Consultant, then 3 — their time. Stacked in one column because choosing the
+          consultant is what reveals the times, and the two read as one step. */}
+      <div className="space-y-4">
+        <div>
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">2 · Consultant</p>
+          <p className="mb-2 text-[10px] text-slate-400">
+            Only those free on the picked date{currentConsultantName ? ` · currently ${currentConsultantName}` : ""}.
+          </p>
+          {!value?.date ? (
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">Pick a date first.</p>
+          ) : experts.loading ? (
+            <p className="text-xs text-slate-400">Checking availability…</p>
+          ) : experts.rows.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-6 text-center text-xs text-amber-700" data-testid={`${testPrefix}-no-experts`}>
+              No consultant is free on this date. Pick another day.
+            </p>
+          ) : (
+            <div className="max-h-44 space-y-1.5 overflow-y-auto pr-0.5">
+              {experts.rows.map((doc) => {
+                const active = value?.physio_id === doc.id;
+                const open = (doc.free_slots || []).length;
+                const isCurrent = !!currentConsultantName && doc.full_name === currentConsultantName;
+                return (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => onChange({ ...(value || {}), physio_id: doc.id, time: "", duration: null })}
+                    className={`flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition ${
+                      active ? "border-sky-400 bg-sky-50 ring-1 ring-sky-300" : "border-slate-200 bg-white hover:bg-slate-50"
+                    }`}
+                    data-testid={`${testPrefix}-expert-${doc.id}`}
+                  >
+                    {doc.photo_url ? (
+                      <img src={doc.photo_url} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500">
+                        {(doc.full_name || "?").slice(0, 1).toUpperCase()}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-semibold text-slate-700">
+                        {doc.full_name}
+                        {/* Named rather than hidden. Keeping the same consultant is a
+                            legitimate reschedule — the patient is the one who could not
+                            make the day — and a list that quietly left them out would
+                            read as though they had been taken off the case. */}
+                        {isCurrent && <span className="ml-1 text-[10px] font-medium text-sky-600">· current</span>}
+                      </span>
+                      <span className="block truncate text-[10px] text-slate-400">
+                        {open} slot{open === 1 ? "" : "s"} open{doc.specialization ? ` · ${doc.specialization}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">3 · New Time</p>
+          {!value?.physio_id ? (
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">Pick a consultant first.</p>
+          ) : slots.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-6 text-center text-xs text-amber-700">
+              This consultant has no open time left on that date.
+            </p>
+          ) : (
+            <div className="grid max-h-36 grid-cols-3 gap-1.5 overflow-y-auto pr-0.5">
+              {slots.map((sl) => {
+                const active = value?.time === sl.time;
+                return (
+                  <button
+                    key={sl.slot_time}
+                    type="button"
+                    onClick={() => onChange({ ...(value || {}), time: sl.time, duration: sl.duration })}
+                    className={`rounded-md border px-2 py-1.5 text-[11px] font-semibold transition ${
+                      active ? "border-sky-500 bg-sky-100 text-sky-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                    data-testid={`${testPrefix}-time-${sl.time}`}
+                  >
+                    {to12h(sl.time)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment", externalSortOrder = "oldest" }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
@@ -1903,8 +2121,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const [timelineRemarks, setTimelineRemarks] = useState([]);
   const [timelineActivity, setTimelineActivity] = useState([]);
   const [storeItems, setStoreItems] = useState([]);
-  const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
-  const [rescheduleDraft, setRescheduleDraft] = useState(null); // { followupId, date, time, reason } | null
+  const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, physio_id, duration, remarks } | null
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  // { followupId, fromDate, fromTime, currentConsultant, date, time, physio_id, duration, reason } | null
+  // followupId is null for a patient booked from Branch Leads, who reaches Consultation
+  // Booked with no follow-up entry behind them.
+  const [rescheduleDraft, setRescheduleDraft] = useState(null);
   const [loading, setLoading] = useState(false);
 
   // Bulk hard-delete — Select mode swaps the row number for a checkbox rather than adding
@@ -7382,9 +7604,22 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         <Button
                           size="sm"
                           className="bg-amber-500 text-xs text-white hover:bg-amber-600"
-                          onClick={() => (activeFollowUp
-                            ? setRescheduleDraft({ followupId: activeFollowUp.id, date: activeFollowUp.date, time: activeFollowUp.time, reason: "" })
-                            : setFollowUpDraft({ date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: "10:00", remarks: "" }))}
+                          // Reschedule always opens the reschedule popup now, with or
+                          // without a follow-up entry behind it. It used to fall through to
+                          // "Schedule Follow-Up" for the commonest case -- a patient booked
+                          // from Branch Leads, who has no entry -- and that popup neither
+                          // knew what it was moving off nor asked for a reason.
+                          onClick={() => setRescheduleDraft({
+                            followupId: activeFollowUp?.id || null,
+                            fromDate: activeFollowUp?.date || selectedLead.appointment_date || "",
+                            fromTime: activeFollowUp?.time || selectedLead.appointment_time || "",
+                            currentConsultant: selectedLead.assigned_physio_name || "",
+                            // Deliberately blank rather than pre-filled with the slot being
+                            // left. The date it is on is the one date this cannot stay on,
+                            // and a picker that opens already answered invites a Reschedule
+                            // that moves nothing.
+                            date: "", time: "", physio_id: "", duration: null, reason: "",
+                          })}
                           data-testid="cons-reschedule-btn"
                         >
                           Reschedule
@@ -7850,6 +8085,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       >
                         <div>
                           <p className={`font-semibold ${isActive ? "text-orange-700" : "text-slate-400 line-through"}`}>{f.date} at {f.time}</p>
+                          {f.consultant_name && (
+                            <p className="mt-0.5 text-[11px] font-medium text-slate-500" data-testid={`cons-followup-consultant-${f.id}`}>
+                              with {f.consultant_name}
+                            </p>
+                          )}
                           {f.remarks && <p className="mt-0.5 text-slate-600">{f.remarks}</p>}
                           {f.status === "rescheduled" && f.reschedule_reason && (
                             <p className="mt-0.5 italic text-slate-400">Rescheduled: {f.reschedule_reason}</p>
@@ -7860,7 +8100,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             size="sm"
                             variant="outline"
                             className="h-7 shrink-0 text-[11px]"
-                            onClick={() => setRescheduleDraft({ followupId: f.id, date: f.date, time: f.time, reason: "" })}
+                            onClick={() => setRescheduleDraft({
+                              followupId: f.id,
+                              fromDate: f.date,
+                              fromTime: f.time,
+                              currentConsultant: f.consultant_name || selectedLead.assigned_physio_name || "",
+                              date: "", time: "", physio_id: "", duration: null, reason: "",
+                            })}
                             data-testid={`cons-followup-reschedule-${f.id}`}
                           >
                             Reschedule
@@ -10353,41 +10599,42 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
               </div>
             )}
 
-            {/* Reschedule Follow-Up popup */}
+            {/* Reschedule popup: a new date, a consultant free on it, one of their open times. */}
             {rescheduleDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4" data-testid="cons-reschedule-modal">
-                <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+                <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
                   <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
-                    <div className="flex items-center gap-2">
-                      <Bell className="h-5 w-5" />
-                      <p className="text-base font-semibold">Reschedule Follow-Up</p>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Bell className="h-5 w-5 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-base font-semibold">Reschedule Consultation</p>
+                        {/* The booking being moved off, spelled out. The picker below shows
+                            open slots and says nothing about which one the patient is on
+                            now, and "move it" is not a decision anyone can make without
+                            that. */}
+                        <p className="truncate text-[11px] text-white/80" data-testid="cons-reschedule-current">
+                          Now {rescheduleDraft.fromDate || "—"}{rescheduleDraft.fromTime ? ` at ${to12h(rescheduleDraft.fromTime)}` : ""}
+                          {rescheduleDraft.currentConsultant ? ` with ${rescheduleDraft.currentConsultant}` : ""}
+                        </p>
+                      </div>
                     </div>
-                    <button onClick={() => setRescheduleDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-reschedule-close">
+                    <button onClick={() => setRescheduleDraft(null)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-reschedule-close">
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="space-y-4 p-5">
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold text-slate-600">New Date *</label>
-                      <MilkDateInput
-                        value={rescheduleDraft.date}
-                        min={new Date().toISOString().slice(0, 10)}
-                        onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, date: e.target.value })}
-                        data-testid="cons-reschedule-date"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold text-slate-600">New Time *</label>
-                      <MilkTimeInput
-                        value={rescheduleDraft.time}
-                        onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, time: e.target.value })}
-                        data-testid="cons-reschedule-time"
-                      />
-                    </div>
+                  <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                    <ConsultationSlotPicker
+                      branchId={selectedLead.branch_id || branchId}
+                      leadId={selectedLead.id}
+                      value={rescheduleDraft}
+                      onChange={(v) => setRescheduleDraft({ ...rescheduleDraft, ...v })}
+                      currentConsultantName={rescheduleDraft.currentConsultant}
+                      testPrefix="cons-reschedule"
+                    />
                     <div>
                       <label className="mb-1 block text-xs font-semibold text-slate-600">Reason for Reschedule *</label>
                       <textarea
-                        rows={3}
+                        rows={2}
                         className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
                         placeholder="Why is this being rescheduled..."
                         value={rescheduleDraft.reason}
@@ -10396,28 +10643,54 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       />
                     </div>
                   </div>
-                  <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
-                    <Button variant="outline" onClick={() => setRescheduleDraft(null)} data-testid="cons-reschedule-cancel">Cancel</Button>
-                    <Button
-                      className="bg-amber-500 text-white hover:bg-amber-600"
-                      onClick={async () => {
-                        if (!rescheduleDraft.date || !rescheduleDraft.time || !rescheduleDraft.reason.trim()) {
-                          toast.error("Date, time and reason are required");
-                          return;
-                        }
-                        try {
-                          const updated = await rescheduleConsultationFollowUp(selectedLead.id, rescheduleDraft.followupId, {
-                            date: rescheduleDraft.date, time: rescheduleDraft.time, reason: rescheduleDraft.reason,
-                          });
-                          applyUpdatedLead(updated);
-                          setRescheduleDraft(null);
-                          toast.success(`Follow-up rescheduled to ${rescheduleDraft.date} at ${rescheduleDraft.time}`);
-                        } catch (e) { toast.error(e?.response?.data?.detail || "Failed to reschedule"); }
-                      }}
-                      data-testid="cons-reschedule-save"
-                    >
-                      <CheckCircle2 className="mr-1 h-4 w-4" /> Reschedule
-                    </Button>
+                  <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+                    <p className="min-w-0 truncate text-xs text-slate-500" data-testid="cons-reschedule-summary">
+                      {rescheduleDraft.date && rescheduleDraft.time && rescheduleDraft.physio_id
+                        ? `Moving to ${rescheduleDraft.date} at ${to12h(rescheduleDraft.time)}`
+                        : "Pick a date, a consultant and a time."}
+                    </p>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button variant="outline" onClick={() => setRescheduleDraft(null)} data-testid="cons-reschedule-cancel">Cancel</Button>
+                      <Button
+                        className="bg-amber-500 text-white hover:bg-amber-600"
+                        disabled={rescheduleBusy}
+                        onClick={async () => {
+                          if (!rescheduleDraft.date) { toast.error("Pick a new date"); return; }
+                          if (!rescheduleDraft.physio_id) { toast.error("Pick the consultant who will take it"); return; }
+                          if (!rescheduleDraft.time) { toast.error("Pick a new time"); return; }
+                          if (!rescheduleDraft.reason.trim()) { toast.error("A reason is required"); return; }
+                          setRescheduleBusy(true);
+                          try {
+                            const body = {
+                              date: rescheduleDraft.date,
+                              time: rescheduleDraft.time,
+                              reason: rescheduleDraft.reason,
+                              physio_id: rescheduleDraft.physio_id,
+                              ...(rescheduleDraft.duration ? { duration: rescheduleDraft.duration } : {}),
+                            };
+                            // Two ways in, one act. A patient booked from Branch Leads
+                            // reaches Consultation Booked with no follow-up entry behind
+                            // them, so there is nothing for the reschedule endpoint to mark
+                            // as moved -- scheduling the new slot is what moves them, and
+                            // it rebooks the consultant's calendar the same way.
+                            const updated = rescheduleDraft.followupId
+                              ? await rescheduleConsultationFollowUp(selectedLead.id, rescheduleDraft.followupId, body)
+                              : await scheduleConsultationFollowUp(selectedLead.id, {
+                                  date: body.date, time: body.time, physio_id: body.physio_id,
+                                  remarks: `Rescheduled: ${rescheduleDraft.reason.trim()}`,
+                                  ...(body.duration ? { duration: body.duration } : {}),
+                                });
+                            applyUpdatedLead(updated);
+                            setRescheduleDraft(null);
+                            toast.success(`Rescheduled to ${rescheduleDraft.date} at ${to12h(rescheduleDraft.time)}${updated.assigned_physio_name ? ` with ${updated.assigned_physio_name}` : ""}`);
+                          } catch (e) { toast.error(e?.response?.data?.detail || "Failed to reschedule"); }
+                          finally { setRescheduleBusy(false); }
+                        }}
+                        data-testid="cons-reschedule-save"
+                      >
+                        <CheckCircle2 className="mr-1 h-4 w-4" /> {rescheduleBusy ? "Rescheduling..." : "Reschedule"}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
