@@ -300,9 +300,33 @@ export const BranchExpensesPanel = ({ onChanged }) => {
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full min-w-[860px] text-xs">
+        {/* table-fixed with a colgroup, not auto widths. Left to itself the browser hands
+            the leftover width of a 1900px screen to whichever column holds the longest
+            string, so Date sat marooned at the far left, Category and Paid to drifted
+            apart, and the row read as scattered rather than as a line. Pinned proportions
+            put every column where the reader expects it whatever is in the cells, and the
+            same eight land in the same places on every row.
+
+            Percentages rather than pixels so the table still fills a wide screen; the
+            min-width underneath is what stops them collapsing on a narrow one, where the
+            wrapper scrolls sideways instead. */}
+        <table className="w-full min-w-[920px] table-fixed text-xs">
+          <colgroup>
+            <col className="w-[5%]" />
+            <col className="w-[10%]" />
+            <col className="w-[16%]" />
+            <col className="w-[15%]" />
+            <col className="w-[9%]" />
+            <col className="w-[13%]" />
+            <col className="w-[12%]" />
+            <col className="w-[20%]" />
+          </colgroup>
           <thead className="bg-slate-50 text-slate-500">
             <tr>
+              {/* Position in the list on screen, so two people can say "the second one"
+                  about the same row. It renumbers when the tab changes, because it counts
+                  what is in front of the reader rather than identifying the expense. */}
+              <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">S:No</th>
               <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Date</th>
               <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Category</th>
               <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Paid to</th>
@@ -314,26 +338,34 @@ export const BranchExpensesPanel = ({ onChanged }) => {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="px-3 py-10 text-center text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={8} className="px-3 py-10 text-center text-slate-400">Loading…</td></tr>
             ) : visible.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-10 text-center text-slate-400" data-testid="branch-expense-empty">
+                <td colSpan={8} className="px-3 py-10 text-center text-slate-400" data-testid="branch-expense-empty">
                   {view === "approved" ? "Nothing approved yet." : "No requests open. Add Expense sends one to the accountant."}
                 </td>
               </tr>
-            ) : visible.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100" data-testid={`branch-expense-row-${r.id}`}>
+            ) : visible.map((r, i) => (
+              /* align-top, because a category carrying a note is two lines deep and every
+                 other cell is one. Centred against it, Paid to and Mode floated half a
+                 line below the category they belong to; topped, every cell on the row
+                 starts on the same line. */
+              <tr key={r.id} className="border-t border-slate-100 align-top" data-testid={`branch-expense-row-${r.id}`}>
+                <td className="px-3 py-2.5 tabular-nums text-slate-400" data-testid={`branch-expense-sno-${r.id}`}>{i + 1}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-slate-500">{r.expense_date || "—"}</td>
                 <td className="px-3 py-2.5 font-medium text-slate-700">
                   {r.category}
                   {r.note ? <span className="block text-[11px] font-normal text-slate-400">{r.note}</span> : null}
                 </td>
-                <td className="px-3 py-2.5 text-slate-600">{r.paid_to || "—"}</td>
+                {/* break-words, not truncation: a long payee or reference is what somebody
+                    checks the row against, and a fixed-width column would otherwise cut it
+                    off mid-name with no way to see the rest. */}
+                <td className="break-words px-3 py-2.5 text-slate-600">{r.paid_to || "—"}</td>
                 <td className="px-3 py-2.5 text-slate-600">
                   {(MODES.find(([k]) => k === r.payment_mode) || [null, r.payment_mode || "—"])[1]}
                 </td>
-                <td className="px-3 py-2.5 text-slate-500">{r.reference || "—"}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-slate-800">{fmt(r.amount)}</td>
+                <td className="break-words px-3 py-2.5 text-slate-500">{r.reference || "—"}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-slate-800">{fmt(r.amount)}</td>
                 <td className="px-3 py-2.5">
                   <StatusChip row={r} />
                   {/* Said, not just marked. A branch left with a rejected row and no
