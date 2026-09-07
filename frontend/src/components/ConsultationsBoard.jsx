@@ -1192,38 +1192,46 @@ const COLS_WITH_ACTION = {
 };
 
 /**
- * The three fees a patient can pay, each collected at its own point and stored separately.
+ * The four fees a patient can pay, each collected at its own point and stored separately.
  *
- * Fee Collected holds anyone who has paid anything, which made it one list answering three
- * different questions — "who paid to be seen", "who bought treatment", "who took a diet
- * plan" — and the branch could not read any of them off it.
+ * Fee Collected holds anyone who has paid anything, which made it one list answering four
+ * different questions -- "who paid to be seen", "who bought treatment", "who was sent for
+ * rehab", "who took a diet plan" -- and the branch could not read any of them off it.
  *
  * Consultation is first and is the widest: it is the fee that puts a patient in this stage
- * at all, so nearly everyone here has one. The other two are what they went on to buy.
+ * at all, so nearly everyone here has one. The rest are what they went on to buy.
  *
- * `paid` reads the amount rather than a flag because there is no flag — the amount being
+ * Treatment is named for what was sold, not for the desk that delivers it. It was called
+ * Physio, which is the room the sessions happen in and not the thing on the bill: the plan
+ * line under every patient's name says "Treatment (35 Sessions)", the money is the
+ * Treatment Fee, and this tab -- which reports that fee and collects it -- was the one
+ * place on the board calling it something else.
+ *
+ * `paid` reads the amount rather than a flag because there is no flag -- the amount being
  * present is what "collected" means, and 0 is not a collection.
  *
- * `action` is which fee the button at the end of the row collects on that tab. Every tab
- * has one now. Three of them used to end their rows with nothing at all: the Physio, Rehab
- * and Diet lists could say a fee had not come in and offered no way to take it, so the desk
- * read the shortfall on one screen and went to another to do something about it — and a
- * balance left by a short collection, which is the whole reason those lists are read, had
- * to be chased through the patient popup one at a time.
+ * `action` is which fee the button at the end of the row collects on that tab, and it is
+ * always that tab's own fee. It used to be the Treatment Fee on the Consultant tab, on the
+ * reasoning that consultation money is already in by the time a patient stands here. That
+ * held while the dropdown said All and broke the moment it said Fees Non Collected: the
+ * tab would then list patients whose consultation fee was outstanding and offer to take
+ * their treatment fee instead. A tab that reports a fee as unpaid has to be the tab that
+ * collects it, or its count and its button are about two different debts.
  *
- * Each tab collects its own fee, except Consultant, which collects the Treatment Fee: that
- * list is everyone whose consultation money is already in, so its own fee is the one column
- * that is never outstanding and treatment is what is due from them next. That pairing is
- * what this row of buttons has always done, and it is left as it was.
+ * Every tab has a button. Three of them used to end their rows with nothing at all: the
+ * Treatment, Rehab and Diet lists could say a fee had not come in and offered no way to
+ * take it, so the desk read the shortfall on one screen and went to another to do
+ * something about it -- and a balance left by a short collection, which is the whole
+ * reason those lists are read, had to be chased through the patient popup one at a time.
  *
  * `scope` is who the tab is about at all -- the patients sent to that desk.
  *
- * Without it the four tabs were four names over one list: with the dropdown on All every
- * tab showed the stage entire, so a stage of seven read Consultant 7 | Physio 7 | Rehab 7
- * | Diet 7 -- the same seven counted four times -- and the Diet tab listed six people who
- * had never been referred for a diet, each with "Not collected" against a fee they do not
- * owe. A tab is a desk, and a desk's list has to be that desk's own patients before the
- * dropdown can say anything useful about which of them have paid.
+ * Without it the tabs were names over one list: with the dropdown on All every tab showed
+ * the stage entire, so a stage of seven read Consultant 7 | Treatment 7 | Rehab 7 | Diet 7
+ * -- the same seven counted four times -- and the Diet tab listed six people who had never
+ * been referred for a diet, each with "Not collected" against a fee they do not owe. A tab
+ * is a desk, and a desk's list has to be that desk's own patients before the dropdown can
+ * say anything useful about which of them have paid.
  *
  * Read off the referral the Head Physio's decision records -- the tick IS the referral,
  * see CONSULTATION_ADDONS -- widened to anyone already carrying that desk's package or its
@@ -1240,16 +1248,27 @@ const FEE_TABS = [
     key: "consultation",
     label: "Consultant",
     tone: "#0284c7",
+    empty: "No patients in this stage yet.",
     scope: () => true,
     paid: (l) => Number(l.package_paid) || 0,
     item: (l) => l.package_name || l.consultation_item_name || "",
     mode: (l) => l.package_payment_mode || "",
-    action: "treatment",
+    action: "consultation",
   },
   {
     key: "treatment",
-    label: "Physio",
-    tone: "#059669",
+    label: "Treatment",
+    empty: "Nobody in this stage was sold treatment sessions.",
+    // The green the plan line under every patient's name already gives the word -- see
+    // PLAN_PART_TONES. A tab and a chip naming the same sale in two different colours are
+    // two different sales as far as anybody reading the row is concerned.
+    tone: "#1baf7a",
+    // Read off the decision rather than off the package, because the package is a later
+    // step: a Consultant can tick Treatment and leave without choosing which package, and
+    // that patient has bought treatment and has nothing priced to be charged for yet. They
+    // are exactly who this tab is read for, so it cannot be scoped in a way that drops them
+    // -- the row's own button names what is missing instead, see rowFeeGate.
+    //
     // Treatment is the one addon with a package to pick, so it is recorded as the decision
     // itself rather than as a flag beside it -- see CONSULTATION_ADDONS.
     scope: (l) => l.consultation_decision === "consultation_treatment"
@@ -1264,6 +1283,7 @@ const FEE_TABS = [
     key: "rehab",
     label: "Rehab",
     tone: "#0891b2",
+    empty: "No patients referred to Rehab in this stage.",
     scope: (l) => !!l.rehab_referred || !!l.rehab_package_id || Number(l.rehab_fee_paid) > 0,
     paid: (l) => Number(l.rehab_fee_paid) || 0,
     item: (l) => l.rehab_package_name || "",
@@ -1274,6 +1294,7 @@ const FEE_TABS = [
     key: "diet",
     label: "Diet",
     tone: "#d97706",
+    empty: "No patients referred to Diet in this stage.",
     // Both halves of a diet referral count, and either fee does. The tab reports the Diet
     // Consultation fee, but a patient sent away with a chart alone is still this desk's --
     // dropping them here would leave a Diet Chart sale on no list at all. See DIET_KINDS.
@@ -2590,18 +2611,34 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   // How many patients are behind each fee, counted off the stage's own rows. Carried on the
   // tab itself as a badge, so that Rehab holds eight and Diet five is readable from the row
   // without opening either.
+  //
+  // Two numbers per tab, because the row is read for two different reasons.
+  //
+  // `shown` is the length of the list the tab would open -- counted through the tab's own
+  // scope and then through the dropdown, in that order, the same two cuts `filtered` makes.
+  // A badge that keeps saying 2 while the row under it lists 5 is the badge being read as
+  // the wrong number rather than as a different question.
+  //
+  // Scope first is what stops the badges from repeating one number: they count four
+  // different sets of patients now, not the stage over and over.
+  //
+  // `due` is that desk's unpaid, and it deliberately ignores the dropdown. It is the one
+  // figure the branch comes to this row for -- how much of today's work is still money
+  // outstanding -- and putting it behind a dropdown setting meant it could only be read one
+  // desk at a time, by changing a control that changed all four tabs at once. Every desk's
+  // shortfall now sits on its own tab whatever the list below is filtered to, so "Rehab has
+  // three to chase" is read without leaving the Diet tab.
   const feeCounts = useMemo(() => {
     if (!showDiscountColumn) return {};
     const out = {};
-    // Counted through the tab's own scope and then through the dropdown, in that order --
-    // the same two cuts `filtered` makes, so the badge is always the length of the list the
-    // tab would open. A badge that keeps saying 2 while the row under it lists 5 is the
-    // badge being read as the wrong number rather than as a different question.
-    //
-    // Scope first is what stops the four badges from repeating one number: they count four
-    // different sets of patients now, not the stage over and over.
     for (const t of FEE_TABS) {
-      out[t.key] = inStage.filter((l) => t.scope(l) && activeStatus.match(t.paid(l))).length;
+      const mine = inStage.filter((l) => t.scope(l));
+      out[t.key] = {
+        shown: mine.filter((l) => activeStatus.match(t.paid(l))).length,
+        // The same test FEE_STATUSES' pending arm uses, so the two can never disagree about
+        // who is unpaid -- 0 is not a collection.
+        due: mine.filter((l) => t.paid(l) <= 0).length,
+      };
     }
     return out;
   }, [inStage, showDiscountColumn, activeStatus]);
@@ -4766,28 +4803,55 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
           </select>
           {FEE_TABS.map((t) => {
             const on = t.key === activeFee.key;
+            const c = feeCounts[t.key] || { shown: 0, due: 0 };
             return (
               <button
                 key={t.key}
                 type="button"
                 onClick={() => setFeeTab(t.key)}
                 aria-pressed={on}
-                // The visible label is one word now, so the full question goes on the
-                // accessible name — "Physio" alone tells a screen reader nothing, and
-                // "Physio Fee Collected" is the wrong sentence on two of the three
-                // dropdown settings.
-                aria-label={`${t.label} — ${activeStatus.label} (${feeCounts[t.key] ?? 0})`}
+                // The visible label is one word, so the full question goes on the accessible
+                // name — "Physio" alone tells a screen reader nothing, and "Physio Fee
+                // Collected" is the wrong sentence on two of the three dropdown settings.
+                // The shortfall is spelled out here too: sighted or not, a second bare
+                // number beside the first is two numbers and no way to tell them apart.
+                aria-label={`${t.label} — ${activeStatus.label} (${c.shown})${c.due ? `, ${c.due} unpaid` : ""}`}
                 // flex-1 below sm so four tabs share a phone's width evenly instead of
                 // leaving a ragged last row; at sm+ each takes only the width of its label.
                 className={`flex-1 rounded-md px-3 py-2 text-left transition sm:flex-none ${on ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
                 style={on ? { background: t.tone } : undefined}
                 data-testid={`cons-fee-tab-${t.key}`}
               >
-                <span className="block whitespace-nowrap text-xs font-semibold">
+                <span className="flex items-center justify-center gap-1.5 whitespace-nowrap text-xs font-semibold sm:justify-start">
                   {t.label}
-                  <span className={`ml-1.5 rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
-                    {feeCounts[t.key] ?? 0}
+                  <span className={`rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
+                    {c.shown}
                   </span>
+                  {/* What this desk is still owed, on the tab. The count above it is how
+                      many patients the tab lists, which on All is everyone that desk saw and
+                      says nothing about money — so the one number the branch opens this
+                      screen for was the one number it did not show, and finding it meant
+                      setting the dropdown to Fees Non Collected and then reading each tab in
+                      turn. Amber, and only present when there is something to chase: a badge
+                      that renders "0 due" on every tab is an alarm on every tab, and the eye
+                      stops reading all four.
+
+                      Kept out of the tab's own colour on the open tab as well. This is the
+                      one thing on the row that has to stay findable while a tab is selected,
+                      and white-on-tone would make it the selection's own badge again. */}
+                  {c.due > 0 && (
+                    <span
+                      className="rounded px-1.5 py-px text-[10px] font-bold text-amber-700 ring-1 ring-inset ring-amber-300"
+                      style={{ background: on ? "#fff" : "#fef3c7" }}
+                      // Named for the fee, not for the tab. Physio's fee is the Treatment
+                      // Fee — see FEE_TABS' `action` — and "3 Physio fees not collected"
+                      // is a fee this branch does not charge.
+                      title={`${c.due} ${ROW_FEES[t.action].label.toLowerCase()}${c.due === 1 ? "" : "s"} not collected`}
+                      data-testid={`cons-fee-tab-due-${t.key}`}
+                    >
+                      {c.due} due
+                    </span>
+                  )}
                 </span>
               </button>
             );
@@ -5074,9 +5138,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 {showDiscountColumn && <th className={`${cols.total} px-3 py-2 text-left align-middle`}>Total Amount</th>}
                 {/* The one column on this table that does something rather than reports
                     something, so it sits at the end where a row is finished being read. */}
-                {/* Named for the fee the button under it actually collects, which is not
-                    always the tab's own — see FEE_TABS' `action`. */}
-                {showFeeAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>{rowFeeSpec.label}</th>}
+                {/* A verb, not a fee name. The button under it now always collects the
+                    tab's own fee — see FEE_TABS' `action` — and the column two to the left
+                    is already named for that fee, so naming this one after it too put
+                    "Treatment Fee" over two columns of the same table. */}
+                {showFeeAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>Collect</th>}
                 {showConsultationAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>Consultation Fee</th>}
               </tr>
             </thead>
@@ -5160,13 +5226,25 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       // is a number nobody can check.
                       <td className="whitespace-nowrap px-3 py-3 align-top text-xs" data-testid={`cons-fee-${activeFee.key}-${l.id}`}>
                         {activeFee.paid(l) > 0 ? (
-                          <span className="font-semibold leading-5" style={{ color: activeFee.tone }}>{rupees(activeFee.paid(l))}</span>
+                          // A tick before the figure, because on the All list the two states
+                          // of this column are a number and a phrase — and a column of mixed
+                          // amounts is scanned as amounts, so which of them are settled was
+                          // read off the wording rather than seen. The mark carries it: the
+                          // same tick the Collect column's Paid pill wears, so one glance
+                          // down the row says paid whichever of the two columns it lands on.
+                          <span className="inline-flex items-center gap-1 align-top font-semibold leading-5" style={{ color: activeFee.tone }}>
+                            <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" />
+                            {rupees(activeFee.paid(l))}
+                          </span>
                         ) : (
                           // Nothing has come in at this desk for this patient. "Rs.0" reads
                           // as a fee of nothing that was collected rather than as a fee
                           // still owed, and on the Fees Non Collected list every row would
                           // be a column of zeroes saying it.
-                          <span className="font-semibold leading-5 text-amber-600" data-testid={`cons-fee-pending-${l.id}`}>Not collected</span>
+                          <span className="inline-flex items-center gap-1 align-top font-semibold leading-5 text-amber-600" data-testid={`cons-fee-pending-${l.id}`}>
+                            <AlertCircle className="h-3 w-3 shrink-0" />
+                            Not collected
+                          </span>
                         )}
                         {activeFee.item(l) && (
                           <span className="block max-w-full truncate text-[10px] text-slate-400" title={activeFee.item(l)}>
@@ -5350,17 +5428,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     // reason, so each says its own -- "nothing collected" under Fees Non
                     // Collected would be the opposite of what emptied it.
                     : showDiscountColumn
+                      // Named for the fee, not for the tab. Two tabs collect the Treatment
+                      // Fee and neither is called Treatment Fee, so reading the sentence off
+                      // the tab produced fees that do not exist -- "every consultant fee is
+                      // collected", "every physio fee is collected". See FEE_TABS' `action`.
                       ? feeStatus === "pending"
-                        ? `Every ${activeFee.label.toLowerCase()} fee here is collected.`
+                        ? `Every ${rowFeeSpec.label.toLowerCase()} on this tab is collected.`
                         : feeStatus === "collected"
-                          ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
-                          // On All a tab now empties because nobody was sent to that desk,
-                          // which is not the same as the stage being empty -- and the
-                          // Consultant tab, whose list is everyone here, can only mean it
-                          // the old way. See FEE_TABS' `scope`.
-                          : activeFee.key === "consultation"
-                            ? "No patients in this stage yet."
-                            : `No patients referred to ${activeFee.label} in this stage.`
+                          ? `No ${rowFeeSpec.label.toLowerCase()} collected${stageFilter ? "" : " yet"}.`
+                          // On All a tab empties because nobody reached that desk, which is
+                          // not the same as the stage being empty -- and each desk is reached
+                          // by its own route, so each says what did not happen rather than
+                          // one sentence about referrals that only fits two of them. See
+                          // FEE_TABS' `empty`.
+                          : activeFee.empty
                       : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
                 </td></tr>
               )}
