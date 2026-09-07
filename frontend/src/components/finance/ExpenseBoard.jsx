@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Trash2, Receipt, X } from "lucide-react";
+import { Check, Plus, Trash2, Receipt, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
-import { getBranches, getFinanceExpenses, createFinanceExpense, deleteFinanceExpense } from "@/lib/api";
+import {
+  getBranches, getFinanceExpenses, createFinanceExpense, deleteFinanceExpense,
+  approveFinanceExpense, rejectFinanceExpense,
+} from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -25,6 +28,7 @@ export const ExpenseBoard = () => {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(blankExpense);
   const [saving, setSaving] = useState(false);
+  const [deciding, setDeciding] = useState(null);
 
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
 
@@ -61,6 +65,28 @@ export const ExpenseBoard = () => {
     if (!window.confirm(`Delete this ${exp.category} expense of ${fmt(exp.amount)}?`)) return;
     try { await deleteFinanceExpense(exp.id); toast.success("Deleted"); load(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
+  };
+
+  // Signing off what a branch has asked to spend, or turning it down. A rejection asks for
+  // the reason rather than assuming one: the branch is owed an answer they can act on, and
+  // a row that comes back refused with nothing attached gets sent again unchanged.
+  const decide = async (exp, approve) => {
+    let reason = "";
+    if (!approve) {
+      reason = window.prompt(`Why is this ${exp.category} expense of ${fmt(exp.amount)} being turned down?`) || "";
+      if (!reason.trim()) return;
+    }
+    setDeciding(exp.id);
+    try {
+      if (approve) await approveFinanceExpense(exp.id);
+      else await rejectFinanceExpense(exp.id, reason.trim());
+      toast.success(approve ? "Approved" : "Rejected");
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save that");
+    } finally {
+      setDeciding(null);
+    }
   };
 
   return (
@@ -115,13 +141,54 @@ export const ExpenseBoard = () => {
               <p className="text-xs text-slate-400">No expenses logged yet.</p>
             </div>
           ) : data.expenses.map((exp) => (
-            <div key={exp.id} className="flex items-center justify-between gap-3 px-4 py-3" data-testid={`finance-expense-row-${exp.id}`}>
+            <div
+              key={exp.id}
+              className={`flex items-center justify-between gap-3 px-4 py-3 ${exp.approved === false && !exp.rejected ? "bg-amber-50/50" : ""}`}
+              data-testid={`finance-expense-row-${exp.id}`}
+            >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-slate-800">{exp.category}</p>
-                <p className="truncate text-xs text-slate-500">{exp.branch_name} · {exp.expense_date}{exp.note ? ` · ${exp.note}` : ""}</p>
+                <p className="truncate text-xs text-slate-500">
+                  {[exp.branch_name, exp.expense_date, exp.paid_to && `to ${exp.paid_to}`, exp.reference, exp.note]
+                    .filter(Boolean).join(" · ")}
+                </p>
+                {/* Who asked, on a row somebody is being asked to sign off. Approving a
+                    figure without knowing whose spending it is, is initialling a number. */}
+                {exp.approved === false && !exp.rejected && exp.created_by ? (
+                  <p className="truncate text-[11px] text-amber-700">Raised by {exp.created_by}</p>
+                ) : null}
+                {exp.rejected && exp.rejection_reason ? (
+                  <p className="truncate text-[11px] text-rose-600">Rejected — {exp.rejection_reason}</p>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-3">
                 <span className="text-sm font-bold text-rose-600">{fmt(exp.amount)}</span>
+                {/* Only on what is actually waiting. An expense the accountant entered is
+                    already signed off by the act of entering it, and one already decided
+                    is not a decision to make twice. */}
+                {exp.approved === false && !exp.rejected ? (
+                  <>
+                    <Button
+                      size="sm"
+                      className="h-7 bg-emerald-600 px-2 text-[11px] text-white hover:bg-emerald-700"
+                      disabled={deciding === exp.id}
+                      onClick={() => decide(exp, true)}
+                      data-testid={`finance-expense-approve-${exp.id}`}
+                    >
+                      <Check className="mr-1 h-3 w-3" /> Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 border-rose-200 px-2 text-[11px] text-rose-700 hover:bg-rose-50"
+                      disabled={deciding === exp.id}
+                      onClick={() => decide(exp, false)}
+                      data-testid={`finance-expense-reject-${exp.id}`}
+                    >
+                      Reject
+                    </Button>
+                  </>
+                ) : null}
                 <button onClick={() => remove(exp)} className="text-slate-400 hover:text-rose-600" data-testid={`finance-expense-delete-${exp.id}`}>
                   <Trash2 className="h-4 w-4" />
                 </button>

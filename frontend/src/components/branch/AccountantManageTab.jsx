@@ -3,6 +3,7 @@ import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, Cale
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
+import { BranchExpensesPanel } from "@/components/branch/BranchExpensesPanel";
 import { maskDayMonthYear, manualToIso, isoToManual } from "@/components/DateFilterPopover";
 import { getBranches, getRevenueOverview } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
@@ -28,14 +29,14 @@ const mainTabClasses = (tab, active) => {
   return active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50";
 };
 
-// Collected is every payment in the current filter regardless of sign-off; Approved and
-// Pending are the two ways it splits under the Accountant's own Approvals review. Picking
-// one narrows the revenue cards and the table below it the same way a revenue card does —
-// two independent cuts of the same transaction list, not a second data source.
-const APPROVAL_VIEWS = [
-  { key: "collected", label: "Collected" },
-  { key: "approved", label: "Approved" },
-  { key: "pending", label: "Pending" },
+// Money in and money out — the first thing this tab is asked, and the two do not belong
+// in one list. What replaced: three chips splitting collections by sign-off, which said
+// the same thing three times over (every collection is pending until the Accountant's own
+// Approvals tab signs it off, so Collected and Pending read identically on any branch
+// that has not been through it, as Rs.4,96,594 and Rs.4,96,594 did here).
+const LEDGER_VIEWS = [
+  { key: "income", label: "Income" },
+  { key: "expenses", label: "Expenses" },
 ];
 
 // Same set a Branch Admin picks from when collecting a fee (V3MarkInstallmentPaidInput
@@ -134,7 +135,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(fixedBranchId || "");
   const [tab, setTab] = useState("summary");
-  const [approvalView, setApprovalView] = useState("collected");
+  const [ledger, setLedger] = useState("income");
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
   const [revenueView, setRevenueView] = useState("collected");
   const [preset, setPreset] = useState("all");
@@ -222,21 +223,13 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const transactions = useMemo(() => data?.transactions || [], [data]);
   const outstanding = useMemo(() => data?.outstanding_clients || [], [data]);
 
-  // Collected/Approved/Pending narrows which transactions the revenue cards and table
-  // below are built from — "Collected" is every one of them, the other two split on the
-  // same `approved` flag the Approvals tab signs off on.
-  const approvalFilteredTxns = useMemo(() => {
-    if (approvalView === "approved") return transactions.filter((t) => t.approved);
-    if (approvalView === "pending") return transactions.filter((t) => !t.approved);
-    return transactions;
-  }, [transactions, approvalView]);
-
-  // A second, independent cut on top of the first — how it was paid, not whether it's
-  // been signed off. Same combinable-filters shape as Finance > Approvals.
+  // How it was paid, which is the one cut left on this list. Whether a collection has
+  // been signed off is the Accountant's own Approvals tab, and asking it here too gave a
+  // branch two screens answering one question in two places.
   const filteredTxns = useMemo(() => {
-    if (paymentModeFilter === "all") return approvalFilteredTxns;
-    return approvalFilteredTxns.filter((t) => t.payment_mode === paymentModeFilter);
-  }, [approvalFilteredTxns, paymentModeFilter]);
+    if (paymentModeFilter === "all") return transactions;
+    return transactions.filter((t) => t.payment_mode === paymentModeFilter);
+  }, [transactions, paymentModeFilter]);
 
   // Every card's figure and the count under it, from one pass over whichever set the
   // filters above left standing.
@@ -373,26 +366,25 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : tab === "summary" ? (
         <div className="space-y-4" data-testid="accountant-manage-summary">
-          {/* The two cuts side by side: whether it is signed off on the left, how it was
-              paid on the right. They are independent filters and combine, so they read
-              better as two ends of one line than as two rows stacked. */}
+          {/* Income on the left, Expenses on the right, and the payment-mode row only
+              belongs to the first of them — it describes collections. */}
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-approval-filter">
-              {APPROVAL_VIEWS.map((v) => (
+            <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-ledger-filter">
+              {LEDGER_VIEWS.map((v) => (
                 <button
                   key={v.key}
-                  onClick={() => setApprovalView(v.key)}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${approvalView === v.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
-                  data-testid={`accountant-manage-approval-${v.key}`}
+                  onClick={() => setLedger(v.key)}
+                  className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${ledger === v.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
+                  data-testid={`accountant-manage-ledger-${v.key}`}
                 >
-                  {v.label} · {fmt(v.key === "collected" ? k.total_collected : v.key === "approved" ? k.total_approved : k.total_pending_approval)}
+                  {v.label}
                 </button>
               ))}
             </div>
 
             {/* Same set Branch Admin picks from when collecting the fee in the first
                 place — not approval status but how it was paid. */}
-            <div className="ml-auto flex flex-wrap items-center gap-2" data-testid="accountant-manage-payment-mode-filter">
+            <div className={`ml-auto flex-wrap items-center gap-2 ${ledger === "income" ? "flex" : "hidden"}`} data-testid="accountant-manage-payment-mode-filter">
               {PAYMENT_MODES.map(([key, label]) => (
                 <button
                   key={key}
@@ -409,6 +401,14 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             </div>
           </div>
 
+          {/* Expenses is its own ledger, not a filter of this one: nothing above it —
+              the revenue tiles, the source table, the payment-mode row — describes money
+              going out, so the whole of the income side steps aside for it rather than
+              being reused with different numbers in it. */}
+          {ledger === "expenses" && <BranchExpensesPanel />}
+
+          {ledger === "income" && (
+          <>
           {/* Seven across from lg with Rehab among them. Two-up on a phone, which leaves
               the odd one centred rather than stranded in a column of its own. */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
@@ -486,6 +486,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             rows={revenueView === "collected" ? filteredTxns : filteredTxns.filter((t) => t.source === revenueView)}
             onView={setViewingLeadId}
           />
+          </>
+          )}
         </div>
       ) : tab === "schedule" ? (
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />

@@ -615,6 +615,25 @@ class ExpenseCreate(BaseModel):
     branch_id: Optional[str] = None  # blank = an org-wide expense, not one branch's own
     note: Optional[str] = ""
     expense_date: Optional[str] = None  # defaults to today if omitted
+    # What the money was for and where it went. Asked because an expense somebody has to
+    # sign off is a claim about a real payment, and "Rs.4,000, Maintenance" is not one an
+    # accountant can check — they need to know who it went to and how it was paid.
+    paid_to: Optional[str] = ""
+    payment_mode: Optional[str] = ""
+    reference: Optional[str] = ""
+
+
+class ExpenseDecision(BaseModel):
+    # Why it was turned down, so the branch is told rather than left watching a row sit.
+    reason: Optional[str] = ""
+
+
+# An expense written before approval existed was entered by the accountant, and their
+# entering it was the sign-off — there was no other hand it could pass through. So a row
+# with no flag reads as approved rather than appearing in a queue nobody raised.
+def _expense_approved(row: dict) -> bool:
+    value = row.get("approved")
+    return True if value is None else bool(value)
 
 
 @router.get("/finance/expenses")
@@ -647,27 +666,112 @@ async def list_expenses(
         rows = [r for r in rows if not r.get("branch_id") or (r["branch_id"] in online_ids) == (mode == "online")]
     for r in rows:
         r["branch_name"] = branch_name_map.get(r.get("branch_id"), "") if r.get("branch_id") else "All Branches"
-    return {"expenses": rows, "total": sum(r.get("amount", 0) for r in rows)}
+        r["approved"] = _expense_approved(r)
+        r["rejected"] = bool(r.get("rejected"))
+    approved_rows = [r for r in rows if r["approved"]]
+    pending_rows = [r for r in rows if not r["approved"] and not r["rejected"]]
+    # `total` stays what it always was — every row in the window — so nothing already
+    # reading this endpoint changes meaning under it. The split is beside it.
+    return {
+        "expenses": rows,
+        "total": sum(r.get("amount", 0) for r in rows),
+        "approved_total": sum(r.get("amount", 0) for r in approved_rows),
+        "approved_count": len(approved_rows),
+        "pending_total": sum(r.get("amount", 0) for r in pending_rows),
+        "pending_count": len(pending_rows),
+    }
 
 
 @router.post("/finance/expenses")
-async def create_expense(payload: ExpenseCreate, user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant"))):
+async def create_expense(
+    payload: ExpenseCreate,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """Raise an expense. A branch raises a request; the accountant enters a fact.
+
+    Same door for both, because it is the same record — what differs is who is standing
+    at it. A branch cannot approve its own spending, so theirs arrives pending and waits.
+    An accountant's is approved as it is written: approval exists to put a second pair of
+    eyes on a payment, and holding their own entry in a queue for themselves to sign off
+    is a queue of one person's work waiting on that person.
+
+    A branch's expense is theirs whatever the form said. The org-wide option belongs to
+    head office — a branch expense with no branch on it is one nobody's books carry.
+    """
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
     if not payload.category.strip():
         raise HTTPException(status_code=400, detail="Category is required")
+
+    raised_by_branch = is_branch_admin_role(user.role)
+    if raised_by_branch and not user.branch_id:
+        raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
+
     doc = {
         "id": str(uuid.uuid4()),
         "category": payload.category.strip(),
         "amount": payload.amount,
-        "branch_id": payload.branch_id or None,
+        "branch_id": user.branch_id if raised_by_branch else (payload.branch_id or None),
         "note": (payload.note or "").strip(),
+        "paid_to": (payload.paid_to or "").strip(),
+        "payment_mode": (payload.payment_mode or "").strip(),
+        "reference": (payload.reference or "").strip(),
         "expense_date": payload.expense_date or _now()[:10],
         "created_by": user.full_name,
+        "created_by_role": user.role,
         "created_at": _now(),
+        "approved": not raised_by_branch,
+        "approved_by": None if raised_by_branch else user.full_name,
+        "approved_at": None if raised_by_branch else _now(),
+        "rejected": False,
+        "rejection_reason": "",
     }
     await v3_col("expenses").insert_one(doc.copy())
     return doc
+
+
+@router.post("/finance/expenses/{expense_id}/approve")
+async def approve_expense(
+    expense_id: str,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+):
+    """Sign off one branch expense. Not open to Branch Admin, for the reason
+    approve_transaction gives: approval is somebody other than whoever raised it saying
+    the money went where the form says it went."""
+    update = {
+        "approved": True,
+        "approved_by": user.full_name,
+        "approved_at": _now(),
+        "rejected": False,
+        "rejection_reason": "",
+    }
+    res = await v3_col("expenses").update_one({"id": expense_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    return {"message": "Approved"}
+
+
+@router.post("/finance/expenses/{expense_id}/reject")
+async def reject_expense(
+    expense_id: str,
+    payload: ExpenseDecision = ExpenseDecision(),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+):
+    """Turn one down, with the reason. Kept rather than deleted: the branch that raised it
+    is owed an answer, and a row that vanishes reads as one that was never sent."""
+    update = {
+        "approved": False,
+        "rejected": True,
+        "rejection_reason": (payload.reason or "").strip(),
+        "approved_by": None,
+        "approved_at": None,
+        "rejected_by": user.full_name,
+        "rejected_at": _now(),
+    }
+    res = await v3_col("expenses").update_one({"id": expense_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    return {"message": "Rejected"}
 
 
 @router.delete("/finance/expenses/{expense_id}")
@@ -738,7 +842,13 @@ async def finance_profit(
         expense_date_query["$lte"] = end_date
     if expense_date_query:
         expense_query["expense_date"] = expense_date_query
-    expenses = await v3_col("expenses").find(expense_query, {"_id": 0, "amount": 1, "category": 1, "branch_id": 1}).to_list(2000)
+    expenses = await v3_col("expenses").find(
+        expense_query, {"_id": 0, "amount": 1, "category": 1, "branch_id": 1, "approved": 1}
+    ).to_list(2000)
+    # Only what has been signed off. A request is somebody asking to spend, not money
+    # gone — counting it would drop reported profit the moment a branch typed a number,
+    # and put it back when the accountant said no.
+    expenses = [e for e in expenses if _expense_approved(e)]
     if mode in ("online", "offline"):
         # Org-wide (no branch_id) counts under both — same as the Expense tab's own
         # mode filter, so the two stay in step for the same window.

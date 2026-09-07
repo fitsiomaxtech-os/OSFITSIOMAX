@@ -346,6 +346,11 @@ export const unapproveTransaction = async (activityId) => (await api.post(`/fina
 export const getFinanceExpenses = async (params = {}) => (await api.get("/finance/expenses", { params })).data;
 export const createFinanceExpense = async (payload) => (await api.post("/finance/expenses", payload)).data;
 export const deleteFinanceExpense = async (expenseId) => (await api.delete(`/finance/expenses/${expenseId}`)).data;
+// Signing off a branch's expense, or turning it down with the reason. Neither is open to
+// the Branch Admin who raised it — approval is somebody else saying the money went where
+// the form says it went, the same rule the payment approvals run on.
+export const approveFinanceExpense = async (expenseId) => (await api.post(`/finance/expenses/${expenseId}/approve`)).data;
+export const rejectFinanceExpense = async (expenseId, reason) => (await api.post(`/finance/expenses/${expenseId}/reject`, { reason })).data;
 export const getFinanceProfit = async (params = {}) => (await api.get("/finance/profit", { params })).data;
 
 export const getRevenueOverview = async (params = {}) => (await api.get("/finance/revenue-overview", { params })).data;
