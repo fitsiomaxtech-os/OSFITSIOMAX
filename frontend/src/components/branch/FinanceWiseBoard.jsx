@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { Building2, Layers } from "lucide-react";
+import { Building2, Layers, TrendingUp, Receipt, BadgeIndianRupee } from "lucide-react";
 import { FinanceBoard } from "@/components/FinanceBoard";
+import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
+import { ProfitBoard } from "@/components/finance/ProfitBoard";
 
 // Every default vertical is named "online_.../offline_..." — same helper as
 // Branch Wise's own sort.
@@ -8,12 +10,26 @@ const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
 const ALL_KEY = "all";
 
+// Income is FinanceBoard exactly as it already stood; Expense and Overview are the
+// Accountant's own ExpenseBoard/ProfitBoard, reused rather than rebuilt — both already
+// carry approvals, payment-mode capture and a Revenue-less-Expense read, and now take
+// branchId/mode from this screen's own pill row instead of asking a second time.
+const LEDGER_TABS = [
+  { key: "income", label: "Income", icon: TrendingUp },
+  { key: "expense", label: "Expense", icon: Receipt },
+  { key: "overview", label: "Overview", icon: BadgeIndianRupee },
+];
+
 /**
  * Finance, browsed per branch — same pill-picker shape as Branch Wise, with one
  * addition: an "All Branches" pill first, Finance's own aggregate view (every branch
  * summed, with its own Revenue-by-Branch breakdown) rather than any one branch's book.
  * FinanceBoard already carries its own date-range and fee-type filters, so this wrapper
  * is only the branch switch around it.
+ *
+ * A second, Income/Expense/Overview row sits under the branch switch — the branch pill
+ * picks WHOSE book, this picks WHICH page of it, and both apply together whichever
+ * branch (or All Branches) is selected above.
  */
 export const FinanceWiseBoard = ({ branches }) => {
   const sortedBranches = [...(branches || [])].sort((a, b) => {
@@ -22,6 +38,8 @@ export const FinanceWiseBoard = ({ branches }) => {
     return (a.branch_name || "").localeCompare(b.branch_name || "");
   });
   const [selectedId, setSelectedId] = useState(ALL_KEY);
+  const [ledger, setLedger] = useState("income");
+  const branchId = selectedId === ALL_KEY ? undefined : selectedId;
 
   return (
     <div className="space-y-4" data-testid="finance-wise-board-root">
@@ -62,10 +80,35 @@ export const FinanceWiseBoard = ({ branches }) => {
         ))}
       </div>
 
-      {/* Keyed on the selection so switching remounts the board — its own filters
-          (fee type, search, date range) belong to one branch's book and must not
-          survive the switch to another. */}
-      <FinanceBoard key={selectedId} branchId={selectedId === ALL_KEY ? undefined : selectedId} />
+      {/* Income / Expense / Overview — the branch pill above already picked whose book,
+          this picks which page of it. */}
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="finance-wise-ledger-tabs">
+        {LEDGER_TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setLedger(t.key)}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
+                ledger === t.key ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"
+              }`}
+              data-testid={`finance-wise-ledger-tab-${t.key}`}
+            >
+              <Icon className="h-4 w-4" />{t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Keyed on the branch selection so switching remounts the board — its own filters
+          (fee type, search, date range) belong to one branch's book and must not survive
+          the switch to another. Not keyed on `ledger` too: Income, Expense and Overview
+          are three different components, already unmounted/remounted by React swapping
+          which one renders below. */}
+      {ledger === "income" && <FinanceBoard key={selectedId} branchId={branchId} />}
+      {ledger === "expense" && <ExpenseBoard key={selectedId} branchId={branchId} scoped />}
+      {ledger === "overview" && <ProfitBoard key={selectedId} branchId={branchId} scoped />}
     </div>
   );
 };

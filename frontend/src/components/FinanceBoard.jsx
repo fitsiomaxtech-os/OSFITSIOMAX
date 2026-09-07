@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { getBranchFinance } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { PAYMENT_MODE_LABELS, PAYMENT_MODE_COLORS, orderedPaymentModeEntries } from "@/lib/paymentModes";
 
 const FEE_FILTERS = [
   { key: "all", label: "All" },
@@ -136,6 +137,27 @@ export const FinanceBoard = ({ branchId, mode } = {}) => {
                 {card.prefix || ""}{formatCurrency(card.value)}
               </p>
               {card.sub && <p className="text-[10px] text-slate-400 mt-0.5">{card.sub}</p>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Income by Payment Mode — Cash, Cheque, Bank and UPI always shown, in that
+          order, so the row reads the same whichever of the four the branch actually
+          took; Card and Other join only when they carry money. Same tile shape and
+          same four-first order as the Expense tab, so the two sides of the same
+          collection read as one system rather than two boards that happened to agree. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="finance-payment-modes">
+        {orderedPaymentModeEntries(s.payment_modes).map(([pm, amt]) => {
+          const c = PAYMENT_MODE_COLORS[pm] || PAYMENT_MODE_COLORS.unknown;
+          return (
+            <div
+              key={pm}
+              className={`rounded-xl border ${c.border} ${c.bg} p-4`}
+              data-testid={`finance-payment-mode-${pm}`}
+            >
+              <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">{PAYMENT_MODE_LABELS[pm]}</p>
+              <p className={`mt-1 text-xl font-bold ${c.text}`}>Rs.{formatCurrency(amt)}</p>
             </div>
           );
         })}

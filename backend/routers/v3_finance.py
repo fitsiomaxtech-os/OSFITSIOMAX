@@ -278,6 +278,11 @@ async def get_branch_finance(
             "fee_type": tx_type,
             "amount": amount,
             "package_weeks": weeks,
+            # "cash" | "upi" | "card" | "cheque" | "account_transfer" | "unknown" — parsed
+            # off the same "... via X" wording every collection flow writes into details.
+            # package_sold carries none (see the comment on activity_query above), so it
+            # reads back "unknown" like any other untagged row.
+            "payment_mode": _parse_payment_mode(details),
             "collected_by": act.get("created_by", ""),
             "collected_at": act.get("created_at", ""),
             "branch_stage": lead.get("branch_stage", ""),
@@ -299,6 +304,14 @@ async def get_branch_finance(
     summary["approved_total"] = approved_total
     summary["pending_approval_total"] = sum(t["amount"] for t in pending_approval)
     summary["pending_approval_count"] = len(pending_approval)
+
+    # Same window as the transactions list above (fee_type/date/search/approved already
+    # applied), so the Income tab's Cash/Cheque/Bank/UPI tiles always add up to the total
+    # it's showing rather than some wider, unfiltered figure.
+    payment_modes = {}
+    for t in transactions:
+        payment_modes[t["payment_mode"]] = payment_modes.get(t["payment_mode"], 0.0) + t["amount"]
+    summary["payment_modes"] = payment_modes
 
     return {"summary": summary, "transactions": transactions}
 
@@ -670,6 +683,14 @@ async def list_expenses(
         r["rejected"] = bool(r.get("rejected"))
     approved_rows = [r for r in rows if r["approved"]]
     pending_rows = [r for r in rows if not r["approved"] and not r["rejected"]]
+    # Same Cash/Cheque/Bank/UPI split Income's own summary carries (see get_branch_finance),
+    # so the Expense tab's tiles read the same way and Overview can set the two side by
+    # side. Blank on a row logged before payment_mode was asked for — reads back "unknown"
+    # like an untagged Income row rather than crashing the count.
+    payment_modes = {}
+    for r in rows:
+        pm = r.get("payment_mode") or "unknown"
+        payment_modes[pm] = payment_modes.get(pm, 0.0) + (r.get("amount") or 0)
     # `total` stays what it always was — every row in the window — so nothing already
     # reading this endpoint changes meaning under it. The split is beside it.
     return {
@@ -679,6 +700,7 @@ async def list_expenses(
         "approved_count": len(approved_rows),
         "pending_total": sum(r.get("amount", 0) for r in pending_rows),
         "pending_count": len(pending_rows),
+        "payment_modes": payment_modes,
     }
 
 

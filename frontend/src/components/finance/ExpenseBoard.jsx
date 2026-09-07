@@ -8,51 +8,69 @@ import {
   getBranches, getFinanceExpenses, createFinanceExpense, deleteFinanceExpense,
   approveFinanceExpense, rejectFinanceExpense,
 } from "@/lib/api";
+import { EXPENSE_PAYMENT_MODE_OPTIONS, PAYMENT_MODE_LABELS, PAYMENT_MODE_COLORS, orderedPaymentModeEntries } from "@/lib/paymentModes";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-const blankExpense = { category: "", amount: "", branch_id: "", note: "", expense_date: todayIso() };
+const blankExpense = { category: "", amount: "", branch_id: "", note: "", expense_date: todayIso(), payment_mode: "cash" };
 
-/** Accountant > Expense — what went out, logged by hand (rent, salaries, supplies —
- *  whatever category is typed). Feeds the Profit tab, which is Revenue less this same
- *  list for the same window. */
-export const ExpenseBoard = () => {
+/**
+ * Accountant > Expense — what went out, logged by hand (rent, salaries, supplies —
+ * whatever category is typed). Feeds the Profit tab, which is Revenue less this same
+ * list for the same window.
+ *
+ * `branchId`/`mode`/`scoped` are optional: passed by Super Admin's Finance screen, whose
+ * own branch-pill row already picked a scope — this board then reads that scope instead
+ * of asking a second time with its own dropdown. `scoped` is the explicit flag for that
+ * (rather than inferring it from `branchId` being set, which is exactly as legitimately
+ * undefined for "All Branches" as it is for "no caller passed anything"). Left off, this
+ * keeps its original shape: the Accountant's own login board, picking its own branch and
+ * vertical.
+ */
+export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = false } = {}) => {
+  const controlled = scoped;
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState("");
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
+  const effectiveBranchId = controlled ? (branchIdProp || "") : branchId;
+  const effectiveMode = controlled ? (modeProp || "all") : mode;
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [data, setData] = useState({ expenses: [], total: 0 });
+  const [data, setData] = useState({ expenses: [], total: 0, payment_modes: {} });
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(blankExpense);
   const [saving, setSaving] = useState(false);
   const [deciding, setDeciding] = useState(null);
 
-  useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
+  useEffect(() => { if (!controlled) getBranches().then(setBranches).catch(() => {}); }, [controlled]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = {};
-      if (branchId) params.branch_id = branchId;
-      if (mode !== "all") params.mode = mode;
+      if (effectiveBranchId) params.branch_id = effectiveBranchId;
+      if (effectiveMode !== "all") params.mode = effectiveMode;
       if (startDate) params.start_date = startDate;
       if (endDate) params.end_date = endDate;
       setData(await getFinanceExpenses(params));
     } catch { /* silent */ }
     setLoading(false);
-  }, [branchId, mode, startDate, endDate]);
+  }, [effectiveBranchId, effectiveMode, startDate, endDate]);
 
   useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
-    if (!form.category.trim()) { toast.error("Category is required"); return; }
+    if (!form.category.trim()) { toast.error("Expense name is required"); return; }
     if (!(Number(form.amount) > 0)) { toast.error("Enter an amount"); return; }
     setSaving(true);
     try {
-      await createFinanceExpense({ ...form, amount: Number(form.amount), branch_id: form.branch_id || null });
+      await createFinanceExpense({
+        ...form,
+        amount: Number(form.amount),
+        branch_id: (controlled ? effectiveBranchId : form.branch_id) || null,
+      });
       toast.success("Expense logged");
       setForm(blankExpense);
       setShowAdd(false);
@@ -101,8 +119,26 @@ export const ExpenseBoard = () => {
         </Button>
       </div>
 
+      {/* Cash/Cheque/Bank/UPI split — same tiles and same order as the Income tab, so an
+          expense figure and the money it came out against read as one system. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="finance-expense-payment-modes">
+        {orderedPaymentModeEntries(data.payment_modes).map(([pm, amt]) => {
+          const c = PAYMENT_MODE_COLORS[pm] || PAYMENT_MODE_COLORS.unknown;
+          return (
+            <div key={pm} className={`rounded-xl border ${c.border} ${c.bg} p-4`} data-testid={`finance-expense-payment-mode-${pm}`}>
+              <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">{PAYMENT_MODE_LABELS[pm]}</p>
+              <p className={`mt-1 text-xl font-bold ${c.text}`}>{fmt(amt)}</p>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
-        {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
+        {/* Branch and vertical are already picked by the branch-pill row above this
+            board when embedded there — asking again here would be a second control for
+            the same scope. The Accountant's own dashboard has no such row, so it keeps
+            both. */}
+        {!controlled && [["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -115,15 +151,17 @@ export const ExpenseBoard = () => {
             {label}
           </button>
         ))}
-        <select
-          value={branchId}
-          onChange={(e) => setBranchId(e.target.value)}
-          className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-          data-testid="finance-expense-branch"
-        >
-          <option value="">All Branches</option>
-          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-        </select>
+        {!controlled && (
+          <select
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+            data-testid="finance-expense-branch"
+          >
+            <option value="">All Branches</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+          </select>
+        )}
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           <MilkDateInput value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-xs" data-testid="finance-expense-start" />
           <span>to</span>
@@ -149,7 +187,7 @@ export const ExpenseBoard = () => {
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-slate-800">{exp.category}</p>
                 <p className="truncate text-xs text-slate-500">
-                  {[exp.branch_name, exp.expense_date, exp.paid_to && `to ${exp.paid_to}`, exp.reference, exp.note]
+                  {[exp.branch_name, exp.expense_date, PAYMENT_MODE_LABELS[exp.payment_mode], exp.paid_to && `to ${exp.paid_to}`, exp.reference, exp.note]
                     .filter(Boolean).join(" · ")}
                 </p>
                 {/* Who asked, on a row somebody is being asked to sign off. Approving a
@@ -206,19 +244,49 @@ export const ExpenseBoard = () => {
               <button onClick={() => setShowAdd(false)} className="text-slate-400 hover:text-slate-600" data-testid="finance-expense-add-close"><X className="h-4 w-4" /></button>
             </div>
             <div className="space-y-3 p-5">
-              <Input placeholder="Category (e.g. Rent, Salaries)" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} data-testid="finance-expense-category" />
+              <Input placeholder="Expense Name (e.g. Rent, Salaries)" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} data-testid="finance-expense-category" />
               <Input type="number" min="0" placeholder="Amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} data-testid="finance-expense-amount" />
-              <select
-                value={form.branch_id}
-                onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
-                className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm"
-                data-testid="finance-expense-form-branch"
-              >
-                <option value="">All Branches (org-wide)</option>
-                {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-              </select>
               <MilkDateInput value={form.expense_date} onChange={(e) => setForm({ ...form, expense_date: e.target.value })} data-testid="finance-expense-date" />
-              <Input placeholder="Note (optional)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} data-testid="finance-expense-note" />
+              {/* Already fixed by the branch-pill row above this board when embedded there;
+                  the Accountant's own dashboard has no such row and still picks one here. */}
+              {controlled ? (
+                <p className="text-xs text-slate-500" data-testid="finance-expense-form-branch-fixed">
+                  Recorded {effectiveBranchId ? "against this branch." : "as an org-wide expense (All Branches)."}
+                </p>
+              ) : (
+                <select
+                  value={form.branch_id}
+                  onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+                  className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm"
+                  data-testid="finance-expense-form-branch"
+                >
+                  <option value="">All Branches (org-wide)</option>
+                  {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+                </select>
+              )}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-700">Payment Mode</label>
+                <div className="flex flex-wrap gap-1.5" data-testid="finance-expense-form-mode">
+                  {EXPENSE_PAYMENT_MODE_OPTIONS.map((m) => {
+                    const selected = m === form.payment_mode;
+                    const c = PAYMENT_MODE_COLORS[m];
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setForm({ ...form, payment_mode: m })}
+                        className={`h-9 min-w-[64px] flex-1 rounded-md border text-center text-xs font-semibold transition ${
+                          selected ? `${c.bg} ${c.border} ${c.text} shadow-sm` : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        }`}
+                        data-testid={`finance-expense-form-mode-${m}`}
+                      >
+                        {PAYMENT_MODE_LABELS[m]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <Input placeholder="Remarks (optional)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} data-testid="finance-expense-note" />
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
               <Button variant="outline" onClick={() => setShowAdd(false)} data-testid="finance-expense-cancel">Cancel</Button>

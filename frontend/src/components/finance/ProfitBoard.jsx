@@ -5,33 +5,42 @@ import { getBranches, getFinanceProfit } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 
-/** Accountant > Profit — Revenue (every collection for the window, same figure
- *  Accountant Manage's own Total Revenue tile shows) less Expense for the same window
- *  and branch. Approval status plays no part: it's a review step, not a filter on what
- *  counts as money in. */
-export const ProfitBoard = () => {
+/**
+ * Accountant > Profit — Revenue (every collection for the window, same figure
+ * Accountant Manage's own Total Revenue tile shows) less Expense for the same window
+ * and branch. Approval status plays no part: it's a review step, not a filter on what
+ * counts as money in.
+ *
+ * `branchId`/`mode`/`scoped` are optional — see the same note on ExpenseBoard. Passed by
+ * Super Admin's Finance screen (its Overview tab), whose branch-pill row already picked
+ * a scope; left off, this keeps picking its own on the Accountant's own dashboard.
+ */
+export const ProfitBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = false } = {}) => {
+  const controlled = scoped;
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState("");
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
+  const effectiveBranchId = controlled ? (branchIdProp || "") : branchId;
+  const effectiveMode = controlled ? (modeProp || "all") : mode;
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [data, setData] = useState({ revenue: 0, expense: 0, profit: 0, expense_by_category: [] });
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
+  useEffect(() => { if (!controlled) getBranches().then(setBranches).catch(() => {}); }, [controlled]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = {};
-      if (branchId) params.branch_id = branchId;
-      if (mode !== "all") params.mode = mode;
+      if (effectiveBranchId) params.branch_id = effectiveBranchId;
+      if (effectiveMode !== "all") params.mode = effectiveMode;
       if (startDate) params.start_date = startDate;
       if (endDate) params.end_date = endDate;
       setData(await getFinanceProfit(params));
     } catch { /* silent */ }
     setLoading(false);
-  }, [branchId, mode, startDate, endDate]);
+  }, [effectiveBranchId, effectiveMode, startDate, endDate]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -40,7 +49,9 @@ export const ProfitBoard = () => {
   return (
     <div className="space-y-4" data-testid="finance-profit-root">
       <div className="flex flex-wrap items-center gap-3">
-        {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
+        {/* Already picked by the branch-pill row above this board when embedded in
+            Super Admin's Finance screen — see the same note on ExpenseBoard. */}
+        {!controlled && [["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -53,15 +64,17 @@ export const ProfitBoard = () => {
             {label}
           </button>
         ))}
-        <select
-          value={branchId}
-          onChange={(e) => setBranchId(e.target.value)}
-          className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-          data-testid="finance-profit-branch"
-        >
-          <option value="">All Branches</option>
-          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-        </select>
+        {!controlled && (
+          <select
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+            data-testid="finance-profit-branch"
+          >
+            <option value="">All Branches</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+          </select>
+        )}
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           <MilkDateInput value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-xs" data-testid="finance-profit-start" />
           <span>to</span>
