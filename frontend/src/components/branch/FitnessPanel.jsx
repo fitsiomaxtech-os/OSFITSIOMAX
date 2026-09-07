@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dumbbell, IndianRupee, Pencil, Plus, RefreshCw, Search, Trash2, X, PlayCircle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,23 +112,54 @@ export const FitnessPanel = ({ branchId }) => {
   const [viewing, setViewing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
+  // Rises with every roll fetch started here, so a reply that is no longer the newest is
+  // dropped rather than written. Refresh going dead while busy stops two presses racing,
+  // but not the other way in: the branch picker changes `branchId` under a mounted panel,
+  // which re-runs `load` while the previous branch's request is still out. Whichever
+  // replies last would win, and that is how one branch's roll ends up under another
+  // branch's name and card counts.
+  const fetchSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     try {
-      setData(await listFitness(branchId));
+      const next = await listFitness(branchId);
+      if (seq !== fetchSeq.current) return;
+      setData(next);
     } catch (e) {
+      if (seq !== fetchSeq.current) return;
       toast.error(e?.response?.data?.detail || "Couldn't load memberships");
     }
-    setLoading(false);
+    // Only the newest fetch owns the spinner; an overtaken one leaving would stop it while
+    // its replacement is still in flight.
+    if (seq === fetchSeq.current) setLoading(false);
   }, [branchId]);
 
   useEffect(() => { load(); }, [load]);
 
-  // The Fitness shelf, loaded once. Sold as a session package like everything else in the
-  // store, which is why this asks for that item_type rather than a kind of its own.
-  useEffect(() => {
-    listStoreItems("fitness", "session").then((rows) => setPackages(rows || [])).catch(() => setPackages([]));
+  // The Fitness shelf. Sold as a session package like everything else in the store, which
+  // is why this asks for that item_type rather than a kind of its own. Org-wide and not
+  // per-branch, so it is not keyed on branchId — but it does need to be re-readable, which
+  // is why it is a callback now: it used to be an effect that ran once and nothing else,
+  // so Refresh re-read the roll and left the shelf exactly as the panel had opened with.
+  // A package added or repriced in Services and Products stayed invisible to the Renew and
+  // member dialogs until the whole page was reloaded.
+  const loadPackages = useCallback(async () => {
+    try {
+      setPackages((await listStoreItems("fitness", "session")) || []);
+    } catch {
+      // Left as it was rather than emptied. On a refresh a blip would otherwise blank the
+      // package picker, and an empty shelf reads as "nothing to sell" rather than "ask
+      // again" — on mount there is nothing to keep, so this is the same [] either way.
+    }
   }, []);
+
+  useEffect(() => { loadPackages(); }, [loadPackages]);
+
+  // What the button does, as against what opening the panel does: a press means re-read
+  // everything this panel shows, the shelf included.
+  const refresh = useCallback(() => { load(); loadPackages(); }, [load, loadPackages]);
 
   const rows = data.registrations || [];
   const counts = data.counts || {};
@@ -238,7 +269,7 @@ export const FitnessPanel = ({ branchId }) => {
             />
           </div>
           <Button
-            onClick={load}
+            onClick={refresh}
             disabled={loading}
             title="Refresh"
             aria-label="Refresh"
