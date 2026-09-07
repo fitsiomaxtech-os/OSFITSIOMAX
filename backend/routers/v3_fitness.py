@@ -620,7 +620,19 @@ async def collect_fitness_payment(
         # Counted notes settle the figure rather than sitting beside it. Two numbers that
         # can disagree is one number nobody can trust, and the count is the one somebody
         # actually looked at.
-        amount = note_total if (mode == "cash" and counted) else _amount(line.amount)
+        #
+        # Cash now has to be counted rather than merely being allowed to be: a typed figure
+        # with nothing behind it is the one thing a till cannot be checked against at the
+        # end of the day, so it is refused here and not only in the dialog. A cash line
+        # with nothing in it at all is still just an unused line, and is skipped.
+        if mode == "cash" and not counted:
+            if _amount(line.amount) > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Count the cash notes — a cash payment is recorded by its count",
+                )
+            continue
+        amount = note_total if mode == "cash" else _amount(line.amount)
         if amount <= 0:
             continue
 

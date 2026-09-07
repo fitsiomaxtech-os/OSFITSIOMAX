@@ -787,6 +787,15 @@ const lineMissingReference = (lines) => (lines || []).find(
   (l) => lineTotal(l) > 0 && COLLECT_REFERENCE_LABELS[l.mode] && !(l.reference || "").trim(),
 );
 
+/** Whether a cash line has been counted. Collecting cash means counting it: a typed figure
+ *  is a number nobody can check the till against, so the count is what makes the line real
+ *  and the Collect button live. Non-cash lines have nothing to count and are always ready. */
+const lineIsCounted = (l) => l?.mode !== "cash" || noteTotal(l) > 0;
+
+/** The first cash line taken without a count, so the desk is told to count it before the
+ *  round trip rather than after it. */
+const lineMissingCount = (lines) => (lines || []).find((l) => !lineIsCounted(l));
+
 /**
  * Another term on a membership that is nearly up.
  *
@@ -1045,8 +1054,13 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
   const total = linesTotal(lines);
   const over = total > outstanding;
   const remaining = Math.max(0, outstanding - total);
+  // A cash line is a payment only once it has been counted. An uncounted one holds the
+  // whole collection rather than slipping through at zero, and a desk that does not want
+  // to take cash changes the line's mode or drops it instead of leaving it blank.
+  const uncounted = lineMissingCount(lines);
 
   const submit = async () => {
+    if (uncounted) { toast.error("Count the cash notes before collecting"); return; }
     if (total <= 0) { toast.error("Enter an amount to collect"); return; }
     if (over) { toast.error(`That is ${rupees(total)} against ${rupees(outstanding)} outstanding`); return; }
     setSaving(true);
@@ -1082,7 +1096,13 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
               <div className="flex flex-wrap items-end gap-3">
                 <div className="min-w-[150px] flex-1">
                   <FieldLabel>Paid By</FieldLabel>
-                  <FormSelect value={l.mode} onChange={(v) => setLine(i, { mode: v, notes: {} })} testid={`fitness-collect-mode-${i}`}>
+                  {/* Switching to cash clears the typed figure too — cash is settled by its
+                      count, and a number left behind from UPI would be one nobody counted. */}
+                  <FormSelect
+                    value={l.mode}
+                    onChange={(v) => setLine(i, { mode: v, notes: {}, ...(v === "cash" ? { amount: "" } : {}) })}
+                    testid={`fitness-collect-mode-${i}`}
+                  >
                     {COLLECT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </FormSelect>
                 </div>
@@ -1091,12 +1111,14 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
                   <Input
                     type="number"
                     min="0"
-                    value={l.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : l.amount}
+                    value={l.mode === "cash" ? (noteTotal(l) > 0 ? noteTotal(l) : "") : l.amount}
                     onChange={(e) => setLine(i, { amount: e.target.value })}
-                    // Counted notes drive the figure, so the box shows the count rather than
-                    // inviting a second, different number beside it.
-                    readOnly={l.mode === "cash" && noteTotal(l) > 0}
-                    className={l.mode === "cash" && noteTotal(l) > 0 ? "bg-slate-50" : ""}
+                    // Cash is only ever the counted notes. The box is read-only for it from
+                    // the start rather than once a note is entered, so there is never a
+                    // moment where a figure can be typed in that no one counted out.
+                    readOnly={l.mode === "cash"}
+                    placeholder={l.mode === "cash" ? "From the count below" : ""}
+                    className={l.mode === "cash" ? "bg-slate-50" : ""}
                     data-testid={`fitness-collect-amount-${i}`}
                   />
                 </div>
@@ -1121,8 +1143,10 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
               {l.mode === "cash" && (
                 <div className="mt-3 border-t border-slate-100 pt-3">
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Notes counted
-                    <span className="ml-1 font-normal normal-case text-slate-400">— leave blank to just type the amount</span>
+                    Notes counted <span className="text-rose-500">*</span>
+                    <span className="ml-1 font-normal normal-case text-slate-400">
+                      — required; the cash amount is whatever is counted here
+                    </span>
                   </p>
                   <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
                     {DENOMINATIONS.map((d) => (
@@ -1139,10 +1163,16 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
                       </div>
                     ))}
                   </div>
-                  {noteTotal(l) > 0 && (
+                  {noteTotal(l) > 0 ? (
                     <p className="mt-2 text-right text-[11px] text-slate-500" data-testid={`fitness-collect-note-total-${i}`}>
                       {DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => `${l.notes[d]}×₹${d}`).join("  +  ")}
                       {" = "}<b className="text-slate-700">{rupees(noteTotal(l))}</b>
+                    </p>
+                  ) : (
+                    // Says why Collect is still greyed out, at the line that is holding it,
+                    // rather than leaving the desk to guess which box is empty.
+                    <p className="mt-2 text-right text-[11px] text-rose-500" data-testid={`fitness-collect-note-missing-${i}`}>
+                      Count the notes to collect this cash.
                     </p>
                   )}
                 </div>
@@ -1168,9 +1198,11 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
             <p className="mt-1 text-[11px] text-slate-600" data-testid="fitness-collect-summary">
               {over
                 ? `That is more than the ${rupees(outstanding)} outstanding.`
-                : remaining > 0
-                  ? `${rupees(remaining)} will still be due after this.`
-                  : total > 0 ? "This clears the membership." : "Nothing entered yet."}
+                : uncounted
+                  ? "Count the cash notes above before collecting."
+                  : remaining > 0
+                    ? `${rupees(remaining)} will still be due after this.`
+                    : total > 0 ? "This clears the membership." : "Nothing entered yet."}
             </p>
           </div>
         </div>
@@ -1180,8 +1212,9 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
           <Button
             size="sm"
             onClick={submit}
-            disabled={saving || over || total <= 0}
+            disabled={saving || over || total <= 0 || !!uncounted}
             className="bg-emerald-600 text-white hover:bg-emerald-700"
+            title={uncounted ? "Count the cash notes first" : undefined}
             data-testid="fitness-collect-submit"
           >
             {saving ? "Collecting..." : `Collect ${rupees(total)}`}
