@@ -668,8 +668,20 @@ async def recommend_diet_chart(
     Written by the coach alone, the same as the report and the chart itself: Branch Admin
     books and collects, and what a patient clinically needs is nobody else's to decide.
 
-    Held to a patient who is actually theirs to see -- one assigned to a Nutrition Coach --
-    but not to a report having been written first: the recommendation is normally made in
+    Held to a patient who is actually theirs -- but "theirs" has three answers, not two,
+    and reading it as two is what told a coach that a patient sitting on their own board
+    belonged to nobody. /diet/consultations lists unassigned referrals deliberately: a new
+    referral belongs to no coach until one takes it, and hiding it until then would leave
+    nobody able to pick it up. So the coach who opens such a patient and recommends a chart
+    IS taking them, and this takes them -- assignment follows the clinical act rather than
+    gating it. Refusing instead sent the coach off to get the patient assigned first, from
+    a board that has no such button and through a flow that is Branch Admin's alone.
+
+    What is refused is the third answer: a patient already filed under a DIFFERENT coach.
+    That is the case the old check was reaching for, and the only one where the call really
+    is somebody else's to make.
+
+    Not held to a report having been written first: the recommendation is normally made in
     the same sitting, and demanding the write-up before it would only push coaches to save
     an empty one to get past the gate.
 
@@ -680,18 +692,30 @@ async def recommend_diet_chart(
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Patient not found")
-    if not lead.get("diet_coach_id"):
+
+    # Asked of every record this coach holds, for the reason in _coach_record_ids: a
+    # patient filed under a sibling record is still this coach's, and matching only the
+    # one resolved id would read their own patient as another coach's.
+    #
+    # A Super Admin driving this resolves to no coach record at all, which leaves `mine`
+    # empty and both branches below inert: they can recommend for anyone, and nothing is
+    # filed under them by accident.
+    coach = await _resolve_coach(user)
+    mine = await _coach_record_ids(coach) if coach else []
+    holder = lead.get("diet_coach_id")
+    if holder and mine and holder not in mine:
         raise HTTPException(
             status_code=400,
-            detail="This patient has not been assigned to a Nutrition Coach yet",
+            detail=f"This patient is with {lead.get('diet_coach_name') or 'another Nutrition Coach'}",
         )
+
     if lead.get("diet_chart"):
         # Already recommended. Not an error -- two taps, or two coaches, should read the
         # same as one -- and the second must not overwrite who recommended it or when.
         return _chart_out(lead, await _current_chart(lead_id))
 
     now = now_iso()
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+    changes = {
         "diet_chart": True,
         "diet_chart_recommended_at": now,
         "diet_chart_recommended_by": user.full_name,
@@ -700,7 +724,30 @@ async def recommend_diet_chart(
         # patient on every screen that asks.
         "diet_recommended": True,
         "updated_at": now,
-    }})
+    }
+    if not holder and coach:
+        # Taking the patient, and no more than that. diet_stage is left where it stands,
+        # because that field belongs to the check-in plan and a plan is what assign-diet
+        # builds -- days booked against published slots, Diet Fee collected. Writing
+        # "Diet Plan Assigned" here would show the branch a plan nobody has sold.
+        changes["diet_coach_id"] = coach["id"]
+        changes["diet_coach_name"] = coach.get("full_name") or user.full_name
+        changes["diet_assigned_at"] = now
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": changes})
+
+    if changes.get("diet_coach_id"):
+        # Logged under the name the branch already reads for this, and separately from the
+        # recommendation: two things happened on one tap, and a log that mentioned only
+        # the chart would leave the patient's coach appearing from nowhere.
+        await v3_col("lead_activity").insert_one({
+            "id": str(uuid.uuid4()),
+            "lead_id": lead_id,
+            "action": "diet_coach_assigned",
+            "details": f"{changes['diet_coach_name']} took this patient at the Diet Consultation",
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "created_at": now,
+        })
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
