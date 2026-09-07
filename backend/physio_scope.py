@@ -178,3 +178,40 @@ async def physio_owns_lead(physio_id, lead_id: str) -> bool:
     return bool(await v3_col("rehab_sessions").find_one(
         {"lead_id": lead_id, "physio_id": {"$in": ids}}, {"_id": 0, "id": 1}
     ))
+
+
+async def physio_of_lead(lead: dict) -> dict:
+    """The physio treating this patient -- physio_lead_ids read the other way round.
+
+    The same two routes in, taken in the same order, because the two answers have to
+    agree: the physio a patient is offered as an address for their feedback must be the
+    physio whose own Patients list holds them. Resolved from the assignment and the rehab
+    course rather than from a session row, so a patient between packages still has one.
+
+    Returns the id and the name together. Every caller needs both -- the id is who the
+    thread belongs to, the name is who the patient is told they are writing to -- and
+    looking the name up separately is how a row ends up addressed to a blank.
+    """
+    if not lead:
+        return {"id": "", "name": ""}
+    physio_id = str(lead.get("assigned_physio_id") or "").strip()
+    name = str(lead.get("assigned_physio_name") or "").strip()
+    if not physio_id:
+        # Never stamped on the lead for a rehab patient: the course is its own collection,
+        # deliberately, and the newest day is the one that says who has them now.
+        day = await v3_col("rehab_sessions").find_one(
+            {"lead_id": lead.get("id"), "physio_id": {"$nin": [None, ""]}},
+            {"_id": 0, "physio_id": 1, "physio_name": 1},
+            sort=[("slot_time", -1)],
+        ) or {}
+        physio_id = str(day.get("physio_id") or "").strip()
+        name = name or str(day.get("physio_name") or "").strip()
+    # A name copied onto the lead months ago is still the right one to show -- it is who
+    # the patient has been seeing -- but an assignment carrying none has to be looked up
+    # or the portal offers "send to " with nothing after it.
+    if physio_id and not name:
+        doctor = await v3_col("doctors").find_one(
+            {"id": physio_id}, {"_id": 0, "full_name": 1},
+        ) or {}
+        name = str(doctor.get("full_name") or "").strip()
+    return {"id": physio_id, "name": name}

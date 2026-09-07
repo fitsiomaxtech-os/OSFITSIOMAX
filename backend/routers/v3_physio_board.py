@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
@@ -22,6 +23,14 @@ from routers.v3_reviews import (
 # reviews router need it, and this one already imports from that one — a helper living
 # in either would close the loop.
 from physio_scope import physio_lead_ids, physio_owns_lead, resolve_physio_doctor
+# The feedback rules, imported rather than restated. What counts as addressed to a physio,
+# and how a thread is read out of a row, are decided in one place -- a second copy here
+# would be a second answer the day either changes.
+from routers.v3_feedback import (
+    AUDIENCE_PHYSIO, AUTHOR_PATIENT, AUTHOR_STAFF, MAX_MESSAGE,
+    STATUS_AWAITING, STATUS_IN_PROGRESS,
+    _audience as _feedback_audience, _status as _feedback_status, _thread as _feedback_thread,
+)
 
 router = APIRouter(prefix="/api/v3")
 
@@ -847,3 +856,108 @@ async def physio_weekly_assessment(
         {"lead_id": lead_id, "week_number": week_number}, {"_id": 0}
     )
     return updated
+
+
+# ---------- what a patient said to their physio ----------
+
+
+class PhysioFeedbackReplyIn(BaseModel):
+    body: str
+    # The same door the branch closes one through: say what was done and ask whether that
+    # settled it. Nothing this side does moves a thread to resolved -- see v3_feedback.
+    ask_resolved: bool = False
+
+
+@router.get("/physio/patient/{lead_id}/feedback")
+async def physio_patient_feedback(
+    lead_id: str,
+    physio_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
+):
+    """What this patient wrote to their physio, on the physio's own patient page.
+
+    Only what was addressed to a physio, and only where that physio is this one. A patient
+    writes to their branch about the building and to their physio about their shoulder, and
+    the two are not the same post-bag: showing the branch's here would put the physio in
+    the middle of a complaint about the branch, which is the thing the patient did not do.
+
+    Scoped by the physio's own record ids rather than by the lead alone. Owning the patient
+    is not enough on its own -- a patient handed on to somebody else keeps the threads they
+    wrote to the physio they wrote them to, because that is who they were talking to.
+    """
+    doctor = await _resolve_doctor(user, physio_id)
+    if not doctor:
+        raise HTTPException(status_code=404, detail="No physio profile found for this user")
+    if not await physio_owns_lead(_ids_of(doctor), lead_id):
+        raise HTTPException(status_code=403, detail="This lead is not assigned to you")
+
+    # Scoped by the physio as well as by the patient. Super Admin driving somebody's
+    # board reads that physio's post rather than everybody's -- _resolve_doctor has
+    # already settled whose board this is.
+    query = {
+        "lead_id": lead_id,
+        "audience": AUDIENCE_PHYSIO,
+        "physio_id": {"$in": _ids_of(doctor)},
+    }
+    rows = await v3_col("patient_feedback").find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+    for row in rows:
+        row["status"] = _feedback_status(row.get("status"))
+        row["messages"] = _feedback_thread(row)
+        # What is waiting on this side: a thread whose last word was the patient's.
+        last = row["messages"][-1] if row["messages"] else None
+        row["awaiting_staff"] = bool(last and last.get("author") == AUTHOR_PATIENT)
+    return {"feedback": rows, "unread": sum(1 for r in rows if r["awaiting_staff"])}
+
+
+@router.post("/physio/feedback/{feedback_id}/message")
+async def physio_reply_to_feedback(
+    feedback_id: str,
+    payload: PhysioFeedbackReplyIn,
+    physio_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
+):
+    """Answer a patient on the thread they opened with you.
+
+    The same append the branch does, held to the same two walls: the thread must be
+    addressed to a physio, and that physio must be this one. A physio cannot answer on a
+    thread the patient sent to the branch or to head office -- they cannot read those
+    either, and the wall is written here as well as there because the id is guessable and
+    the board is not the only way in.
+    """
+    body = (payload.body or "").strip()[:MAX_MESSAGE]
+    if not body:
+        raise HTTPException(status_code=400, detail="Write something to send")
+
+    doctor = await _resolve_doctor(user, physio_id)
+    if not doctor:
+        raise HTTPException(status_code=404, detail="No physio profile found for this user")
+
+    existing = await v3_col("patient_feedback").find_one({"id": feedback_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="No such feedback")
+    if _feedback_audience(existing.get("audience")) != AUDIENCE_PHYSIO:
+        raise HTTPException(status_code=403, detail="Not addressed to you")
+    if existing.get("physio_id") not in _ids_of(doctor):
+        raise HTTPException(status_code=403, detail="Not addressed to you")
+
+    now = now_iso()
+    message = {
+        "id": str(uuid.uuid4()),
+        "author": AUTHOR_STAFF,
+        "author_name": user.full_name or user.email,
+        "body": body,
+        "created_at": now,
+    }
+    thread = [*_feedback_thread(existing), message]
+    status = STATUS_AWAITING if payload.ask_resolved else STATUS_IN_PROGRESS
+    changes = {
+        "messages": thread,
+        "status": status,
+        "handled_by": user.full_name or user.email,
+        "handled_at": now,
+        "reply": body,
+        "replied_by": message["author_name"],
+        "replied_at": now,
+    }
+    await v3_col("patient_feedback").update_one({"id": feedback_id}, {"$set": changes})
+    return {**existing, **changes, "awaiting_staff": False}

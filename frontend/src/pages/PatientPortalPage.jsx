@@ -1055,16 +1055,28 @@ const PORTAL_TABS = [
  * Not a thread, but not a shout into a well either: the history tab says where each one
  * got to, and a branch closing one has to say what was done, which the patient reads there.
  */
-// The two people a patient can write to, and the difference between them in the words a
+// The people a patient can write to, and the difference between them in the words a
 // patient would use. Named rather than described as "escalation": somebody unhappy enough
 // to go past their branch should not have to work out which word means that.
-const FEEDBACK_TO = [
+//
+// Built per patient rather than held as a constant, because the third one is a person. A
+// patient with nobody treating them yet is not offered it -- an address with no name on it
+// is a card that cannot say who reads it, which is the one thing these cards are for.
+const feedbackTo = (physioName, hasPhysioThreads) => [
   {
     key: "branch_admin",
     label: "My branch",
     who: "Branch Admin",
-    blurb: "Anything about your Consultant, Physio or Zumba master. Your branch runs their care and answers for it.",
+    blurb: "Anything about the branch, your appointments or your bill. Your branch runs your care and answers for it.",
   },
+  ...((physioName || hasPhysioThreads) ? [{
+    key: "physio",
+    label: "My physio",
+    // The name, not the role. The patient knows who has been treating them, and this is
+    // the card that says the words land with that person rather than in an inbox.
+    who: physioName || "Your physio",
+    blurb: "About your treatment — how a session felt, or something that is not getting better. Goes to them directly.",
+  }] : []),
   {
     key: "super_admin",
     label: "Head office",
@@ -1111,7 +1123,7 @@ const channelMessages = (rows) => rows
  */
 const openThreadOf = (rows) => rows.find((f) => (f.status || "new") !== "resolved") || null;
 
-function FeedbackTab() {
+function FeedbackTab({ data }) {
   const [draft, setDraft] = useState("");
   const [audience, setAudience] = useState("branch_admin");
   const [sending, setSending] = useState(false);
@@ -1125,12 +1137,27 @@ function FeedbackTab() {
   }, []);
   useEffect(() => { loadMine(); }, [loadMine]);
 
+  const physioName = (data?.feedback_physio_name || "").trim();
+  // Offered while there is a physio to write to, and kept while there is a conversation
+  // with one. A patient handed on to somebody else would otherwise lose what they had
+  // already said, and the answer to it, the day the assignment changed.
+  const hasPhysioThreads = mine.some((f) => f.audience === "physio");
+  const canWriteToPhysio = Boolean(physioName || hasPhysioThreads);
+  const audiences = feedbackTo(physioName, hasPhysioThreads);
   // Rows arrive newest first, which is right for a list and backwards for a conversation.
   const channelRows = mine.filter((f) => (f.audience || "branch_admin") === audience);
   const messages = channelMessages([...channelRows].reverse());
   const asked = channelRows.find((f) => (f.status || "new") === "awaiting_patient") || null;
   const open = openThreadOf(channelRows);
-  const them = audience === "super_admin" ? "Head office" : "Your branch";
+  const them = audience === "super_admin" ? "Head office"
+    : audience === "physio" ? (physioName || "Your physio")
+    : "Your branch";
+
+  // A patient whose physio is unassigned mid-visit would otherwise be left writing into a
+  // channel whose card has gone, with no way back to one that exists.
+  useEffect(() => {
+    if (audience === "physio" && !canWriteToPhysio) setAudience("branch_admin");
+  }, [canWriteToPhysio, audience]);
 
   // The newest message, not the top of the history. A conversation that opens scrolled to
   // a paragraph from three weeks ago hides the answer somebody came back to read.
@@ -1177,8 +1204,10 @@ function FeedbackTab() {
             the two are separate — what goes to head office the branch never sees. */}
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to</p>
-          <div className="grid gap-2 sm:grid-cols-2" data-testid="portal-feedback-audience">
-            {FEEDBACK_TO.map((a) => {
+          {/* Two across on a phone reads as two columns of small print; three would read
+              as three. They stack, and go side by side once there is room. */}
+          <div className={`grid gap-2 ${audiences.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`} data-testid="portal-feedback-audience">
+            {audiences.map((a) => {
               const on = audience === a.key;
               return (
                 <button
@@ -1282,7 +1311,10 @@ function FeedbackTab() {
           onClick={() => send(undefined)}
           data-testid="portal-feedback-submit"
         >
-          {sending ? "Sending…" : audience === "super_admin" ? "Send to head office" : "Send to my branch"}
+          {sending ? "Sending…"
+            : audience === "super_admin" ? "Send to head office"
+            : audience === "physio" ? "Send to my physio"
+            : "Send to my branch"}
         </Button>
       </CardContent>
     </Card>
@@ -1342,7 +1374,7 @@ function PortalDashboard({ onLogout }) {
         {activeTab === "treatment" && <TreatmentTab data={data} />}
         {activeTab === "payment" && <PaymentTab data={data} />}
         {activeTab === "profile" && <ProfileTab data={data} />}
-        {activeTab === "feedback" && <FeedbackTab />}
+        {activeTab === "feedback" && <FeedbackTab data={data} />}
       </div>
 
       {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal

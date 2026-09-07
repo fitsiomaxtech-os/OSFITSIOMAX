@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { BranchExpensesPanel } from "@/components/branch/BranchExpensesPanel";
 import { maskDayMonthYear, manualToIso, isoToManual } from "@/components/DateFilterPopover";
-import { getBranches, getRevenueOverview } from "@/lib/api";
+import { getBranches, getRevenueOverview, getFinanceExpenses } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
 
@@ -139,6 +139,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const [branchId, setBranchId] = useState(fixedBranchId || "");
   const [tab, setTab] = useState("summary");
   const [ledger, setLedger] = useState("income");
+  const [expenseTotals, setExpenseTotals] = useState({ approved_total: 0, approved_count: 0, pending_count: 0 });
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
   const [revenueView, setRevenueView] = useState("collected");
   const [preset, setPreset] = useState("all");
@@ -189,6 +190,21 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   }, [branchId, mode, startDate, endDate, preset, customFrom, customTo]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Kept beside the revenue call rather than inside it: this one answers about money going
+  // out, takes no date range yet, and a branch with no expenses should not stop the eight
+  // revenue cards rendering.
+  const loadExpenseTotals = useCallback(() => {
+    getFinanceExpenses()
+      .then((d) => setExpenseTotals({
+        approved_total: d.approved_total || 0,
+        approved_count: d.approved_count || 0,
+        pending_count: d.pending_count || 0,
+      }))
+      .catch(() => { /* the card falls back to zero; the panel says why when opened */ });
+  }, []);
+
+  useEffect(() => { loadExpenseTotals(); }, [loadExpenseTotals]);
 
   const openCustom = () => {
     if (preset !== "custom") setPresetBeforeCustom(preset);
@@ -369,28 +385,56 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : tab === "summary" ? (
         <div className="space-y-4" data-testid="accountant-manage-summary">
-          {/* The one question this tab opens on: money in, or money out. Alone on its
-              line — what used to share it filters the income side and now sits with it. */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-ledger-filter">
-              {LEDGER_VIEWS.map((v) => (
+          {/* The one question this tab opens on: money in, or money out. Two cards
+              rather than a segmented pill, because the choice carries its own figure —
+              a switch that also says what is on each side of it, in the shape the cards
+              below it already use.
+
+              Green for money in and rose for money out: the colours the Total Revenue
+              tile and the Accountant's own Total Expense card were already wearing, so a
+              figure does not change colour depending on which screen it is read on. The
+              picked one is ringed rather than filled, or the unpicked side would read as
+              switched off rather than as the other half of the same total. */}
+          <div className="grid grid-cols-2 gap-3" data-testid="accountant-manage-ledger-filter">
+            {LEDGER_VIEWS.map((v) => {
+              const on = ledger === v.key;
+              const income = v.key === "income";
+              const tone = income
+                ? { ring: "#059669", border: "border-emerald-200", bg: "bg-emerald-50/60", text: "text-emerald-700", sub: "text-emerald-600/80" }
+                : { ring: "#e11d48", border: "border-rose-200", bg: "bg-rose-50/60", text: "text-rose-700", sub: "text-rose-600/80" };
+              const value = income ? sums.totals.collected : expenseTotals.approved_total;
+              const count = income ? sums.counts.collected : expenseTotals.approved_count;
+              const noun = income ? "payment" : "expense";
+              return (
                 <button
                   key={v.key}
+                  type="button"
                   onClick={() => setLedger(v.key)}
-                  className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${ledger === v.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
+                  aria-pressed={on}
+                  className={`rounded-xl border ${tone.border} ${tone.bg} p-4 text-left transition ${on ? "" : "opacity-70 hover:opacity-100"}`}
+                  style={on ? { boxShadow: `0 0 0 2px ${tone.ring}` } : undefined}
                   data-testid={`accountant-manage-ledger-${v.key}`}
                 >
-                  {v.label}
+                  <p className={`text-[11px] font-bold uppercase tracking-wider ${tone.text}`}>{v.label}</p>
+                  <p className={`mt-1 text-2xl font-bold ${tone.text}`}>{fmt(value)}</p>
+                  <p className={`text-[11px] ${tone.sub}`}>
+                    {countLabel(count, noun)}
+                    {/* Said on the card rather than only inside, so a branch does not have
+                        to open Expenses to find out something is waiting on somebody. */}
+                    {!income && expenseTotals.pending_count > 0
+                      ? ` \u00b7 ${expenseTotals.pending_count} awaiting approval`
+                      : ""}
+                  </p>
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
 
           {/* Expenses is its own ledger, not a filter of this one: nothing above it —
               the revenue tiles, the source table, the payment-mode row — describes money
               going out, so the whole of the income side steps aside for it rather than
               being reused with different numbers in it. */}
-          {ledger === "expenses" && <BranchExpensesPanel />}
+          {ledger === "expenses" && <BranchExpensesPanel onChanged={loadExpenseTotals} />}
 
           {ledger === "income" && (
           <>
