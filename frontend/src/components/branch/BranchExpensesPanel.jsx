@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Clock, Plus, Receipt, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -186,12 +186,18 @@ const AddExpenseDialog = ({ onClose, onSaved }) => {
   );
 };
 
-export const BranchExpensesPanel = () => {
+export const BranchExpensesPanel = ({ onChanged }) => {
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({ approved_total: 0, approved_count: 0, pending_total: 0, pending_count: 0 });
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("request"); // "request" | "approved"
   const [adding, setAdding] = useState(false);
+
+  // Held in a ref rather than named as a dependency of `load`: the caller passes an inline
+  // arrow, which is a new function every render, and as a dependency it would rebuild
+  // `load`, which the effect below re-runs on — a fetch loop for as long as the tab is open.
+  const onChangedRef = useRef(onChanged);
+  useEffect(() => { onChangedRef.current = onChanged; }, [onChanged]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -204,6 +210,10 @@ export const BranchExpensesPanel = () => {
         pending_total: data.pending_total || 0,
         pending_count: data.pending_count || 0,
       });
+      // The card above this panel carries the same two figures and fetches them itself,
+      // because it has to have them before anybody opens this. Told here so raising one
+      // does not leave the header behind until the tab is reloaded.
+      onChangedRef.current?.();
     } catch {
       setRows([]);
     } finally {
