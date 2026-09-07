@@ -369,8 +369,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : tab === "summary" ? (
         <div className="space-y-4" data-testid="accountant-manage-summary">
-          {/* Income on the left, Expenses on the right, and the payment-mode row only
-              belongs to the first of them — it describes collections. */}
+          {/* The one question this tab opens on: money in, or money out. Alone on its
+              line — what used to share it filters the income side and now sits with it. */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-ledger-filter">
               {LEDGER_VIEWS.map((v) => (
@@ -384,24 +384,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
                 </button>
               ))}
             </div>
-
-            {/* Same set Branch Admin picks from when collecting the fee in the first
-                place — not approval status but how it was paid. */}
-            <div className={`ml-auto flex-wrap items-center gap-2 ${ledger === "income" ? "flex" : "hidden"}`} data-testid="accountant-manage-payment-mode-filter">
-              {PAYMENT_MODES.map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setPaymentModeFilter(key)}
-                  className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-                    paymentModeFilter === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
-                  }`}
-                  data-testid={`accountant-manage-payment-mode-${key}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* Expenses is its own ledger, not a filter of this one: nothing above it —
@@ -412,8 +394,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
 
           {ledger === "income" && (
           <>
-          {/* Seven across from lg with Rehab among them. Two-up on a phone, which leaves
-              the odd one centred rather than stranded in a column of its own. */}
+          {/* All eight on one line where there is room for eight, stepping down to four
+              and then two rather than squeezing: at lg an eighth of the width is narrower
+              than the card's own text column. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
             {REVENUE_VIEWS.map((v) => (
               <StatTile
@@ -427,6 +410,30 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
                 onClick={() => setRevenueView(v.key)}
                 testid={`revenue-kpi-${v.label.toLowerCase().replace(/\s+/g, "-")}`}
               />
+            ))}
+          </div>
+
+          {/* Under the cards, because it cuts them. On the top line it sat beside Income
+              and Expenses looking like a second choice of the same kind, when it is a
+              filter of what one of them shows — every figure above moves when it is
+              pressed. Same set a Branch Admin picks from when collecting the fee in the
+              first place: how it was paid, not whether it has been signed off.
+
+              No ledger gate on it any more: it renders inside the income side, so there
+              is no longer an Expenses view for it to have to hide from. */}
+          <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-payment-mode-filter">
+            {PAYMENT_MODES.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setPaymentModeFilter(key)}
+                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                  paymentModeFilter === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                }`}
+                data-testid={`accountant-manage-payment-mode-${key}`}
+              >
+                {label}
+              </button>
             ))}
           </div>
 
