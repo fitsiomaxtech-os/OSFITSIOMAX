@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, MapPin, Clock, Calendar as CalendarIcon, Mail, Phone, User, RefreshCw, Pencil,
   Users, BarChart3, Stethoscope, Activity, ListChecks, FileText, Wallet, UserCog, X,
@@ -26,9 +26,29 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
   const [tab, setTab] = useState("summary");
   const [data, setData] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  // Bumped by Refresh, and read by the tabs that fetch lists this page's `data` does not
+  // carry — Team's Pre-Sales desk and Lead Management's switch history. Both keep their own
+  // state off `branchId`, which does not change when the same branch is reloaded, so
+  // without a token their effects never re-run and Refresh left them showing what they had
+  // fetched when the tab first opened. TeamTab's own afterSave already reloads both lists
+  // for exactly this reason; the header button had the gap that comment warns about.
+  const [reloadToken, setReloadToken] = useState(0);
 
-  const load = useCallback(() => bmDetail(branchId).then(setData).catch(() => toast.error("Failed to load")), [branchId]);
+  const load = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      setData(await bmDetail(branchId));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to load");
+    }
+    setRefreshing(false);
+  }, [branchId]);
   useEffect(() => { load(); }, [load]);
+
+  // The token is bumped here rather than inside `load` so opening the page fetches each
+  // list once: mount runs `load` on its own, and only a press means "everything again".
+  const refresh = () => { load(); setReloadToken((n) => n + 1); };
 
   if (!data) return <p className="text-sm text-slate-500" data-testid="branch-detail-loading">Loading branch details...</p>;
   const b = data.branch;
@@ -49,7 +69,22 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
         {/* Wraps rather than overflowing: three controls plus a two-part switch is more
             than a phone header holds on one line. */}
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button variant="outline" onClick={load} data-testid="branch-detail-refresh"><RefreshCw className="h-4 w-4" /></Button>
+          {/* Spins and goes dead while the fetch is in flight. Without that this button
+              had no answer at all: the page only shows "Loading branch details..." while
+              `data` is still null, so on a reload — when it never is — pressing Refresh
+              changed nothing on screen and read as a broken control. Disabling also stops
+              a second press from racing the first, where the slower of two replies wins
+              and can put older data back on the page. */}
+          <Button
+            variant="outline"
+            onClick={refresh}
+            disabled={refreshing}
+            title="Refresh"
+            aria-label="Refresh"
+            data-testid="branch-detail-refresh"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          </Button>
           {/* The Lead Control switch used to sit here, between Refresh and Edit. It has
               moved to the Lead Management tab, where the record of past switches gives it
               the context a bare toggle in a header could not. */}
@@ -75,10 +110,10 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
       </div>
 
       {tab === "summary" && <SummaryTab data={data} branchId={branchId} onChanged={load} readOnly={readOnly} />}
-      {tab === "staff" && <TeamTab staff={data.staff} branchId={branchId} onChanged={load} readOnly={readOnly} />}
+      {tab === "staff" && <TeamTab staff={data.staff} branchId={branchId} onChanged={load} reloadToken={reloadToken} readOnly={readOnly} />}
       {tab === "performance" && <PerformanceTab perf={data.performance} />}
       {tab === "head_physio" && <HeadPhysioTab hp={data.head_physio_section} branchId={branchId} onChanged={load} readOnly={readOnly} />}
-      {tab === "lead_management" && <LeadManagementTab branch={b} branchId={branchId} onChanged={load} readOnly={readOnly} />}
+      {tab === "lead_management" && <LeadManagementTab branch={b} branchId={branchId} onChanged={load} reloadToken={reloadToken} readOnly={readOnly} />}
 
       {showEdit && <BranchFormDialogV2 branch={b} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />}
     </div>
@@ -166,7 +201,7 @@ const formatChangedAt = (iso) => {
  * branch's leads live, and a control that consequential reads better next to the record of
  * when it was last thrown than tucked between Refresh and Edit.
  */
-const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) => {
+const LeadManagementTab = ({ branch, branchId, onChanged, reloadToken = 0, readOnly = false }) => {
   const [history, setHistory] = useState(null); // null = still loading, [] = never switched
   // Fetched up front, not when the dialog opens: the confirm needs the list the moment it
   // appears, and a spinner inside a decision like this one is worse than a moment's wait.
@@ -178,9 +213,23 @@ const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) =>
       .catch(() => setHistory([]));
   }, [branchId]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
-  useEffect(() => {
+
+  const loadPreSales = useCallback(() => {
     bmPreSalesMembers(branchId).then(setPreSalesMembers).catch(() => setPreSalesMembers([]));
   }, [branchId]);
+  useEffect(() => { loadPreSales(); }, [loadPreSales]);
+
+  // The header's Refresh reaching both of the above — neither rides on the page's `data`,
+  // so without this the switch history stayed as it was fetched even though the button had
+  // just re-read the branch the history belongs to. See the note where the token is
+  // declared; the first value is skipped because the mount effects have already fetched.
+  const reloadSeen = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadToken === reloadSeen.current) return;
+    reloadSeen.current = reloadToken;
+    loadHistory();
+    loadPreSales();
+  }, [reloadToken, loadHistory, loadPreSales]);
 
   const current = normalizeLeadControl(branch.lead_control);
 
@@ -338,7 +387,7 @@ const TEAM_DESKS = [
  * creating and editing logins is Super Admin's, and the endpoints refuse anyone else, so
  * the buttons are not offered rather than offered and refused.
  */
-const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
+const TeamTab = ({ staff, branchId, onChanged, reloadToken = 0, readOnly = false }) => {
   const [preSalesMembers, setPreSalesMembers] = useState([]);
   const [desk, setDesk] = useState("all");
   const [editing, setEditing] = useState(null);   // a user row
@@ -351,6 +400,18 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
     bmPreSalesMembers(branchId).then(setPreSalesMembers).catch(() => setPreSalesMembers([]));
   }, [branchId]);
   useEffect(() => { loadPreSales(); }, [loadPreSales]);
+
+  // The header's Refresh reaching this list. It is fetched here rather than carried on the
+  // page's `data`, so a reload of the same branch changes nothing this effect watches and
+  // the desk kept showing what it held when the tab was opened. Same shape as the token
+  // ConsultationsBoard takes from the Branch Admin toolbar: the first value is skipped
+  // because the mount effect above has already fetched.
+  const reloadSeen = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadToken === reloadSeen.current) return;
+    reloadSeen.current = reloadToken;
+    loadPreSales();
+  }, [reloadToken, loadPreSales]);
 
   const groups = TEAM_DESKS.map((d) => ({
     ...d,
