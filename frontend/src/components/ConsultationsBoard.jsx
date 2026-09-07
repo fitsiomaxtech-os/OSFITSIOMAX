@@ -9929,18 +9929,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           })}
                         </div>
 
-                        <div className="mt-3 hidden space-y-1.5 border-t border-slate-100 pt-2 sm:block">
-                          <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-semibold text-slate-500">
-                            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" /> Paid day</span>
-                            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-rose-500" /> Unpaid day</span>
-                            <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" /> Slots open</span>
-                          </div>
-                          <p className="text-[11px] leading-snug text-slate-400">
-                            One {dayNoun} a day — {totalSessionsNeeded} means {totalSessionsNeeded} separate
-                            days. Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Pick a
-                            time and it <b>jumps to the next open date</b> on its own, so the plan is laid out in one
-                            run. Picking another time on a day already fixed <b>moves</b> that day and stays put.
-                          </p>
+                        <div className="mt-3 hidden flex-wrap items-center gap-2.5 border-t border-slate-100 pt-2 text-[11px] font-semibold text-slate-500 sm:flex">
+                          <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" /> Paid day</span>
+                          <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-rose-500" /> Unpaid day</span>
+                          <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" /> Slots open</span>
                         </div>
                       </div>
 
