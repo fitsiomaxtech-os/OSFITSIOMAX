@@ -1271,7 +1271,12 @@ const EMP_TABS = [
   { key: "employment", label: "Employment" },
   { key: "id_docs", label: "ID & Docs" },
   { key: "address", label: "Address & Emergency" },
-  { key: "salary", label: "Salary & Bank" },
+  // Bank details and the PAN they are paid against. It used to open with two salary
+  // boxes, which is not where a salary is set: a salary is a timeline of records with a
+  // reason and a month behind each one, kept in Payroll Management, and this form wrote
+  // straight over the figure that timeline had put on the employee. Two doors onto one
+  // number, and the one with no history behind it won.
+  { key: "bank", label: "Bank & PAN" },
 ];
 
 const blankEmployee = {
@@ -1408,6 +1413,12 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
       return;
     }
     const payload = { ...form };
+    // Still sent, with no box on the form behind them any more. The form is seeded from
+    // the employee, so on an edit these carry back whatever Payroll Management last wrote
+    // there and the save leaves it exactly as it was; dropping them would send a salary
+    // of nothing and wipe the figure the timeline had put on. On a create they are the
+    // zeroes a brand-new employee starts on, which is what tells the first salary record
+    // which of the two fields to take (see _salary_field).
     payload.net_salary = Number(payload.net_salary) || 0;
     payload.gross_salary = Number(payload.gross_salary) || 0;
     try {
@@ -1595,9 +1606,11 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
               )}
             </div>
           )}
+          {/* PAN used to be the other half of this. It sits with the bank details now,
+              which is what it is actually for here — the account is where the money goes
+              and the PAN is what it is paid against, and they are filled in together. */}
           {tab === "id_docs" && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="PAN"><Input value={form.pan} onChange={(e) => set("pan", e.target.value)} data-testid="hr-emp-pan" /></Field>
               <Field label="Aadhar"><Input value={form.aadhar} onChange={(e) => set("aadhar", e.target.value)} data-testid="hr-emp-aadhar" /></Field>
             </div>
           )}
@@ -1610,13 +1623,20 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
               </div>
             </div>
           )}
-          {tab === "salary" && (
+          {tab === "bank" && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Net Salary (₹)"><Input type="number" value={form.net_salary} onChange={(e) => set("net_salary", e.target.value)} data-testid="hr-emp-net" /></Field>
-              <Field label="Gross Salary (₹)"><Input type="number" value={form.gross_salary} onChange={(e) => set("gross_salary", e.target.value)} data-testid="hr-emp-gross" /></Field>
               <Field label="Bank Name"><Input value={form.bank_name} onChange={(e) => set("bank_name", e.target.value)} data-testid="hr-emp-bank" /></Field>
               <Field label="Account Number"><Input value={form.bank_account} onChange={(e) => set("bank_account", e.target.value)} data-testid="hr-emp-account" /></Field>
-              <Field label="IFSC"><Input value={form.ifsc} onChange={(e) => set("ifsc", e.target.value)} data-testid="hr-emp-ifsc" /></Field>
+              <Field label="IFSC Code"><Input value={form.ifsc} onChange={(e) => set("ifsc", e.target.value)} data-testid="hr-emp-ifsc" /></Field>
+              <Field label="PAN Number"><Input value={form.pan} onChange={(e) => set("pan", e.target.value)} data-testid="hr-emp-pan" /></Field>
+              {/* Said rather than left to be discovered: somebody who came to this tab to
+                  type a salary needs telling where the salary went, not an empty space
+                  where the box used to be. */}
+              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 sm:col-span-2">
+                Salary is set in <b>Payroll Management</b>, on the employee's own salary
+                record — each figure filed with the reason for it and the month it starts,
+                so what somebody was on in any given month has an answer.
+              </p>
             </div>
           )}
         </div>
