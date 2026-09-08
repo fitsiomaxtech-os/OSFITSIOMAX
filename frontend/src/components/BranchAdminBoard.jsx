@@ -176,15 +176,33 @@ const BRANCH_CONSULTATION_DEFAULT_STAGE = "Consultation Visit";
  */
 const squashKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
+/**
+ * Whether one extra_fields key is one of the things being looked for.
+ *
+ * Two kinds of entry, both compared against the squashed key. A string is one exact
+ * spelling of a header -- "City", "city_town" -- and a RegExp is a question whose wording
+ * is fixed but whose middle is not: "Which area of Chennai are you located in?" is the
+ * same question in every city the clinic ever opens in, and listing the cities would mean
+ * the column going quiet the day a new one is added.
+ *
+ * Still exact matching either way, never a substring: the pattern is anchored to the whole
+ * key, for the reason CITY_KEYS gives -- "city" inside "capacity" is how a column fills
+ * with the wrong answer and nobody notices.
+ */
+const matchesFormKey = (key, wanted) => {
+  const squashed = squashKey(key);
+  return wanted.some((w) => (w instanceof RegExp ? w.test(squashed) : squashKey(w) === squashed));
+};
+
 const formAnswer = (lead, questionKey, fallback, formatFallback) => {
   // A list, because one field is not always one header. The intake questions each have a
   // single exact spelling and pass a string; a plain field like City is written whichever
   // way the sheet that carries it felt like writing it, and passes every spelling worth
   // recognising. Same walk either way.
-  const wanted = new Set((Array.isArray(questionKey) ? questionKey : [questionKey]).map(squashKey));
+  const wanted = Array.isArray(questionKey) ? questionKey : [questionKey];
   const extras = lead?.extra_fields || {};
   for (const [key, value] of Object.entries(extras)) {
-    if (wanted.has(squashKey(key)) && value !== null && value !== undefined && String(value).trim() !== "") {
+    if (matchesFormKey(key, wanted) && value !== null && value !== undefined && String(value).trim() !== "") {
       return String(value).trim();
     }
   }
@@ -300,7 +318,20 @@ const PHYSIO_FORM_QUESTIONS = [ARM_START_WHEN];
  * matches "capacity", and a column that quietly fills with somebody's slot capacity is
  * worse than one that occasionally reads "—".
  */
-const CITY_KEYS = ["city", "town", "city/town", "town/city", "city_town", "hometown", "native"];
+const CITY_KEYS = [
+  "city", "town", "city/town", "town/city", "city_town", "hometown", "native",
+  // And the question a branch's own intake form asks in place of a City column: "Which
+  // area of Chennai are you located in?", which is where the patient lives said as a
+  // sentence. The form asks it, the popup printed the answer under the question, and the
+  // City column beside it read a dash -- one lead, its town on the screen twice, once
+  // as an answer and once as a blank.
+  //
+  // Matched by shape rather than listed, because the city in the middle of it is whichever
+  // city the branch is in. The whole key has to be the question, so nothing else can fall
+  // in: "Which is your preferred location ?" -- the other question on this same form, and
+  // the one that names a BRANCH rather than a patient's area -- does not match it.
+  /^whichareaof[a-z]+areyoulocatedin$/,
+];
 
 const cityAnswer = (lead) => formAnswer(lead, CITY_KEYS, "city", null);
 
@@ -2925,10 +2956,9 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   //
   // Only the copy the City row is actually showing is withheld: the keys here are the
   // ones cityAnswer reads, so nothing is dropped that the popup does not print elsewhere.
-  const cityKeys = new Set(CITY_KEYS.map(squashKey));
   const formAnswers = [];
   rawFormAnswers.forEach(([key, value]) => {
-    if (cityKeys.has(squashKey(key))) return;
+    if (matchesFormKey(key, CITY_KEYS)) return;
     if (AD_FIELD_KEYS.has(normaliseAdKey(key))) return;
     formAnswers.push([key, value]);
   });
