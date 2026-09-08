@@ -383,6 +383,23 @@ const DocumentsPanel = ({ leadId }) => {
   );
 };
 
+/**
+ * The three lists the Treatment tab holds, and what each is a list of.
+ *
+ * All is the day-by-day board this tab has always opened on: the treatment days booked
+ * on the date picked in the strip, which is the physio's actual shift. The other two are
+ * about the patient rather than the day — who is still mid-course and who has been seen
+ * all the way through — so neither is tied to a date, and both are read as a caseload.
+ *
+ * Ongoing and Completed use the same words the Patients tab already splits its own list
+ * with, on purpose: a patient filed under Completed there must not read as Ongoing here.
+ */
+const TREATMENT_SUBTABS = [
+  { key: "all", label: "All" },
+  { key: "ongoing", label: "Ongoing" },
+  { key: "completed", label: "Completed" },
+];
+
 function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   const [leads, setLeads] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -462,71 +479,106 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   // just that group. Tapping an already-active tile clears back to "all".
   const [rowFilter, setRowFilter] = useState("all");
 
+  // Which of the three sub-tabs is open. "all" is the day board; the other two swap it
+  // for a caseload list, so the tiles and the week strip — both of which answer questions
+  // about a date — come off screen with it rather than sitting above a list they do not
+  // describe.
+  const [subTab, setSubTab] = useState("all");
+
   /**
-   * Patients who have finished their whole course — a different unit from the three
-   * cards beside it, which all count days.
+   * This physio's caseload, split into the two the sub-tabs read it by, plus the count
+   * the Treatment Completed tile shows.
    *
-   * "Completed 80" means eighty treatment days are done across everyone; it says nothing
-   * about how many people that finished. This is the count of patients with no day left,
-   * which is the one that answers "how many did we see through to the end".
+   * Finished is a different unit from the three cards beside that tile, which all count
+   * days. "Completed 80" means eighty treatment days are done across everyone; it says
+   * nothing about how many people that finished. These are counts of patients, which is
+   * what answers "how many did we see through to the end" and "who is still mid-course".
    *
    * Deliberately not scoped by the date filter. Whether a course is finished is a fact
    * about the patient as of now, not about a range of days, and pretending otherwise
-   * would need the date each patient's last session landed on. The card says "of N
+   * would need the date each patient's last session landed on. The tile says "of N
    * patients" so the unit is legible next to the day counts.
    *
-   * Declared above visibleRows because that memo reads finished.rows, in its body and in
-   * its dependency array. A const is in the temporal dead zone until its own line runs,
-   * so with this below it the memo threw "Cannot access 'finished' before initialization"
+   * Days done AND the review written. The tile counted the day tally alone, so a patient
+   * landed here the moment their last day was ticked off -- reading as discharged on the
+   * board while the popup one click behind it still said REVIEW DUE, and while the Head
+   * Physio had not seen them. review_pending is the server's answer to the same question
+   * (leads_awaiting_review in v3_reviews.py), so the tile, the Completed sub-tab, the
+   * branch's Completed stage and the Review tab cannot come apart.
+   *
+   * That is one predicate for both lists, so a patient is in exactly one of them: whoever
+   * is not finished is ongoing, including the patient whose days are all ticked off and
+   * whose closing review is still with the CONSULTANT. The card says which of the two is
+   * outstanding rather than leaving "0 days left, still Ongoing" to be puzzled over.
+   *
+   * Declared above visibleRows because that memo reads it, in its body and in its
+   * dependency array. A const is in the temporal dead zone until its own line runs, so
+   * with this below it the memo threw "Cannot access 'courses' before initialization"
    * on the first render of the tab — a build the compiler and the linter both pass.
    */
-  const finished = useMemo(() => {
+  const courses = useMemo(() => {
     const inTreatment = leads.filter((l) => (l.total_sessions || 0) > 0);
-    // Days done AND the review written. The tile counted the day tally alone, so a patient
-    // landed here the moment their last day was ticked off -- reading as discharged on the
-    // board while the popup one click behind it still said REVIEW DUE, and while the Head
-    // Physio had not seen them. review_pending is the server's answer to the same question
-    // (leads_awaiting_review in v3_reviews.py), so this tile, the branch's Completed stage
-    // and the Review tab cannot come apart.
-    const done = inTreatment.filter(
-      (l) => !l.review_pending && (l.completed_sessions || 0) >= l.total_sessions,
-    );
+    const isFinished = (l) => !l.review_pending && (l.completed_sessions || 0) >= l.total_sessions;
+    // One row shape for both lists, so the Ongoing and Completed cards are the same card
+    // reading different numbers rather than two layouts that drift apart.
+    const row = (l) => ({
+      key: `patient-${l.id}`,
+      lead: l,
+      total: l.total_sessions || 0,
+      completed: l.completed_sessions || 0,
+      remaining: Math.max(0, (l.total_sessions || 0) - (l.completed_sessions || 0)),
+      // Every day is done and only the CONSULTANT's write-up is outstanding. Kept on the
+      // Ongoing side — the course is not closed until that review lands — but the card
+      // says which of the two it is waiting on, since "0 days left" and "still ongoing"
+      // read as a contradiction without it.
+      reviewPending: !!l.review_pending,
+      done: isFinished(l),
+    });
+    const done = inTreatment.filter(isFinished);
     return {
       done: done.length,
       patients: inTreatment.length,
-      // The rows the tile shows when selected. Built off the same predicate as the count
-      // so the list can never disagree with the figure above it.
-      rows: done.map((l) => ({
-        key: `finished-${l.id}`,
-        lead: l,
-        time: "",
-        label: `${l.completed_sessions} of ${l.total_sessions} days`,
-        done: true,
-      })),
+      completed: done.map(row),
+      ongoing: inTreatment.filter((l) => !isFinished(l)).map(row),
     };
   }, [leads]);
 
+  // Matches a row against the search box — one definition because the day list and the
+  // two caseload lists are searched by the same box in the same toolbar, and a name that
+  // finds a patient on one tab must find them on the others.
+  const matches = useCallback((lead, q) => (
+    !q || (lead?.name || "").toLowerCase().includes(q) || (lead?.phone || "").toLowerCase().includes(q)
+  ), []);
+
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    // Treatment Completed swaps the list rather than narrowing it. A patient with no days
-    // left has nothing booked on any date, so filtering the selected day by "is finished"
-    // would show an empty list on every day of the week — the tile would look broken
-    // rather than filtered. Search still applies on top.
-    let rows = rowFilter === "finished" ? finished.rows : dayRows;
-    if (q) {
-      rows = rows.filter((r) => (
-        (r.lead.name || "").toLowerCase().includes(q) || (r.lead.phone || "").toLowerCase().includes(q)
-      ));
-    }
+    let rows = dayRows.filter((r) => matches(r.lead, q));
     if (rowFilter === "completed") rows = rows.filter((r) => r.done);
     else if (rowFilter === "pending") rows = rows.filter((r) => !r.done);
-    // "finished" needs no filter of its own — finished.rows is already exactly that set.
     // Incomplete cards always show first, completed (green) cards always last —
     // each group keeps its own time order from rowsFor's sort.
     const incomplete = rows.filter((r) => !r.done);
     const completed = rows.filter((r) => r.done);
     return [...incomplete, ...completed];
-  }, [dayRows, finished.rows, search, rowFilter]);
+  }, [dayRows, search, rowFilter, matches]);
+
+  /**
+   * The caseload the open sub-tab is showing — Ongoing or Completed, never the day board.
+   *
+   * Sorted so the patient who most needs reading is first. On Ongoing that is whoever has
+   * the fewest days left, which is who is closest to needing a closing review; on
+   * Completed it is simply the longest course first, so the biggest cases are at the top
+   * rather than the list being in whatever order the leads arrived in.
+   */
+  const visiblePatients = useMemo(() => {
+    if (subTab === "all") return [];
+    const q = search.trim().toLowerCase();
+    const rows = (subTab === "completed" ? courses.completed : courses.ongoing)
+      .filter((r) => matches(r.lead, q));
+    return [...rows].sort((a, b) => (
+      subTab === "completed" ? b.total - a.total : a.remaining - b.remaining
+    ));
+  }, [subTab, courses, search, matches]);
 
   // Every treatment day this physio holds, regardless of date — the default when
   // no Meta-style date filter is active.
@@ -649,15 +701,53 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
       >
         <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
       </Button>
-      <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered iconOnly />
+      {/* Day board only, like the tiles it drives. Ongoing and Completed are lists of
+          patients as of now — a date range narrows nothing on either, and a filter that
+          visibly does nothing when it is set reads as a broken one. */}
+      {subTab === "all" && (
+        <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered iconOnly />
+      )}
     </div>
   );
 
   return (
     <div data-testid="physio-treatment-tab">
+      {/* All / Ongoing / Completed. The same pill strip the Patients tab splits its own
+          list with, so one control does one thing across the board rather than each tab
+          inventing its own switcher.
+
+          No count on All: the other two count patients, and the list All shows counts
+          days on one date. A number there would be read as the third of three patient
+          counts and would not be one. */}
+      <div className="mb-3 flex w-fit gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="physio-treatment-subtabs">
+        {TREATMENT_SUBTABS.map((t) => {
+          const count = t.key === "ongoing" ? courses.ongoing.length : t.key === "completed" ? courses.completed.length : null;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setSubTab(t.key)}
+              aria-current={subTab === t.key ? "page" : undefined}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                subTab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
+              }`}
+              data-testid={`physio-treatment-subtab-${t.key}`}
+            >
+              {t.label}
+              {count !== null && <span className="ml-1 text-[10px] text-slate-400">({count})</span>}
+            </button>
+          );
+        })}
+      </div>
+
       {/* The tinted panel these sat in is gone — the Head Physio cards sit straight on
           the page, and boxing the same cards here made two identical controls look like
-          two different ones. The heading stays: it names the range the counts answer to. */}
+          two different ones. The heading stays: it names the range the counts answer to.
+
+          Day board only. Every figure on these four is scoped to a date range, and above
+          a caseload list that is not tied to a date they would be answering a question
+          nobody on that tab is asking. */}
+      {subTab === "all" && (
       <div className="mb-4" data-testid="physio-treatment-summary">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall Treatment"}</p>
         {/* Two by two on a phone rather than four across: at ~85px a card the labels
@@ -677,14 +767,19 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
             icon={Clock} label="Pending" value={filterStats.pending} sub="Days left" color={TILE.pending}
             onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
           />
+          {/* Opens the Completed sub-tab rather than swapping this list underneath the
+              week strip. It always showed a set of patients that had nothing to do with
+              the day selected above it, which is exactly what a sub-tab is for — and the
+              banner that used to apologise for the mismatch is gone with it. */}
           <StatTile
-            icon={UserCheck} label="Treatment Completed" value={finished.done} color={TILE.finished}
-            sub={finished.patients ? `of ${finished.patients} patients` : null}
-            onClick={() => setRowFilter(rowFilter === "finished" ? "all" : "finished")} active={rowFilter === "finished"}
+            icon={UserCheck} label="Treatment Completed" value={courses.done} color={TILE.finished}
+            sub={courses.patients ? `of ${courses.patients} patients` : null}
+            onClick={() => setSubTab("completed")} active={false}
             testid="physio-stat-treatment-completed"
           />
         </div>
       </div>
+      )}
 
       {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
@@ -695,7 +790,11 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
           The arrows sit beside the strip and centre against its full height rather than
           riding in the month line. They step the week — the row of days — so pinned to the
-          label they floated above the thing they move. */}
+          label they floated above the thing they move.
+
+          Day board only, with the tiles: a date picker over a list that is not filtered by
+          a date is a control that does nothing when it is used, which reads as broken. */}
+      {subTab === "all" && (
       <div className="mb-3 flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2" data-testid="physio-treatment-week-strip">
         <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Previous week" data-testid="physio-week-prev">
           <ChevronLeft className="h-4 w-4" />
@@ -738,37 +837,16 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
-
-      {/* The week strip above is still on screen but no longer drives this list, and a day
-          tapped with no visible effect reads as a bug. Says so, and offers the way back. */}
-      {rowFilter === "finished" && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2" data-testid="physio-finished-banner">
-          <p className="text-[11px] font-medium text-indigo-800">
-            Showing every patient who finished their course — not tied to the day selected above.
-          </p>
-          <button
-            type="button"
-            onClick={() => setRowFilter("all")}
-            className="shrink-0 rounded-md border border-indigo-200 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
-            data-testid="physio-finished-banner-back"
-          >
-            Back to the day
-          </button>
-        </div>
       )}
 
-      {visibleRows.length === 0 && !loading ? (
+      {subTab === "all" && (
+      visibleRows.length === 0 && !loading ? (
         <div className="text-center py-16">
           <ClipboardList className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          {/* The finished list is not tied to the selected day, so it cannot borrow the
-              "nothing booked for <date>" wording — that would send someone looking through
-              the week for patients who by definition have nothing booked at all. */}
           <p className="text-sm text-slate-400">
-            {rowFilter === "finished"
-              ? (search.trim() ? `No finished patient matches "${search.trim()}"` : "No patient has finished their course yet")
-              : search.trim()
-                ? `No patient matches "${search.trim()}" on this day`
-                : `Nothing booked for ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}`}
+            {search.trim()
+              ? `No patient matches "${search.trim()}" on this day`
+              : `Nothing booked for ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}`}
           </p>
         </div>
       ) : (
@@ -925,6 +1003,93 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
             </div>
           </div>
         </>
+      ))}
+
+      {/* Ongoing and Completed — the caseload, one card per patient, no date in sight.
+          One list for both: the two differ in which patients they hold and in what the
+          numbers on the card mean, not in shape, and two layouts for that would drift.
+
+          A card at all widths rather than cards-then-table. The day board is read across
+          a column (who is at 8:00, who is at 9:30), which is what a table is for; this is
+          read one patient at a time, and the progress bar is the point of the row. */}
+      {subTab !== "all" && (
+        visiblePatients.length === 0 && !loading ? (
+          <div className="py-16 text-center" data-testid="physio-treatment-caseload-empty">
+            <Users className="mx-auto mb-3 h-10 w-10 text-slate-200" />
+            <p className="text-sm text-slate-400">
+              {search.trim()
+                ? `No ${subTab} patient matches "${search.trim()}"`
+                : subTab === "completed"
+                  ? "No patient has finished their course yet"
+                  : "No patient is mid-course right now"}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2" data-testid={`physio-treatment-caseload-${subTab}`}>
+            {visiblePatients.map((r) => {
+              const l = r.lead;
+              const pct = r.total ? Math.round((r.completed / r.total) * 100) : 0;
+              return (
+                <button
+                  type="button"
+                  key={r.key}
+                  onClick={() => setSelectedLead(l)}
+                  className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${
+                    r.done ? "border-emerald-200 bg-emerald-50/50 hover:bg-emerald-50" : "border-slate-200 bg-white hover:border-sky-200"
+                  }`}
+                  data-testid={`physio-caseload-row-${l.id}`}
+                >
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                    r.done ? "bg-emerald-100 text-emerald-700" : "bg-sky-50 text-sky-700"
+                  }`}>
+                    {(l.name || "?").charAt(0).toUpperCase()}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
+                    {l.phone ? <p className="truncate text-[11px] text-slate-400">{l.phone}</p> : null}
+                    {/* How far through the course, as a figure and as a bar. The figure is
+                        what gets read; the bar is what gets scanned down a list of twenty. */}
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <div className="h-1.5 w-full max-w-[180px] overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className={`h-full rounded-full ${r.done ? "bg-emerald-500" : "bg-sky-500"}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="shrink-0 text-[10px] font-semibold text-slate-500">
+                        {r.completed} of {r.total} days
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {/* Every day is done and the course still is not: the closing review is
+                        with the CONSULTANT. Said here rather than left to read as "0 days
+                        left, still Ongoing", which is the one thing the card cannot mean. */}
+                    {!r.done && r.reviewPending && r.remaining === 0 && (
+                      <span className="hidden rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700 sm:inline-flex">
+                        Review due
+                      </span>
+                    )}
+                    {r.done ? (
+                      <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700">Completed</span>
+                    ) : (
+                      <span className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold text-sky-700">
+                        {r.remaining} left
+                      </span>
+                    )}
+                    {/* Named rather than a bare chevron. This list is the answer to "let me
+                        look at that patient", so the row says what pressing it does. */}
+                    <span className="flex items-center gap-0.5 text-[11px] font-semibold text-sky-600" data-testid={`physio-caseload-view-${l.id}`}>
+                      <Eye className="h-3.5 w-3.5" /> View
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )
       )}
 
       {selectedLead && (
@@ -1683,6 +1848,18 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     );
   }, [sessions]);
 
+  // The two halves of that order, under headings of their own.
+  //
+  // The break was already there — done days sort to the bottom — but nothing named it, so
+  // a twelve-day course read as one run of twelve rows in which the physio had to work out
+  // where the record ended and the work began by reading the badge on every row. Upcoming
+  // is what is left to do, Completed is what has been done, and each says how many.
+  //
+  // Filtered off orderedSessions rather than sorted twice, so the ordering above is the
+  // only place that decides what comes before what.
+  const upcomingDays = useMemo(() => orderedSessions.filter((s) => s.status !== "completed"), [orderedSessions]);
+  const completedDays = useMemo(() => orderedSessions.filter((s) => s.status === "completed"), [orderedSessions]);
+
   // Each week of days goes to the Head Physio for a review appointment; that review
   // is only "completed" once they've written it up (status flips to reviewed).
   const totalWeeks = sessions.length ? Math.max(...sessions.map((s) => s.week_number || 1)) : 0;
@@ -1706,6 +1883,222 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
       </div>
     )
   );
+
+  /**
+   * One day of the course, as a row.
+   *
+   * Lifted out of the list so Upcoming and Completed can both draw it. Written inline in
+   * the map it would have had to be written twice, and the two copies would have had to
+   * agree on all of: which day is open, which is blocked by an earlier one, which is held
+   * for a review, and which is simply not due yet.
+   */
+  const dayRow = (s) => {
+    const done = s.status === "completed";
+    // The day an absence pushed off the end of the course. It holds no slot
+    // until the Branch Admin puts it on one, so there is no date on which it
+    // could be worked and nothing here to press.
+    const awaiting = !done && (s.needs_assignment || !s.slot_time);
+    // The earliest day still open before this one. Ordered on the day number,
+    // not the date: an absence pushes a day past the one after it until that
+    // one shifts too, and comparing dates would call the order broken.
+    const blockedBy = done ? null : firstOpenBefore(s);
+    // Held by a week nobody has written up yet. The server refuses the day
+    // for this reason too, so the button says it rather than letting the
+    // press come back as a red toast; it holds every day still to be worked,
+    // on either course, because the day count the milestone is read off
+    // counts both. Never the day that reaches the milestone -- that one is
+    // what makes the review raisable, and holding it would be a deadlock.
+    const heldByReview = !done && !!reviewHold;
+    // The day the course currently stands on: the lowest-numbered day of this
+    // track that is still open. Day 1 until Day 1 is signed off, then Day 2,
+    // then Day 3 — one open day at a time, in the order they are worked.
+    //
+    // This used to be whichever day fell on the date picked in the strip
+    // behind the popup, which opened Day 3 for a patient who had not had
+    // Day 1 yet: a day the server would refuse as out of order anyway.
+    const isOpenDay = !done && !awaiting && blockedBy === null;
+    // Today or already behind, and it can be worked; still to come and it
+    // waits. A day that has slipped past stays workable rather than turning
+    // into a dead end — days run in order, so leaving it shut would wall off
+    // every day after it as well. The strip's own date still counts, so a day
+    // opened from the calendar on the morning it falls is workable on it.
+    const dayIso = (s.slot_time || "").slice(0, 10);
+    const canWork = isOpenDay && (dayIso <= todayIso || dayIso === activeDate);
+    // Says which date is holding this day up, so the block reads as somewhere
+    // to go rather than a dead end.
+    const blockedByRow = blockedBy
+      ? sessions.find(
+          (x) =>
+            (x.track || "treatment") === (s.track || "treatment") &&
+            (x.session_number || 0) === blockedBy
+        )
+      : null;
+    const blockedByDate = blockedByRow ? fmtDate(blockedByRow.slot_time) : null;
+    return (
+      <div
+        key={s.id}
+        className={`flex items-center gap-3 rounded-lg border p-3 ${
+          done ? "border-emerald-200 bg-emerald-50/50"
+          : awaiting ? "border-amber-200 bg-amber-50/60"
+          : heldByReview && isOpenDay ? "border-amber-200 bg-amber-50/40"
+          : isOpenDay ? "border-sky-200 bg-sky-50/40"
+          : "border-slate-200 bg-white"
+        }`}
+        data-testid={`physio-treatment-day-${s.id}`}
+      >
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+          done ? "bg-emerald-200 text-emerald-800"
+          : awaiting ? "bg-amber-200 text-amber-800"
+          : heldByReview && isOpenDay ? "bg-amber-200 text-amber-800"
+          : isOpenDay ? "bg-sky-200 text-sky-800"
+          : "bg-slate-100 text-slate-500"
+        }`}>
+          {s.session_number}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-700">
+            {/* A rehab day says so, and carries no week: a rehab course is
+                not cut into weeks, and printing "Week 0" over one is worse
+                than printing nothing. Same wording the day list outside
+                this popup uses, so one patient reads the same either way. */}
+            {s.track === "rehab" ? "Rehab " : ""}Day {s.session_number} of {s.total_sessions}
+            {s.track !== "rehab" && s.week_number ? ` · Week ${s.week_number}` : ""}
+            {/* Marks the one day of the course that is open to be worked.
+                It sorts to the head of the list, but a position is not a
+                label — a day still awaiting a date from the Branch Admin
+                heads the list too and cannot be worked — so the row says
+                in words which day this is. */}
+            {isOpenDay && (
+              heldByReview ? (
+                // The day is next in line and still cannot be worked. Saying
+                // "Opened" over a button that refuses to open it is the one
+                // reading that helps nobody.
+                <span className="rounded bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700">
+                  Held for review
+                </span>
+              ) : (
+                <span className="rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700">
+                  Opened
+                </span>
+              )
+            )}
+          </p>
+          <p className={`text-[10px] ${awaiting ? "font-semibold text-amber-700" : "text-slate-400"}`}>
+            {s.slot_time
+              ? `${fmtDate(s.slot_time)} at ${slotTo12h(s.slot_time)}`
+              : awaiting
+                ? "Missed class — Branch Admin to give this day a date"
+                : "—"}
+          </p>
+          {(s.physio_treatments || []).length > 0 && (
+            <div className="mt-1">
+              <PhysioTreatmentChips names={s.physio_treatments} testid={`physio-day-treatments-${s.id}`} />
+            </div>
+          )}
+          {/* Every note the day carries, each under its own name. `||`
+              printed the treatment half and swallowed the rehab one, so a
+              day written up with both -- which is every day signed off while
+              the popup still offered two boxes -- read as half a record. */}
+          {s.jr_physio_remarks && (
+            <p className="mt-0.5 text-[10px] text-emerald-600"><span className="font-semibold">Treatment: </span>{s.jr_physio_remarks}</p>
+          )}
+          {s.rehab_remarks && (
+            <p className="mt-0.5 text-[10px] text-emerald-600"><span className="font-semibold">Rehab: </span>{s.rehab_remarks}</p>
+          )}
+        </div>
+        {done ? (
+          // A finished day is a record, and until now it was a record with no way into it:
+          // the treatments given and the note written on the day were on the server and
+          // reachable from nowhere on this screen. CompleteSessionModal already reads a
+          // completed session back as a summary rather than a form — this is the button
+          // that gets to it.
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-emerald-200 text-xs text-emerald-700 hover:bg-emerald-50"
+              onClick={() => setCompleteTarget(s)}
+              data-testid={`physio-view-day-${s.id}`}
+            >
+              <Eye className="mr-1 h-3 w-3" /> View
+            </Button>
+          </div>
+        ) : awaiting ? (
+          // No button: the physio cannot place this day. Only the Branch Admin
+          // books onto the published calendar, so this says who has it rather
+          // than offering an action that would be refused.
+          <span
+            className="flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-semibold text-amber-700"
+            title="An absence pushed this day past the end of the booked slots. Branch Admin assigns it a new date."
+            data-testid={`physio-day-awaiting-${s.id}`}
+          >
+            <AlertCircle className="h-3 w-3" /> Needs a date
+          </span>
+        ) : blockedBy ? (
+          // Treatment runs in order, so a later day cannot be ticked off
+          // while an earlier one is open. Said in the button's tooltip
+          // rather than only refused by the server after the press.
+          <Button
+            size="sm"
+            disabled
+            className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
+            title={`Day ${blockedBy}${blockedByDate ? ` on ${blockedByDate}` : ""} has to be finished first`}
+            data-testid={`physio-day-out-of-order-${s.id}`}
+          >
+            <Check className="mr-1 h-3 w-3" /> After Day {blockedBy}
+          </Button>
+        ) : canWork ? (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-200 text-xs text-amber-700 hover:bg-amber-50"
+              onClick={() => setAbsentTarget(s)}
+              data-testid={`physio-absent-day-${s.id}`}
+            >
+              <UserX className="mr-1 h-3 w-3" /> Absent
+            </Button>
+            {heldByReview ? (
+              // A week of treatment is read before the next one is worked.
+              // The same refusal the server makes, said on the button that
+              // would otherwise offer the day and have the press thrown
+              // back; the milestone banner above names the week and says
+              // who is holding it.
+              <Button
+                size="sm"
+                disabled
+                className="bg-amber-100 text-xs text-amber-700 hover:bg-amber-100"
+                title={reviewHoldMessage}
+                data-testid={`physio-day-review-held-${s.id}`}
+              >
+                <AlertCircle className="mr-1 h-3 w-3" /> Review due
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                className="bg-sky-600 text-xs text-white hover:bg-sky-700"
+                onClick={() => setCompleteTarget(s)}
+                data-testid={`physio-complete-day-${s.id}`}
+              >
+                <Check className="mr-1 h-3 w-3" /> Complete
+              </Button>
+            )}
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            disabled
+            className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
+            title={heldByReview ? reviewHoldMessage : `This day is next, but ${fmtDate(s.slot_time)} has not come round yet`}
+            data-testid={`physio-day-locked-${s.id}`}
+          >
+            <Check className="mr-1 h-3 w-3" /> Complete
+          </Button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -2057,198 +2450,39 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                 No treatment days booked yet — Branch Admin assigns these once the Treatment Fee is collected.
               </div>
             ) : (
-              <div className="space-y-2">
-                {orderedSessions.map((s) => {
-                  const done = s.status === "completed";
-                  // The day an absence pushed off the end of the course. It holds no slot
-                  // until the Branch Admin puts it on one, so there is no date on which it
-                  // could be worked and nothing here to press.
-                  const awaiting = !done && (s.needs_assignment || !s.slot_time);
-                  // The earliest day still open before this one. Ordered on the day number,
-                  // not the date: an absence pushes a day past the one after it until that
-                  // one shifts too, and comparing dates would call the order broken.
-                  const blockedBy = done ? null : firstOpenBefore(s);
-                  // Held by a week nobody has written up yet. The server refuses the day
-                  // for this reason too, so the button says it rather than letting the
-                  // press come back as a red toast; it holds every day still to be worked,
-                  // on either course, because the day count the milestone is read off
-                  // counts both. Never the day that reaches the milestone -- that one is
-                  // what makes the review raisable, and holding it would be a deadlock.
-                  const heldByReview = !done && !!reviewHold;
-                  // The day the course currently stands on: the lowest-numbered day of this
-                  // track that is still open. Day 1 until Day 1 is signed off, then Day 2,
-                  // then Day 3 — one open day at a time, in the order they are worked.
-                  //
-                  // This used to be whichever day fell on the date picked in the strip
-                  // behind the popup, which opened Day 3 for a patient who had not had
-                  // Day 1 yet: a day the server would refuse as out of order anyway.
-                  const isOpenDay = !done && !awaiting && blockedBy === null;
-                  // Today or already behind, and it can be worked; still to come and it
-                  // waits. A day that has slipped past stays workable rather than turning
-                  // into a dead end — days run in order, so leaving it shut would wall off
-                  // every day after it as well. The strip's own date still counts, so a day
-                  // opened from the calendar on the morning it falls is workable on it.
-                  const dayIso = (s.slot_time || "").slice(0, 10);
-                  const canWork = isOpenDay && (dayIso <= todayIso || dayIso === activeDate);
-                  // Says which date is holding this day up, so the block reads as somewhere
-                  // to go rather than a dead end.
-                  const blockedByRow = blockedBy
-                    ? sessions.find(
-                        (x) =>
-                          (x.track || "treatment") === (s.track || "treatment") &&
-                          (x.session_number || 0) === blockedBy
-                      )
-                    : null;
-                  const blockedByDate = blockedByRow ? fmtDate(blockedByRow.slot_time) : null;
-                  return (
-                    <div
-                      key={s.id}
-                      className={`flex items-center gap-3 rounded-lg border p-3 ${
-                        done ? "border-emerald-200 bg-emerald-50/50"
-                        : awaiting ? "border-amber-200 bg-amber-50/60"
-                        : heldByReview && isOpenDay ? "border-amber-200 bg-amber-50/40"
-                        : isOpenDay ? "border-sky-200 bg-sky-50/40"
-                        : "border-slate-200 bg-white"
-                      }`}
-                      data-testid={`physio-treatment-day-${s.id}`}
-                    >
-                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                        done ? "bg-emerald-200 text-emerald-800"
-                        : awaiting ? "bg-amber-200 text-amber-800"
-                        : heldByReview && isOpenDay ? "bg-amber-200 text-amber-800"
-                        : isOpenDay ? "bg-sky-200 text-sky-800"
-                        : "bg-slate-100 text-slate-500"
-                      }`}>
-                        {s.session_number}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-700">
-                          {/* A rehab day says so, and carries no week: a rehab course is
-                              not cut into weeks, and printing "Week 0" over one is worse
-                              than printing nothing. Same wording the day list outside
-                              this popup uses, so one patient reads the same either way. */}
-                          {s.track === "rehab" ? "Rehab " : ""}Day {s.session_number} of {s.total_sessions}
-                          {s.track !== "rehab" && s.week_number ? ` · Week ${s.week_number}` : ""}
-                          {/* Marks the one day of the course that is open to be worked.
-                              It sorts to the head of the list, but a position is not a
-                              label — a day still awaiting a date from the Branch Admin
-                              heads the list too and cannot be worked — so the row says
-                              in words which day this is. */}
-                          {isOpenDay && (
-                            heldByReview ? (
-                              // The day is next in line and still cannot be worked. Saying
-                              // "Opened" over a button that refuses to open it is the one
-                              // reading that helps nobody.
-                              <span className="rounded bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700">
-                                Held for review
-                              </span>
-                            ) : (
-                              <span className="rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700">
-                                Opened
-                              </span>
-                            )
-                          )}
-                        </p>
-                        <p className={`text-[10px] ${awaiting ? "font-semibold text-amber-700" : "text-slate-400"}`}>
-                          {s.slot_time
-                            ? `${fmtDate(s.slot_time)} at ${slotTo12h(s.slot_time)}`
-                            : awaiting
-                              ? "Missed class — Branch Admin to give this day a date"
-                              : "—"}
-                        </p>
-                        {(s.physio_treatments || []).length > 0 && (
-                          <div className="mt-1">
-                            <PhysioTreatmentChips names={s.physio_treatments} testid={`physio-day-treatments-${s.id}`} />
-                          </div>
-                        )}
-                        {/* Every note the day carries, each under its own name. `||`
-                            printed the treatment half and swallowed the rehab one, so a
-                            day written up with both -- which is every day signed off while
-                            the popup still offered two boxes -- read as half a record. */}
-                        {s.jr_physio_remarks && (
-                          <p className="mt-0.5 text-[10px] text-emerald-600"><span className="font-semibold">Treatment: </span>{s.jr_physio_remarks}</p>
-                        )}
-                        {s.rehab_remarks && (
-                          <p className="mt-0.5 text-[10px] text-emerald-600"><span className="font-semibold">Rehab: </span>{s.rehab_remarks}</p>
-                        )}
-                      </div>
-                      {done ? (
-                        <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
-                      ) : awaiting ? (
-                        // No button: the physio cannot place this day. Only the Branch Admin
-                        // books onto the published calendar, so this says who has it rather
-                        // than offering an action that would be refused.
-                        <span
-                          className="flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-semibold text-amber-700"
-                          title="An absence pushed this day past the end of the booked slots. Branch Admin assigns it a new date."
-                          data-testid={`physio-day-awaiting-${s.id}`}
-                        >
-                          <AlertCircle className="h-3 w-3" /> Needs a date
-                        </span>
-                      ) : blockedBy ? (
-                        // Treatment runs in order, so a later day cannot be ticked off
-                        // while an earlier one is open. Said in the button's tooltip
-                        // rather than only refused by the server after the press.
-                        <Button
-                          size="sm"
-                          disabled
-                          className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
-                          title={`Day ${blockedBy}${blockedByDate ? ` on ${blockedByDate}` : ""} has to be finished first`}
-                          data-testid={`physio-day-out-of-order-${s.id}`}
-                        >
-                          <Check className="mr-1 h-3 w-3" /> After Day {blockedBy}
-                        </Button>
-                      ) : canWork ? (
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-amber-200 text-xs text-amber-700 hover:bg-amber-50"
-                            onClick={() => setAbsentTarget(s)}
-                            data-testid={`physio-absent-day-${s.id}`}
-                          >
-                            <UserX className="mr-1 h-3 w-3" /> Absent
-                          </Button>
-                          {heldByReview ? (
-                            // A week of treatment is read before the next one is worked.
-                            // The same refusal the server makes, said on the button that
-                            // would otherwise offer the day and have the press thrown
-                            // back; the milestone banner above names the week and says
-                            // who is holding it.
-                            <Button
-                              size="sm"
-                              disabled
-                              className="bg-amber-100 text-xs text-amber-700 hover:bg-amber-100"
-                              title={reviewHoldMessage}
-                              data-testid={`physio-day-review-held-${s.id}`}
-                            >
-                              <AlertCircle className="mr-1 h-3 w-3" /> Review due
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              className="bg-sky-600 text-xs text-white hover:bg-sky-700"
-                              onClick={() => setCompleteTarget(s)}
-                              data-testid={`physio-complete-day-${s.id}`}
-                            >
-                              <Check className="mr-1 h-3 w-3" /> Complete
-                            </Button>
-                          )}
-                        </div>
-                      ) : (
-                        <Button
-                          size="sm"
-                          disabled
-                          className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
-                          title={heldByReview ? reviewHoldMessage : `This day is next, but ${fmtDate(s.slot_time)} has not come round yet`}
-                          data-testid={`physio-day-locked-${s.id}`}
-                        >
-                          <Check className="mr-1 h-3 w-3" /> Complete
-                        </Button>
-                      )}
+              <div className="space-y-4">
+                {/* Upcoming first: this popup is opened to work a day, and the day that
+                    asks for something is in this half. Completed is the record underneath
+                    it. The split was already in the ordering — nothing named it, so a
+                    twelve-row list had to be read badge by badge to find where the record
+                    ended and the work began. */}
+                <div data-testid="physio-days-upcoming">
+                  <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-600">
+                    <Clock className="h-3.5 w-3.5" /> Upcoming
+                    <span className="font-semibold text-slate-400">({upcomingDays.length})</span>
+                  </p>
+                  {upcomingDays.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-emerald-200 bg-emerald-50/40 p-4 text-center text-xs text-emerald-700" data-testid="physio-days-upcoming-empty">
+                      Every booked day is done.
                     </div>
-                  );
-                })}
+                  ) : (
+                    <div className="space-y-2">{upcomingDays.map(dayRow)}</div>
+                  )}
+                </div>
+
+                <div data-testid="physio-days-completed">
+                  <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-600">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Completed
+                    <span className="font-semibold text-slate-400">({completedDays.length})</span>
+                  </p>
+                  {completedDays.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400" data-testid="physio-days-completed-empty">
+                      No day has been signed off yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">{completedDays.map(dayRow)}</div>
+                  )}
+                </div>
               </div>
             )}
 
