@@ -1363,6 +1363,51 @@ const ROW_FEES = {
     noneHint: "Not referred for diet — there is no diet fee to collect",
     tone: "bg-orange-500 text-white hover:bg-orange-600",
   },
+  // The second thing sold under the word "diet" and separate money from the first — its
+  // own fields on the lead, its own schedule, its own row on the fee steps (see
+  // DIET_FEE_KINDS.chart). It has no tab on Fee Collected, because the Diet tab there
+  // reports the consultation half; it is here so the Diet Chart pill can report and
+  // collect its own fee rather than somebody else's.
+  //
+  // `applies` is the Nutritionist's recommendation, which is the server's own gate --
+  // collect_diet_chart_fee refuses a chart nobody has called for. The Consultation Fee
+  // it also waits on is the generic one rowFeeGate already applies to every fee but the
+  // first two.
+  diet_chart: {
+    label: "Diet Chart Fee",
+    details: "diet_chart_fee_payment_details",
+    paid: (l) => l.diet_chart_fee_paid,
+    mode: (l) => l.diet_chart_fee_payment_mode,
+    price: (l) => l.diet_chart_package_price,
+    applies: (l) => !!l.diet_chart,
+    noneHint: "No Diet Chart has been recommended — there is no chart fee to collect",
+    tone: "bg-orange-500 text-white hover:bg-orange-600",
+  },
+};
+
+// The branch pipeline is Consultation Booked -> Consultation Visit -> Fee Collected ->
+// Physio Assign, with Consultation Completed closing out a patient who bought no sessions
+// (see V3_CONSULTATION_STAGES). These are the two a patient can be standing on having
+// already passed the fee desk — the stages an unpaid rehab or diet fee gets stranded on.
+const PAST_FEE_DESK = ["Physio Assign", "Consultation Completed"];
+
+/**
+ * Which fee a stage's list is about, where that is not the Consultation Fee.
+ *
+ * Rehab, Diet Consultation and Diet Chart are not steps in the physio pipeline -- nothing
+ * writes them onto a lead, and matchesStage reads each off its own referral. They are
+ * desks, and each one has money of its own to take.
+ *
+ * The column at the end of those lists reported the CONSULTATION fee, which is in by the
+ * time anybody is referred anywhere: the Rehab desk's list showed a green "Paid" against
+ * every patient on it, including the one who owed eighteen thousand rupees of rehab and
+ * had no way to be charged for it from that screen. A desk's list has to report the
+ * desk's own fee, or the only money it names is money that is not its business.
+ */
+const STAGE_ROW_FEE = {
+  Rehab: "rehab",
+  "Diet Consultation": "diet",
+  "Diet Chart": "diet_chart",
 };
 
 /**
@@ -1400,6 +1445,18 @@ const feeStateOf = (l, fee) => {
 
 const treatmentFeeStateOf = (l) => feeStateOf(l, "treatment");
 const consultationFeeStateOf = (l) => feeStateOf(l, "consultation");
+
+/**
+ * Does this patient still owe the Fee Collected desk anything?
+ *
+ * Asked of the four fees that desk has a tab for, so a patient is never pulled onto that
+ * list by a debt none of its tabs could show. Both unsettled readings count: a fee never
+ * collected, and a balance left by a short one.
+ */
+const owesFeeDesk = (l) => FEE_TABS.some((t) => {
+  const state = feeStateOf(l, t.action);
+  return state.kind === "due" || state.kind === "balance";
+});
 
 /**
  * What stands between this row and the fee it is offering to collect, if anything.
@@ -2812,6 +2869,28 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       return (referralLive && (!!lead.rehab_referred || !!lead.rehab_package_id))
         || lead.rehab_fee_paid != null;
     }
+    // A fee nobody collected does not stop being owed because the patient moved on.
+    //
+    // The Treatment Fee is what advances a patient to Physio Assign, and the rehab course
+    // and the diet plan sold at the same consultation are separate money that the same
+    // move does not take. So a patient stands at Physio Assign with their sessions
+    // running, owing eighteen thousand of rehab and eight hundred of diet, one stage past
+    // the only desk that collects either — and Fee Collected is the stage nobody can go
+    // back to. The popup's own panel was given those fees to show; the list was not, so
+    // the branch could only find the debt by opening patients one at a time and guessing
+    // which ones.
+    //
+    // Fee Collected is a desk rather than a step, then: everybody standing at it, and
+    // everybody who left it still owing something it can take. Only the four fees it has
+    // tabs for count (see owesFeeDesk) — a patient pulled onto this list by a debt none
+    // of its tabs could show would be a row with nothing on it to explain why.
+    //
+    // Nobody is dragged back from Completed: isCourseComplete is false while a rehab fee
+    // or a diet plan is outstanding (see programmePending), so a patient with arrears has
+    // not reached that pill, and one who has reached it has none.
+    if (!isConsultant && stageName === "Fee Collected" && lead[stageField] !== stageName) {
+      return PAST_FEE_DESK.includes(lead[stageField]) && owesFeeDesk(lead);
+    }
     return lead[stageField] === stageName;
   }, [isConsultant, stageField]);
 
@@ -2871,8 +2950,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const rowFee = activeFee.action;
   const rowFeeSpec = ROW_FEES[rowFee];
 
-  // The Consultation Fee, collected from the row it is owed on — the same shortcut the
-  // Treatment Fee button above is, for the fee that comes first.
+  // The stage's own fee, collected from the row it is owed on — the same shortcut the
+  // Treatment Fee button above is.
+  //
+  // The Consultation Fee on most stages, because on most of them it is the fee the stage
+  // is waiting for. Not on all of them: Rehab, Diet Consultation and Diet Chart are desks
+  // rather than steps, each with money of its own, and the consultation money is in by the
+  // time anybody is referred to one — so on those three this column was a green "Paid"
+  // against every row and a button for a fee that was never that desk's business. See
+  // STAGE_ROW_FEE, which says which fee each list is actually about.
   //
   // Taking it meant opening each patient in turn to reach the Fee Collected card the popup
   // already lives on, on a list where every row is somebody who owes it. The button at the
@@ -2891,12 +2977,17 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   // booked rows is money taken before the visit it belongs to, and the column it needs
   // costs the seven reporting ones a point or two each to say nothing. The fee is
   // collected from Consultation Visit onward, where it is real.
-  const showConsultationAction = !showDiscountColumn && !isConsultant && stageFilter !== "Consultation Booked";
+  const showStageFeeAction = !showDiscountColumn && !isConsultant && stageFilter !== "Consultation Booked";
+  // Which fee that column reports and collects: the open desk's own where the stage has
+  // one of its own (see STAGE_ROW_FEE), and the Consultation Fee everywhere else, which
+  // is the fee every one of those stages is actually waiting on.
+  const stageRowFee = STAGE_ROW_FEE[stageFilter] || "consultation";
+  const stageRowFeeSpec = ROW_FEES[stageRowFee];
   const cols = showFeeAction
     ? COLS_WITH_ACTION
     : showDiscountColumn
       ? COLS_WITH_DISCOUNT
-      : showConsultationAction
+      : showStageFeeAction
         ? COLS_PLAIN_WITH_ACTION
         : COLS_PLAIN;
 
@@ -4254,10 +4345,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     else openCollectFeeDraft(lead);
   };
 
-  // What the table's Consultation Fee row button does — same handoff as the Treatment Fee
-  // one beside it.
-  const openRowConsultationFee = (lead) => openRowFee(lead, "consultation");
-
   // The same fork again for the two parallel programmes, so the Rehab and Diet tabs' row
   // buttons reach the popups the panel's own cards reach.
   //
@@ -4282,14 +4369,23 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     else openDietFeeDraft("consultation");
   };
 
-  // Which of the four openers a fee name reaches. Read in openRowFee and in the effect
-  // that finishes the job once the patient is selected, so the two cannot disagree about
-  // what a button was asking for.
+  // The chart half, through the same popup with its other kind selected — one draft
+  // serves both, see openDietFeeDraft.
+  const openDietChartFeeFor = (lead) => {
+    const state = feeStateOf(lead, "diet_chart");
+    if (state.kind === "balance") openPartialCollectPopup(state.nextIdx, "diet_chart", lead);
+    else openDietFeeDraft("chart");
+  };
+
+  // Which of the openers a fee name reaches. Read in openRowFee and in the effect that
+  // finishes the job once the patient is selected, so the two cannot disagree about what
+  // a button was asking for.
   const feeOpeners = {
     consultation: openConsultationFeeFor,
     treatment: openTreatmentFeeFor,
     rehab: openRehabFeeFor,
     diet: openDietFeeFor,
+    diet_chart: openDietChartFeeFor,
   };
 
   /**
@@ -5667,7 +5763,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
           {/* Fee Collected is the stage where a negotiated Consultation Fee has become a
               fact, so the discount and total columns are added there alone — on every
               earlier stage there is no payment yet and they would be a row of dashes. */}
-          <table className={`w-full table-fixed text-sm ${showFeeAction ? "min-w-[1160px]" : showDiscountColumn ? "min-w-[1060px]" : showConsultationAction ? "min-w-[980px]" : "min-w-[880px]"}`}>
+          <table className={`w-full table-fixed text-sm ${showFeeAction ? "min-w-[1160px]" : showDiscountColumn ? "min-w-[1060px]" : showStageFeeAction ? "min-w-[980px]" : "min-w-[880px]"}`}>
             <thead className="sticky top-0 z-10 bg-slate-500 text-xs uppercase text-white">
               <tr>
                 <th className={`${cols.sno} px-3 py-2 text-left align-middle`}>S.No</th>
@@ -5697,7 +5793,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     is already named for that fee, so naming this one after it too put
                     "Treatment Fee" over two columns of the same table. */}
                 {showFeeAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>Collect</th>}
-                {showConsultationAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>Consultation Fee</th>}
+                {/* Named for the fee under it. On Rehab and the two diet pills that is
+                    that desk's own fee, and the heading has to move with it: "Consultation
+                    Fee" over a column of Rehab Fee buttons is the column reporting one fee
+                    and collecting another. */}
+                {showStageFeeAction && <th className={`${cols.action} px-3 py-2 text-left align-middle`}>{stageRowFeeSpec.label}</th>}
               </tr>
             </thead>
             {/* Every cell top-aligns, and every single-line one carries leading-5 so its
@@ -5901,14 +6001,21 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         </td>
                       );
                     })()}
-                    {showConsultationAction && (() => {
-                      const c = consultationFeeStateOf(l);
-                      // The prescription this fee waits on, still missing. The button stays
-                      // on the row and stays pressable — it is the way to the uploader — but
-                      // it says what it will actually do, in the same amber the panel's
-                      // Documents tab wears while the same page is outstanding. A button
-                      // labelled "Collect" that will not collect is the thing being fixed.
-                      const rxMissing = c.kind !== "paid" && rxDue(l);
+                    {showStageFeeAction && (() => {
+                      const c = feeStateOf(l, stageRowFee);
+                      // The prescription the CONSULTATION fee waits on, still missing. The
+                      // button stays on the row and stays pressable — it is the way to the
+                      // uploader — but it says what it will actually do, in the same amber
+                      // the panel's Documents tab wears while the same page is outstanding.
+                      // A button labelled "Collect" that will not collect is the thing being
+                      // fixed. The other fees have no page to file and are held back by
+                      // gates of their own instead, below.
+                      const rxMissing = stageRowFee === "consultation" && c.kind !== "paid" && rxDue(l);
+                      // Those gates: the server refuses every fee but the first until the
+                      // Consultation Fee is in, and the Rehab Fee until a course has been
+                      // priced. The same ones the Fee Collected tabs put on the same fees,
+                      // and only asked about a fee genuinely still due — see rowFeeGate.
+                      const gate = !rxMissing && c.kind === "due" ? rowFeeGate(l, stageRowFee) : null;
                       return (
                         // stopPropagation on the cell, not just the button: the whole row
                         // opens the patient, and a click that lands a pixel beside the
@@ -5917,9 +6024,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         <td
                           className="whitespace-nowrap px-3 py-3 align-top text-xs"
                           onClick={(e) => e.stopPropagation()}
-                          data-testid={`cons-row-consultation-${l.id}`}
+                          data-testid={`cons-row-${stageRowFee}-${l.id}`}
                         >
-                          {c.kind === "paid" ? (
+                          {/* A fee this patient does not owe at all. Cannot happen on the
+                              Consultation Fee, which every patient owes — it is a referral
+                              withdrawn after the money came in, or a chart the Nutritionist
+                              has not called for. */}
+                          {c.kind === "none" ? (
+                            <span className="text-slate-300" title={c.hint}>—</span>
+                          ) : c.kind === "paid" ? (
                             // Says so and stops there, exactly as the popup's card does. A
                             // fee that is in is not a thing to press; correcting one is done
                             // from the patient, where the figure it is correcting is on screen.
@@ -5935,19 +6048,25 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             <>
                               <Button
                                 size="sm"
-                                className={`w-full ${rxMissing
+                                // A blocked fee keeps its button — it is the way to the step
+                                // that is blocking it — but drops out of the filled colours
+                                // the collectable ones wear, so a row that cannot take money
+                                // does not look like one that can.
+                                className={`w-full ${rxMissing || gate
                                   ? "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
                                   : c.kind === "balance"
                                   ? "bg-amber-500 text-white hover:bg-amber-600"
-                                  : "bg-sky-600 text-white hover:bg-sky-700"} shadow-sm ${ACT_BTN}`}
-                                title={rxMissing ? "Upload the prescription before collecting the Consultation Fee" : undefined}
-                                onClick={() => openRowConsultationFee(l)}
-                                data-testid={`cons-row-consultation-collect-${l.id}`}
+                                  : stageRowFeeSpec.tone} shadow-sm ${ACT_BTN}`}
+                                title={rxMissing ? "Upload the prescription before collecting the Consultation Fee" : gate?.hint}
+                                onClick={() => openRowFee(l, stageRowFee)}
+                                data-testid={`cons-row-${stageRowFee}-collect-${l.id}`}
                               >
                                 {rxMissing
                                   ? <FileText className="mr-1 h-3.5 w-3.5 shrink-0" />
+                                  : gate
+                                  ? <AlertCircle className="mr-1 h-3.5 w-3.5 shrink-0" />
                                   : <IndianRupee className="mr-1 h-3.5 w-3.5 shrink-0" />}
-                                {rxMissing ? "Prescription" : c.kind === "balance" ? "Collect Balance" : "Collect"}
+                                {rxMissing ? "Prescription" : gate ? gate.label : c.kind === "balance" ? "Collect Balance" : "Collect"}
                               </Button>
                               {/* The figure the button is about, under it. A part-paid fee
                                   is the one case where "Collect" alone is a question rather
@@ -5955,11 +6074,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                   prescription is outstanding it says so instead: the figure
                                   is not the thing standing in the way. */}
                               <span
-                                className={`mt-1 block truncate text-[10px] font-medium ${rxMissing ? "text-amber-600" : c.kind === "balance" && c.overdue ? "text-rose-600" : c.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
-                                title={rxMissing ? "Upload the prescription before collecting the Consultation Fee" : c.kind === "balance" && c.due ? `Due ${c.due}` : undefined}
+                                className={`mt-1 block truncate text-[10px] font-medium ${rxMissing || gate ? "text-amber-600" : c.kind === "balance" && c.overdue ? "text-rose-600" : c.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
+                                title={rxMissing ? "Upload the prescription before collecting the Consultation Fee" : gate ? gate.hint : c.kind === "balance" && c.due ? `Due ${c.due}` : undefined}
                               >
                                 {rxMissing
                                   ? "Required first"
+                                  : gate
+                                  ? gate.note
                                   : c.kind === "balance"
                                   ? `${rupees(c.balance)} due${c.overdue ? " · overdue" : ""}`
                                   : c.amount != null ? rupees(c.amount) : "—"}
@@ -5973,7 +6094,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={showFeeAction ? 11 : showDiscountColumn ? 10 : showConsultationAction ? 8 : 7} className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan={showFeeAction ? 11 : showDiscountColumn ? 10 : showStageFeeAction ? 8 : 7} className="px-4 py-8 text-center text-sm text-slate-400">
                   {loading
                     ? "Loading…"
                     // An empty tab is not an empty stage: saying "no leads in consultations"
