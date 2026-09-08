@@ -64,6 +64,9 @@ const presetFilter = (p) => { const r = p.range(); return r ? { key: p.key, labe
  *  which is how the Custom pill knows to stay quiet while a preset is the active one. */
 const isPreset = (f) => !f || DATE_PRESETS.some((p) => p.key === f.key);
 
+/** The stored timestamp as a plain YYYY-MM-DD, which is what the date inputs compare. */
+const dayOf = (iso) => String(iso || "").slice(0, 10);
+
 const PAYMENT_MODE_LABELS = { ...Object.fromEntries(PAYMENT_MODES.map((m) => [m.value, m.label])), split: "Split" };
 
 // The modes that leave a trail somewhere else, and what that trail is called. A UPI ID and
@@ -677,23 +680,125 @@ const DetailRow = ({ label, value }) => (
   </div>
 );
 
-/** How the collected fees divide between the two masters and Fitsiomax.
+/** Half of a class's takings are its master's. Kept in step with MASTER_SHARE in
+ *  backend/routers/v3_zumba.py — the two work the same rows, and a split here that
+ *  disagreed with the server's would be somebody's pay disagreeing with itself. */
+const MASTER_SHARE = 0.5;
+
+const paidOf = (r) => Number(r?.fee_paid || 0);
+const slotOf = (r) => String(r?.time_slot || "").trim();
+const sumPaid = (list) => list.reduce((n, r) => n + paidOf(r), 0);
+const money2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * How the collected fees divide between the two masters and Fitsiomax — as lanes that can
+ * be opened, not only figures to be read.
  *
- *  Beside the list rather than in the card row above it, because it is a breakdown of one
- *  card's figure rather than a fifth card: Payment Done already answers what came in, and
- *  this answers whose it is. Shown only while that card is the one selected, so the header
- *  of every other view is left alone.
+ * The slot is what decides whose money it is. One master takes the 10 o'clock class and
+ * another the 11 o'clock, each keeps half of what their own slot collected, and the rest
+ * is Fitsiomax's. Worked out here rather than taken from the server's revenue_split,
+ * because the day and mode filters below narrow what this popup is showing and a lane
+ * figure carried over from the whole branch would no longer describe the lines under it.
+ * The arithmetic is the server's, step for step, so with nothing filtered these are the
+ * same four numbers it sends — see revenue_split in v3_zumba.
  *
- *  The slot is what decides whose money it is. One master takes the 10 o'clock class and
- *  another the 11 o'clock, each keeps half of what their own slot collected, and the rest
- *  is Fitsiomax's. Computed on the server so the figures cannot drift from the total on
- *  the card beside them — see revenue_split in v3_zumba.
+ * Fitsiomax's share is the remainder rather than a second multiplication, for the reason
+ * the server gives: these figures are somebody's pay and they have to add back up to what
+ * was taken. That is also what decides where money on a customer with no slot yet goes —
+ * it falls to Fitsiomax, and gets a lane of its own so nobody reads that share as larger
+ * than Fitsiomax has really earned.
+ *
+ * Each lane carries the test for the rows behind it, so the tab showing a figure and the
+ * table showing what it is made of cannot fall out of step.
  */
-const RevenueChip = ({ label, sub, value, accent }) => (
-  <div className={`rounded-lg border px-2.5 py-1 ${accent}`}>
-    <p className="text-[9px] font-bold uppercase leading-none tracking-wide opacity-70">{label}</p>
-    <p className="mt-0.5 text-sm font-extrabold leading-none">{rupees(value)}</p>
-    {sub && <p className="mt-0.5 text-[9px] font-medium leading-none opacity-60">{sub}</p>}
+const revenueLanes = (list) => {
+  const slots = TIME_SLOTS.map((slot, i) => {
+    const collected = sumPaid(list.filter((r) => slotOf(r) === slot));
+    return {
+      // Master 01 takes the first slot and Master 02 the second. The pairing is the
+      // branch's timetable rather than anything a registration records, so the number
+      // comes off the slot's position and no name is claimed for it.
+      key: `slot-${i + 1}`,
+      label: `Master 0${i + 1} Revenue`,
+      sub: slot,
+      value: money2(collected * MASTER_SHARE),
+      accent: "sky",
+      match: (r) => slotOf(r) === slot,
+    };
+  });
+  const total = sumPaid(list);
+  const mastersTotal = money2(slots.reduce((n, s) => n + s.value, 0));
+  const unslotted = money2(sumPaid(list.filter((r) => !TIME_SLOTS.includes(slotOf(r)))));
+  const lanes = [
+    {
+      // Fitsiomax's half comes off both classes, so its lane is every payment: this is the
+      // tab that holds the whole list, and the one the popup opens on.
+      key: "all",
+      label: "FitsioMax Revenue",
+      sub: "every payment",
+      value: money2(total - mastersTotal),
+      accent: "emerald",
+      match: () => true,
+    },
+    ...slots,
+  ];
+  // Normally absent: a membership is prepaid and the slot is set when it is sold. When it
+  // is not, that money has no master to go to and sits in the Fitsiomax figure. A lane
+  // rather than only a caption, so the rows behind it can be opened and put right.
+  if (unslotted > 0) {
+    lanes.push({
+      key: "unslotted",
+      label: "No slot yet",
+      sub: "counted with FitsioMax",
+      value: unslotted,
+      accent: "amber",
+      match: (r) => !TIME_SLOTS.includes(slotOf(r)),
+    });
+  }
+  return lanes;
+};
+
+// On and off for each lane's colour. Written out rather than assembled from the accent
+// name, because a class string Tailwind only sees put together at runtime is a class
+// string Tailwind does not ship.
+const LANE_ACCENTS = {
+  emerald: {
+    on: "border-emerald-500 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-500",
+    off: "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50/50",
+  },
+  sky: {
+    on: "border-sky-500 bg-sky-50 text-sky-800 ring-1 ring-sky-500",
+    off: "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:bg-sky-50/50",
+  },
+  amber: {
+    on: "border-amber-500 bg-amber-50 text-amber-800 ring-1 ring-amber-500",
+    off: "border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50/50",
+  },
+};
+
+/** The lanes, stretched across the popup and each one a way in. Equal widths rather than
+ *  chips sized by their own text: they are the same kind of thing as each other, and a row
+ *  where Fitsiomax's tab is twice the width of a master's says they are not. */
+const RevenueLanes = ({ lanes, lane, onPick }) => (
+  <div className="flex flex-wrap gap-2" data-testid="zumba-revenue-split">
+    {lanes.map((l) => {
+      const on = l.key === lane;
+      const accent = LANE_ACCENTS[l.accent] || LANE_ACCENTS.emerald;
+      return (
+        <button
+          key={l.key}
+          type="button"
+          onClick={() => onPick(l.key)}
+          aria-pressed={on}
+          className={`min-w-[8.5rem] flex-1 rounded-lg border px-3 py-2 text-left transition ${on ? accent.on : accent.off}`}
+          data-testid={`zumba-revenue-lane-${l.key}`}
+        >
+          <p className="text-[9px] font-bold uppercase leading-none tracking-wide opacity-70">{l.label}</p>
+          <p className="mt-1 text-base font-extrabold leading-none">{rupees(l.value)}</p>
+          <p className="mt-1 text-[9px] font-medium leading-none opacity-60">{l.sub}</p>
+        </button>
+      );
+    })}
   </div>
 );
 
@@ -743,43 +848,6 @@ const ClassMasters = ({ masters, onSet, busy }) => (
   </div>
 );
 
-const RevenueSplit = ({ split }) => {
-  if (!split) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5" data-testid="zumba-revenue-split">
-      <RevenueChip
-        label="FitsioMax Revenue"
-        value={split.fitsiomax}
-        accent="border-emerald-200 bg-emerald-50 text-emerald-800"
-      />
-      {(split.slots || []).map((s) => (
-        <RevenueChip
-          key={s.slot}
-          // Master 01 takes the first slot and Master 02 the second. The pairing is the
-          // branch's timetable rather than anything a registration records, so the number
-          // comes off the slot's position and no name is claimed for it.
-          label={`Master 0${s.master_no} Revenue`}
-          sub={s.slot}
-          value={s.master_share}
-          accent="border-sky-200 bg-sky-50 text-sky-800"
-        />
-      ))}
-      {/* Normally absent: a membership is prepaid and the slot is set when it is sold. When
-          it is not, that money has no master to go to and sits in the Fitsiomax figure,
-          which would otherwise read as more than Fitsiomax has earned. Named here so the
-          gap is visible where the money is counted, not only on the "to fill in" badge. */}
-      {Number(split.unslotted || 0) > 0 && (
-        <RevenueChip
-          label="No slot yet"
-          sub="counted with FitsioMax"
-          value={split.unslotted}
-          accent="border-amber-200 bg-amber-50 text-amber-800"
-        />
-      )}
-    </div>
-  );
-};
-
 /**
  * The Payment Done card, opened rather than filtered.
  *
@@ -793,12 +861,62 @@ const RevenueSplit = ({ split }) => {
  * The lines are read off every registration rather than off the filtered list, and drop
  * whoever has discontinued exactly as the server's total does. A popup opened from a
  * figure whose lines add up to less than the figure that was clicked is the one thing a
- * card must never do, so the total is footed here and can be read back against the card
- * that opened it. The date pills and the search box below are left alone, still working
- * the table they belong to.
+ * card must never do, so it opens on every payment, footed, and can be read straight back
+ * against the card that opened it.
+ *
+ * From there it narrows three ways, and each one is a question a branch actually asks of
+ * this figure: whose money it is, which day it came in on, and how it arrived. They are
+ * this popup's own filters rather than the table's underneath — reading the takings is not
+ * a reason to lose the view being worked, and one set of pills writing both would mean it
+ * is. Whatever is left showing is what the header, the lanes and the foot all describe.
  */
-const PaymentDoneModal = ({ rows, split, onClose }) => {
-  const collected = rows.reduce((n, r) => n + Number(r.fee_paid || 0), 0);
+const PaymentDoneModal = ({ rows, onClose }) => {
+  const [lane, setLane] = useState("all");
+  const [dateFilter, setDateFilter] = useState(null);
+  const [modeFilter, setModeFilter] = useState("");
+
+  // The day and the mode narrow the money itself, so the lanes are worked out from what is
+  // left after them: on a week one master did not teach, that master's tab reads zero
+  // rather than carrying the whole branch's figure over a list that no longer holds it.
+  // The lane is applied after, or picking one would empty the tabs beside it.
+  const scoped = useMemo(() => {
+    let list = rows;
+    if (dateFilter) {
+      // Compared as timestamps rather than as day strings: the picker hands back Dates
+      // whose ends are the start and the end of a day, so a single day is a range like any
+      // other and needs no special case.
+      const fromTs = dateFilter.from?.getTime();
+      const toTs = dateFilter.to?.getTime();
+      list = list.filter((r) => {
+        // The day the registration was taken — the only date this record carries. A fee is
+        // settled against the membership rather than stamped with a date of its own, so
+        // "today" here means today's registrations, the same as it does on the table.
+        const ts = new Date(`${dayOf(r.created_at)}T00:00:00`).getTime();
+        if (!ts) return false;
+        if (fromTs && ts < fromTs) return false;
+        if (toTs && ts > toTs) return false;
+        return true;
+      });
+    }
+    if (modeFilter) list = list.filter((r) => r.payment_mode === modeFilter);
+    return list;
+  }, [rows, dateFilter, modeFilter]);
+
+  const lanes = useMemo(() => revenueLanes(scoped), [scoped]);
+  const picked = lanes.find((l) => l.key === lane) || lanes[0];
+  const shown = useMemo(() => scoped.filter((r) => (picked?.match || (() => true))(r)), [scoped, picked]);
+
+  // A lane can go away under a filter — the unslotted one exists only while there is
+  // unslotted money — and leaving the popup pointed at a tab that is no longer on screen
+  // would show a list nothing above it explains.
+  useEffect(() => {
+    if (!lanes.some((l) => l.key === lane)) setLane("all");
+  }, [lanes, lane]);
+
+  const collected = sumPaid(shown);
+  const everything = sumPaid(rows);
+  const narrowed = shown.length !== rows.length;
+
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
@@ -807,31 +925,92 @@ const PaymentDoneModal = ({ rows, split, onClose }) => {
     >
       {/* overflow-hidden, or the tinted header paints its own square corners over the
           rounded ones this container draws. */}
-      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b bg-emerald-50/60 p-5">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-slate-800">Payment Done</h3>
             <p className="mt-1 text-2xl font-extrabold leading-none text-emerald-700" data-testid="zumba-payment-done-total">
               {rupees(collected)}
             </p>
-            <p className="mt-1 text-[11px] text-slate-500">collected from {pluralCustomers(rows.length)}</p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              collected from {pluralCustomers(shown.length)}
+              {/* What was clicked, kept in sight while the popup is narrowed: the figure
+                  above is no longer the card's once a filter is on, and a number that has
+                  quietly stopped being the one you came in on is worse than a caption with
+                  another number in it. */}
+              {narrowed ? ` · of ${rupees(everything)} from ${pluralCustomers(rows.length)}` : ""}
+            </p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close" data-testid="zumba-payment-done-close">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {/* Whose the collected money is, above the payments it was made of. */}
-          {split && (
-            <div className="border-b border-slate-100 px-5 py-3">
-              <RevenueSplit split={split} />
-            </div>
-          )}
+        {/* Whose the collected money is, above the payments it was made of — and the way
+            into each of them. */}
+        <div className="shrink-0 border-b border-slate-100 px-5 py-3">
+          <RevenueLanes lanes={lanes} lane={picked?.key} onPick={setLane} />
+        </div>
 
-          {rows.length === 0 ? (
+        {/* One line, two groups: when the days are asked on the left and the payment mode
+            on the right, the space between them is what says they are separate questions.
+            The same pair the table downstairs carries, because they are the same two
+            questions — asked here of the money rather than of the roll. */}
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-slate-100 px-5 py-2.5">
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="zumba-payment-done-date-filter">
+            {DATE_PRESETS.map((preset) => {
+              const active = preset.key === "all" ? !dateFilter : dateFilter?.key === preset.key;
+              return (
+                <button
+                  key={preset.key}
+                  type="button"
+                  onClick={() => setDateFilter(presetFilter(preset))}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+                  data-testid={`zumba-payment-done-date-${preset.key}`}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+            {/* The trigger is a Button this component does not own, so its size and text
+                are pinned from out here rather than by adding props to a control five
+                other boards share. Handed null while a preset is active, so it reads
+                "Custom" rather than echoing the pill already lit beside it. */}
+            <span className="[&_button]:h-[30px] [&_button]:rounded-md [&_button]:px-3 [&_button]:text-xs [&_button]:font-semibold [&_svg]:mr-1.5 [&_svg]:h-3.5 [&_svg]:w-3.5">
+              <DateFilterPopover
+                value={isPreset(dateFilter) ? null : dateFilter}
+                onChange={setDateFilter}
+                centered
+                placeholder="Custom"
+                testid="zumba-payment-done-date-custom"
+              />
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="zumba-payment-done-mode-filter">
+            {MODE_FILTERS.map(([key, label]) => (
+              <button
+                key={key || "all"}
+                type="button"
+                onClick={() => setModeFilter(key)}
+                className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                  modeFilter === key
+                    ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+                }`}
+                data-testid={`zumba-payment-done-mode-${key || "all"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {shown.length === 0 ? (
             <p className="px-5 py-12 text-center text-sm text-slate-400" data-testid="zumba-payment-done-empty">
-              Nothing has been collected at this branch yet.
+              {rows.length > 0
+                ? "Nothing collected under this filter."
+                : "Nothing has been collected at this branch yet."}
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -847,7 +1026,7 @@ const PaymentDoneModal = ({ rows, split, onClose }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {rows.map((r, i) => {
+                  {shown.map((r, i) => {
                     const due = Number(r.fee_amount || 0) - Number(r.fee_paid || 0);
                     return (
                       <tr key={r.id} className="align-top" data-testid={`zumba-payment-done-row-${r.id}`}>
@@ -865,9 +1044,9 @@ const PaymentDoneModal = ({ rows, split, onClose }) => {
                           ) : <span className="text-xs leading-5 text-slate-300">—</span>}
                         </td>
                         {/* The slot, because it is what decides whose money this line is:
-                            the split above is this column added up. A row with none yet
+                            the lane above is this column added up. A row with none yet
                             says so rather than showing a dash, since those rows are the
-                            reason the "No slot yet" chip is up there at all. */}
+                            reason the "No slot yet" lane is up there at all. */}
                         <td className="px-4 py-3">
                           {r.time_slot
                             ? <p className="text-xs leading-5 text-slate-600">{r.time_slot}</p>
@@ -889,7 +1068,7 @@ const PaymentDoneModal = ({ rows, split, onClose }) => {
                     );
                   })}
                 </tbody>
-                {/* Footed, so the lines can be read back against the card that opened them. */}
+                {/* Footed, so the lines can be read back against the tab that opened them. */}
                 <tfoot className="border-t-2 border-slate-200 bg-slate-50">
                   <tr>
                     <td colSpan={5} className="px-4 py-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">Total collected</td>
@@ -1216,9 +1395,6 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
     </div>
   );
 };
-
-/** The stored timestamp as a plain YYYY-MM-DD, which is what the date inputs compare. */
-const dayOf = (iso) => String(iso || "").slice(0, 10);
 
 /** Today, as the branch's own calendar has it. Not off toISOString(), which is UTC: at
  *  three in the morning in India that still reads as yesterday, and a membership would be
@@ -2226,7 +2402,6 @@ export const ZumbaPanel = ({ branchId }) => {
       {paymentDoneOpen && (
         <PaymentDoneModal
           rows={paymentDoneRows}
-          split={summary.revenue_split}
           onClose={() => setPaymentDoneOpen(false)}
         />
       )}
