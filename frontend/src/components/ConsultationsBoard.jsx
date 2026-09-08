@@ -8502,6 +8502,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       ? Math.min(100, Math.round((courseCompleted / totalCourseSessions) * 100))
                       : 0;
                     const courseDone = totalCourseSessions > 0 && courseRemaining === 0;
+                    // Whether there is a delivery to report at all. Read once: the column
+                    // it fills, that column's heading and the spells inside it are three
+                    // places that would otherwise each decide for themselves.
+                    const hasPhysioJourney = !!physioProgress && (physioProgress.previous.length > 0 || !!physioProgress.current);
                     // Physio Assign is a stage on the TREATMENT pipeline, and it used to be
                     // written as though treatment were the only thing a consultation could
                     // sell. It has a tab row again, because it is not: the Consultant can send
@@ -8542,106 +8546,131 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       >
                         {detailBody || (
                           <>
-                            <PanelCard testid="cons-physio-assign-summary">
-                              <PanelRow
-                                label="Treatment Package"
-                                value={`${selectedLead.session_package_name || "—"}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`}
-                              />
-                              <PanelRow
-                                label="Assigned Physio"
-                                value={selectedLead.assigned_physio_name || "Not assigned"}
-                                tone={assigned ? "" : "text-amber-700"}
-                              />
-                              {/* The two numbers this card is opened for. Sessions Completed
-                                  carries what is left rather than making the reader subtract,
-                                  because "4 left" is the thing the branch acts on. */}
-                              <PanelRow label="Total Sessions" value={totalCourseSessions || "—"} />
-                              <PanelRow
-                                label="Sessions Completed"
-                                value={`${courseCompleted} of ${totalCourseSessions || "—"}`}
-                                tone={courseCompleted > 0 ? "text-emerald-700" : ""}
-                                note={totalCourseSessions > 0 ? (courseDone ? "course complete" : `${courseRemaining} left`) : ""}
-                                noteTone={courseDone ? "text-emerald-600" : "text-slate-500"}
-                              />
-                              {selectedLead.diet_coach_name && (
-                                <PanelRow
-                                  label="Diet Consultation"
-                                  value={`${selectedLead.diet_coach_name}${selectedLead.diet_appointment_at ? ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}` : ""}`}
-                                />
-                              )}
-                            </PanelCard>
+                            {/* Two columns, because this panel answers two questions and
+                                they were stacked into one column a screen and a half long:
+                                what was sold — the package, the physio, the count, how far
+                                in — and who has actually delivered it. Side by side they
+                                are read together, which is how they are used: the branch is
+                                checking the second against the first.
 
-                            {/* The same two numbers as one length, so how far in the patient
-                                is reads at a glance instead of by subtraction. */}
-                            {totalCourseSessions > 0 && (
-                              <div className="mt-2" data-testid="cons-physio-assign-progress">
-                                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                                  <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${coursePct}%` }} />
-                                </div>
-                                <p className="mt-1 text-[10px] font-medium text-slate-500">
-                                  {coursePct}% of the course delivered
-                                  {courseRemaining > 0 ? ` · ${courseRemaining} session${courseRemaining === 1 ? "" : "s"} to go` : ""}
-                                </p>
-                              </div>
-                            )}
+                                The action goes under the people rather than under the
+                                course, because reassigning is something done to the
+                                delivery and not to the package. What is still owed keeps
+                                the full width beneath both, where money on this panel has
+                                always been the last thing read and belongs to the patient
+                                rather than to either column. */}
+                            <div className="grid grid-cols-1 gap-x-4 gap-y-3 lg:grid-cols-2">
+                              <div className="min-w-0 space-y-2" data-testid="cons-physio-assign-course">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Session Details</p>
+                                <PanelCard testid="cons-physio-assign-summary">
+                                  <PanelRow
+                                    label="Treatment Package"
+                                    value={`${selectedLead.session_package_name || "—"}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`}
+                                  />
+                                  <PanelRow
+                                    label="Assigned Physio"
+                                    value={selectedLead.assigned_physio_name || "Not assigned"}
+                                    tone={assigned ? "" : "text-amber-700"}
+                                  />
+                                  {/* The two numbers this card is opened for. Sessions Completed
+                                      carries what is left rather than making the reader subtract,
+                                      because "4 left" is the thing the branch acts on. */}
+                                  <PanelRow label="Total Sessions" value={totalCourseSessions || "—"} />
+                                  <PanelRow
+                                    label="Sessions Completed"
+                                    value={`${courseCompleted} of ${totalCourseSessions || "—"}`}
+                                    tone={courseCompleted > 0 ? "text-emerald-700" : ""}
+                                    note={totalCourseSessions > 0 ? (courseDone ? "course complete" : `${courseRemaining} left`) : ""}
+                                    noteTone={courseDone ? "text-emerald-600" : "text-slate-500"}
+                                  />
+                                  {selectedLead.diet_coach_name && (
+                                    <PanelRow
+                                      label="Diet Consultation"
+                                      value={`${selectedLead.diet_coach_name}${selectedLead.diet_appointment_at ? ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}` : ""}`}
+                                    />
+                                  )}
+                                </PanelCard>
 
-                            {/* Who delivered it, in the order the patient had them: every
-                                physio before this one, then this one. A reassignment leaves
-                                the previous physio's completed days behind it, and the branch
-                                needs to see where they left off before it reads what the new
-                                physio has picked up. */}
-                            {physioProgress && (physioProgress.previous.length > 0 || physioProgress.current) && (
-                              <div className="mt-3 space-y-1.5" data-testid="cons-physio-assign-journey">
-                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                                  {physioProgress.reassigned
-                                    ? `Physio History · ${physioProgress.previous.length + (physioProgress.current ? 1 : 0)} physios`
-                                    : "Delivered By"}
-                                </p>
-                                {physioProgress.previous.map((spell, i) => (
-                                  <PhysioSpell
-                                    key={`${spell.physio_id}-${i}`}
-                                    spell={spell}
-                                    packageSessions={totalCourseSessions}
-                                    testid={`cons-physio-spell-previous-${i}`}
-                                  />
-                                ))}
-                                {physioProgress.current && (
-                                  <PhysioSpell
-                                    spell={physioProgress.current}
-                                    packageSessions={totalCourseSessions}
-                                    testid="cons-physio-spell-current"
-                                  />
+                                {/* The same two numbers as one length, so how far in the patient
+                                    is reads at a glance instead of by subtraction. */}
+                                {totalCourseSessions > 0 && (
+                                  <div data-testid="cons-physio-assign-progress">
+                                    <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                                      <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${coursePct}%` }} />
+                                    </div>
+                                    <p className="mt-1 text-[10px] font-medium text-slate-500">
+                                      {coursePct}% of the course delivered
+                                      {courseRemaining > 0 ? ` · ${courseRemaining} session${courseRemaining === 1 ? "" : "s"} to go` : ""}
+                                    </p>
+                                  </div>
                                 )}
                               </div>
-                            )}
 
-                            <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                              {!assigned
-                                ? "Treatment Fee collected. Choose the physiotherapist who will deliver the sessions."
-                                : courseDone
-                                  ? "Every session of this course has been delivered."
-                                  : "Treatment sessions are in progress — every day is on this physio's calendar and on their board."}
-                            </p>
-                            {/* Said before the picker is opened rather than discovered inside
-                                it: reassigning mid-course re-dates only what is left, and the
-                                branch is about to be asked for exactly that many dates. */}
-                            {assigned && !courseDone && courseCompleted > 0 && (
-                              <p className="mt-1 text-xs leading-relaxed text-violet-700" data-testid="cons-physio-reassign-note">
-                                Reassigning keeps the {courseCompleted} session{courseCompleted === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {courseRemaining} get new dates.
-                              </p>
-                            )}
-                            <div className="mt-3">
-                              <Button
-                                size="sm"
-                                disabled={assigned && courseDone}
-                                title={assigned && courseDone ? "The course is finished — there are no sessions left to reassign" : undefined}
-                                className={`${assigned ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200 hover:bg-violet-50" : "bg-violet-600 text-white shadow-sm hover:bg-violet-700"} ${ACT_BTN}`}
-                                onClick={() => openPhysioModal("treatment")}
-                                data-testid={assigned ? "cons-reassign-physio" : "cons-open-physio-assign"}
-                              >
-                                <Users className="mr-1 h-3.5 w-3.5" />
-                                {assigned ? "Reassign Physio" : "Assign Physio & Book Sessions"}
-                              </Button>
+                              <div className="min-w-0 space-y-2">
+                                {/* Named for what the column holds once there is a course
+                                    running, and for what it asks for while there is not:
+                                    before a physio is picked there is no delivery to report
+                                    and the only thing in it is the step to take. */}
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                  {hasPhysioJourney && physioProgress.reassigned
+                                    ? `Physio History · ${physioProgress.previous.length + (physioProgress.current ? 1 : 0)} physios`
+                                    : assigned ? "Delivered By" : "Next Step"}
+                                </p>
+
+                                {/* Who delivered it, in the order the patient had them: every
+                                    physio before this one, then this one. A reassignment leaves
+                                    the previous physio's completed days behind it, and the branch
+                                    needs to see where they left off before it reads what the new
+                                    physio has picked up. */}
+                                {hasPhysioJourney && (
+                                  <div className="space-y-1.5" data-testid="cons-physio-assign-journey">
+                                    {physioProgress.previous.map((spell, i) => (
+                                      <PhysioSpell
+                                        key={`${spell.physio_id}-${i}`}
+                                        spell={spell}
+                                        packageSessions={totalCourseSessions}
+                                        testid={`cons-physio-spell-previous-${i}`}
+                                      />
+                                    ))}
+                                    {physioProgress.current && (
+                                      <PhysioSpell
+                                        spell={physioProgress.current}
+                                        packageSessions={totalCourseSessions}
+                                        testid="cons-physio-spell-current"
+                                      />
+                                    )}
+                                  </div>
+                                )}
+
+                                <p className="text-xs leading-relaxed text-slate-600">
+                                  {!assigned
+                                    ? "Treatment Fee collected. Choose the physiotherapist who will deliver the sessions."
+                                    : courseDone
+                                      ? "Every session of this course has been delivered."
+                                      : "Treatment sessions are in progress — every day is on this physio's calendar and on their board."}
+                                </p>
+                                {/* Said before the picker is opened rather than discovered inside
+                                    it: reassigning mid-course re-dates only what is left, and the
+                                    branch is about to be asked for exactly that many dates. */}
+                                {assigned && !courseDone && courseCompleted > 0 && (
+                                  <p className="text-xs leading-relaxed text-violet-700" data-testid="cons-physio-reassign-note">
+                                    Reassigning keeps the {courseCompleted} session{courseCompleted === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {courseRemaining} get new dates.
+                                  </p>
+                                )}
+                                <div className="pt-0.5">
+                                  <Button
+                                    size="sm"
+                                    disabled={assigned && courseDone}
+                                    title={assigned && courseDone ? "The course is finished — there are no sessions left to reassign" : undefined}
+                                    className={`${assigned ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200 hover:bg-violet-50" : "bg-violet-600 text-white shadow-sm hover:bg-violet-700"} ${ACT_BTN}`}
+                                    onClick={() => openPhysioModal("treatment")}
+                                    data-testid={assigned ? "cons-reassign-physio" : "cons-open-physio-assign"}
+                                  >
+                                    <Users className="mr-1 h-3.5 w-3.5" />
+                                    {assigned ? "Reassign Physio" : "Assign Physio & Book Sessions"}
+                                  </Button>
+                                </div>
+                              </div>
                             </div>
 
                             {/* And whatever the patient still owes, on the same cards Fee Collected
