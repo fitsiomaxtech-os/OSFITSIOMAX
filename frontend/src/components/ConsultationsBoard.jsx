@@ -2090,6 +2090,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   // its patient triggers. See openRowFee, which parks it, and the effect that picks it up.
   const pendingRowFeeRef = useRef(null);
   const [detailTab, setDetailTab] = useState("overview");
+  // The consultation's write-up — the pre-sales note, the two boxes the Consultant fills
+  // and the plan they confirmed — folded away for everybody except the Consultant who
+  // writes it. A branch opens a patient to act on the stage panel, and four read-only
+  // cards stacked above it pushed that panel most of a screen down. What the record holds
+  // is named on the closed row, so nothing has to be unfolded to know what is inside.
+  const [caseRecordOpen, setCaseRecordOpen] = useState(false);
   const [timelineRemarks, setTimelineRemarks] = useState([]);
   const [timelineActivity, setTimelineActivity] = useState([]);
   const [storeItems, setStoreItems] = useState([]);
@@ -2444,7 +2450,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   }, [selectedLead?.id, docTick, noteRxFiled]);
   // Closed whenever a different patient is opened: a Diet card left standing would
   // otherwise read as the new patient's, with the previous one's figures still in it.
-  useEffect(() => { setProgrammeDetail("own"); }, [selectedLead?.id]);
+  useEffect(() => { setProgrammeDetail("own"); setCaseRecordOpen(false); }, [selectedLead?.id]);
 
   // Whether one lead still owes the prescription the Consultation Fee waits on — the same
   // question the endpoint asks before it takes the money, asked of a row.
@@ -5969,8 +5975,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
           {/* A floating card rather than a full-bleed sheet on a phone: edge to edge reads
               as a page you navigated to, with no backdrop to show it sits above the list
               and nothing beside it to tap to dismiss. Capped height, and tapping the
-              backdrop closes — the same behaviour as every other popup on this board. */}
-          <div className="max-h-[85dvh] w-full space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:max-h-[calc(100vh-1rem)] sm:w-[96vw] sm:max-w-5xl sm:p-5">
+              backdrop closes — the same behaviour as every other popup on this board.
+
+              A frame rather than a long page, too: the patient's name and the tab row are
+              held out of the scroll and only the body under them moves. The whole card
+              used to scroll as one, so a Branch Admin three sections into a case had no
+              name at the top of the screen and nothing to press to reach another tab
+              without scrolling back up to find the row. */}
+          <div className="flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-slate-900/5 sm:max-h-[calc(100vh-1rem)] sm:w-[96vw] sm:max-w-5xl">
             {/* Who this is, then where they stand, side by side. The expert and the fee
                 badge used to hang below the phone number, where stacked under the contact
                 line they read as two more of the patient's details rather than as the
@@ -5981,7 +5993,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 of white space in the middle and made two related blocks look like two
                 unrelated ones. The rule between them is what marks them as a separate
                 thing — which is the job the distance was failing to do. */}
-            <div className="flex items-start gap-3">
+            <div className="flex shrink-0 items-start gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
               <div className="min-w-0">
                 <h3 className="flex min-w-0 items-center gap-2 text-base font-semibold text-slate-900" data-testid="cons-detail-title">
                   <span className="truncate">{selectedLead.name || "Lead"}</span>
@@ -6045,8 +6057,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
               <button onClick={() => setSelectedLead(null)} className="ml-auto shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
             </div>
 
-            {/* Sub tabs */}
-            <div className="flex flex-wrap gap-1.5 border-b border-slate-100 pb-3" data-testid="cons-detail-tabs">
+            {/* Sub tabs. An underline rail rather than six filled pills: the pills read as
+                six buttons to press, which is not what the top of a card whose first job is
+                to be read should say, and they spent a band of colour and half again the
+                height saying it. */}
+            <div className="flex shrink-0 flex-wrap items-center gap-x-4 border-b border-slate-200 px-4 sm:px-5" data-testid="cons-detail-tabs">
               {[
                 { key: "overview", label: "Overview" },
                 // Not for the Consultant, for the same reason the Timeline is not: chasing
@@ -6071,7 +6086,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 <button
                   key={t.key}
                   onClick={() => setDetailTab(t.key)}
-                  className={`rounded-[5px] px-3.5 py-1 text-xs font-semibold transition-all ${detailTab === t.key ? "bg-sky-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
+                  className={`-mb-px border-b-2 py-2.5 text-xs font-semibold transition-colors ${detailTab === t.key ? "border-sky-600 text-sky-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}
                   data-testid={`cons-detail-tab-${t.key}`}
                 >
                   {t.label}
@@ -6079,2471 +6094,2538 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
               ))}
             </div>
 
-            {detailTab === "overview" && (
-            <>
-            {/* Pre-Sales Diagnosis — read-only reference, mini card */}
-            {selectedLead.diagnosis && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-presales-diagnosis">
-                <p className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                  <Stethoscope className="h-3.5 w-3.5" /> Pre-Sales Diagnosis
-                </p>
-                <p className="text-xs text-slate-700">{selectedLead.diagnosis}</p>
-              </div>
-            )}
+            {/* The only part of the card that scrolls. Its own padding, because the
+                head band above it is flush to the card edge and has to stay that way
+                for its border to run the full width. */}
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5" data-testid="cons-detail-body">
+              {/* A column with an order to it rather than a fragment: for everyone but the
+                  Consultant the panel that does the work is ordered first and the read-only
+                  record follows it. Written in reading order, ordered in working order. */}
+              {detailTab === "overview" && (
+              <div className="flex flex-col gap-3">
+              {/* The consultation as it was written up — what pre-sales heard, what the
+                  Consultant diagnosed, what they wrote down as the treatment, and the plan
+                  they confirmed — kept together and folded away for everybody but the
+                  Consultant.
 
-            {/* Diagnosis Report + Treatment Summary — side by side */}
-            {((isConsultant || selectedLead.physio_diagnosis_report) || (isConsultant || selectedLead.treatment_summary)) && (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {(isConsultant || selectedLead.physio_diagnosis_report) && (
-                  <LockableTextBox
-                    icon={Stethoscope}
-                    label="Diagnosis Report"
-                    accent="sky"
-                    value={physioDiagDraft}
-                    onChange={handlePhysioDiagChange}
-                    editing={physioDiagEditing}
-                    locked={!!selectedLead.physio_diagnosis_locked}
-                    savedText={selectedLead.physio_diagnosis_report}
-                    saving={savingPhysioDiag}
-                    canEdit={isConsultant}
-                    onEdit={() => setPhysioDiagEditing(true)}
-                    onUnlock={unlockPhysioDiag}
-                    rows={3}
-                    placeholder="Write the full diagnosis report..."
-                    /* No preset picker here. A diagnosis is written about one patient, so
-                       a saved phrase to drop in is a phrase that fits somebody else — and
-                       the dropdown and its Save sat above the box making the one thing
-                       this card is for look like the second thing to do. The text saves
-                       itself as it is typed, so there is nothing else to press. */
-                    testPrefix="cons-physio-diagnosis"
-                  />
+                  A branch admin opens this card to do something: take a fee, book a
+                  physio, chase a follow-up. All four of these are read-only to them, and
+                  stacked above the panel that does the work they pushed it most of a
+                  screen down — so the panel comes first and the write-up folds up under
+                  it, with the plan named on the closed row. The Consultant writes two of
+                  these boxes, so for them it is neither folded nor moved. */}
+              {(isConsultant
+                || selectedLead.diagnosis
+                || selectedLead.physio_diagnosis_report
+                || selectedLead.treatment_summary
+                || selectedLead.consultation_decision) && (
+              <section
+                className={isConsultant ? "space-y-3" : "order-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"}
+                data-testid="cons-case-record"
+              >
+                {!isConsultant && (
+                  <button
+                    type="button"
+                    onClick={() => setCaseRecordOpen((open) => !open)}
+                    aria-expanded={caseRecordOpen}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-slate-50"
+                    data-testid="cons-case-record-toggle"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                      <ClipboardList className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-semibold uppercase tracking-wider text-slate-600">Consultation Record</span>
+                      {/* The plan itself on the closed row, so folding the record away
+                          does not fold away the one line of it the branch reads most. */}
+                      <span className="block truncate text-[11px] text-slate-500" data-testid="cons-case-record-preview">
+                        {selectedLead.consultation_decision
+                          ? addonsLabel({
+                              treatment: selectedLead.consultation_decision === "consultation_treatment",
+                              diet: !!selectedLead.diet_recommended,
+                              dietConsultation: !!selectedLead.diet_consultation,
+                              dietChart: !!selectedLead.diet_chart,
+                              rehab: !!selectedLead.rehab_referred,
+                              fitness: !!selectedLead.fitness_recommended,
+                              zumba: !!selectedLead.zumba_recommended,
+                            })
+                          : "Diagnosis and treatment summary"}
+                      </span>
+                    </span>
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${caseRecordOpen ? "rotate-180" : ""}`} />
+                  </button>
                 )}
 
-                {(isConsultant || selectedLead.treatment_summary) && (
-                  <LockableTextBox
-                    // Keyed by lead so the tick-list remounts between patients. It holds
-                    // the open/search state, and without this the panel would stay open
-                    // across a switch, showing the next patient's ticks mid-search.
-                    key={selectedLead.id}
-                    icon={ClipboardList}
-                    label="Treatment Summary"
-                    accent="indigo"
-                    value={treatmentDraft}
-                    onChange={handleTreatmentChange}
-                    editing={treatmentEditing}
-                    locked={!!selectedLead.treatment_summary_locked}
-                    savedText={selectedLead.treatment_summary}
-                    saving={savingTreatment}
-                    canEdit={isConsultant && !treatmentSummaryFrozen}
-                    // Why the Edit button is gone, said on the card rather than left to be
-                    // worked out — a Consultant who wrote this box yesterday and finds no
-                    // way back into it today is owed the reason. Said only to them, which
-                    // is what the isConsultant here is for: a Physio or Nutrition Coach has
-                    // never been able to write in here, and telling them a box they could
-                    // not edit anyway is now closed answers a question they never asked.
-                    lockNote={isConsultant && treatmentSummaryFrozen ? "Treatment fee collected — this plan is final." : null}
-                    onEdit={() => setTreatmentEditing(true)}
-                    onUnlock={unlockTreatment}
-                    rows={3}
-                    placeholder="What treatment should be given to the patient..."
-                    presetKind="treatment_summary"
-                    choices={treatmentTypes}
-                    testPrefix="cons-treatment-summary"
-                  />
-                )}
-              </div>
-            )}
+                {(isConsultant || caseRecordOpen) && (
+                  <div className={isConsultant ? "space-y-3" : "space-y-3 border-t border-slate-200 p-4"} data-testid="cons-case-record-body">
+                    {/* Three columns for a reader, two for the Consultant — their Treatment
+                        Summary is a tick-list to work in rather than a paragraph to read,
+                        and a third of the card is not enough to work in. */}
+                    {(selectedLead.diagnosis || isConsultant || selectedLead.physio_diagnosis_report || selectedLead.treatment_summary) && (
+                      <div className={`grid grid-cols-1 gap-3 md:grid-cols-2 ${isConsultant ? "" : "lg:grid-cols-3"}`}>
+                        {/* Pre-Sales Diagnosis — read-only reference */}
+                        {selectedLead.diagnosis && (
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-presales-diagnosis">
+                            <p className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                              <Stethoscope className="h-3.5 w-3.5" /> Pre-Sales Diagnosis
+                            </p>
+                            <p className="text-xs text-slate-700">{selectedLead.diagnosis}</p>
+                          </div>
+                        )}
 
-            {/* Treatment — Head Physio's own "Move to Admin". Requires Diagnosis Report +
-                Treatment Summary to already be written (that's what marks the consultation
-                itself done and ready for Branch Admin to collect the Consultation Fee).
-                Every patient goes on to a Treatment Package here — "Consultation Only" is a
-                legacy decision value some already-existing leads still carry, no longer
-                offered as a choice. Physio assignment lives entirely on Branch Admin's own
-                board, after both fees are collected. */}
-            {isConsultant && (() => {
-              // Read off the decision the lead carries rather than the name of the stage
-              // it landed on. The backend writes whatever the head_consultation pipeline's
-              // closing stage is currently called, which Pipeline Stage Management can
-              // rename — and a literal compared against that goes quietly false, putting
-              // the whole form back in front of a consultation already finished.
-              const alreadyMoved = !!selectedLead.consultation_decision && !editingDecision;
-              const diagnosisReady = !!(selectedLead.physio_diagnosis_report || "").trim();
-              const summaryReady = !!(selectedLead.treatment_summary || "").trim();
-              const selectedPackage = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
-              const selectedPackageWeeks = selectedPackage ? weeksFromPackageName(selectedPackage.name) : null;
-              // Treatment is not one of five optional add-ons any more. What leaves this
-              // form for Branch Admin is a treatment plan — sessions to book and a package
-              // to collect against — so the tick, its package and its sessions/week are as
-              // required as the two reports above. Ticked with no package, or a package
-              // with no sessions/week, is the same gap as never having ticked it: the
-              // branch gets a patient with nothing to book.
-              const treatmentReady = !!decisionDraft.treatment
-                && !!decisionDraft.item_id
-                && !!selectedPackageWeeks
-                && !!parseInt(decisionDraft.sessionsPerWeek, 10);
-              // Diet asks nothing: the referral is to the Nutritionist's consultation,
-              // which is the whole of what a Consultant decides on that side.
-              //
-              // Rehab does ask. It is a course of a named length at a named price, so a
-              // patient referred to it with no package chosen reaches the branch with
-              // nothing to book and nothing to collect -- the same gap Move to Admin is
-              // held open for on the Treatment package above, held here the same way.
-              const rehabReady = !decisionDraft.rehab || !!decisionDraft.rehab_item_id;
-              const canSave = diagnosisReady && summaryReady && treatmentReady && rehabReady;
+                        {(isConsultant || selectedLead.physio_diagnosis_report) && (
+                          <LockableTextBox
+                            icon={Stethoscope}
+                            label="Diagnosis Report"
+                            value={physioDiagDraft}
+                            onChange={handlePhysioDiagChange}
+                            editing={physioDiagEditing}
+                            locked={!!selectedLead.physio_diagnosis_locked}
+                            savedText={selectedLead.physio_diagnosis_report}
+                            saving={savingPhysioDiag}
+                            canEdit={isConsultant}
+                            onEdit={() => setPhysioDiagEditing(true)}
+                            onUnlock={unlockPhysioDiag}
+                            rows={3}
+                            placeholder="Write the full diagnosis report..."
+                            /* No preset picker here. A diagnosis is written about one patient, so
+                               a saved phrase to drop in is a phrase that fits somebody else — and
+                               the dropdown and its Save sat above the box making the one thing
+                               this card is for look like the second thing to do. The text saves
+                               itself as it is typed, so there is nothing else to press. */
+                            testPrefix="cons-physio-diagnosis"
+                          />
+                        )}
 
-              // What the Consultant has ticked, in the shelf's own order. The detail column
-              // is built from this rather than from five separate conditionals, so a card
-              // can never appear for a service that is off, and the two columns cannot
-              // disagree about what is selected.
-              const selectedAddons = CONSULTATION_ADDONS.filter((a) => decisionDraft[a.key]);
-
-              // Whether ticking a service opens a picker at all. Fitness has nothing to
-              // decide, so clicking it selects and stops there rather than opening a popup
-              // whose only content is a line saying there is nothing in it.
-              const hasPicker = (key) => key !== "fitness";
-
-              // Taking a service off clears whatever was picked under it, so an abandoned
-              // choice can't be submitted once the picker holding it is gone.
-              const clearAddon = (key) => {
-                setDecisionDraft((d) => ({
-                  ...d,
-                  [key]: false,
-                  ...(key === "treatment" ? { item_id: "", sessionsPerWeek: "" } : {}),
-                  ...(key === "rehab" ? { rehab_item_id: "" } : {}),
-                  ...(key === "zumba" ? { zumba_item_id: "" } : {}),
-                  ...(key === "diet" ? { dietConsultation: false } : {}),
-                }));
-                setAddonPicker((cur) => (cur === key ? null : cur));
-              };
-
-              // Ticking a service is the same act as asking what it should be, so the
-              // picker opens with it, and clicking a service already on is how you get
-              // back to that picker. Nothing here turns a service off: removal is the ×
-              // on its row in Selected, beside the choice actually being thrown away.
-              const pickAddon = (key) => {
-                // Ticking Diet is the referral, whole: there is nothing under it left to
-                // answer, so the flag the wire and the labels read is set with it rather
-                // than by a picker that would only ever have had one button in it.
-                if (!decisionDraft[key]) setDecisionDraft((d) => ({ ...d, [key]: true, ...(key === "diet" ? { dietConsultation: true } : {}) }));
-                if (hasPicker(key)) setAddonPicker(key);
-              };
-
-              /**
-               * What one ticked service reads as in the Selected column: the choice in
-               * words, and whether it is still missing something.
-               *
-               * Read off the same draft the pickers write to, so a row can never name a
-               * package that was cleared. `incomplete` is the condition Confirm is
-               * disabled on, said on the row it belongs to -- with the pickers behind a
-               * popup, a form greyed out over an unanswered question would otherwise have
-               * nothing on screen saying which question.
-               */
-              const addonSummary = (key) => {
-                if (key === "treatment") {
-                  const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
-                  if (!item) return { text: "Choose a package", incomplete: true };
-                  const weeks = weeksFromPackageName(item.name);
-                  const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
-                  if (!perWeek) return { text: `${item.name} — choose sessions/week`, incomplete: true };
-                  return {
-                    text: `${item.name} · ${perWeek}/week${weeks ? ` · ${weeks * perWeek} sessions` : ""}`,
-                    incomplete: false,
-                  };
-                }
-                if (key === "diet") {
-                  // Nothing left to be missing. A Diet Chart, where the Nutritionist later
-                  // calls for one, is recorded on the patient and shown on the branch's own
-                  // panel — it was never something this form could answer.
-                  return { text: "Diet Consultation", incomplete: false };
-                }
-                if (key === "rehab" || key === "zumba") {
-                  const items = key === "rehab" ? rehabPackageItems : zumbaPackageItems;
-                  const id = key === "rehab" ? decisionDraft.rehab_item_id : decisionDraft.zumba_item_id;
-                  const item = items.find((i) => i.id === id);
-                  // Zumba is a standing referral: the classes run either way, so no
-                  // package there means the patient was sent to them without one bought up
-                  // front. Rehab is a course or it is nothing -- ticked with no package it
-                  // names no sessions, no price and nothing for the branch to book or
-                  // collect, so the tick on its own is a gap rather than an answer.
-                  if (!item) return key === "rehab"
-                    ? { text: "Choose a package", incomplete: true }
-                    : { text: "No package", incomplete: false };
-                  const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
-                  const unit = key === "zumba" ? "classes" : "sessions";
-                  return { text: `${item.name}${count ? ` · ${count} ${unit}` : ""}`, incomplete: false };
-                }
-                // Fitness, and anything added to the shelf later that carries no picker.
-                return { text: "Referral only", incomplete: false };
-              };
-
-              /**
-               * What one ticked service still needs decided.
-               *
-               * One function rather than five blocks stacked in the markup, because the
-               * caller now renders these in a loop -- headed, coloured and ordered by the
-               * shelf. The bodies are the pickers that were already here; what changed is
-               * where they are drawn, not what they do or what they are called in a test.
-               *
-               * A service with nothing to choose says so rather than rendering an empty
-               * card. Fitness is a referral and nothing else, and a card with a blank body
-               * reads as a picker that failed to load.
-               */
-              const addonDetail = (key) => {
-                if (key === "diet") {
-                  return (
-                    <div data-testid="cons-decision-diet-kinds">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Diet</label>
-                      {/* One thing to refer for, so nothing to pick. This asked the
-                          Consultant to choose between a Diet Consultation and a Diet Chart,
-                          which is a question they are in no position to answer: a chart is
-                          decided ON at the consultation, by the Nutritionist who sees the
-                          patient. Ticked here it let the branch collect a Chart Fee for a
-                          chart nobody had yet said was needed, and left the coach owing a
-                          document somebody else had already sold.
-
-                          So this says what the referral is and what follows it. The chart
-                          re-enters from the Nutritionist's own board -- see
-                          recommend_diet_chart -- and only then does a Diet Chart Fee appear
-                          for the branch to collect. */}
-                      <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] leading-relaxed text-orange-800" data-testid="cons-decision-diet-note">
-                        The branch collects the Diet Consultation Fee and books the
-                        Nutritionist. If this patient needs a Diet Chart, the Nutritionist
-                        recommends it after seeing them — and the Diet Chart Fee is
-                        collected then.
-                      </p>
-                    </div>
-                  );
-                }
-
-                if (key === "rehab") {
-                  return (
-                    <div data-testid="cons-decision-rehab-package">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Rehab Package</label>
-                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-rehab-options">
-                        {rehabPackageItems.map((i) => {
-                          const selected = decisionDraft.rehab_item_id === i.id;
-                          return (
-                            <button
-                              key={i.id}
-                              type="button"
-                              // Always a selection, never a clear. Rehab has to carry a
-                              // package, so clicking the chosen one again would only put
-                              // the form back into the state Confirm refuses -- the way
-                              // out of Rehab is Remove Rehab, which says so on the button.
-                              onClick={() => setDecisionDraft((prev) => ({ ...prev, rehab_item_id: i.id }))}
-                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
-                                selected
-                                  ? "border-cyan-600 bg-cyan-600 text-white"
-                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                              }`}
-                              data-testid={`cons-decision-rehab-option-${i.id}`}
-                            >
-                              {i.name}
-                            </button>
-                          );
-                        })}
-                        {rehabPackageItems.length === 0 && (
-                          <p className="text-xs text-slate-400">No rehab packages in Services and Products yet.</p>
+                        {(isConsultant || selectedLead.treatment_summary) && (
+                          <LockableTextBox
+                            // Keyed by lead so the tick-list remounts between patients. It holds
+                            // the open/search state, and without this the panel would stay open
+                            // across a switch, showing the next patient's ticks mid-search.
+                            key={selectedLead.id}
+                            icon={ClipboardList}
+                            label="Treatment Summary"
+                            value={treatmentDraft}
+                            onChange={handleTreatmentChange}
+                            editing={treatmentEditing}
+                            locked={!!selectedLead.treatment_summary_locked}
+                            savedText={selectedLead.treatment_summary}
+                            saving={savingTreatment}
+                            canEdit={isConsultant && !treatmentSummaryFrozen}
+                            // Why the Edit button is gone, said on the card rather than left to be
+                            // worked out — a Consultant who wrote this box yesterday and finds no
+                            // way back into it today is owed the reason. Said only to them, which
+                            // is what the isConsultant here is for: a Physio or Nutrition Coach has
+                            // never been able to write in here, and telling them a box they could
+                            // not edit anyway is now closed answers a question they never asked.
+                            lockNote={isConsultant && treatmentSummaryFrozen ? "Treatment fee collected — this plan is final." : null}
+                            onEdit={() => setTreatmentEditing(true)}
+                            onUnlock={unlockTreatment}
+                            rows={3}
+                            placeholder="What treatment should be given to the patient..."
+                            presetKind="treatment_summary"
+                            choices={treatmentTypes}
+                            testPrefix="cons-treatment-summary"
+                          />
                         )}
                       </div>
-                      {/* Session count only, never the price -- the same rule the Treatment
-                          picker follows, with the amount shown to Branch Admin at collection. */}
-                      {decisionDraft.rehab_item_id && (() => {
-                        const item = rehabPackageItems.find((i) => i.id === decisionDraft.rehab_item_id);
-                        if (!item) return null;
-                        const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
-                        return (
-                          <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-rehab-summary">
-                            {item.name}{count ? ` · ${count} sessions` : ""}
+                    )}
+
+                    {/* What the Consultant decided, read back for the branch. The Consultant
+                        has this card already (cons-decision-summary, on their own form), but
+                        only they could see it: a Branch Admin opening a patient to take a fee
+                        saw the diagnosis and the treatment list and then a payment panel, with
+                        the plan those fees are FOR named nowhere on the screen. Read-only here
+                        — the decision is the Consultant's to change, and Edit stays on their
+                        card. */}
+                    {!isConsultant && !!selectedLead.consultation_decision && (() => {
+                      const weeks = weeksFromPackageName(selectedLead.session_package_name);
+                      const total = selectedLead.session_package_sessions || 0;
+                      const perWeek = weeks && total ? Math.round(total / weeks) : 0;
+                      const onTreatment = selectedLead.consultation_decision === "consultation_treatment";
+
+                      // One row per service the patient is going away with, in the shelf's own
+                      // order — built off the same lead fields addonsLabel reads, so the headline
+                      // and the rows under it cannot name different plans.
+                      const rows = [
+                        onTreatment && {
+                          icon: Activity,
+                          label: "Treatment Package",
+                          value: selectedLead.session_package_name || "Not named",
+                          note: perWeek && weeks
+                            ? `${perWeek} weekly × ${weeks} week${weeks === 1 ? "" : "s"} = ${total} sessions`
+                            : total ? `${total} sessions` : null,
+                        },
+                        selectedLead.diet_recommended && {
+                          icon: Salad,
+                          label: "Diet",
+                          value: dietLabels({
+                            diet: true,
+                            dietConsultation: !!selectedLead.diet_consultation,
+                            dietChart: !!selectedLead.diet_chart,
+                          }).join(" + "),
+                          note: null,
+                        },
+                        selectedLead.rehab_referred && {
+                          icon: HeartPulse,
+                          label: "Rehab Package",
+                          value: selectedLead.rehab_package_name || "Referred",
+                          note: selectedLead.rehab_package_sessions ? `${selectedLead.rehab_package_sessions} sessions` : null,
+                        },
+                        selectedLead.fitness_recommended && {
+                          icon: Dumbbell,
+                          label: "Fitness",
+                          value: "Referred",
+                          note: null,
+                        },
+                        selectedLead.zumba_recommended && {
+                          icon: Music2,
+                          label: "Zumba Plan",
+                          value: selectedLead.zumba_package_name || "Referred",
+                          note: null,
+                        },
+                      ].filter(Boolean);
+
+                      return (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-treatment-suggestions">
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                              <ClipboardCheck className="h-3.5 w-3.5" /> Treatment Suggestions
+                            </p>
+                            <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-inset ring-slate-200">
+                              From the Consultant
+                            </span>
+                          </div>
+
+                          {/* The plan in one line first, then what each part of it actually is —
+                              the same order the Consultant confirmed it in. */}
+                          <p className="text-sm font-semibold text-slate-800" data-testid="cons-treatment-suggestions-plan">
+                            {addonsLabel({
+                              treatment: onTreatment,
+                              diet: !!selectedLead.diet_recommended,
+                              dietConsultation: !!selectedLead.diet_consultation,
+                              dietChart: !!selectedLead.diet_chart,
+                              rehab: !!selectedLead.rehab_referred,
+                              fitness: !!selectedLead.fitness_recommended,
+                              zumba: !!selectedLead.zumba_recommended,
+                            })}
                           </p>
-                        );
-                      })()}
-                    </div>
-                  );
-                }
 
-                if (key === "zumba") {
-                  return (
-                    <div data-testid="cons-decision-zumba-package">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Zumba Package <span className="font-normal text-slate-400">(optional)</span></label>
-                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-zumba-options">
-                        {zumbaPackageItems.map((i) => {
-                          const selected = decisionDraft.zumba_item_id === i.id;
-                          return (
-                            <button
-                              key={i.id}
-                              type="button"
-                              onClick={() => setDecisionDraft((prev) => ({ ...prev, zumba_item_id: selected ? "" : i.id }))}
-                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
-                                selected
-                                  ? "border-pink-600 bg-pink-600 text-white"
-                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                              }`}
-                              data-testid={`cons-decision-zumba-option-${i.id}`}
-                            >
-                              {i.name}
-                            </button>
-                          );
-                        })}
-                        {zumbaPackageItems.length === 0 && (
-                          <p className="text-xs text-slate-400">No Zumba packages in Services and Products yet.</p>
-                        )}
-                      </div>
-                      {decisionDraft.zumba_item_id && (() => {
-                        const item = zumbaPackageItems.find((i) => i.id === decisionDraft.zumba_item_id);
-                        if (!item) return null;
-                        const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
-                        return (
-                          <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-zumba-summary">
-                            {item.name}{count ? ` · ${count} classes` : ""}
-                          </p>
-                        );
-                      })()}
-                    </div>
-                  );
-                }
-
-                if (key === "treatment") {
-                  return (
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
-                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
-                        {treatmentPackageItems.map((i) => {
-                          const selected = decisionDraft.item_id === i.id;
-                          return (
-                            <button
-                              key={i.id}
-                              type="button"
-                              onClick={() => setDecisionDraft((prev) => ({ ...prev, item_id: i.id, sessionsPerWeek: "" }))}
-                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
-                                selected
-                                  ? "border-slate-900 bg-slate-900 text-white"
-                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                              }`}
-                              data-testid={`cons-decision-package-option-${i.id}`}
-                            >
-                              {i.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {decisionDraft.item_id && (() => {
-                        const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
-                        if (!item) return null;
-                        // Head Physio sees the session count only -- never the price.
-                        // The Treatment Fee amount is derived server-side from
-                        // sessions_override and shown to Branch Admin at fee collection.
-                        const weeks = weeksFromPackageName(item.name);
-                        const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
-                        const totalSessions = weeks && perWeek ? weeks * perWeek : 0;
-                        return (
-                          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50/70 p-3" data-testid="cons-decision-package-summary">
-                            <p className="text-sm font-semibold text-slate-800">{item.name}{weeks ? ` · ${weeks} week${weeks > 1 ? "s" : ""}` : ""}</p>
-                            <div className="mt-2">
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions / week</label>
-                              <div className="flex flex-wrap gap-1.5" data-testid="cons-decision-sessions-per-week">
-                                {[1, 2, 3, 4, 5, 6, 7].map((n) => {
-                                  const selected = perWeek === n;
+                          {rows.length > 0 ? (
+                            <div className="mt-2 rounded-md border border-slate-200 bg-white">
+                              <dl className="divide-y divide-slate-100">
+                                {rows.map((r) => {
+                                  const Icon = r.icon;
                                   return (
-                                    <button
-                                      key={n}
-                                      type="button"
-                                      onClick={() => setDecisionDraft((prev) => ({ ...prev, sessionsPerWeek: String(n) }))}
-                                      className={`h-8 w-8 rounded-md border text-xs font-semibold transition ${
-                                        selected ? "border-sky-500 bg-sky-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
-                                      }`}
-                                      data-testid={`cons-decision-sessions-per-week-${n}`}
-                                    >
-                                      {n}
-                                    </button>
+                                    <div key={r.label} className="flex items-baseline justify-between gap-3 px-2.5 py-1.5">
+                                      <dt className="flex shrink-0 items-center gap-1.5 text-[11px] text-slate-500">
+                                        <Icon className="h-3 w-3 text-slate-400" /> {r.label}
+                                      </dt>
+                                      <dd className="min-w-0 truncate text-right text-xs font-semibold text-slate-800" title={r.value}>
+                                        {r.value}
+                                        {r.note && <span className="ml-1 font-medium text-slate-400">· {r.note}</span>}
+                                      </dd>
+                                    </div>
                                   );
                                 })}
-                              </div>
-                              <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-total-sessions">
-                                {!weeks
-                                  ? <span className="text-amber-600">Couldn't read a week count from this package's name.</span>
-                                  : !perWeek
-                                  ? "Choose sessions per week"
-                                  : (
-                                    <>
-                                      {perWeek} session{perWeek > 1 ? "s" : ""} Weekly × {weeks} Week{weeks > 1 ? "s" : ""} = <span className="text-sm font-semibold text-slate-800">{totalSessions} Total Sessions</span>
-                                    </>
-                                  )}
-                              </p>
+                              </dl>
                             </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                }
-
-                // Fitness, and anything added to the shelf later that carries no picker.
-                // Names itself, because the coloured edge is the only other thing marking
-                // this block and a colour on its own is not a label.
-                const addon = CONSULTATION_ADDONS.find((a) => a.key === key);
-                return (
-                  <p className="text-xs text-slate-500" data-testid={`cons-decision-detail-none-${key}`}>
-                    <span className="font-semibold text-slate-600">{addon?.label || key}</span>
-                    {" — nothing to choose here, recorded as a referral."}
-                  </p>
-                );
-              };
-
-              if (alreadyMoved) {
-                return (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-decision-summary">
-                    <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
-                      <ClipboardCheck className="h-3.5 w-3.5" /> Treatment
-                    </p>
-                    {/* Read back as the choice that was made, rather than as the flags it
-                        is stored as. */}
-                    <p className="text-sm font-semibold text-slate-800">
-                      {addonsLabel({
-                        treatment: selectedLead.consultation_decision === "consultation_treatment",
-                        diet: !!selectedLead.diet_recommended,
-                        dietConsultation: !!selectedLead.diet_consultation,
-                        dietChart: !!selectedLead.diet_chart,
-                        rehab: !!selectedLead.rehab_referred,
-                        fitness: !!selectedLead.fitness_recommended,
-                        zumba: !!selectedLead.zumba_recommended,
-                      })}
-                    </p>
-                    {selectedLead.consultation_decision === "consultation_treatment" && selectedLead.session_package_name && (
-                      <p className="mt-0.5 text-xs text-slate-600">
-                        Treatment Package: <span className="font-semibold">{selectedLead.session_package_name}</span>
-                      </p>
-                    )}
-                    {/* The other two courses the Consultant can pick. Only the treatment
-                        package was named here, so a patient sent to Rehab read as "+ Rehab"
-                        with no way to see which course was chosen without reopening the
-                        Consultant's own form. */}
-                    {selectedLead.rehab_referred && selectedLead.rehab_package_name && (
-                      <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-rehab">
-                        Rehab Package: <span className="font-semibold">{selectedLead.rehab_package_name}</span>
-                        {selectedLead.rehab_package_sessions ? <span className="text-slate-400"> · {selectedLead.rehab_package_sessions} sessions</span> : null}
-                      </p>
-                    )}
-                    {selectedLead.zumba_recommended && selectedLead.zumba_package_name && (
-                      <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-zumba">
-                        Zumba Plan: <span className="font-semibold">{selectedLead.zumba_package_name}</span>
-                      </p>
-                    )}
-                    <p className="mt-1.5 text-[11px] text-slate-500">Sent to Branch Admin — Consultation Visit.</p>
-                    {/* Reopens the form on the choice and package already saved, rather
-                        than on a blank one — see beginEditDecision. */}
-                    <div className="mt-2.5 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 text-xs"
-                        onClick={() => beginEditDecision(selectedLead)}
-                        data-testid="cons-decision-edit"
-                      >
-                        <Pencil className="mr-1 h-3 w-3" />Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 text-xs"
-                        onClick={() => shareDecision(decisionSummaryOf(selectedLead))}
-                        data-testid="cons-decision-share"
-                      >
-                        <Share2 className="mr-1 h-3 w-3" />Share
-                      </Button>
-                    </div>
-                  </div>
-                );
-              }
-
-              return (
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="cons-decision-form">
-                  <p className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-800">
-                    <ClipboardCheck className="h-4 w-4 text-sky-600" /> Treatment
-                  </p>
-                  {/* The thing standing between this form and Save, so it is a block that
-                      stops the eye rather than a coloured line of text among other lines.
-                      Rose over amber for the same reason: amber is the colour half this
-                      panel already uses for asides nobody has to act on. */}
-                  {(!diagnosisReady || !summaryReady || !treatmentReady) && (
-                    <p
-                      className="mb-3 rounded-md border-l-4 border-rose-500 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700"
-                      data-testid="cons-decision-required-hint"
-                    >
-                      {/* One thing at a time, in the order the form is worked down: the two
-                          reports are above this panel, Treatment is inside it, and naming
-                          both at once sends the eye to the wrong half of the screen. */}
-                      {!diagnosisReady || !summaryReady
-                        ? "Write the Diagnosis Report and Treatment Summary above before Move to Admin."
-                        : "Pick Treatment, its package and its sessions/week before Move to Admin."}
-                    </p>
-                  )}
-                  {/* Consultation itself needs no toggle — writing this form up is the
-                      consultation. Treatment is required: a consultation reaches Branch
-                      Admin as a plan to book and collect against, so it is picked here and
-                      cannot then be taken off. The other four are what else the patient is
-                      going away with, and any combination of those is valid, including
-                      none of them.
-
-                      Two columns: the shelf on the left, what has actually been chosen on
-                      the right, and the pickers themselves over the form in a popup. They
-                      used to unroll under the shelf, one block per ticked service, so a
-                      patient going away with three things meant three stacked pickers and
-                      a Confirm button below all of them — picking the third service was a
-                      scroll past the answers to the first two. Only one service is ever
-                      being answered at a time, so only one picker is ever on screen, and
-                      the form stays the height of its two short columns. */}
-                  <div className="mb-3 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Services</label>
-                      {/* A column rather than the row of five this was, so each service
-                          lines up with its own answer opposite and the words are never
-                          squeezed to a fifth of half the panel. */}
-                      <div className="space-y-1.5" data-testid="cons-decision-plan-options">
-                        {CONSULTATION_ADDONS.map((p) => {
-                          const selected = !!decisionDraft[p.key];
-                          const Icon = p.icon;
-                          return (
-                            <button
-                              key={p.key}
-                              type="button"
-                              onClick={() => pickAddon(p.key)}
-                              className="flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold transition hover:brightness-95"
-                              style={selected
-                                ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
-                                : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
-                              data-testid={`cons-decision-plan-${p.key}`}
-                            >
-                              <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-                              <span className="truncate">{p.label}</span>
-                              {/* The one service that has to be picked says so on the chip
-                                  itself, where the choice is made. The hint at the top of
-                                  the panel names the reports first while they are unwritten,
-                                  so on a fresh consultation it is not saying this yet.
-                                  Gone once Treatment is on — the tick says the rest. */}
-                              {p.key === "treatment" && !selected && (
-                                <span className="ml-auto shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-600">
-                                  Required
-                                </span>
-                              )}
-                              {selected && <CheckCircle2 aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* The answers, one row per ticked service, in the shelf's own order so
-                        the rows read down in the order the services read down opposite. A
-                        row is the way back into its picker; the × beside it is the only way
-                        an optional service comes off, which puts removing one next to the
-                        choice being thrown away rather than on the chip that turned it on.
-
-                        Treatment's row has no ×. It is required, so the only thing its row
-                        offers is the way back into the picker to change the package — a
-                        cross there would be a button whose only outcome is a form that
-                        cannot be submitted. */}
-                    <div>
-                      <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Selected Services</label>
-                      {selectedAddons.length === 0 ? (
-                        /* Nothing picked is not a valid outcome any more — Treatment is
-                           required — so this column reads as the gap it is rather than as
-                           a note about what saving now would do. Rose to match the hint at
-                           the top of the panel: they are the same missing thing. */
-                        <p
-                          className="rounded-lg border border-dashed border-rose-200 bg-rose-50/40 px-3 py-3 text-[11px] font-medium text-rose-600"
-                          data-testid="cons-decision-selected-empty"
-                        >
-                          Pick Treatment to move this patient to Admin.
-                        </p>
-                      ) : (
-                        <div className="space-y-1.5" data-testid="cons-decision-details">
-                          {selectedAddons.map((a) => {
-                            const summary = addonSummary(a.key);
-                            return (
-                              <div
-                                key={a.key}
-                                className="flex items-center gap-1.5 rounded-r-lg border-l-2 bg-slate-50/70 py-1.5 pl-2.5 pr-1.5"
-                                style={{ borderLeftColor: a.tone }}
-                                data-testid={`cons-decision-detail-${a.key}`}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => pickAddon(a.key)}
-                                  disabled={!hasPicker(a.key)}
-                                  className="min-w-0 flex-1 text-left disabled:cursor-default"
-                                  data-testid={`cons-decision-selected-${a.key}`}
-                                >
-                                  <span className="block text-[11px] font-semibold" style={{ color: a.tone }}>{a.label}</span>
-                                  <span
-                                    className={`block truncate text-[11px] ${summary.incomplete ? "font-medium text-rose-600" : "text-slate-600"}`}
-                                    title={summary.text}
-                                  >
-                                    {summary.text}
-                                  </span>
-                                </button>
-                                {a.key === "treatment" ? (
-                                  /* A pencil where every other row has its ×. Treatment
-                                     cannot come off, so the only thing this row does is
-                                     reopen the picker — and a row that ends in nothing
-                                     reads as a row that does nothing. Decorative: the press
-                                     target is the whole row beside it. */
-                                  <Pencil aria-hidden className="mr-1.5 h-3 w-3 shrink-0 text-slate-400" />
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => clearAddon(a.key)}
-                                    className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
-                                    title={`Remove ${a.label}`}
-                                    data-testid={`cons-decision-remove-${a.key}`}
-                                  >
-                                    <X aria-hidden className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* One service's picker, over the form. Rendered from inside the same
-                      block that built addonDetail, so the popup can never open on a service
-                      the form has since had turned off — it closes itself instead. */}
-                  {addonPicker && (() => {
-                    const a = CONSULTATION_ADDONS.find((x) => x.key === addonPicker);
-                    if (!a || !decisionDraft[addonPicker]) return null;
-                    // What this service still needs, read off the same helper the row in
-                    // the form reads, so the popup and the row can never disagree about
-                    // whether the choice has been made.
-                    const pickerSummary = addonSummary(addonPicker);
-                    const Icon = a.icon;
-                    return (
-                      <div
-                        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-                        onClick={(e) => { if (e.target === e.currentTarget) setAddonPicker(null); }}
-                        data-testid="cons-decision-picker-modal"
-                      >
-                        <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-xl">
-                          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-                            <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: a.tone }}>
-                              <Icon aria-hidden className="h-4 w-4" /> {a.label}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => setAddonPicker(null)}
-                              className="rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                              data-testid="cons-decision-picker-close"
-                            >
-                              <X aria-hidden className="h-4 w-4" />
-                            </button>
-                          </div>
-                          {/* The pickers themselves, unchanged — same bodies, same test
-                              ids, drawn here instead of down the form. */}
-                          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{addonDetail(addonPicker)}</div>
-                          <div className="flex shrink-0 justify-between gap-2 border-t border-slate-100 px-4 py-3">
-                            {/* Required, so there is nothing to remove it with — the same
-                                reason its row in Selected carries no ×. The empty span
-                                holds Done on the right, where it is on every other
-                                service's picker. */}
-                            {addonPicker === "treatment" ? <span /> : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
-                                onClick={() => clearAddon(addonPicker)}
-                                data-testid="cons-decision-picker-remove"
-                              >
-                                Remove {a.label}
-                              </Button>
-                            )}
-                            {/* Shut while the open picker is still missing something, so
-                                the popup cannot be dismissed by the one button that reads
-                                like the choice was made. The X and the backdrop still
-                                close it -- this is not a trap, it is the difference
-                                between leaving and finishing. */}
-                            <Button
-                              size="sm"
-                              className="h-8 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
-                              onClick={() => setAddonPicker(null)}
-                              disabled={pickerSummary.incomplete}
-                              title={pickerSummary.incomplete ? pickerSummary.text : undefined}
-                              data-testid="cons-decision-picker-done"
-                            >
-                              Done
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  <Button
-                    size="sm"
-                    className="mt-4 h-9 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
-                    onClick={submitConsultationDecision}
-                    disabled={savingDecision || !canSave}
-                    data-testid="cons-decision-save"
-                  >
-                    {/* One label now, because there is one outcome. This branched three
-                        ways over which services were ticked, back when a consultation
-                        could leave here with no Treatment on it; with Treatment required,
-                        every save hands the patient to Branch Admin — to collect the fees
-                        and book the sessions — whatever else is ticked beside it. So the
-                        button names the desk the patient lands on. */}
-                    {savingDecision ? "Saving..." : "Move to Admin"}
-                  </Button>
-                </div>
-              );
-            })()}
-
-            {/* What the Consultant decided, read back for the branch — sitting between the
-                consultation's own two boxes and the panel that collects money against it.
-                The Consultant has this card already (cons-decision-summary, above), but
-                only they could see it: a Branch Admin opening a patient to take a fee saw
-                the diagnosis and the treatment list and then a payment panel, with the
-                plan those fees are FOR named nowhere on the screen. Read-only here — the
-                decision is the Consultant's to change, and Edit stays on their card. */}
-            {!isConsultant && !!selectedLead.consultation_decision && (() => {
-              const weeks = weeksFromPackageName(selectedLead.session_package_name);
-              const total = selectedLead.session_package_sessions || 0;
-              const perWeek = weeks && total ? Math.round(total / weeks) : 0;
-              const onTreatment = selectedLead.consultation_decision === "consultation_treatment";
-
-              // One row per service the patient is going away with, in the shelf's own
-              // order — built off the same lead fields addonsLabel reads, so the headline
-              // and the rows under it cannot name different plans.
-              const rows = [
-                onTreatment && {
-                  icon: Activity,
-                  label: "Treatment Package",
-                  value: selectedLead.session_package_name || "Not named",
-                  note: perWeek && weeks
-                    ? `${perWeek} weekly × ${weeks} week${weeks === 1 ? "" : "s"} = ${total} sessions`
-                    : total ? `${total} sessions` : null,
-                },
-                selectedLead.diet_recommended && {
-                  icon: Salad,
-                  label: "Diet",
-                  value: dietLabels({
-                    diet: true,
-                    dietConsultation: !!selectedLead.diet_consultation,
-                    dietChart: !!selectedLead.diet_chart,
-                  }).join(" + "),
-                  note: null,
-                },
-                selectedLead.rehab_referred && {
-                  icon: HeartPulse,
-                  label: "Rehab Package",
-                  value: selectedLead.rehab_package_name || "Referred",
-                  note: selectedLead.rehab_package_sessions ? `${selectedLead.rehab_package_sessions} sessions` : null,
-                },
-                selectedLead.fitness_recommended && {
-                  icon: Dumbbell,
-                  label: "Fitness",
-                  value: "Referred",
-                  note: null,
-                },
-                selectedLead.zumba_recommended && {
-                  icon: Music2,
-                  label: "Zumba Plan",
-                  value: selectedLead.zumba_package_name || "Referred",
-                  note: null,
-                },
-              ].filter(Boolean);
-
-              return (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-treatment-suggestions">
-                  <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
-                      <ClipboardCheck className="h-3.5 w-3.5" /> Treatment Suggestions
-                    </p>
-                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                      From the Consultant
-                    </span>
-                  </div>
-
-                  {/* The plan in one line first, then what each part of it actually is —
-                      the same order the Consultant confirmed it in. */}
-                  <p className="text-sm font-semibold text-slate-800" data-testid="cons-treatment-suggestions-plan">
-                    {addonsLabel({
-                      treatment: onTreatment,
-                      diet: !!selectedLead.diet_recommended,
-                      dietConsultation: !!selectedLead.diet_consultation,
-                      dietChart: !!selectedLead.diet_chart,
-                      rehab: !!selectedLead.rehab_referred,
-                      fitness: !!selectedLead.fitness_recommended,
-                      zumba: !!selectedLead.zumba_recommended,
-                    })}
-                  </p>
-
-                  {rows.length > 0 ? (
-                    <div className="mt-2 rounded-md border border-emerald-100 bg-white">
-                      <dl className="divide-y divide-emerald-50">
-                        {rows.map((r) => {
-                          const Icon = r.icon;
-                          return (
-                            <div key={r.label} className="flex items-baseline justify-between gap-3 px-2.5 py-1.5">
-                              <dt className="flex shrink-0 items-center gap-1.5 text-[11px] text-slate-500">
-                                <Icon className="h-3 w-3 text-slate-400" /> {r.label}
-                              </dt>
-                              <dd className="min-w-0 truncate text-right text-xs font-semibold text-slate-800" title={r.value}>
-                                {r.value}
-                                {r.note && <span className="ml-1 font-medium text-slate-400">· {r.note}</span>}
-                              </dd>
-                            </div>
-                          );
-                        })}
-                      </dl>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-[11px] text-slate-500">A plain consultation — nothing else was recommended.</p>
-                  )}
-                </div>
-              );
-            })()}
-
-            {!isConsultant && (() => {
-              const stage = selectedLead.consultation_stage;
-              const decision = selectedLead.consultation_decision;
-              // Cancel belongs before the consultation, not after it. A patient who has
-              // not come in yet can call the appointment off, and that is what cancelling
-              // one means. Once they have been seen the visit is a fact: the paperwork is
-              // being filed against it and the fee taken for it, and a Cancel sitting in
-              // that panel offers to call off something that already happened -- next to
-              // the money it was collected with.
-              //
-              // So the stages before the visit keep it and the stages from the visit on do
-              // not. CancelButton is null there, which is what the {CancelButton} slots in
-              // those panels already render.
-              // "Follow Up" is this stage's former name — see the panel below for why both
-              // are still matched.
-              const cancellable = ["New Appointment", "Consultation Booked", "Follow Up"].includes(stage);
-              // Once a lead has moved forward past a stage, it can never come back —
-              // there's no manual "move backward" control anymore (see the backend's
-              // matching rejection in move-consultation-stage).
-              const activeFollowUp = (selectedLead.consultation_follow_ups || []).slice().reverse().find((f) => f.status !== "rescheduled");
-
-              const CancelButton = cancellable ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className={`border-rose-200 text-rose-600 hover:bg-rose-50 ${ACT_BTN}`}
-                  onClick={() => { if (window.confirm("Cancel this consultation?")) moveStage(selectedLead, "Cancel"); }}
-                  data-testid="cons-cancel-btn"
-                >
-                  <Ban className="mr-1 h-3.5 w-3.5" /> Cancel
-                </Button>
-              ) : null;
-
-              // Diet, one button, one strict sequence: the Diet Fee first, then the
-              // Nutrition Coach + their appointment — can't reach assignment until the fee
-              // is in. Routes to the same two flows as before (openDietFeeDraft /
-              // openDietModal), just gated behind one entry point instead of two sitting
-              // side by side, where either could be done first or skipped.
-              //
-              // Offered from the moment the Consultation Fee is in, and on every path.
-              // Diet normally follows treatment, but a patient can come for a diet
-              // consultation and nothing else, so it never waits on a physio or a package.
-              const dietFeePaid = selectedLead.diet_fee_paid != null;
-              const dietAssigned = !!selectedLead.diet_coach_id;
-              const dietBooked = !!selectedLead.diet_appointment_at;
-              // The chart half of the referral, and no longer the Consultant's to start.
-              // `chartReferred` comes on when the NUTRITIONIST recommends a chart, having
-              // seen the patient — which is the only thing that puts a Diet Chart Fee on
-              // this panel. It also comes on once such a fee is taken or a chart is sent, so
-              // a chart sold or written off somebody's own judgement still shows here.
-              const chartReferred = !!selectedLead.diet_chart;
-              const dietChartFeePaid = selectedLead.diet_chart_fee_paid != null;
-              const chartSent = !!selectedLead.diet_chart_sent_at;
-              const DietButton = selectedLead.package_paid != null ? (
-                <Button
-                  size="sm"
-                  variant={dietFeePaid && dietBooked ? "outline" : undefined}
-                  className={`${dietFeePaid && dietBooked
-                    ? "border-orange-200 text-orange-700 hover:bg-orange-50"
-                    : "bg-orange-500 text-white hover:bg-orange-600"} ${ACT_BTN}`}
-                  onClick={!dietFeePaid ? () => openDietFeeDraft("consultation") : openDietModal}
-                  data-testid="cons-open-diet-assign"
-                >
-                  <Salad className="mr-1 h-3.5 w-3.5" />{" "}
-                  {!dietFeePaid
-                    ? <Lbl full="Collect Diet Fee" short="Diet Fee" />
-                    : !dietBooked
-                    ? <Lbl full="Assign Nutritionist" short="Assign" />
-                    : <Lbl full="Reschedule Diet" short="Diet" />}
-                </Button>
-              ) : null;
-
-              // Offered once the Consultation Fee is in and the Consultant actually chose a
-              // course — without one there is no price to collect against, and the backend
-              // refuses for the same reason. Shows on every path a referred patient can be
-              // sitting on, beside the Diet button it is modelled on.
-              const rehabFeePaid = selectedLead.rehab_fee_paid != null;
-              const RehabButton = (selectedLead.package_paid != null && selectedLead.rehab_referred && selectedLead.rehab_package_id && !rehabFeePaid) ? (
-                <Button
-                  size="sm"
-                  className={`bg-cyan-600 text-white hover:bg-cyan-700 ${ACT_BTN}`}
-                  onClick={openRehabFeeDraft}
-                  data-testid="cons-open-rehab-fee"
-                >
-                  <Activity className="mr-1 h-3.5 w-3.5" />{" "}
-                  <Lbl full="Collect Rehab Fee" short="Rehab Fee" />
-                </Button>
-              ) : null;
-
-              // Diet and Rehab each run a whole programme — a package, a fee, an expert, a
-              // set of days — and the panel only ever offered the next payment button for
-              // them. Where a patient actually stood went unanswered: is the fee in, how
-              // many days is the course, has anyone been assigned.
-              //
-              // They are views of the same panel rather than cards of their own. The four
-              // controls stay put and only the body under them changes, so the row that got
-              // you into a programme is the row that gets you back out — a card that
-              // replaced the whole panel took its own way out with it.
-              const openDetail = (which) => setProgrammeDetail(which);
-
-              const DetailRow = ({ label, value, tone = "" }) => (
-                <div className="flex items-baseline justify-between gap-4 px-3 py-2">
-                  <dt className="shrink-0 text-xs text-slate-500">{label}</dt>
-                  <dd className={`min-w-0 truncate text-right text-sm font-semibold ${tone || "text-slate-800"}`} title={String(value)}>{value}</dd>
-                </div>
-              );
-
-              // What the panel's header band says while a programme is open. Kept beside the
-              // body it belongs to so a view can never announce itself as one thing and then
-              // show another.
-              const DIET_VIEW = {
-                tone: "orange",
-                title: "Diet Programme",
-                icon: Salad,
-                chip: dietFeePaid
-                  ? { tone: "emerald", label: "Fee Collected", tick: true }
-                  : { tone: "amber", label: "Diet Fee Due", tick: false },
-              };
-
-              const REHAB_VIEW = {
-                tone: "cyan",
-                title: "Rehab Programme",
-                icon: Activity,
-                chip: rehabFeePaid
-                  ? { tone: "emerald", label: "Fee Collected", tick: true }
-                  : { tone: "amber", label: "Rehab Fee Due", tick: false },
-              };
-
-              // How far through the course the patient is, who has delivered which part of
-              // it, and the days themselves.
-              //
-              // Built once and shown by both ways into rehab — the Rehab pill's own panel
-              // and the Rehab Details view the other panels open — because a course must
-              // not read as two different courses depending on which door was used.
-              //
-              // Nothing until the days arrive. A skeleton would be a bar at 0% over a
-              // course that is half delivered, which is worse than a panel that fills in a
-              // moment later.
-              const RehabCourseStatus = rehabProgress ? (
-                <div data-testid="cons-rehab-course-status">
-                  {/* The two numbers as one length, so how far in the patient is reads at a
-                      glance instead of by subtraction — the same bar the Physio Assign
-                      panel draws for the treatment course. */}
-                  {rehabProgress.packageDays > 0 && (
-                    <div className="mt-3" data-testid="cons-rehab-progress">
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                        <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${rehabProgress.pct}%` }} />
-                      </div>
-                      <p className="mt-1 text-[10px] font-medium text-slate-500">
-                        {rehabProgress.pct}% of the course delivered
-                        {rehabProgress.remaining > 0 ? ` · ${rehabProgress.remaining} day${rehabProgress.remaining === 1 ? "" : "s"} to go` : ""}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Who is delivering the course, drawn the way the treatment panel draws
-                      it — on a course one physio has held throughout as much as on one that
-                      has changed hands. The name two rows above says who holds the course;
-                      this card says what they have done with it: days completed, which day
-                      numbers are theirs, how many are still booked, and since when. That is
-                      the question the desk opens rehab to answer, and gating it on a
-                      reassignment meant the ordinary course — one physio, mid-delivery —
-                      was the one that showed nothing. A handover only adds the physios
-                      before them, oldest first, and renames the heading to say how many. */}
-                  {(rehabProgress.previous.length > 0 || rehabProgress.current) && (
-                    <div className="mt-3 space-y-1.5" data-testid="cons-rehab-journey">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        {rehabProgress.reassigned
-                          ? `Physio History · ${rehabProgress.previous.length + (rehabProgress.current ? 1 : 0)} physios`
-                          : "Delivered By"}
-                      </p>
-                      {rehabProgress.previous.map((spell, i) => (
-                        <PhysioSpell
-                          key={`${spell.physio_id}-${i}`}
-                          spell={spell}
-                          packageSessions={rehabProgress.packageDays}
-                          tone="cyan"
-                          dayNoun="days"
-                          testid={`cons-rehab-spell-previous-${i}`}
-                        />
-                      ))}
-                      {rehabProgress.current && (
-                        <PhysioSpell
-                          spell={rehabProgress.current}
-                          packageSessions={rehabProgress.packageDays}
-                          tone="cyan"
-                          dayNoun="days"
-                          testid="cons-rehab-spell-current"
-                        />
-                      )}
-                    </div>
-                  )}
-
-                  <RehabDayList
-                    days={rehabProgress.days}
-                    showPhysio={rehabProgress.reassigned}
-                    testid="cons-rehab-day-list"
-                  />
-                </div>
-              ) : null;
-
-              const DietDetailBody = (
-                <>
-                  <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-diet-detail">
-                    <dl className="divide-y divide-slate-100">
-                      <DetailRow label="Diet Package" value={selectedLead.diet_package_name || "Not chosen yet"} />
-                      <DetailRow
-                        label="Diet Fee"
-                        value={dietFeePaid
-                          ? `Rs.${Number(selectedLead.diet_fee_paid).toLocaleString("en-IN")}${selectedLead.diet_fee_payment_mode ? ` (${selectedLead.diet_fee_payment_mode})` : ""}`
-                          : (dietFeeDue != null ? `Rs.${Number(dietFeeDue).toLocaleString("en-IN")} — not collected` : "Not collected")}
-                        tone={dietFeePaid ? "text-emerald-700" : "text-amber-700"}
-                      />
-                      <DetailRow label="Nutritionist" value={selectedLead.diet_coach_name || "Not assigned"} tone={dietAssigned ? "" : "text-amber-700"} />
-                      <DetailRow
-                        label="Diet Consultation"
-                        value={selectedLead.diet_appointment_at
-                          ? `${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`
-                          : "Not booked"}
-                        tone={dietBooked ? "" : "text-amber-700"}
-                      />
-                      {/* The chart's own three rows, and only once a chart has actually been
-                          called for. A Diet Chart is a second product on a second shelf at a
-                          second price, so it gets its own fee line rather than sharing the
-                          one above — which is also what the lead stores.
-
-                          Nothing here until the Nutritionist recommends one. Until then
-                          there is no chart to price, and a fee line offered against one
-                          would be asking the desk to collect for a decision nobody has made.
-
-                          The last row is the one the desk is actually asked about. A chart
-                          the coach sent is not a chart the patient can see: unpaid, it is
-                          held, and the person who has to say so is standing at this screen. */}
-                      {chartReferred && (
-                        <>
-                          <DetailRow label="Diet Chart Package" value={selectedLead.diet_chart_package_name || "Not chosen yet"} />
-                          <DetailRow
-                            label="Diet Chart Fee"
-                            value={dietChartFeePaid
-                              ? `Rs.${Number(selectedLead.diet_chart_fee_paid).toLocaleString("en-IN")}${selectedLead.diet_chart_fee_payment_mode ? ` (${selectedLead.diet_chart_fee_payment_mode})` : ""}`
-                              : (dietChartFeeDue != null ? `Rs.${Number(dietChartFeeDue).toLocaleString("en-IN")} — not collected` : "Not collected")}
-                            tone={dietChartFeePaid ? "text-emerald-700" : "text-amber-700"}
-                          />
-                          <DetailRow
-                            label="Diet Chart"
-                            value={!chartSent
-                              ? "Not sent yet"
-                              : dietChartFeePaid
-                              ? `Sent${selectedLead.diet_chart_sent_by ? ` by ${selectedLead.diet_chart_sent_by}` : ""}`
-                              : "Sent — held until the fee is collected"}
-                            tone={!chartSent ? "text-slate-500" : dietChartFeePaid ? "text-emerald-700" : "text-amber-700"}
-                          />
-                        </>
-                      )}
-                    </dl>
-                  </div>
-                  {/* The fee first and the nutritionist after it, because that is the order
-                      the backend enforces — assign-diet refuses an unpaid patient, so
-                      offering assignment first would be offering a dead end.
-
-                      Once it is collected the fee button goes rather than turning into
-                      "Update Diet Fee". Collecting is a step in that sequence and it is
-                      done; what is left on this card is the appointment. The compact Diet
-                      button above has always worked this way — it moves on to Assign and
-                      then Reschedule — so this card was the one place still offering to
-                      reopen a settled fee, next to a badge saying it was collected. */}
-                  <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
-                    {!dietFeePaid && (
-                      <Button
-                        size="sm"
-                        className={`bg-orange-500 text-white shadow-sm hover:bg-orange-600 ${ACT_BTN}`}
-                        onClick={() => openDietFeeDraft("consultation")}
-                        data-testid="cons-diet-detail-fee"
-                      >
-                        <IndianRupee className="mr-1 h-3.5 w-3.5" />
-                        Collect Diet Fee
-                      </Button>
-                    )}
-                    {/* Offered only once the Nutritionist has recommended a chart, and it
-                        goes once collected — the same way the fee button above does, and for
-                        the same reason: collecting is a step in a sequence and it is done.
-
-                        Which puts it, in practice, after the consultation rather than beside
-                        it: the recommendation is made at the appointment the fee above pays
-                        for. It is not gated on that fee here, because the recommendation
-                        cannot exist without it having happened. */}
-                    {chartReferred && !dietChartFeePaid && (
-                      <Button
-                        size="sm"
-                        className={`bg-orange-500 text-white shadow-sm hover:bg-orange-600 ${ACT_BTN}`}
-                        onClick={() => openDietFeeDraft("chart")}
-                        data-testid="cons-diet-detail-chart-fee"
-                      >
-                        <IndianRupee className="mr-1 h-3.5 w-3.5" />
-                        Collect Diet Chart Fee
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      disabled={!dietFeePaid}
-                      title={dietFeePaid ? undefined : "Collect the Diet Fee first"}
-                      className={`${dietFeePaid ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
-                      onClick={openDietModal}
-                      data-testid="cons-diet-detail-assign"
-                    >
-                      <Salad className="mr-1 h-3.5 w-3.5" />
-                      {dietBooked ? "Reschedule Diet" : "Assign Nutritionist"}
-                    </Button>
-                  </div>
-                </>
-              );
-
-              const RehabDetailBody = (
-                <>
-                  <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-rehab-detail">
-                    <dl className="divide-y divide-slate-100">
-                      <DetailRow label="Rehab Course" value={selectedLead.rehab_package_name || "Not chosen yet"} />
-                      <DetailRow
-                        label="Sessions"
-                        value={selectedLead.rehab_package_sessions
-                          ? `${selectedLead.rehab_package_sessions} day${selectedLead.rehab_package_sessions > 1 ? "s" : ""}`
-                          : "Not stated on the course"}
-                        tone={selectedLead.rehab_package_sessions ? "" : "text-slate-400"}
-                      />
-                      <DetailRow
-                        label="Rehab Fee"
-                        value={rehabFeePaid
-                          ? `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}${selectedLead.rehab_fee_payment_mode ? ` (${selectedLead.rehab_fee_payment_mode})` : ""}`
-                          : (selectedLead.rehab_package_price != null ? `Rs.${Number(selectedLead.rehab_package_price).toLocaleString("en-IN")} — not collected` : "Not collected")}
-                        tone={rehabFeePaid ? "text-emerald-700" : "text-amber-700"}
-                      />
-                      <DetailRow label="Rehab Physio" value={selectedLead.rehab_physio_name || "Not assigned"} tone={selectedLead.rehab_physio_name ? "" : "text-amber-700"} />
-                      {rehabProgress && (
-                        <DetailRow
-                          label="Days Completed"
-                          value={`${rehabProgress.completed} of ${rehabProgress.packageDays || "—"}${rehabProgress.done ? "" : ` · ${rehabProgress.remaining} left`}`}
-                          tone={rehabProgress.completed > 0 ? "text-emerald-700" : ""}
-                        />
-                      )}
-                    </dl>
-                  </div>
-                  {/* The same course status the Rehab panel shows, because it is the same
-                      course. This view is the only way into rehab from Fee Collected and
-                      from the diet panel, and a patient opened through those doors used to
-                      get four rows and no sign of whether a single day had been run. */}
-                  {RehabCourseStatus}
-                  {/* Same order and the same gate as diet: the days cannot be booked until
-                      the course is paid for, which is the rule assign-rehab itself holds. */}
-                  <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
-                    {/* Only while the course is unpaid. The Rehab Fee is taken in one go —
-                        anything short of the listed price is recorded as a discount, not a
-                        balance — so once it is in there is no rehab money left to collect,
-                        and a button offering to take it again beside a line reading
-                        "Rs.20,800 (cash)" only invites someone to overwrite the record. */}
-                    {!rehabFeePaid && (
-                      <Button
-                        size="sm"
-                        /* Dead until the Consultant has priced a course, because there is
-                           nothing to collect against and collect-rehab-fee refuses for the
-                           same reason. Drawn and disabled rather than left out: this view is
-                           now reachable for a referral with no course on it, and a card whose
-                           only action has silently vanished reads as a card with nothing left
-                           to do. The title says which desk the next move belongs to. */
-                        disabled={!selectedLead.rehab_package_id}
-                        title={selectedLead.rehab_package_id ? undefined : "The Consultant has not chosen a Rehab course yet — there is no price to collect against"}
-                        className={`${selectedLead.rehab_package_id ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
-                        onClick={openRehabFeeDraft}
-                        data-testid="cons-rehab-detail-fee"
-                      >
-                        <IndianRupee className="mr-1 h-3.5 w-3.5" />
-                        Collect Rehab Fee
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      disabled={!rehabFeePaid}
-                      title={rehabFeePaid ? undefined : "Collect the Rehab Fee first"}
-                      className={`${rehabFeePaid ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
-                      onClick={() => openPhysioModal("rehab")}
-                      data-testid="cons-rehab-detail-assign"
-                    >
-                      <Activity className="mr-1 h-3.5 w-3.5" />
-                      {selectedLead.rehab_physio_name ? "Reassign Rehab Physio" : "Assign Physio"}
-                    </Button>
-                  </div>
-                </>
-              );
-
-              // Documents, as a view of the panel rather than a trip to the Documents tab
-              // at the top of the card. Consultation Visit needs one before it will take a
-              // payment, and sending someone to another tab to satisfy a rule this panel is
-              // enforcing is how a person ends up not knowing why the button is dead.
-              // Consultation Visit is the one stage that will not proceed without paperwork.
-              // Everywhere else Documents is simply available.
-              const docsRequired = stage === "Consultation Visit";
-              // What the fee waits on. Not "has any document": that count goes up for a
-              // scheme letter or an old MRI report, so a patient with paperwork on file
-              // and no prescription would have opened the gate with somebody else's page.
-              const hasRx = (leadRxCount || 0) > 0;
-
-              // Step one, and only step one. No fees on this screen: somebody filing a
-              // scan is filing a scan, and the figures belong to the step that can act on
-              // them. What it does carry is the way on to that step, once there is
-              // something on file to carry them there.
-              const DocumentsBody = (
-                <div className="space-y-4" data-testid="cons-documents-body">
-                  {docsRequired && !hasRx && (
-                    <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-                      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-                      <span>Upload the prescription before collecting the fee — the photo or scan is the record of what the Consultant prescribed.</span>
-                    </p>
-                  )}
-                  {/* Its own uploader above the general pile, not a row inside it. This is
-                      the document the fee waits on, so it is asked for by name: a panel
-                      that says "documents" and means one particular document is how a
-                      scheme letter gets filed and the gate stays shut with nothing on
-                      screen explaining why. */}
-                  <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-3" data-testid="cons-prescription-block">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-800">
-                        <FileText className="h-3.5 w-3.5" />Prescription
-                        {docsRequired && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-sky-700">Required to collect the fee</span>}
-                      </p>
-                      {hasRx && <span className="shrink-0 text-[11px] font-semibold text-emerald-600" data-testid="cons-prescription-done">On file</span>}
-                    </div>
-                    <LeadDocuments
-                      leadId={selectedLead.id}
-                      kind="prescription"
-                      fixedLabel="Prescription"
-                      canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
-                      onChanged={notePrescriptionCount}
-                    />
-                  </div>
-                  {/* Only the prescription lives here. Everything else the patient has on
-                      file — reports, scans, scheme letters — is filed and read in the
-                      Documents tab at the top of the card: this panel exists to clear the
-                      one page the fee waits on, and a second uploader beside it invites
-                      the scheme letter that leaves the gate shut with nothing on screen
-                      explaining why. */}
-                </div>
-              );
-
-              // Which programme is on screen, if any. Null means the panel shows its own
-              // stage — the fee summary and the line about what to do next.
-              const detailView = programmeDetail === "diet" ? DIET_VIEW
-                : programmeDetail === "rehab" ? REHAB_VIEW
-                : null;
-              const detailBody = programmeDetail === "diet" ? DietDetailBody
-                : programmeDetail === "rehab" ? RehabDetailBody
-                : programmeDetail === "documents" ? DocumentsBody
-                : null;
-
-              // The buttons that open the two cards above. They replace the pair that used
-              // to fire a fee popup straight off this row — same place, but they now show
-              // the programme rather than assuming the next thing wanted is a payment.
-              // Gated on the referral, like its Rehab twin below. It was offered to every
-              // patient whose consultation fee was in, so a Consultant who sent somebody to
-              // Rehab and nowhere else still produced a Diet Details button on the Branch
-              // Admin's panel — a programme this patient was never put on, sitting beside
-              // the one they were.
-              // Widened past diet_recommended alone — that is the Consultant's tick, and it is
-              // not the only thing that puts a patient on this programme. A Diet Chart is
-              // recommended later, by the Nutritionist, and carries diet_chart on its own; a
-              // fee already taken is a fact no cleared tick can undo. Both used to leave a
-              // patient with a Diet Chart Fee on their fee card and no tab that would open
-              // the programme it belongs to. Same reading as the fee cards and the pill.
-              const onDietProgramme = !!selectedLead.diet_recommended || !!selectedLead.diet_consultation
-                || !!selectedLead.diet_chart || selectedLead.diet_fee_paid != null
-                || selectedLead.diet_chart_fee_paid != null;
-              const DietDetailButton = (selectedLead.package_paid != null && onDietProgramme) ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className={`${programmeDetail === "diet" ? "border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
-                  onClick={() => openDetail("diet")}
-                  data-testid="cons-open-diet-detail"
-                >
-                  <Salad className="mr-1 h-3.5 w-3.5" />
-                  <Lbl full="Diet Details" short="Diet" />
-                </Button>
-              ) : null;
-
-              // No rehab_package_id in this gate, unlike the collect button above it. A
-              // referral with no course chosen is exactly the patient somebody needs to look
-              // at — the panel's first row says "Not chosen yet", which is the answer to why
-              // no fee can be taken — and hiding the view left that question unanswerable
-              // from here. The button inside it is what refuses; see RehabDetailBody.
-              const onRehabProgramme = !!selectedLead.rehab_referred || !!selectedLead.rehab_package_id
-                || selectedLead.rehab_fee_paid != null;
-              const RehabDetailButton = (selectedLead.package_paid != null && onRehabProgramme) ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className={`${programmeDetail === "rehab" ? "border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
-                  onClick={() => openDetail("rehab")}
-                  data-testid="cons-open-rehab-detail"
-                >
-                  <Activity className="mr-1 h-3.5 w-3.5" />
-                  <Lbl full="Rehab Details" short="Rehab" />
-                </Button>
-              ) : null;
-
-              // The tab for a panel's own stage. Each panel names it for what it holds —
-              // "Assign Physio" on Fee Collected — because "Overview" would tell the reader
-              // nothing about which of the three views they are on.
-              // Filled, so which step is open is read at a glance rather than found. Used by every
-  // tab on this row so the selected one always looks the same, whichever it is.
-  const TAB_ON = "border-sky-600 bg-sky-600 text-white shadow-sm hover:bg-sky-700 hover:text-white";
-
-  const OwnTab = ({ label, short, icon: TabIcon, active, locked = false, lockedTitle }) => (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={locked}
-                  title={locked ? lockedTitle : undefined}
-                  className={`${locked
-                    ? "border-slate-200 bg-slate-50 text-slate-400"
-                    : programmeDetail === "own" ? active : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
-                  onClick={() => openDetail("own")}
-                  data-testid="cons-open-own-detail"
-                >
-                  <TabIcon className="mr-1 h-3.5 w-3.5" />
-                  <Lbl full={label} short={short || label} />
-                </Button>
-              );
-
-              // Every fee this patient has been quoted, one card each, in the order the
-              // fees are taken. It lives out here rather than inside a stage branch
-              // because collecting the Consultation Fee moves the lead from Consultation
-              // Visit to Fee Collected, and the Branch Admin who just took that fee is
-              // still standing in front of the person who owes the next one. Fee Collected
-              // used to answer with a panel of a different shape — the same fees as flat
-              // rows, the collect button moved up into the tab row — so taking two fees off
-              // one patient meant reading two screens for the same job. The cards stay put
-              // now: the fee just paid ticks over, and the next one lights up where it
-              // already was.
-              const consultationPaid = selectedLead.package_paid != null;
-              const treatmentFeePaid = selectedLead.treatment_fee_paid != null;
-
-              // Where a Partial Payment plan currently stands — the next installment, what
-              // is still owed, and whether it is late. Worked out once, for the Treatment
-              // Fee card here and for the balance note Fee Collected prints under the grid.
-              const partialPlan = feeBalances.treatment || null;
-
-              // What a card says and does when that fee has been part collected: it is
-              // neither settled nor untouched, so it names the balance instead of ticking
-              // itself green, and its button collects that balance under any mode.
-              const balanceStep = (fee, fallbackAct, fallbackLabel) => {
-                const plan = feeBalances[fee];
-                if (!plan) return { paid: undefined, pending: null, pendingTone: "text-amber-600", act: fallbackAct, actLabel: fallbackLabel };
-                return {
-                  paid: false,
-                  pending: `Rs.${Number(plan.balance).toLocaleString("en-IN")} balance${plan.next?.due_date ? ` · due ${plan.next.due_date}` : ""}`,
-                  pendingTone: plan.overdue ? "text-rose-600" : "text-amber-600",
-                  act: () => openPartialCollectPopup(plan.nextIdx, fee),
-                  actLabel: "Collect Balance",
-                };
-              };
-
-              // Each fee is gated on the patient actually being on that programme —
-              // quoting diet or rehab to everyone would overstate what is owed.
-              const feeSteps = [
-                {
-                  key: "consultation",
-                  label: "Consultation Fee",
-                  amount: selectedLead.package_price,
-                  paid: consultationPaid,
-                  note: consultationPaid ? selectedLead.package_payment_mode : null,
-                  show: true,
-                  ...balanceStep("consultation", openCollectFeeDraft, "Collect"),
-                  // A part-paid fee is still "paid" for everything gated on it — the
-                  // patient is through the door — so the tick is only withheld while a
-                  // balance is actually outstanding.
-                  ...(feeBalances.consultation ? {} : { paid: consultationPaid }),
-                },
-                {
-                  key: "treatment",
-                  label: "Treatment Fee",
-                  sub: selectedLead.session_package_name
-                    ? `${selectedLead.session_package_name}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`
-                    : null,
-                  amount: selectedLead.session_package_price,
-                  // A part-paid plan has money in and a balance still owed, so it is
-                  // neither collected nor untouched: the card keeps its button and names
-                  // the installment that is due instead of ticking itself green.
-                  paid: treatmentFeePaid && !partialPlan,
-                  note: treatmentFeePaid ? selectedLead.treatment_fee_payment_mode : null,
-                  pending: partialPlan
-                    ? `${savedInstallments.filter((i) => i.paid).length} of ${savedInstallments.length} in · balance Rs.${Number(partialPlan.balance).toLocaleString("en-IN")}`
-                    : null,
-                  pendingTone: partialPlan && partialPlan.overdue ? "text-rose-600" : "text-amber-600",
-                  show: decision === "consultation_treatment",
-                  act: partialPlan ? () => openPartialCollectPopup(partialPlan.nextIdx) : openTreatmentFeeDraft,
-                  actLabel: partialPlan ? `Collect ${installmentLabelFor(partialPlan.nextIdx)}` : "Collect",
-                },
-                {
-                  key: "rehab",
-                  label: "Rehab Fee",
-                  sub: selectedLead.rehab_package_name,
-                  amount: selectedLead.rehab_fee_paid != null ? selectedLead.rehab_fee_paid : selectedLead.rehab_package_price,
-                  paid: selectedLead.rehab_fee_paid != null,
-                  note: selectedLead.rehab_fee_paid != null ? selectedLead.rehab_fee_payment_mode : null,
-                  show: !!selectedLead.rehab_referred,
-                  // Collected on the Rehab tab, which carries the course as well as the
-                  // figure — this card is the pointer to it. A balance is different: it
-                  // is one figure to take, so the card takes it.
-                  ...balanceStep("rehab", () => openDetail("rehab"), "Open"),
-                  ...(feeBalances.rehab ? {} : { paid: selectedLead.rehab_fee_paid != null }),
-                },
-                {
-                  key: "diet",
-                  label: "Diet Fee",
-                  sub: selectedLead.diet_package_name,
-                  amount: selectedLead.diet_fee_paid != null ? selectedLead.diet_fee_paid : dietFeeDue,
-                  paid: selectedLead.diet_fee_paid != null,
-                  note: selectedLead.diet_fee_paid != null ? selectedLead.diet_fee_payment_mode : null,
-                  show: !!selectedLead.diet_recommended,
-                  // Straight into the collect popup, not across to the Diet tab. This card
-                  // sits under a heading that says Collect a Payment, on a panel opened to
-                  // take money — so "Open" spent a click moving the Branch Admin to a
-                  // programme view whose only unpaid action was the same button under
-                  // another name. The Rehab card still points at its tab because the course
-                  // is chosen there; the Diet Package is chosen inside the popup itself.
-                  ...balanceStep("diet", () => openDietFeeDraft("consultation"), "Collect"),
-                  ...(feeBalances.diet ? {} : { paid: selectedLead.diet_fee_paid != null }),
-                },
-                {
-                  // Its own card rather than a second figure inside the Diet one. A patient
-                  // sold both would otherwise read one total they cannot match against
-                  // either receipt, on the card whose whole job is saying what they owe.
-                  //
-                  // Shown only where the chart was actually ticked, so it stays off every
-                  // patient who was referred for the consultation alone.
-                  key: "diet_chart",
-                  label: "Diet Chart Fee",
-                  sub: selectedLead.diet_chart_package_name,
-                  amount: selectedLead.diet_chart_fee_paid != null ? selectedLead.diet_chart_fee_paid : dietChartFeeDue,
-                  paid: selectedLead.diet_chart_fee_paid != null,
-                  note: selectedLead.diet_chart_fee_paid != null ? selectedLead.diet_chart_fee_payment_mode : null,
-                  show: !!selectedLead.diet_chart,
-                  ...balanceStep("diet_chart", () => openDetail("diet"), "Open"),
-                  ...(feeBalances.diet_chart ? {} : { paid: selectedLead.diet_chart_fee_paid != null }),
-                },
-              ].filter((f) => f.show);
-
-              // The one fee that can be taken right now. Everything after the Consultation
-              // Fee waits on it — the server's rule, not a habit of this screen — so only
-              // that card gets the filled button and the rest stay quiet outlines.
-              const nextFeeStep = feeSteps.find((f) => !f.paid && (f.key === "consultation" || consultationPaid));
-
-              // And the Consultation Fee itself waits on the prescription — the server's
-              // rule too, since collect-package-payment refuses without it.
-              //
-              // The tab above these cards is already locked while the page is missing, but
-              // that lock only closes once the count has arrived: leadRxCount is null until
-              // the fetch lands, the effect that jumps to Documents waits for it, and the
-              // cards render in the meantime with a live Collect button on them. Reading the
-              // null as "no prescription" here is the safe way round — a card that waits a
-              // moment for an answer costs nothing, and one that collects before the answer
-              // arrives is the bug.
-              const consultationRxBlocked = docsRequired && !consultationPaid && !hasRx;
-
-              /**
-               * The fee cards, drawn over whichever of the fees the caller wants shown.
-               *
-               * A function rather than one built element, because there are two readings of
-               * this list and only one of them is the whole thing. Fee Collected shows every
-               * fee the patient was quoted, ticks and all, because that panel IS the money:
-               * the tick beside a settled fee is half of what it reports. Physio Assign shows
-               * only what is still owed — the consultation and treatment fees are in by
-               * definition once a patient stands there, and repeating two green ticks over
-               * the course card would bury the one fee that still needs taking.
-               *
-               * `n` numbers each card. Handed in rather than taken from the index, so a card
-               * keeps the step number it has on the full list when it is shown on a short
-               * one: the Diet Fee is the fourth fee whether or not the three before it are
-               * on screen beside it.
-               */
-              const renderFeeSteps = (steps, testid = "cons-fee-steps") => (
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid={testid}>
-                  {steps.map(({ step: f, n }) => (
-                    <div
-                      key={f.key}
-                      className={`flex flex-col gap-2 rounded-lg border p-3 ${
-                        f.paid ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-white"
-                      }`}
-                      data-testid={`cons-fee-step-${f.key}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
-                          f.paid ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
-                        }`}>
-                          {f.paid ? <CheckCircle2 className="h-3 w-3" /> : n}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-semibold text-slate-700">{f.label}</p>
-                          {f.sub ? <p className="truncate text-[11px] text-slate-400" title={String(f.sub)}>{f.sub}</p> : null}
-                        </div>
-                      </div>
-                      <p className="text-lg font-extrabold leading-none text-slate-800">
-                        {f.amount != null ? `Rs.${Number(f.amount).toLocaleString("en-IN")}` : "—"}
-                      </p>
-                      {f.paid ? (
-                        <>
-                          <span className="text-[11px] font-medium capitalize text-emerald-700">
-                            {f.note ? `Paid · ${f.note}` : "Paid"}
-                          </span>
-                          {/* The way back to the receipt for money already in. A settled
-                              card used to end at "Paid · Cash": the document the patient
-                              was handed existed for as long as the popup that raised it,
-                              so a patient who lost theirs could only be pointed at their
-                              own WhatsApp history. This reopens the same card — print,
-                              WhatsApp, share and download — rebuilt off the record.
-
-                              Sits where the Collect button sits on an unpaid card rather
-                              than beside the tick, so the fee grid keeps one shape: the
-                              bottom of every card is what to do about that fee, and for
-                              a fee that is in, that is hand it over again.
-
-                              Shown only where the record can actually produce one. A fee
-                              settled before payment_details were stored has no
-                              transaction id and no mode fields behind it, and a button
-                              that opened a receipt with a blank transaction number on it
-                              would be worse than no button. */}
-                          {REISSUE_FEES[f.key] && (selectedLead[REISSUE_FEES[f.key].details]?.transaction_id) && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className={`w-full border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 ${ACT_BTN}`}
-                              onClick={() => openFeeReceipt(f.key)}
-                              title="Open the receipt for this payment — print, send or download it again"
-                              data-testid={`cons-fee-receipt-${f.key}`}
-                            >
-                              <Eye className="mr-1 h-3.5 w-3.5" />
-                              <Lbl full="View Receipt" short="Receipt" />
-                            </Button>
+                          ) : (
+                            <p className="mt-1 text-[11px] text-slate-500">A plain consultation — nothing else was recommended.</p>
                           )}
-                        </>
-                      ) : (
-                        <>
-                          {f.pending ? <span className={`text-[11px] font-medium ${f.pendingTone}`}>{f.pending}</span> : null}
-                          <Button
-                            size="sm"
-                            variant={nextFeeStep && f.key === nextFeeStep.key ? undefined : "outline"}
-                            /* Everything after the consultation fee waits on it, and the
-                               consultation fee waits on the prescription. Both say so
-                               rather than failing when pressed. */
-                            disabled={f.key === "consultation" ? consultationRxBlocked : !consultationPaid}
-                            title={f.key === "consultation"
-                              ? (consultationRxBlocked ? "Upload the prescription first" : undefined)
-                              : (!consultationPaid ? "Collect the consultation fee first" : undefined)}
-                            className={`w-full ${nextFeeStep && f.key === nextFeeStep.key ? "bg-sky-600 text-white hover:bg-sky-700" : ""} ${ACT_BTN}`}
-                            onClick={f.act}
-                            data-testid={`cons-fee-act-${f.key}`}
-                          >
-                            {f.actLabel}
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              );
-
-              // Numbered once, here, so both readings below agree about which step a fee is.
-              const numberedFeeSteps = feeSteps.map((step, i) => ({ step, n: i + 1 }));
-              const FeeSteps = renderFeeSteps(numberedFeeSteps);
-              // What is still owed, for the panels that are not the money panel. Empty for
-              // the patient who paid for everything at the desk, which is most of them — so
-              // every caller has to be prepared to draw nothing.
-              const outstandingFeeSteps = numberedFeeSteps.filter(({ step }) => !step.paid);
-
-              const panel = (() => {
-                // FIRST in this chain, deliberately. The Rehab tab is a cross-cutting view
-                // rather than a position in the pipeline: a patient is on it because their
-                // Rehab Fee is in, while their consultation_stage still says where they
-                // actually are — which for almost all of them is Fee Collected. Placed any
-                // lower, that branch returns first and the Rehab tab opens a patient onto
-                // the fee panel with no way to reach Assign Physio.
-                if (stageFilter === "Rehab" && selectedLead.rehab_fee_paid != null) {
-                  // Named for the course rather than the collection: `rehabDays` up in the
-                  // component is the days themselves, and one word for the two of them in
-                  // a block that reads both is how a count gets mapped over.
-                  const rehabCourseDays = selectedLead.rehab_package_sessions || 0;
-                  const rehabAssigned = !!selectedLead.rehab_physio_name;
-                  // Label/value pairs built once, so the rows below are a list rather than
-                  // four hand-repeated flex divs — and so a row that has nothing to say is
-                  // dropped instead of printing "0 days" or an empty physio.
-                  const rehabRows = [
-                    { label: "Course", value: selectedLead.rehab_package_name || "Rehab course" },
-                    rehabCourseDays > 0 ? { label: "Duration", value: `${rehabCourseDays} day${rehabCourseDays > 1 ? "s" : ""}` } : null,
-                    {
-                      label: "Rehab Fee",
-                      value: `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}`,
-                      note: selectedLead.rehab_fee_payment_mode || "",
-                      strong: true,
-                    },
-                    rehabAssigned ? { label: "Rehab Physio", value: selectedLead.rehab_physio_name } : null,
-                    // No count row here. What the course was sold as is what these rows are
-                    // for; how much of it has been delivered is the bar directly below them,
-                    // which says the same two numbers as a length and then lists the days
-                    // themselves. Saying it twice, three lines apart, only invited the reader
-                    // to check whether the two agreed.
-                  ].filter(Boolean);
-                  return (
-                    <div
-                      className="overflow-hidden rounded-xl border border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white shadow-sm ring-1 ring-inset ring-white/60"
-                      data-testid="cons-stage-panel-rehab"
-                    >
-                      {/* Header band: the icon gets a tile of its own and the state sits at
-                          the far end, so the panel says what it is and where it stands on
-                          one line before any figure is read. */}
-                      <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-2.5">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-600/10 text-cyan-700">
-                            <Activity className="h-4 w-4" />
-                          </span>
-                          <span className="truncate text-xs font-semibold uppercase tracking-wider text-cyan-800">Rehab</span>
                         </div>
-                        {/* Who is delivering it, on the header line rather than only in the
-                            rows below. Assigning a physio is the one act this panel exists
-                            for, and until it says so on the line that says what the panel
-                            is, the answer to "did that go through" is four rows down. */}
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          {rehabAssigned && (
-                            <span
-                              className="flex max-w-[10rem] items-center gap-1 rounded-full bg-cyan-600 px-2 py-0.5 text-[10px] font-semibold text-white"
-                              title={`Rehab Physio: ${selectedLead.rehab_physio_name}`}
-                              data-testid="cons-rehab-physio-chip"
-                            >
-                              <Users className="h-3 w-3 shrink-0" />
-                              <span className="truncate">{selectedLead.rehab_physio_name}</span>
-                            </span>
-                          )}
-                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                            <CheckCircle2 className="h-3 w-3" /> Fee Collected
-                          </span>
-                        </div>
-                      </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </section>
+              )}
 
-                      <div className="p-4">
-                        {/* Hairline-divided rows rather than four bordered boxes: one card,
-                            one column of values, nothing for the eye to step over. */}
-                        <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-rehab-summary">
-                          <dl className="divide-y divide-slate-100">
-                            {rehabRows.map((row) => (
-                              <div key={row.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
-                                <dt className="shrink-0 text-xs text-slate-500">{row.label}</dt>
-                                <dd className={`min-w-0 truncate text-right font-semibold text-slate-800 ${row.strong ? "text-[15px]" : "text-sm"}`} title={String(row.value)}>
-                                  {row.value}
-                                  {/* Capitalised: the only note these rows carry is a payment
-                                      mode — "(Cash)" — which is written lowercase upstream. */}
-                                  {row.note && <span className="ml-1 text-xs font-medium capitalize text-emerald-600">({row.note})</span>}
-                                </dd>
-                              </div>
-                            ))}
-                          </dl>
-                        </div>
-
-                        {RehabCourseStatus}
-
-                        <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                          {!rehabAssigned
-                            ? "Choose the physio who will deliver the course and fix a date and time for every day."
-                            : rehabProgress?.done
-                              ? "Every day of this course has been delivered."
-                              : "The course is booked — every day sits on this physio's calendar and on their board."}
-                        </p>
-                        {/* Said before the picker is opened rather than found inside it.
-                            Reassigning re-dates only what is left — assign-rehab keeps the
-                            completed days with the physio who ran them and replaces the
-                            upcoming ones — and the branch is about to be asked for exactly
-                            that many dates. */}
-                        {rehabAssigned && rehabProgress && !rehabProgress.done && rehabProgress.completed > 0 && (
-                          <p className="mt-1 text-xs leading-relaxed text-cyan-700" data-testid="cons-rehab-reassign-note">
-                            Reassigning keeps the {rehabProgress.completed} day{rehabProgress.completed === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {rehabProgress.remaining} get new dates.
-                          </p>
-                        )}
-
-                        {/* One solid action on the same left edge as everything above it,
-                            with Cancel beside it as a quiet outline rather than a second
-                            filled colour competing with the step to take. No Diet Details
-                            here: this tab is the rehab course, and a patient reached
-                            through it is being looked at for the days of that course --
-                            the diet programme is opened from the panel that owns it. */}
-                        <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
-                          <Button
-                            size="sm"
-                            className="bg-cyan-600 text-xs text-white shadow-sm transition hover:bg-cyan-700 hover:shadow"
-                            onClick={() => openPhysioModal("rehab")}
-                            data-testid="cons-open-rehab-assign"
-                          >
-                            <Activity className="mr-1.5 h-3.5 w-3.5" />
-                            {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
-                          </Button>
-                          {CancelButton}
-                        </div>
-                        {/* Opened from the row above, and shown under it for the same reason
-                            the Fee Collected panel does: the control that opened a
-                            programme has to stay on screen to close it again. */}
-                        {detailBody && <div className="mt-3 border-t border-cyan-100 pt-3">{detailBody}</div>}
-                      </div>
-                    </div>
-                  );
-                }
-
-                // Diet Consultation and Diet Chart are the same kind of pill as Rehab —
-                // nothing writes either, a patient is under one because they are on a diet
-                // plan — so both open the diet programme rather than whatever stage the
-                // lead happens to sit at. One panel because they are one programme with two
-                // fee lines, not two — see DietDetailBody below.
+              {/* Treatment — Head Physio's own "Move to Admin". Requires Diagnosis Report +
+                  Treatment Summary to already be written (that's what marks the consultation
+                  itself done and ready for Branch Admin to collect the Consultation Fee).
+                  Every patient goes on to a Treatment Package here — "Consultation Only" is a
+                  legacy decision value some already-existing leads still carry, no longer
+                  offered as a choice. Physio assignment lives entirely on Branch Admin's own
+                  board, after both fees are collected. */}
+              {isConsultant && (() => {
+                // Read off the decision the lead carries rather than the name of the stage
+                // it landed on. The backend writes whatever the head_consultation pipeline's
+                // closing stage is currently called, which Pipeline Stage Management can
+                // rename — and a literal compared against that goes quietly false, putting
+                // the whole form back in front of a consultation already finished.
+                const alreadyMoved = !!selectedLead.consultation_decision && !editingDecision;
+                const diagnosisReady = !!(selectedLead.physio_diagnosis_report || "").trim();
+                const summaryReady = !!(selectedLead.treatment_summary || "").trim();
+                const selectedPackage = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+                const selectedPackageWeeks = selectedPackage ? weeksFromPackageName(selectedPackage.name) : null;
+                // Treatment is not one of five optional add-ons any more. What leaves this
+                // form for Branch Admin is a treatment plan — sessions to book and a package
+                // to collect against — so the tick, its package and its sessions/week are as
+                // required as the two reports above. Ticked with no package, or a package
+                // with no sessions/week, is the same gap as never having ticked it: the
+                // branch gets a patient with nothing to book.
+                const treatmentReady = !!decisionDraft.treatment
+                  && !!decisionDraft.item_id
+                  && !!selectedPackageWeeks
+                  && !!parseInt(decisionDraft.sessionsPerWeek, 10);
+                // Diet asks nothing: the referral is to the Nutritionist's consultation,
+                // which is the whole of what a Consultant decides on that side.
                 //
-                // The Rehab pill lands here too, but only for a course whose fee has not been
-                // taken yet. Its own panel above is a record of a paid course — it prints the
-                // collected amount and offers to book the days — so a referred patient with
-                // nothing collected fell past it onto whatever stage they happened to sit at,
-                // which is the treatment stage that knows nothing about rehab. The pill now
-                // lists them (see matchesStage), so it has to open them somewhere that can
-                // take the fee, and RehabDetailBody is that place.
-                const onRehabPill = stageFilter === "Rehab";
-                // Which of the two programmes this panel is showing. The tabs switch it, and
-                // the pill that was clicked chooses which one it starts on: a patient opened
-                // from Rehab opens on rehab, and one opened from either Diet pill on diet.
-                const pillProgramme = programmeDetail === "rehab" || (onRehabPill && programmeDetail === "own")
-                  ? "rehab"
-                  : "diet";
-                // Chart-only referrals belong to the Diet pills as much as consultations do
-                // — diet_recommended is the Consultant's tick, and a chart the Nutritionist
-                // recommended later carries diet_chart alone. See matchesStage.
-                const onDietPill = (stageFilter === "Diet Consultation" || stageFilter === "Diet Chart")
-                  && (selectedLead.diet_recommended || selectedLead.diet_consultation || selectedLead.diet_chart
-                    || selectedLead.diet_fee_paid != null || selectedLead.diet_chart_fee_paid != null);
-                if (onDietPill || onRehabPill) {
-                  return (
-                    <StagePanel
-                      tone={pillProgramme === "rehab" ? "cyan" : "orange"}
-                      icon={pillProgramme === "rehab" ? Activity : Salad}
-                      title={pillProgramme === "rehab" ? "Rehab Programme" : "Diet Programme"}
-                      testid="cons-stage-panel-diet"
-                      /* Both the chip and the own-tab follow whichever programme is on
-                         screen. This panel shows either, and it read "Diet Fee Due" over a
-                         rehab course — a patient on both was told the wrong fee was
-                         outstanding for the thing they were looking at. */
-                      // A fee part collected is neither of the two states this chip had:
-                      // it is not due from scratch, and it is not collected. It says what
-                      // is left, because that is the number somebody has to chase.
-                      chip={
-                        pillProgramme === "rehab" ? (
-                          <PanelChip tone={feeBalances.rehab || selectedLead.rehab_fee_paid == null ? "amber" : "emerald"} tick={!feeBalances.rehab && selectedLead.rehab_fee_paid != null}>
-                            {feeBalances.rehab
-                              ? `Balance Rs.${Number(feeBalances.rehab.balance).toLocaleString("en-IN")}`
-                              : selectedLead.rehab_fee_paid != null ? "Fee Collected" : "Rehab Fee Due"}
-                          </PanelChip>
-                        ) : (
-                          <PanelChip tone={feeBalances.diet || !dietFeePaid ? "amber" : "emerald"} tick={!feeBalances.diet && dietFeePaid}>
-                            {feeBalances.diet
-                              ? `Balance Rs.${Number(feeBalances.diet.balance).toLocaleString("en-IN")}`
-                              : dietFeePaid ? "Fee Collected" : "Diet Fee Due"}
-                          </PanelChip>
-                        )
-                      }
-                      /* Keyed to the PILL rather than to the view on screen. The pill decides
-                         which programme is home — the one OwnTab returns to, since OwnTab
-                         sets "own" and "own" means home here — and switching programmes must
-                         not rewrite the tab row underneath the reader. Read off the view, the
-                         row relabelled itself on every switch: a reader on the Diet pill who
-                         opened Rehab was handed a tab reading "Rehab Details", lit as nothing,
-                         which took them to Diet when pressed. */
-                      tabs={
-                        onRehabPill ? (
-                          <>
-                            <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" />
-                            {DietDetailButton}
-                            {CancelButton}
-                          </>
-                        ) : (
-                          <>
-                            <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" />
-                            {RehabDetailButton}
-                            {CancelButton}
-                          </>
-                        )
-                      }
-                    >
-                      {pillProgramme === "rehab" ? RehabDetailBody : DietDetailBody}
-                    </StagePanel>
-                  );
-                }
+                // Rehab does ask. It is a course of a named length at a named price, so a
+                // patient referred to it with no package chosen reaches the branch with
+                // nothing to book and nothing to collect -- the same gap Move to Admin is
+                // held open for on the Treatment package above, held here the same way.
+                const rehabReady = !decisionDraft.rehab || !!decisionDraft.rehab_item_id;
+                const canSave = diagnosisReady && summaryReady && treatmentReady && rehabReady;
 
-                if (stage === "New Appointment") {
-                  return (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3" data-testid="cons-stage-panel-early">
-                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700">
-                        <Calendar className="h-3.5 w-3.5" /> Move to Stage
-                      </p>
-                      <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the CONSULTANT.</p>
-                      <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
-                        <Button
-                          size="sm"
-                          className="bg-amber-500 text-xs text-white hover:bg-amber-600"
-                          onClick={() => setFollowUpDraft({ date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: "10:00", remarks: "" })}
-                          data-testid="cons-move-followup"
-                        >
-                          Schedule Consultation & Move
-                        </Button>
-                        {CancelButton}
-                      </div>
-                    </div>
-                  );
-                }
+                // What the Consultant has ticked, in the shelf's own order. The detail column
+                // is built from this rather than from five separate conditionals, so a card
+                // can never appear for a service that is off, and the two columns cannot
+                // disagree about what is selected.
+                const selectedAddons = CONSULTATION_ADDONS.filter((a) => decisionDraft[a.key]);
 
-                // "Follow Up" is the name this stage used to carry, and is still matched:
-                // the rename happens in a backend migration on its own restart, so for a
-                // window either label can be on a lead. Matching one alone would leave the
-                // patients booked in that window looking at a card with no panel under it.
-                if (stage === "Consultation Booked" || stage === "Follow Up") {
-                  // What the patient was actually booked for. A consultation follow-up
-                  // scheduled from this board writes one of these entries; an appointment
-                  // booked from Branch Leads -- which is how most patients arrive at this
-                  // stage -- writes the lead's own appointment fields and no entry at all,
-                  // so reading the entry alone left the commonest case saying nothing about
-                  // when the patient is expected.
-                  const bookedFor = activeFollowUp
-                    ? `${activeFollowUp.date} at ${activeFollowUp.time}`
-                    : selectedLead.appointment_date
-                      ? `${selectedLead.appointment_date}${selectedLead.appointment_time ? ` at ${selectedLead.appointment_time}` : ""}`
-                      : null;
-                  return (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="cons-stage-panel-followup">
-                      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
-                        <Bell className="h-3.5 w-3.5" /> Consultation Booked
-                      </p>
-                      <p className="mb-2 text-xs text-slate-600">
-                        {bookedFor ? `Booked for ${bookedFor} — waiting on the CONSULTANT.` : "Waiting on the CONSULTANT."}
-                      </p>
-                      <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
-                        <Button
-                          size="sm"
-                          className="bg-amber-500 text-xs text-white hover:bg-amber-600"
-                          // Reschedule always opens the reschedule popup now, with or
-                          // without a follow-up entry behind it. It used to fall through to
-                          // "Schedule Follow-Up" for the commonest case -- a patient booked
-                          // from Branch Leads, who has no entry -- and that popup neither
-                          // knew what it was moving off nor asked for a reason.
-                          onClick={() => setRescheduleDraft({
-                            followupId: activeFollowUp?.id || null,
-                            fromDate: activeFollowUp?.date || selectedLead.appointment_date || "",
-                            fromTime: activeFollowUp?.time || selectedLead.appointment_time || "",
-                            currentConsultant: selectedLead.assigned_physio_name || "",
-                            // Deliberately blank rather than pre-filled with the slot being
-                            // left. The date it is on is the one date this cannot stay on,
-                            // and a picker that opens already answered invites a Reschedule
-                            // that moves nothing.
-                            date: "", time: "", physio_id: "", duration: null, reason: "",
-                          })}
-                          data-testid="cons-reschedule-btn"
-                        >
-                          Reschedule
-                        </Button>
-                        {CancelButton}
-                      </div>
-                    </div>
-                  );
-                }
+                // Whether ticking a service opens a picker at all. Fitness has nothing to
+                // decide, so clicking it selects and stops there rather than opening a popup
+                // whose only content is a line saying there is nothing in it.
+                const hasPicker = (key) => key !== "fitness";
 
-                if (stage === "Consultation Visit") {
-                  return (
-                    <StagePanel
-                      tone={detailView ? detailView.tone : "sky"}
-                      icon={detailView ? detailView.icon : IndianRupee}
-                      title={detailView ? detailView.title : "Collect a Payment"}
-                      testid="cons-stage-panel-consultation-visit"
-                      chip={detailView ? (
-                        <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
-                      ) : consultationPaid ? (
-                        <PanelChip tone="emerald" tick>Consultation Fee In</PanelChip>
-                      ) : (
-                        <PanelChip>Payment Due</PanelChip>
-                      )}
-                      tabs={
-                        <>
-                          {/* The order is the order it happens in: the paperwork is filed,
-                              then the money is taken against it. Documents leads because it
-                              is the step that gates the other one — a row that opens on a
-                              payment it will not let you take is a row that reads as
-                              broken. */}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className={`${programmeDetail === "documents"
-                              ? TAB_ON
-                              : hasRx
-                              ? "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
-                              : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"} ${ACT_BTN}`}
-                            onClick={() => openDetail("documents")}
-                            data-testid="cons-open-documents"
-                          >
-                            <FileText className="mr-1 h-3.5 w-3.5" />
-                            {/* Amber until the prescription is in, whatever else is on
-                                file: the colour is about the step that is outstanding, and
-                                a scheme letter does not finish this one. */}
-                            <Lbl full={!hasRx ? "Prescription — required" : leadDocCount == null ? "Documents" : `Documents (${leadDocCount})`} short="Docs" />
-                          </Button>
-                          {/* Always on screen, and shut until the scan is filed. This panel
-                              is a sequence — paperwork, then money — so a step that
-                              disappears once you reach it takes the shape of the sequence
-                              with it, and one that opens on a payment it will not take asks
-                              for something and refuses it in the same breath. */}
-                          <OwnTab
-                            label={consultationPaid ? "Payment" : "Collect Fees"}
-                            short="Fees"
-                            icon={IndianRupee}
-                            active={TAB_ON}
-                            locked={docsRequired && !hasRx && !consultationPaid}
-                            lockedTitle="Upload the prescription first"
-                          />
-                          {DietDetailButton}
-                          {RehabDetailButton}
-                          {CancelButton}
-                        </>
-                      }
-                    >
-                      {/* Each tab is its own step and shows only that step. The fees do not
-                          appear over the uploader: somebody filing a scan is filing a scan,
-                          and a figure on that screen is a figure they cannot act on yet. */}
-                      {detailBody || FeeSteps}
-                    </StagePanel>
-                  );
-                }
+                // Taking a service off clears whatever was picked under it, so an abandoned
+                // choice can't be submitted once the picker holding it is gone.
+                const clearAddon = (key) => {
+                  setDecisionDraft((d) => ({
+                    ...d,
+                    [key]: false,
+                    ...(key === "treatment" ? { item_id: "", sessionsPerWeek: "" } : {}),
+                    ...(key === "rehab" ? { rehab_item_id: "" } : {}),
+                    ...(key === "zumba" ? { zumba_item_id: "" } : {}),
+                    ...(key === "diet" ? { dietConsultation: false } : {}),
+                  }));
+                  setAddonPicker((cur) => (cur === key ? null : cur));
+                };
 
-                if (stage === "Fee Collected") {
-                  if (decision === "consultation_only") {
+                // Ticking a service is the same act as asking what it should be, so the
+                // picker opens with it, and clicking a service already on is how you get
+                // back to that picker. Nothing here turns a service off: removal is the ×
+                // on its row in Selected, beside the choice actually being thrown away.
+                const pickAddon = (key) => {
+                  // Ticking Diet is the referral, whole: there is nothing under it left to
+                  // answer, so the flag the wire and the labels read is set with it rather
+                  // than by a picker that would only ever have had one button in it.
+                  if (!decisionDraft[key]) setDecisionDraft((d) => ({ ...d, [key]: true, ...(key === "diet" ? { dietConsultation: true } : {}) }));
+                  if (hasPicker(key)) setAddonPicker(key);
+                };
+
+                /**
+                 * What one ticked service reads as in the Selected column: the choice in
+                 * words, and whether it is still missing something.
+                 *
+                 * Read off the same draft the pickers write to, so a row can never name a
+                 * package that was cleared. `incomplete` is the condition Confirm is
+                 * disabled on, said on the row it belongs to -- with the pickers behind a
+                 * popup, a form greyed out over an unanswered question would otherwise have
+                 * nothing on screen saying which question.
+                 */
+                const addonSummary = (key) => {
+                  if (key === "treatment") {
+                    const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+                    if (!item) return { text: "Choose a package", incomplete: true };
+                    const weeks = weeksFromPackageName(item.name);
+                    const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
+                    if (!perWeek) return { text: `${item.name} — choose sessions/week`, incomplete: true };
+                    return {
+                      text: `${item.name} · ${perWeek}/week${weeks ? ` · ${weeks * perWeek} sessions` : ""}`,
+                      incomplete: false,
+                    };
+                  }
+                  if (key === "diet") {
+                    // Nothing left to be missing. A Diet Chart, where the Nutritionist later
+                    // calls for one, is recorded on the patient and shown on the branch's own
+                    // panel — it was never something this form could answer.
+                    return { text: "Diet Consultation", incomplete: false };
+                  }
+                  if (key === "rehab" || key === "zumba") {
+                    const items = key === "rehab" ? rehabPackageItems : zumbaPackageItems;
+                    const id = key === "rehab" ? decisionDraft.rehab_item_id : decisionDraft.zumba_item_id;
+                    const item = items.find((i) => i.id === id);
+                    // Zumba is a standing referral: the classes run either way, so no
+                    // package there means the patient was sent to them without one bought up
+                    // front. Rehab is a course or it is nothing -- ticked with no package it
+                    // names no sessions, no price and nothing for the branch to book or
+                    // collect, so the tick on its own is a gap rather than an answer.
+                    if (!item) return key === "rehab"
+                      ? { text: "Choose a package", incomplete: true }
+                      : { text: "No package", incomplete: false };
+                    const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                    const unit = key === "zumba" ? "classes" : "sessions";
+                    return { text: `${item.name}${count ? ` · ${count} ${unit}` : ""}`, incomplete: false };
+                  }
+                  // Fitness, and anything added to the shelf later that carries no picker.
+                  return { text: "Referral only", incomplete: false };
+                };
+
+                /**
+                 * What one ticked service still needs decided.
+                 *
+                 * One function rather than five blocks stacked in the markup, because the
+                 * caller now renders these in a loop -- headed, coloured and ordered by the
+                 * shelf. The bodies are the pickers that were already here; what changed is
+                 * where they are drawn, not what they do or what they are called in a test.
+                 *
+                 * A service with nothing to choose says so rather than rendering an empty
+                 * card. Fitness is a referral and nothing else, and a card with a blank body
+                 * reads as a picker that failed to load.
+                 */
+                const addonDetail = (key) => {
+                  if (key === "diet") {
                     return (
-                      <div
-                        className="overflow-hidden rounded-xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-emerald-50/60 to-white shadow-sm ring-1 ring-inset ring-white/60"
-                        data-testid="cons-stage-panel-fee-collected"
-                      >
-                        <div className="flex items-center justify-between gap-3 border-b border-emerald-100 px-4 py-2.5">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-600/10 text-emerald-700">
-                              <ClipboardCheck className="h-4 w-4" />
-                            </span>
-                            <span className="truncate text-xs font-semibold uppercase tracking-wider text-emerald-800">Fee Collected</span>
-                          </div>
-                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                            <CheckCircle2 className="h-3 w-3" /> Consultation Only
-                          </span>
-                        </div>
-                        <div className="p-4">
-                          {FeeSteps}
-                          <p className="mt-3 text-xs leading-relaxed text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
-                          <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
-                            <Button size="sm" className="bg-emerald-600 text-xs text-white shadow-sm transition hover:bg-emerald-700 hover:shadow" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
-                              {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
-                            </Button>
-                            {DietDetailButton}
-                            {RehabDetailButton}
-                            {CancelButton}
-                          </div>
-                          {detailBody && <div className="mt-3 border-t border-emerald-100 pt-3">{detailBody}</div>}
-                          </div>
+                      <div data-testid="cons-decision-diet-kinds">
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Diet</label>
+                        {/* One thing to refer for, so nothing to pick. This asked the
+                            Consultant to choose between a Diet Consultation and a Diet Chart,
+                            which is a question they are in no position to answer: a chart is
+                            decided ON at the consultation, by the Nutritionist who sees the
+                            patient. Ticked here it let the branch collect a Chart Fee for a
+                            chart nobody had yet said was needed, and left the coach owing a
+                            document somebody else had already sold.
+
+                            So this says what the referral is and what follows it. The chart
+                            re-enters from the Nutritionist's own board -- see
+                            recommend_diet_chart -- and only then does a Diet Chart Fee appear
+                            for the branch to collect. */}
+                        <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] leading-relaxed text-orange-800" data-testid="cons-decision-diet-note">
+                          The branch collects the Diet Consultation Fee and books the
+                          Nutritionist. If this patient needs a Diet Chart, the Nutritionist
+                          recommends it after seeing them — and the Diet Chart Fee is
+                          collected then.
+                        </p>
                       </div>
                     );
                   }
-                  // Money is taken on the cards below, each fee on its own. What is left
-                  // for the tab row is the schedule behind a part-paid Treatment Fee —
-                  // a view of what was agreed, not another way to collect it.
-                  const FeeActions = partialPlan ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
-                      onClick={openPartialScheduleDraft}
-                      data-testid="cons-open-partial-schedule-sidebar"
-                    >
-                      <Calendar className="mr-1 h-3.5 w-3.5" />
-                      <Lbl full="Payment Schedule" short="Schedule" />
-                    </Button>
-                  ) : null;
 
-                  return (
-                    <StagePanel
-                      /* The heading follows the work rather than the stage name. A lead
-                         lands here the moment the Consultation Fee is taken, usually with
-                         the Treatment Fee still to come — and the Branch Admin taking it
-                         is mid-job, not looking at a receipt. While a fee is still due
-                         this stays the payment screen it was a click ago; once the last
-                         one is in it becomes what the pipeline calls it. */
-                      tone={detailView ? detailView.tone : nextFeeStep ? "sky" : "indigo"}
-                      icon={detailView ? detailView.icon : nextFeeStep ? IndianRupee : ClipboardCheck}
-                      title={detailView ? detailView.title : nextFeeStep ? "Collect a Payment" : "Fee Collected"}
-                      testid="cons-stage-panel-fee-collected"
-                      chip={detailView ? (
-                        <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
-                      ) : partialPlan ? (
-                        <PanelChip tone={partialPlan.overdue ? "rose" : "amber"}>{partialPlan.overdue ? "Balance Overdue" : "Part-paid"}</PanelChip>
-                      ) : treatmentFeePaid ? (
-                        <PanelChip tone="emerald" tick>Both Fees Collected</PanelChip>
-                      ) : (
-                        <PanelChip>Treatment Fee Due</PanelChip>
-                      )}
-                      tabs={
-                        <>
-                          {FeeActions}
-                          {/* Only ever the way back. On the panel's own view this tab was
-                              the words "Assign Physio" sitting directly above the button of
-                              the same name that does the work, and pressing it went nowhere.
-                              Off that view -- Documents, Diet, Rehab -- it is the only road
-                              home, so that is the only time it is drawn. */}
-                          {treatmentFeePaid && programmeDetail !== "own" && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
-                          {/* No Diet tab on this row. The Diet Fee card below is the way
-                              into the diet programme from here — a button in the tab row
-                              as well put the same view two doors apart on one screen,
-                              above a panel whose job right now is the fee that is due. */}
-                          {RehabDetailButton}
-                          {CancelButton}
-                        </>
-                      }
-                    >
-                      {detailBody || (
-                        <>
-                          {FeeSteps}
-
-                          {/* What is still owed and when it is due, across every fee that
-                              has a balance — the cards above are what collect them. */}
-                          {allBalances && (
-                            <div className={`mt-2 rounded-lg border px-3 py-2 ${allBalances.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
-                              <div className="flex items-center justify-between">
-                                <span className={`text-[11px] font-semibold ${allBalances.overdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
-                                <span className={`text-sm font-bold ${allBalances.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{Number(allBalances.total).toLocaleString("en-IN")}</span>
-                              </div>
-                              {/* One line per fee still owed, because a patient can owe on
-                                  two at once and a single total says nothing about which
-                                  card to press. */}
-                              {allBalances.plans.map((plan) => (
-                                <p key={plan.fee} className={`mt-0.5 text-[10px] ${plan.overdue ? "text-rose-600" : "text-amber-600"}`}>
-                                  {FEE_LABELS[plan.fee]} · {plan.fee === "treatment" ? installmentLabelFor(plan.nextIdx) : "Balance"}
-                                  {plan.next.sessions ? ` · ${plan.next.sessions} sessions` : ""}
-                                  {plan.next.amount != null ? ` · Rs.${plan.next.amount}` : ""}
-                                  {plan.next.due_date ? ` · due ${plan.next.due_date}` : ""}
-                                  {plan.overdue ? " · OVERDUE" : ""}
-                                </p>
-                              ))}
-                            </div>
-                          )}
-
-                          {treatmentFeePaid && (
-                            <>
-                              {/* The act itself lives in the view, not in the tab that opens
-                                  the view. A tab that also fired the picker could not be
-                                  pressed to come back to what it was showing. */}
-                              <div className="mt-3">
-                                <Button
-                                  size="sm"
-                                  className={`bg-violet-600 text-white shadow-sm transition hover:bg-violet-700 hover:shadow ${ACT_BTN}`}
-                                  onClick={() => openPhysioModal("treatment")}
-                                  data-testid="cons-open-physio-assign-from-fee-collected"
-                                >
-                                  <Users className="mr-1 h-3.5 w-3.5" />
-                                  {/* Never "Reassign" here. assigned_physio_name is written
-                                      when the appointment is booked -- it is the physio who
-                                      took the consultation, set by the Branch Admin long
-                                      before anyone picks who delivers the treatment -- so
-                                      reading it as "a physio is already assigned" made this
-                                      button say Reassign for every patient who ever had a
-                                      consultation, which is all of them.
-
-                                      The stage is the honest test and it needs no field:
-                                      assign-consultation-physio is what moves a lead off
-                                      Fee Collected, so a lead sitting on this panel has no
-                                      treatment physio yet. Reassigning belongs to the
-                                      Physio Assign panel below, where the name does mean
-                                      what it says. */}
-                                  Assign Physio
-                                </Button>
-                              </div>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </StagePanel>
-                  );
-                }
-
-                if (stage === "Physio Assign") {
-                  const assigned = !!selectedLead.assigned_physio_name;
-                  // The course as sold and the course as delivered. Both are counted off
-                  // the session rows themselves — the board stamps them onto every lead it
-                  // returns (see _stamp_session_progress), and the physio-progress fetch
-                  // recounts the same rows — so this panel and the physio's own board can
-                  // never disagree about how far in a patient is.
-                  const totalCourseSessions = physioProgress?.package_sessions
-                    || selectedLead.session_package_sessions
-                    || selectedLead.total_sessions
-                    || 0;
-                  const courseCompleted = physioProgress?.completed_sessions ?? (selectedLead.completed_sessions || 0);
-                  const courseRemaining = Math.max(0, totalCourseSessions - courseCompleted);
-                  const coursePct = totalCourseSessions > 0
-                    ? Math.min(100, Math.round((courseCompleted / totalCourseSessions) * 100))
-                    : 0;
-                  const courseDone = totalCourseSessions > 0 && courseRemaining === 0;
-                  // Physio Assign is a stage on the TREATMENT pipeline, and it used to be
-                  // written as though treatment were the only thing a consultation could
-                  // sell. It has a tab row again, because it is not: the Consultant can send
-                  // one patient away with treatment, rehab and a diet plan at once, and
-                  // assigning the treatment physio is what moves them off Fee Collected --
-                  // the one panel that could take the other two fees or reach the other two
-                  // programmes. Everything still owed became uncollectable at the exact
-                  // moment the branch did the next right thing.
-                  //
-                  // The Diet and Rehab tabs are the same pair every other panel carries, so
-                  // the programme opens here exactly as it does from Fee Collected. The
-                  // OwnTab beside them is drawn only off this panel's own view, for the
-                  // reason Fee Collected gives: on the stage itself it would be a tab above
-                  // the panel it opens, and pressing it would go nowhere.
-                  const physioAssignTabs = (DietDetailButton || RehabDetailButton) ? (
-                    <>
-                      {programmeDetail !== "own" && (
-                        <OwnTab label="Physio Assign" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />
-                      )}
-                      {DietDetailButton}
-                      {RehabDetailButton}
-                    </>
-                  ) : null;
-                  return (
-                    <StagePanel
-                      tone={detailView ? detailView.tone : assigned ? "emerald" : "violet"}
-                      icon={detailView ? detailView.icon : Users}
-                      title={detailView ? detailView.title : "Physio Assign"}
-                      testid="cons-stage-panel-physio-assign"
-                      chip={detailView ? (
-                        <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
-                      ) : assigned ? (
-                        <PanelChip tone="emerald" tick>Sessions In Progress</PanelChip>
-                      ) : (
-                        <PanelChip>Physio Not Assigned</PanelChip>
-                      )}
-                      tabs={physioAssignTabs}
-                    >
-                      {detailBody || (
-                        <>
-                          <PanelCard testid="cons-physio-assign-summary">
-                            <PanelRow
-                              label="Treatment Package"
-                              value={`${selectedLead.session_package_name || "—"}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`}
-                            />
-                            <PanelRow
-                              label="Assigned Physio"
-                              value={selectedLead.assigned_physio_name || "Not assigned"}
-                              tone={assigned ? "" : "text-amber-700"}
-                            />
-                            {/* The two numbers this card is opened for. Sessions Completed
-                                carries what is left rather than making the reader subtract,
-                                because "4 left" is the thing the branch acts on. */}
-                            <PanelRow label="Total Sessions" value={totalCourseSessions || "—"} />
-                            <PanelRow
-                              label="Sessions Completed"
-                              value={`${courseCompleted} of ${totalCourseSessions || "—"}`}
-                              tone={courseCompleted > 0 ? "text-emerald-700" : ""}
-                              note={totalCourseSessions > 0 ? (courseDone ? "course complete" : `${courseRemaining} left`) : ""}
-                              noteTone={courseDone ? "text-emerald-600" : "text-slate-500"}
-                            />
-                            {selectedLead.diet_coach_name && (
-                              <PanelRow
-                                label="Diet Consultation"
-                                value={`${selectedLead.diet_coach_name}${selectedLead.diet_appointment_at ? ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}` : ""}`}
-                              />
-                            )}
-                          </PanelCard>
-
-                          {/* The same two numbers as one length, so how far in the patient
-                              is reads at a glance instead of by subtraction. */}
-                          {totalCourseSessions > 0 && (
-                            <div className="mt-2" data-testid="cons-physio-assign-progress">
-                              <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                                <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${coursePct}%` }} />
-                              </div>
-                              <p className="mt-1 text-[10px] font-medium text-slate-500">
-                                {coursePct}% of the course delivered
-                                {courseRemaining > 0 ? ` · ${courseRemaining} session${courseRemaining === 1 ? "" : "s"} to go` : ""}
-                              </p>
-                            </div>
-                          )}
-
-                          {/* Who delivered it, in the order the patient had them: every
-                              physio before this one, then this one. A reassignment leaves
-                              the previous physio's completed days behind it, and the branch
-                              needs to see where they left off before it reads what the new
-                              physio has picked up. */}
-                          {physioProgress && (physioProgress.previous.length > 0 || physioProgress.current) && (
-                            <div className="mt-3 space-y-1.5" data-testid="cons-physio-assign-journey">
-                              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                                {physioProgress.reassigned
-                                  ? `Physio History · ${physioProgress.previous.length + (physioProgress.current ? 1 : 0)} physios`
-                                  : "Delivered By"}
-                              </p>
-                              {physioProgress.previous.map((spell, i) => (
-                                <PhysioSpell
-                                  key={`${spell.physio_id}-${i}`}
-                                  spell={spell}
-                                  packageSessions={totalCourseSessions}
-                                  testid={`cons-physio-spell-previous-${i}`}
-                                />
-                              ))}
-                              {physioProgress.current && (
-                                <PhysioSpell
-                                  spell={physioProgress.current}
-                                  packageSessions={totalCourseSessions}
-                                  testid="cons-physio-spell-current"
-                                />
-                              )}
-                            </div>
-                          )}
-
-                          <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                            {!assigned
-                              ? "Treatment Fee collected. Choose the physiotherapist who will deliver the sessions."
-                              : courseDone
-                                ? "Every session of this course has been delivered."
-                                : "Treatment sessions are in progress — every day is on this physio's calendar and on their board."}
-                          </p>
-                          {/* Said before the picker is opened rather than discovered inside
-                              it: reassigning mid-course re-dates only what is left, and the
-                              branch is about to be asked for exactly that many dates. */}
-                          {assigned && !courseDone && courseCompleted > 0 && (
-                            <p className="mt-1 text-xs leading-relaxed text-violet-700" data-testid="cons-physio-reassign-note">
-                              Reassigning keeps the {courseCompleted} session{courseCompleted === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {courseRemaining} get new dates.
-                            </p>
-                          )}
-                          <div className="mt-3">
-                            <Button
-                              size="sm"
-                              disabled={assigned && courseDone}
-                              title={assigned && courseDone ? "The course is finished — there are no sessions left to reassign" : undefined}
-                              className={`${assigned ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200 hover:bg-violet-50" : "bg-violet-600 text-white shadow-sm hover:bg-violet-700"} ${ACT_BTN}`}
-                              onClick={() => openPhysioModal("treatment")}
-                              data-testid={assigned ? "cons-reassign-physio" : "cons-open-physio-assign"}
-                            >
-                              <Users className="mr-1 h-3.5 w-3.5" />
-                              {assigned ? "Reassign Physio" : "Assign Physio & Book Sessions"}
-                            </Button>
-                          </div>
-
-                          {/* And whatever the patient still owes, on the same cards Fee Collected
-                              takes it on. A rehab course or a diet plan is sold at the same
-                              consultation as the treatment and is not paid for by it, so a
-                              patient can stand at this stage — physio assigned, sessions
-                              running — with two fees never collected. This panel showed neither,
-                              and the stage before it is the one nobody can go back to.
-
-                              Only the unpaid ones: the consultation and treatment fees are in by
-                              definition here, and two green ticks under a course card say nothing
-                              the panel above them has not already said. */}
-                          {outstandingFeeSteps.length > 0 && (
-                            <div className="mt-4 border-t border-slate-200 pt-3" data-testid="cons-physio-assign-fees">
-                              <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                                <IndianRupee className="h-3 w-3" /> Still to Collect
-                              </p>
-                              {renderFeeSteps(outstandingFeeSteps, "cons-physio-assign-fee-steps")}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </StagePanel>
-                  );
-                }
-
-                if (stage === "Consultation Completed") {
-                  return (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-stage-panel-completed">
-                      <p className="text-sm font-semibold text-slate-700">Consultation completed</p>
-                      <p className="mt-1 text-xs text-slate-500">Consultation Only — no treatment sessions were required.</p>
-                      {selectedLead.diet_coach_name && (
-                        <p className="mt-1 text-xs text-slate-600">Diet Consultation: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
-                          {selectedLead.diet_appointment_at && ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`}</p>
-                      )}
-                      {/* A closed consultation can still start a diet plan. "Consultation +
-                          Diet" patients land here the moment the consultation is marked
-                          completed, and that is exactly when their plan gets booked. */}
-                      {(DietButton || RehabButton) && <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">{DietButton}{RehabButton}</div>}
-                    </div>
-                  );
-                }
-
-                if (stage === "Cancel") {
-                  return (
-                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-3" data-testid="cons-stage-panel-cancelled">
-                      <p className="text-sm font-semibold text-rose-700">This consultation was cancelled.</p>
-                    </div>
-                  );
-                }
-
-                return null;
-              })();
-
-              return (
-                <div className="space-y-3">
-                  {panel}
-                </div>
-              );
-            })()}
-
-            </>
-            )}
-
-            {detailTab === "followup" && (
-              <div className="space-y-1.5" data-testid="cons-followups-list">
-                {(selectedLead.consultation_follow_ups || []).length === 0 ? (
-                  <p className="py-6 text-center text-sm text-slate-400">No follow-ups scheduled yet.</p>
-                ) : (
-                  selectedLead.consultation_follow_ups.slice().reverse().map((f) => {
-                    const isActive = f.status !== "rescheduled";
+                  if (key === "rehab") {
                     return (
-                      <div
-                        key={f.id}
-                        className={`flex items-start justify-between gap-3 rounded-lg border p-2.5 text-xs ${isActive ? "border-orange-200 bg-orange-50/60" : "border-slate-200 bg-slate-50 text-slate-400"}`}
-                        data-testid={`cons-followup-row-${f.id}`}
-                      >
-                        <div>
-                          <p className={`font-semibold ${isActive ? "text-orange-700" : "text-slate-400 line-through"}`}>{f.date} at {f.time}</p>
-                          {f.consultant_name && (
-                            <p className="mt-0.5 text-[11px] font-medium text-slate-500" data-testid={`cons-followup-consultant-${f.id}`}>
-                              with {f.consultant_name}
-                            </p>
-                          )}
-                          {f.remarks && <p className="mt-0.5 text-slate-600">{f.remarks}</p>}
-                          {f.status === "rescheduled" && f.reschedule_reason && (
-                            <p className="mt-0.5 italic text-slate-400">Rescheduled: {f.reschedule_reason}</p>
+                      <div data-testid="cons-decision-rehab-package">
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Rehab Package</label>
+                        <div className="flex flex-wrap gap-2" data-testid="cons-decision-rehab-options">
+                          {rehabPackageItems.map((i) => {
+                            const selected = decisionDraft.rehab_item_id === i.id;
+                            return (
+                              <button
+                                key={i.id}
+                                type="button"
+                                // Always a selection, never a clear. Rehab has to carry a
+                                // package, so clicking the chosen one again would only put
+                                // the form back into the state Confirm refuses -- the way
+                                // out of Rehab is Remove Rehab, which says so on the button.
+                                onClick={() => setDecisionDraft((prev) => ({ ...prev, rehab_item_id: i.id }))}
+                                className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                  selected
+                                    ? "border-cyan-600 bg-cyan-600 text-white"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                                data-testid={`cons-decision-rehab-option-${i.id}`}
+                              >
+                                {i.name}
+                              </button>
+                            );
+                          })}
+                          {rehabPackageItems.length === 0 && (
+                            <p className="text-xs text-slate-400">No rehab packages in Services and Products yet.</p>
                           )}
                         </div>
-                        {isActive && !isConsultant && (
+                        {/* Session count only, never the price -- the same rule the Treatment
+                            picker follows, with the amount shown to Branch Admin at collection. */}
+                        {decisionDraft.rehab_item_id && (() => {
+                          const item = rehabPackageItems.find((i) => i.id === decisionDraft.rehab_item_id);
+                          if (!item) return null;
+                          const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                          return (
+                            <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-rehab-summary">
+                              {item.name}{count ? ` · ${count} sessions` : ""}
+                            </p>
+                          );
+                        })()}
+                      </div>
+                    );
+                  }
+
+                  if (key === "zumba") {
+                    return (
+                      <div data-testid="cons-decision-zumba-package">
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Zumba Package <span className="font-normal text-slate-400">(optional)</span></label>
+                        <div className="flex flex-wrap gap-2" data-testid="cons-decision-zumba-options">
+                          {zumbaPackageItems.map((i) => {
+                            const selected = decisionDraft.zumba_item_id === i.id;
+                            return (
+                              <button
+                                key={i.id}
+                                type="button"
+                                onClick={() => setDecisionDraft((prev) => ({ ...prev, zumba_item_id: selected ? "" : i.id }))}
+                                className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                  selected
+                                    ? "border-pink-600 bg-pink-600 text-white"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                                data-testid={`cons-decision-zumba-option-${i.id}`}
+                              >
+                                {i.name}
+                              </button>
+                            );
+                          })}
+                          {zumbaPackageItems.length === 0 && (
+                            <p className="text-xs text-slate-400">No Zumba packages in Services and Products yet.</p>
+                          )}
+                        </div>
+                        {decisionDraft.zumba_item_id && (() => {
+                          const item = zumbaPackageItems.find((i) => i.id === decisionDraft.zumba_item_id);
+                          if (!item) return null;
+                          const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                          return (
+                            <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-zumba-summary">
+                              {item.name}{count ? ` · ${count} classes` : ""}
+                            </p>
+                          );
+                        })()}
+                      </div>
+                    );
+                  }
+
+                  if (key === "treatment") {
+                    return (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
+                        <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
+                          {treatmentPackageItems.map((i) => {
+                            const selected = decisionDraft.item_id === i.id;
+                            return (
+                              <button
+                                key={i.id}
+                                type="button"
+                                onClick={() => setDecisionDraft((prev) => ({ ...prev, item_id: i.id, sessionsPerWeek: "" }))}
+                                className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                  selected
+                                    ? "border-slate-900 bg-slate-900 text-white"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                                data-testid={`cons-decision-package-option-${i.id}`}
+                              >
+                                {i.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {decisionDraft.item_id && (() => {
+                          const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+                          if (!item) return null;
+                          // Head Physio sees the session count only -- never the price.
+                          // The Treatment Fee amount is derived server-side from
+                          // sessions_override and shown to Branch Admin at fee collection.
+                          const weeks = weeksFromPackageName(item.name);
+                          const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
+                          const totalSessions = weeks && perWeek ? weeks * perWeek : 0;
+                          return (
+                            <div className="mt-2 rounded-md border border-slate-200 bg-slate-50/70 p-3" data-testid="cons-decision-package-summary">
+                              <p className="text-sm font-semibold text-slate-800">{item.name}{weeks ? ` · ${weeks} week${weeks > 1 ? "s" : ""}` : ""}</p>
+                              <div className="mt-2">
+                                <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions / week</label>
+                                <div className="flex flex-wrap gap-1.5" data-testid="cons-decision-sessions-per-week">
+                                  {[1, 2, 3, 4, 5, 6, 7].map((n) => {
+                                    const selected = perWeek === n;
+                                    return (
+                                      <button
+                                        key={n}
+                                        type="button"
+                                        onClick={() => setDecisionDraft((prev) => ({ ...prev, sessionsPerWeek: String(n) }))}
+                                        className={`h-8 w-8 rounded-md border text-xs font-semibold transition ${
+                                          selected ? "border-sky-500 bg-sky-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                        }`}
+                                        data-testid={`cons-decision-sessions-per-week-${n}`}
+                                      >
+                                        {n}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-total-sessions">
+                                  {!weeks
+                                    ? <span className="text-amber-600">Couldn't read a week count from this package's name.</span>
+                                    : !perWeek
+                                    ? "Choose sessions per week"
+                                    : (
+                                      <>
+                                        {perWeek} session{perWeek > 1 ? "s" : ""} Weekly × {weeks} Week{weeks > 1 ? "s" : ""} = <span className="text-sm font-semibold text-slate-800">{totalSessions} Total Sessions</span>
+                                      </>
+                                    )}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
+                  }
+
+                  // Fitness, and anything added to the shelf later that carries no picker.
+                  // Names itself, because the coloured edge is the only other thing marking
+                  // this block and a colour on its own is not a label.
+                  const addon = CONSULTATION_ADDONS.find((a) => a.key === key);
+                  return (
+                    <p className="text-xs text-slate-500" data-testid={`cons-decision-detail-none-${key}`}>
+                      <span className="font-semibold text-slate-600">{addon?.label || key}</span>
+                      {" — nothing to choose here, recorded as a referral."}
+                    </p>
+                  );
+                };
+
+                if (alreadyMoved) {
+                  return (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-decision-summary">
+                      <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                        <ClipboardCheck className="h-3.5 w-3.5" /> Treatment
+                      </p>
+                      {/* Read back as the choice that was made, rather than as the flags it
+                          is stored as. */}
+                      <p className="text-sm font-semibold text-slate-800">
+                        {addonsLabel({
+                          treatment: selectedLead.consultation_decision === "consultation_treatment",
+                          diet: !!selectedLead.diet_recommended,
+                          dietConsultation: !!selectedLead.diet_consultation,
+                          dietChart: !!selectedLead.diet_chart,
+                          rehab: !!selectedLead.rehab_referred,
+                          fitness: !!selectedLead.fitness_recommended,
+                          zumba: !!selectedLead.zumba_recommended,
+                        })}
+                      </p>
+                      {selectedLead.consultation_decision === "consultation_treatment" && selectedLead.session_package_name && (
+                        <p className="mt-0.5 text-xs text-slate-600">
+                          Treatment Package: <span className="font-semibold">{selectedLead.session_package_name}</span>
+                        </p>
+                      )}
+                      {/* The other two courses the Consultant can pick. Only the treatment
+                          package was named here, so a patient sent to Rehab read as "+ Rehab"
+                          with no way to see which course was chosen without reopening the
+                          Consultant's own form. */}
+                      {selectedLead.rehab_referred && selectedLead.rehab_package_name && (
+                        <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-rehab">
+                          Rehab Package: <span className="font-semibold">{selectedLead.rehab_package_name}</span>
+                          {selectedLead.rehab_package_sessions ? <span className="text-slate-400"> · {selectedLead.rehab_package_sessions} sessions</span> : null}
+                        </p>
+                      )}
+                      {selectedLead.zumba_recommended && selectedLead.zumba_package_name && (
+                        <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-zumba">
+                          Zumba Plan: <span className="font-semibold">{selectedLead.zumba_package_name}</span>
+                        </p>
+                      )}
+                      <p className="mt-1.5 text-[11px] text-slate-500">Sent to Branch Admin — Consultation Visit.</p>
+                      {/* Reopens the form on the choice and package already saved, rather
+                          than on a blank one — see beginEditDecision. */}
+                      <div className="mt-2.5 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={() => beginEditDecision(selectedLead)}
+                          data-testid="cons-decision-edit"
+                        >
+                          <Pencil className="mr-1 h-3 w-3" />Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={() => shareDecision(decisionSummaryOf(selectedLead))}
+                          data-testid="cons-decision-share"
+                        >
+                          <Share2 className="mr-1 h-3 w-3" />Share
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="cons-decision-form">
+                    <p className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-800">
+                      <ClipboardCheck className="h-4 w-4 text-sky-600" /> Treatment
+                    </p>
+                    {/* The thing standing between this form and Save, so it is a block that
+                        stops the eye rather than a coloured line of text among other lines.
+                        Rose over amber for the same reason: amber is the colour half this
+                        panel already uses for asides nobody has to act on. */}
+                    {(!diagnosisReady || !summaryReady || !treatmentReady) && (
+                      <p
+                        className="mb-3 rounded-md border-l-4 border-rose-500 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700"
+                        data-testid="cons-decision-required-hint"
+                      >
+                        {/* One thing at a time, in the order the form is worked down: the two
+                            reports are above this panel, Treatment is inside it, and naming
+                            both at once sends the eye to the wrong half of the screen. */}
+                        {!diagnosisReady || !summaryReady
+                          ? "Write the Diagnosis Report and Treatment Summary above before Move to Admin."
+                          : "Pick Treatment, its package and its sessions/week before Move to Admin."}
+                      </p>
+                    )}
+                    {/* Consultation itself needs no toggle — writing this form up is the
+                        consultation. Treatment is required: a consultation reaches Branch
+                        Admin as a plan to book and collect against, so it is picked here and
+                        cannot then be taken off. The other four are what else the patient is
+                        going away with, and any combination of those is valid, including
+                        none of them.
+
+                        Two columns: the shelf on the left, what has actually been chosen on
+                        the right, and the pickers themselves over the form in a popup. They
+                        used to unroll under the shelf, one block per ticked service, so a
+                        patient going away with three things meant three stacked pickers and
+                        a Confirm button below all of them — picking the third service was a
+                        scroll past the answers to the first two. Only one service is ever
+                        being answered at a time, so only one picker is ever on screen, and
+                        the form stays the height of its two short columns. */}
+                    <div className="mb-3 grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Services</label>
+                        {/* A column rather than the row of five this was, so each service
+                            lines up with its own answer opposite and the words are never
+                            squeezed to a fifth of half the panel. */}
+                        <div className="space-y-1.5" data-testid="cons-decision-plan-options">
+                          {CONSULTATION_ADDONS.map((p) => {
+                            const selected = !!decisionDraft[p.key];
+                            const Icon = p.icon;
+                            return (
+                              <button
+                                key={p.key}
+                                type="button"
+                                onClick={() => pickAddon(p.key)}
+                                className="flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold transition hover:brightness-95"
+                                style={selected
+                                  ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
+                                  : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
+                                data-testid={`cons-decision-plan-${p.key}`}
+                              >
+                                <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">{p.label}</span>
+                                {/* The one service that has to be picked says so on the chip
+                                    itself, where the choice is made. The hint at the top of
+                                    the panel names the reports first while they are unwritten,
+                                    so on a fresh consultation it is not saying this yet.
+                                    Gone once Treatment is on — the tick says the rest. */}
+                                {p.key === "treatment" && !selected && (
+                                  <span className="ml-auto shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-600">
+                                    Required
+                                  </span>
+                                )}
+                                {selected && <CheckCircle2 aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* The answers, one row per ticked service, in the shelf's own order so
+                          the rows read down in the order the services read down opposite. A
+                          row is the way back into its picker; the × beside it is the only way
+                          an optional service comes off, which puts removing one next to the
+                          choice being thrown away rather than on the chip that turned it on.
+
+                          Treatment's row has no ×. It is required, so the only thing its row
+                          offers is the way back into the picker to change the package — a
+                          cross there would be a button whose only outcome is a form that
+                          cannot be submitted. */}
+                      <div>
+                        <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Selected Services</label>
+                        {selectedAddons.length === 0 ? (
+                          /* Nothing picked is not a valid outcome any more — Treatment is
+                             required — so this column reads as the gap it is rather than as
+                             a note about what saving now would do. Rose to match the hint at
+                             the top of the panel: they are the same missing thing. */
+                          <p
+                            className="rounded-lg border border-dashed border-rose-200 bg-rose-50/40 px-3 py-3 text-[11px] font-medium text-rose-600"
+                            data-testid="cons-decision-selected-empty"
+                          >
+                            Pick Treatment to move this patient to Admin.
+                          </p>
+                        ) : (
+                          <div className="space-y-1.5" data-testid="cons-decision-details">
+                            {selectedAddons.map((a) => {
+                              const summary = addonSummary(a.key);
+                              return (
+                                <div
+                                  key={a.key}
+                                  className="flex items-center gap-1.5 rounded-r-lg border-l-2 bg-slate-50/70 py-1.5 pl-2.5 pr-1.5"
+                                  style={{ borderLeftColor: a.tone }}
+                                  data-testid={`cons-decision-detail-${a.key}`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => pickAddon(a.key)}
+                                    disabled={!hasPicker(a.key)}
+                                    className="min-w-0 flex-1 text-left disabled:cursor-default"
+                                    data-testid={`cons-decision-selected-${a.key}`}
+                                  >
+                                    <span className="block text-[11px] font-semibold" style={{ color: a.tone }}>{a.label}</span>
+                                    <span
+                                      className={`block truncate text-[11px] ${summary.incomplete ? "font-medium text-rose-600" : "text-slate-600"}`}
+                                      title={summary.text}
+                                    >
+                                      {summary.text}
+                                    </span>
+                                  </button>
+                                  {a.key === "treatment" ? (
+                                    /* A pencil where every other row has its ×. Treatment
+                                       cannot come off, so the only thing this row does is
+                                       reopen the picker — and a row that ends in nothing
+                                       reads as a row that does nothing. Decorative: the press
+                                       target is the whole row beside it. */
+                                    <Pencil aria-hidden className="mr-1.5 h-3 w-3 shrink-0 text-slate-400" />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => clearAddon(a.key)}
+                                      className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+                                      title={`Remove ${a.label}`}
+                                      data-testid={`cons-decision-remove-${a.key}`}
+                                    >
+                                      <X aria-hidden className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* One service's picker, over the form. Rendered from inside the same
+                        block that built addonDetail, so the popup can never open on a service
+                        the form has since had turned off — it closes itself instead. */}
+                    {addonPicker && (() => {
+                      const a = CONSULTATION_ADDONS.find((x) => x.key === addonPicker);
+                      if (!a || !decisionDraft[addonPicker]) return null;
+                      // What this service still needs, read off the same helper the row in
+                      // the form reads, so the popup and the row can never disagree about
+                      // whether the choice has been made.
+                      const pickerSummary = addonSummary(addonPicker);
+                      const Icon = a.icon;
+                      return (
+                        <div
+                          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+                          onClick={(e) => { if (e.target === e.currentTarget) setAddonPicker(null); }}
+                          data-testid="cons-decision-picker-modal"
+                        >
+                          <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+                            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                              <p className="flex items-center gap-2 text-sm font-semibold" style={{ color: a.tone }}>
+                                <Icon aria-hidden className="h-4 w-4" /> {a.label}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setAddonPicker(null)}
+                                className="rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                                data-testid="cons-decision-picker-close"
+                              >
+                                <X aria-hidden className="h-4 w-4" />
+                              </button>
+                            </div>
+                            {/* The pickers themselves, unchanged — same bodies, same test
+                                ids, drawn here instead of down the form. */}
+                            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{addonDetail(addonPicker)}</div>
+                            <div className="flex shrink-0 justify-between gap-2 border-t border-slate-100 px-4 py-3">
+                              {/* Required, so there is nothing to remove it with — the same
+                                  reason its row in Selected carries no ×. The empty span
+                                  holds Done on the right, where it is on every other
+                                  service's picker. */}
+                              {addonPicker === "treatment" ? <span /> : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
+                                  onClick={() => clearAddon(addonPicker)}
+                                  data-testid="cons-decision-picker-remove"
+                                >
+                                  Remove {a.label}
+                                </Button>
+                              )}
+                              {/* Shut while the open picker is still missing something, so
+                                  the popup cannot be dismissed by the one button that reads
+                                  like the choice was made. The X and the backdrop still
+                                  close it -- this is not a trap, it is the difference
+                                  between leaving and finishing. */}
+                              <Button
+                                size="sm"
+                                className="h-8 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
+                                onClick={() => setAddonPicker(null)}
+                                disabled={pickerSummary.incomplete}
+                                title={pickerSummary.incomplete ? pickerSummary.text : undefined}
+                                data-testid="cons-decision-picker-done"
+                              >
+                                Done
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    <Button
+                      size="sm"
+                      className="mt-4 h-9 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
+                      onClick={submitConsultationDecision}
+                      disabled={savingDecision || !canSave}
+                      data-testid="cons-decision-save"
+                    >
+                      {/* One label now, because there is one outcome. This branched three
+                          ways over which services were ticked, back when a consultation
+                          could leave here with no Treatment on it; with Treatment required,
+                          every save hands the patient to Branch Admin — to collect the fees
+                          and book the sessions — whatever else is ticked beside it. So the
+                          button names the desk the patient lands on. */}
+                      {savingDecision ? "Saving..." : "Move to Admin"}
+                    </Button>
+                  </div>
+                );
+              })()}
+
+              {!isConsultant && (() => {
+                const stage = selectedLead.consultation_stage;
+                const decision = selectedLead.consultation_decision;
+                // Cancel belongs before the consultation, not after it. A patient who has
+                // not come in yet can call the appointment off, and that is what cancelling
+                // one means. Once they have been seen the visit is a fact: the paperwork is
+                // being filed against it and the fee taken for it, and a Cancel sitting in
+                // that panel offers to call off something that already happened -- next to
+                // the money it was collected with.
+                //
+                // So the stages before the visit keep it and the stages from the visit on do
+                // not. CancelButton is null there, which is what the {CancelButton} slots in
+                // those panels already render.
+                // "Follow Up" is this stage's former name — see the panel below for why both
+                // are still matched.
+                const cancellable = ["New Appointment", "Consultation Booked", "Follow Up"].includes(stage);
+                // Once a lead has moved forward past a stage, it can never come back —
+                // there's no manual "move backward" control anymore (see the backend's
+                // matching rejection in move-consultation-stage).
+                const activeFollowUp = (selectedLead.consultation_follow_ups || []).slice().reverse().find((f) => f.status !== "rescheduled");
+
+                const CancelButton = cancellable ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`border-rose-200 text-rose-600 hover:bg-rose-50 ${ACT_BTN}`}
+                    onClick={() => { if (window.confirm("Cancel this consultation?")) moveStage(selectedLead, "Cancel"); }}
+                    data-testid="cons-cancel-btn"
+                  >
+                    <Ban className="mr-1 h-3.5 w-3.5" /> Cancel
+                  </Button>
+                ) : null;
+
+                // Diet, one button, one strict sequence: the Diet Fee first, then the
+                // Nutrition Coach + their appointment — can't reach assignment until the fee
+                // is in. Routes to the same two flows as before (openDietFeeDraft /
+                // openDietModal), just gated behind one entry point instead of two sitting
+                // side by side, where either could be done first or skipped.
+                //
+                // Offered from the moment the Consultation Fee is in, and on every path.
+                // Diet normally follows treatment, but a patient can come for a diet
+                // consultation and nothing else, so it never waits on a physio or a package.
+                const dietFeePaid = selectedLead.diet_fee_paid != null;
+                const dietAssigned = !!selectedLead.diet_coach_id;
+                const dietBooked = !!selectedLead.diet_appointment_at;
+                // The chart half of the referral, and no longer the Consultant's to start.
+                // `chartReferred` comes on when the NUTRITIONIST recommends a chart, having
+                // seen the patient — which is the only thing that puts a Diet Chart Fee on
+                // this panel. It also comes on once such a fee is taken or a chart is sent, so
+                // a chart sold or written off somebody's own judgement still shows here.
+                const chartReferred = !!selectedLead.diet_chart;
+                const dietChartFeePaid = selectedLead.diet_chart_fee_paid != null;
+                const chartSent = !!selectedLead.diet_chart_sent_at;
+                const DietButton = selectedLead.package_paid != null ? (
+                  <Button
+                    size="sm"
+                    variant={dietFeePaid && dietBooked ? "outline" : undefined}
+                    className={`${dietFeePaid && dietBooked
+                      ? "border-orange-200 text-orange-700 hover:bg-orange-50"
+                      : "bg-orange-500 text-white hover:bg-orange-600"} ${ACT_BTN}`}
+                    onClick={!dietFeePaid ? () => openDietFeeDraft("consultation") : openDietModal}
+                    data-testid="cons-open-diet-assign"
+                  >
+                    <Salad className="mr-1 h-3.5 w-3.5" />{" "}
+                    {!dietFeePaid
+                      ? <Lbl full="Collect Diet Fee" short="Diet Fee" />
+                      : !dietBooked
+                      ? <Lbl full="Assign Nutritionist" short="Assign" />
+                      : <Lbl full="Reschedule Diet" short="Diet" />}
+                  </Button>
+                ) : null;
+
+                // Offered once the Consultation Fee is in and the Consultant actually chose a
+                // course — without one there is no price to collect against, and the backend
+                // refuses for the same reason. Shows on every path a referred patient can be
+                // sitting on, beside the Diet button it is modelled on.
+                const rehabFeePaid = selectedLead.rehab_fee_paid != null;
+                const RehabButton = (selectedLead.package_paid != null && selectedLead.rehab_referred && selectedLead.rehab_package_id && !rehabFeePaid) ? (
+                  <Button
+                    size="sm"
+                    className={`bg-cyan-600 text-white hover:bg-cyan-700 ${ACT_BTN}`}
+                    onClick={openRehabFeeDraft}
+                    data-testid="cons-open-rehab-fee"
+                  >
+                    <Activity className="mr-1 h-3.5 w-3.5" />{" "}
+                    <Lbl full="Collect Rehab Fee" short="Rehab Fee" />
+                  </Button>
+                ) : null;
+
+                // Diet and Rehab each run a whole programme — a package, a fee, an expert, a
+                // set of days — and the panel only ever offered the next payment button for
+                // them. Where a patient actually stood went unanswered: is the fee in, how
+                // many days is the course, has anyone been assigned.
+                //
+                // They are views of the same panel rather than cards of their own. The four
+                // controls stay put and only the body under them changes, so the row that got
+                // you into a programme is the row that gets you back out — a card that
+                // replaced the whole panel took its own way out with it.
+                const openDetail = (which) => setProgrammeDetail(which);
+
+                const DetailRow = ({ label, value, tone = "" }) => (
+                  <div className="flex items-baseline justify-between gap-4 px-3 py-2">
+                    <dt className="shrink-0 text-xs text-slate-500">{label}</dt>
+                    <dd className={`min-w-0 truncate text-right text-sm font-semibold ${tone || "text-slate-800"}`} title={String(value)}>{value}</dd>
+                  </div>
+                );
+
+                // What the panel's header band says while a programme is open. Kept beside the
+                // body it belongs to so a view can never announce itself as one thing and then
+                // show another.
+                const DIET_VIEW = {
+                  tone: "orange",
+                  title: "Diet Programme",
+                  icon: Salad,
+                  chip: dietFeePaid
+                    ? { tone: "emerald", label: "Fee Collected", tick: true }
+                    : { tone: "amber", label: "Diet Fee Due", tick: false },
+                };
+
+                const REHAB_VIEW = {
+                  tone: "cyan",
+                  title: "Rehab Programme",
+                  icon: Activity,
+                  chip: rehabFeePaid
+                    ? { tone: "emerald", label: "Fee Collected", tick: true }
+                    : { tone: "amber", label: "Rehab Fee Due", tick: false },
+                };
+
+                // How far through the course the patient is, who has delivered which part of
+                // it, and the days themselves.
+                //
+                // Built once and shown by both ways into rehab — the Rehab pill's own panel
+                // and the Rehab Details view the other panels open — because a course must
+                // not read as two different courses depending on which door was used.
+                //
+                // Nothing until the days arrive. A skeleton would be a bar at 0% over a
+                // course that is half delivered, which is worse than a panel that fills in a
+                // moment later.
+                const RehabCourseStatus = rehabProgress ? (
+                  <div data-testid="cons-rehab-course-status">
+                    {/* The two numbers as one length, so how far in the patient is reads at a
+                        glance instead of by subtraction — the same bar the Physio Assign
+                        panel draws for the treatment course. */}
+                    {rehabProgress.packageDays > 0 && (
+                      <div className="mt-3" data-testid="cons-rehab-progress">
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${rehabProgress.pct}%` }} />
+                        </div>
+                        <p className="mt-1 text-[10px] font-medium text-slate-500">
+                          {rehabProgress.pct}% of the course delivered
+                          {rehabProgress.remaining > 0 ? ` · ${rehabProgress.remaining} day${rehabProgress.remaining === 1 ? "" : "s"} to go` : ""}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Who is delivering the course, drawn the way the treatment panel draws
+                        it — on a course one physio has held throughout as much as on one that
+                        has changed hands. The name two rows above says who holds the course;
+                        this card says what they have done with it: days completed, which day
+                        numbers are theirs, how many are still booked, and since when. That is
+                        the question the desk opens rehab to answer, and gating it on a
+                        reassignment meant the ordinary course — one physio, mid-delivery —
+                        was the one that showed nothing. A handover only adds the physios
+                        before them, oldest first, and renames the heading to say how many. */}
+                    {(rehabProgress.previous.length > 0 || rehabProgress.current) && (
+                      <div className="mt-3 space-y-1.5" data-testid="cons-rehab-journey">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                          {rehabProgress.reassigned
+                            ? `Physio History · ${rehabProgress.previous.length + (rehabProgress.current ? 1 : 0)} physios`
+                            : "Delivered By"}
+                        </p>
+                        {rehabProgress.previous.map((spell, i) => (
+                          <PhysioSpell
+                            key={`${spell.physio_id}-${i}`}
+                            spell={spell}
+                            packageSessions={rehabProgress.packageDays}
+                            tone="cyan"
+                            dayNoun="days"
+                            testid={`cons-rehab-spell-previous-${i}`}
+                          />
+                        ))}
+                        {rehabProgress.current && (
+                          <PhysioSpell
+                            spell={rehabProgress.current}
+                            packageSessions={rehabProgress.packageDays}
+                            tone="cyan"
+                            dayNoun="days"
+                            testid="cons-rehab-spell-current"
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    <RehabDayList
+                      days={rehabProgress.days}
+                      showPhysio={rehabProgress.reassigned}
+                      testid="cons-rehab-day-list"
+                    />
+                  </div>
+                ) : null;
+
+                const DietDetailBody = (
+                  <>
+                    <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-diet-detail">
+                      <dl className="divide-y divide-slate-100">
+                        <DetailRow label="Diet Package" value={selectedLead.diet_package_name || "Not chosen yet"} />
+                        <DetailRow
+                          label="Diet Fee"
+                          value={dietFeePaid
+                            ? `Rs.${Number(selectedLead.diet_fee_paid).toLocaleString("en-IN")}${selectedLead.diet_fee_payment_mode ? ` (${selectedLead.diet_fee_payment_mode})` : ""}`
+                            : (dietFeeDue != null ? `Rs.${Number(dietFeeDue).toLocaleString("en-IN")} — not collected` : "Not collected")}
+                          tone={dietFeePaid ? "text-emerald-700" : "text-amber-700"}
+                        />
+                        <DetailRow label="Nutritionist" value={selectedLead.diet_coach_name || "Not assigned"} tone={dietAssigned ? "" : "text-amber-700"} />
+                        <DetailRow
+                          label="Diet Consultation"
+                          value={selectedLead.diet_appointment_at
+                            ? `${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`
+                            : "Not booked"}
+                          tone={dietBooked ? "" : "text-amber-700"}
+                        />
+                        {/* The chart's own three rows, and only once a chart has actually been
+                            called for. A Diet Chart is a second product on a second shelf at a
+                            second price, so it gets its own fee line rather than sharing the
+                            one above — which is also what the lead stores.
+
+                            Nothing here until the Nutritionist recommends one. Until then
+                            there is no chart to price, and a fee line offered against one
+                            would be asking the desk to collect for a decision nobody has made.
+
+                            The last row is the one the desk is actually asked about. A chart
+                            the coach sent is not a chart the patient can see: unpaid, it is
+                            held, and the person who has to say so is standing at this screen. */}
+                        {chartReferred && (
+                          <>
+                            <DetailRow label="Diet Chart Package" value={selectedLead.diet_chart_package_name || "Not chosen yet"} />
+                            <DetailRow
+                              label="Diet Chart Fee"
+                              value={dietChartFeePaid
+                                ? `Rs.${Number(selectedLead.diet_chart_fee_paid).toLocaleString("en-IN")}${selectedLead.diet_chart_fee_payment_mode ? ` (${selectedLead.diet_chart_fee_payment_mode})` : ""}`
+                                : (dietChartFeeDue != null ? `Rs.${Number(dietChartFeeDue).toLocaleString("en-IN")} — not collected` : "Not collected")}
+                              tone={dietChartFeePaid ? "text-emerald-700" : "text-amber-700"}
+                            />
+                            <DetailRow
+                              label="Diet Chart"
+                              value={!chartSent
+                                ? "Not sent yet"
+                                : dietChartFeePaid
+                                ? `Sent${selectedLead.diet_chart_sent_by ? ` by ${selectedLead.diet_chart_sent_by}` : ""}`
+                                : "Sent — held until the fee is collected"}
+                              tone={!chartSent ? "text-slate-500" : dietChartFeePaid ? "text-emerald-700" : "text-amber-700"}
+                            />
+                          </>
+                        )}
+                      </dl>
+                    </div>
+                    {/* The fee first and the nutritionist after it, because that is the order
+                        the backend enforces — assign-diet refuses an unpaid patient, so
+                        offering assignment first would be offering a dead end.
+
+                        Once it is collected the fee button goes rather than turning into
+                        "Update Diet Fee". Collecting is a step in that sequence and it is
+                        done; what is left on this card is the appointment. The compact Diet
+                        button above has always worked this way — it moves on to Assign and
+                        then Reschedule — so this card was the one place still offering to
+                        reopen a settled fee, next to a badge saying it was collected. */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
+                      {!dietFeePaid && (
+                        <Button
+                          size="sm"
+                          className={`bg-orange-500 text-white shadow-sm hover:bg-orange-600 ${ACT_BTN}`}
+                          onClick={() => openDietFeeDraft("consultation")}
+                          data-testid="cons-diet-detail-fee"
+                        >
+                          <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                          Collect Diet Fee
+                        </Button>
+                      )}
+                      {/* Offered only once the Nutritionist has recommended a chart, and it
+                          goes once collected — the same way the fee button above does, and for
+                          the same reason: collecting is a step in a sequence and it is done.
+
+                          Which puts it, in practice, after the consultation rather than beside
+                          it: the recommendation is made at the appointment the fee above pays
+                          for. It is not gated on that fee here, because the recommendation
+                          cannot exist without it having happened. */}
+                      {chartReferred && !dietChartFeePaid && (
+                        <Button
+                          size="sm"
+                          className={`bg-orange-500 text-white shadow-sm hover:bg-orange-600 ${ACT_BTN}`}
+                          onClick={() => openDietFeeDraft("chart")}
+                          data-testid="cons-diet-detail-chart-fee"
+                        >
+                          <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                          Collect Diet Chart Fee
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        disabled={!dietFeePaid}
+                        title={dietFeePaid ? undefined : "Collect the Diet Fee first"}
+                        className={`${dietFeePaid ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
+                        onClick={openDietModal}
+                        data-testid="cons-diet-detail-assign"
+                      >
+                        <Salad className="mr-1 h-3.5 w-3.5" />
+                        {dietBooked ? "Reschedule Diet" : "Assign Nutritionist"}
+                      </Button>
+                    </div>
+                  </>
+                );
+
+                const RehabDetailBody = (
+                  <>
+                    <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-rehab-detail">
+                      <dl className="divide-y divide-slate-100">
+                        <DetailRow label="Rehab Course" value={selectedLead.rehab_package_name || "Not chosen yet"} />
+                        <DetailRow
+                          label="Sessions"
+                          value={selectedLead.rehab_package_sessions
+                            ? `${selectedLead.rehab_package_sessions} day${selectedLead.rehab_package_sessions > 1 ? "s" : ""}`
+                            : "Not stated on the course"}
+                          tone={selectedLead.rehab_package_sessions ? "" : "text-slate-400"}
+                        />
+                        <DetailRow
+                          label="Rehab Fee"
+                          value={rehabFeePaid
+                            ? `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}${selectedLead.rehab_fee_payment_mode ? ` (${selectedLead.rehab_fee_payment_mode})` : ""}`
+                            : (selectedLead.rehab_package_price != null ? `Rs.${Number(selectedLead.rehab_package_price).toLocaleString("en-IN")} — not collected` : "Not collected")}
+                          tone={rehabFeePaid ? "text-emerald-700" : "text-amber-700"}
+                        />
+                        <DetailRow label="Rehab Physio" value={selectedLead.rehab_physio_name || "Not assigned"} tone={selectedLead.rehab_physio_name ? "" : "text-amber-700"} />
+                        {rehabProgress && (
+                          <DetailRow
+                            label="Days Completed"
+                            value={`${rehabProgress.completed} of ${rehabProgress.packageDays || "—"}${rehabProgress.done ? "" : ` · ${rehabProgress.remaining} left`}`}
+                            tone={rehabProgress.completed > 0 ? "text-emerald-700" : ""}
+                          />
+                        )}
+                      </dl>
+                    </div>
+                    {/* The same course status the Rehab panel shows, because it is the same
+                        course. This view is the only way into rehab from Fee Collected and
+                        from the diet panel, and a patient opened through those doors used to
+                        get four rows and no sign of whether a single day had been run. */}
+                    {RehabCourseStatus}
+                    {/* Same order and the same gate as diet: the days cannot be booked until
+                        the course is paid for, which is the rule assign-rehab itself holds. */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
+                      {/* Only while the course is unpaid. The Rehab Fee is taken in one go —
+                          anything short of the listed price is recorded as a discount, not a
+                          balance — so once it is in there is no rehab money left to collect,
+                          and a button offering to take it again beside a line reading
+                          "Rs.20,800 (cash)" only invites someone to overwrite the record. */}
+                      {!rehabFeePaid && (
+                        <Button
+                          size="sm"
+                          /* Dead until the Consultant has priced a course, because there is
+                             nothing to collect against and collect-rehab-fee refuses for the
+                             same reason. Drawn and disabled rather than left out: this view is
+                             now reachable for a referral with no course on it, and a card whose
+                             only action has silently vanished reads as a card with nothing left
+                             to do. The title says which desk the next move belongs to. */
+                          disabled={!selectedLead.rehab_package_id}
+                          title={selectedLead.rehab_package_id ? undefined : "The Consultant has not chosen a Rehab course yet — there is no price to collect against"}
+                          className={`${selectedLead.rehab_package_id ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
+                          onClick={openRehabFeeDraft}
+                          data-testid="cons-rehab-detail-fee"
+                        >
+                          <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                          Collect Rehab Fee
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        disabled={!rehabFeePaid}
+                        title={rehabFeePaid ? undefined : "Collect the Rehab Fee first"}
+                        className={`${rehabFeePaid ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
+                        onClick={() => openPhysioModal("rehab")}
+                        data-testid="cons-rehab-detail-assign"
+                      >
+                        <Activity className="mr-1 h-3.5 w-3.5" />
+                        {selectedLead.rehab_physio_name ? "Reassign Rehab Physio" : "Assign Physio"}
+                      </Button>
+                    </div>
+                  </>
+                );
+
+                // Documents, as a view of the panel rather than a trip to the Documents tab
+                // at the top of the card. Consultation Visit needs one before it will take a
+                // payment, and sending someone to another tab to satisfy a rule this panel is
+                // enforcing is how a person ends up not knowing why the button is dead.
+                // Consultation Visit is the one stage that will not proceed without paperwork.
+                // Everywhere else Documents is simply available.
+                const docsRequired = stage === "Consultation Visit";
+                // What the fee waits on. Not "has any document": that count goes up for a
+                // scheme letter or an old MRI report, so a patient with paperwork on file
+                // and no prescription would have opened the gate with somebody else's page.
+                const hasRx = (leadRxCount || 0) > 0;
+
+                // Step one, and only step one. No fees on this screen: somebody filing a
+                // scan is filing a scan, and the figures belong to the step that can act on
+                // them. What it does carry is the way on to that step, once there is
+                // something on file to carry them there.
+                const DocumentsBody = (
+                  <div className="space-y-4" data-testid="cons-documents-body">
+                    {docsRequired && !hasRx && (
+                      <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                        <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+                        <span>Upload the prescription before collecting the fee — the photo or scan is the record of what the Consultant prescribed.</span>
+                      </p>
+                    )}
+                    {/* Its own uploader above the general pile, not a row inside it. This is
+                        the document the fee waits on, so it is asked for by name: a panel
+                        that says "documents" and means one particular document is how a
+                        scheme letter gets filed and the gate stays shut with nothing on
+                        screen explaining why. */}
+                    <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-3" data-testid="cons-prescription-block">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-800">
+                          <FileText className="h-3.5 w-3.5" />Prescription
+                          {docsRequired && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-sky-700">Required to collect the fee</span>}
+                        </p>
+                        {hasRx && <span className="shrink-0 text-[11px] font-semibold text-emerald-600" data-testid="cons-prescription-done">On file</span>}
+                      </div>
+                      <LeadDocuments
+                        leadId={selectedLead.id}
+                        kind="prescription"
+                        fixedLabel="Prescription"
+                        canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                        onChanged={notePrescriptionCount}
+                      />
+                    </div>
+                    {/* Only the prescription lives here. Everything else the patient has on
+                        file — reports, scans, scheme letters — is filed and read in the
+                        Documents tab at the top of the card: this panel exists to clear the
+                        one page the fee waits on, and a second uploader beside it invites
+                        the scheme letter that leaves the gate shut with nothing on screen
+                        explaining why. */}
+                  </div>
+                );
+
+                // Which programme is on screen, if any. Null means the panel shows its own
+                // stage — the fee summary and the line about what to do next.
+                const detailView = programmeDetail === "diet" ? DIET_VIEW
+                  : programmeDetail === "rehab" ? REHAB_VIEW
+                  : null;
+                const detailBody = programmeDetail === "diet" ? DietDetailBody
+                  : programmeDetail === "rehab" ? RehabDetailBody
+                  : programmeDetail === "documents" ? DocumentsBody
+                  : null;
+
+                // The buttons that open the two cards above. They replace the pair that used
+                // to fire a fee popup straight off this row — same place, but they now show
+                // the programme rather than assuming the next thing wanted is a payment.
+                // Gated on the referral, like its Rehab twin below. It was offered to every
+                // patient whose consultation fee was in, so a Consultant who sent somebody to
+                // Rehab and nowhere else still produced a Diet Details button on the Branch
+                // Admin's panel — a programme this patient was never put on, sitting beside
+                // the one they were.
+                // Widened past diet_recommended alone — that is the Consultant's tick, and it is
+                // not the only thing that puts a patient on this programme. A Diet Chart is
+                // recommended later, by the Nutritionist, and carries diet_chart on its own; a
+                // fee already taken is a fact no cleared tick can undo. Both used to leave a
+                // patient with a Diet Chart Fee on their fee card and no tab that would open
+                // the programme it belongs to. Same reading as the fee cards and the pill.
+                const onDietProgramme = !!selectedLead.diet_recommended || !!selectedLead.diet_consultation
+                  || !!selectedLead.diet_chart || selectedLead.diet_fee_paid != null
+                  || selectedLead.diet_chart_fee_paid != null;
+                const DietDetailButton = (selectedLead.package_paid != null && onDietProgramme) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`${programmeDetail === "diet" ? "border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                    onClick={() => openDetail("diet")}
+                    data-testid="cons-open-diet-detail"
+                  >
+                    <Salad className="mr-1 h-3.5 w-3.5" />
+                    <Lbl full="Diet Details" short="Diet" />
+                  </Button>
+                ) : null;
+
+                // No rehab_package_id in this gate, unlike the collect button above it. A
+                // referral with no course chosen is exactly the patient somebody needs to look
+                // at — the panel's first row says "Not chosen yet", which is the answer to why
+                // no fee can be taken — and hiding the view left that question unanswerable
+                // from here. The button inside it is what refuses; see RehabDetailBody.
+                const onRehabProgramme = !!selectedLead.rehab_referred || !!selectedLead.rehab_package_id
+                  || selectedLead.rehab_fee_paid != null;
+                const RehabDetailButton = (selectedLead.package_paid != null && onRehabProgramme) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`${programmeDetail === "rehab" ? "border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                    onClick={() => openDetail("rehab")}
+                    data-testid="cons-open-rehab-detail"
+                  >
+                    <Activity className="mr-1 h-3.5 w-3.5" />
+                    <Lbl full="Rehab Details" short="Rehab" />
+                  </Button>
+                ) : null;
+
+                // The tab for a panel's own stage. Each panel names it for what it holds —
+                // "Assign Physio" on Fee Collected — because "Overview" would tell the reader
+                // nothing about which of the three views they are on.
+                // Filled, so which step is open is read at a glance rather than found. Used by every
+    // tab on this row so the selected one always looks the same, whichever it is.
+    const TAB_ON = "border-sky-600 bg-sky-600 text-white shadow-sm hover:bg-sky-700 hover:text-white";
+
+    const OwnTab = ({ label, short, icon: TabIcon, active, locked = false, lockedTitle }) => (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={locked}
+                    title={locked ? lockedTitle : undefined}
+                    className={`${locked
+                      ? "border-slate-200 bg-slate-50 text-slate-400"
+                      : programmeDetail === "own" ? active : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                    onClick={() => openDetail("own")}
+                    data-testid="cons-open-own-detail"
+                  >
+                    <TabIcon className="mr-1 h-3.5 w-3.5" />
+                    <Lbl full={label} short={short || label} />
+                  </Button>
+                );
+
+                // Every fee this patient has been quoted, one card each, in the order the
+                // fees are taken. It lives out here rather than inside a stage branch
+                // because collecting the Consultation Fee moves the lead from Consultation
+                // Visit to Fee Collected, and the Branch Admin who just took that fee is
+                // still standing in front of the person who owes the next one. Fee Collected
+                // used to answer with a panel of a different shape — the same fees as flat
+                // rows, the collect button moved up into the tab row — so taking two fees off
+                // one patient meant reading two screens for the same job. The cards stay put
+                // now: the fee just paid ticks over, and the next one lights up where it
+                // already was.
+                const consultationPaid = selectedLead.package_paid != null;
+                const treatmentFeePaid = selectedLead.treatment_fee_paid != null;
+
+                // Where a Partial Payment plan currently stands — the next installment, what
+                // is still owed, and whether it is late. Worked out once, for the Treatment
+                // Fee card here and for the balance note Fee Collected prints under the grid.
+                const partialPlan = feeBalances.treatment || null;
+
+                // What a card says and does when that fee has been part collected: it is
+                // neither settled nor untouched, so it names the balance instead of ticking
+                // itself green, and its button collects that balance under any mode.
+                const balanceStep = (fee, fallbackAct, fallbackLabel) => {
+                  const plan = feeBalances[fee];
+                  if (!plan) return { paid: undefined, pending: null, pendingTone: "text-amber-600", act: fallbackAct, actLabel: fallbackLabel };
+                  return {
+                    paid: false,
+                    pending: `Rs.${Number(plan.balance).toLocaleString("en-IN")} balance${plan.next?.due_date ? ` · due ${plan.next.due_date}` : ""}`,
+                    pendingTone: plan.overdue ? "text-rose-600" : "text-amber-600",
+                    act: () => openPartialCollectPopup(plan.nextIdx, fee),
+                    actLabel: "Collect Balance",
+                  };
+                };
+
+                // Each fee is gated on the patient actually being on that programme —
+                // quoting diet or rehab to everyone would overstate what is owed.
+                const feeSteps = [
+                  {
+                    key: "consultation",
+                    label: "Consultation Fee",
+                    amount: selectedLead.package_price,
+                    paid: consultationPaid,
+                    note: consultationPaid ? selectedLead.package_payment_mode : null,
+                    show: true,
+                    ...balanceStep("consultation", openCollectFeeDraft, "Collect"),
+                    // A part-paid fee is still "paid" for everything gated on it — the
+                    // patient is through the door — so the tick is only withheld while a
+                    // balance is actually outstanding.
+                    ...(feeBalances.consultation ? {} : { paid: consultationPaid }),
+                  },
+                  {
+                    key: "treatment",
+                    label: "Treatment Fee",
+                    sub: selectedLead.session_package_name
+                      ? `${selectedLead.session_package_name}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`
+                      : null,
+                    amount: selectedLead.session_package_price,
+                    // A part-paid plan has money in and a balance still owed, so it is
+                    // neither collected nor untouched: the card keeps its button and names
+                    // the installment that is due instead of ticking itself green.
+                    paid: treatmentFeePaid && !partialPlan,
+                    note: treatmentFeePaid ? selectedLead.treatment_fee_payment_mode : null,
+                    pending: partialPlan
+                      ? `${savedInstallments.filter((i) => i.paid).length} of ${savedInstallments.length} in · balance Rs.${Number(partialPlan.balance).toLocaleString("en-IN")}`
+                      : null,
+                    pendingTone: partialPlan && partialPlan.overdue ? "text-rose-600" : "text-amber-600",
+                    show: decision === "consultation_treatment",
+                    act: partialPlan ? () => openPartialCollectPopup(partialPlan.nextIdx) : openTreatmentFeeDraft,
+                    actLabel: partialPlan ? `Collect ${installmentLabelFor(partialPlan.nextIdx)}` : "Collect",
+                  },
+                  {
+                    key: "rehab",
+                    label: "Rehab Fee",
+                    sub: selectedLead.rehab_package_name,
+                    amount: selectedLead.rehab_fee_paid != null ? selectedLead.rehab_fee_paid : selectedLead.rehab_package_price,
+                    paid: selectedLead.rehab_fee_paid != null,
+                    note: selectedLead.rehab_fee_paid != null ? selectedLead.rehab_fee_payment_mode : null,
+                    show: !!selectedLead.rehab_referred,
+                    // Collected on the Rehab tab, which carries the course as well as the
+                    // figure — this card is the pointer to it. A balance is different: it
+                    // is one figure to take, so the card takes it.
+                    ...balanceStep("rehab", () => openDetail("rehab"), "Open"),
+                    ...(feeBalances.rehab ? {} : { paid: selectedLead.rehab_fee_paid != null }),
+                  },
+                  {
+                    key: "diet",
+                    label: "Diet Fee",
+                    sub: selectedLead.diet_package_name,
+                    amount: selectedLead.diet_fee_paid != null ? selectedLead.diet_fee_paid : dietFeeDue,
+                    paid: selectedLead.diet_fee_paid != null,
+                    note: selectedLead.diet_fee_paid != null ? selectedLead.diet_fee_payment_mode : null,
+                    show: !!selectedLead.diet_recommended,
+                    // Straight into the collect popup, not across to the Diet tab. This card
+                    // sits under a heading that says Collect a Payment, on a panel opened to
+                    // take money — so "Open" spent a click moving the Branch Admin to a
+                    // programme view whose only unpaid action was the same button under
+                    // another name. The Rehab card still points at its tab because the course
+                    // is chosen there; the Diet Package is chosen inside the popup itself.
+                    ...balanceStep("diet", () => openDietFeeDraft("consultation"), "Collect"),
+                    ...(feeBalances.diet ? {} : { paid: selectedLead.diet_fee_paid != null }),
+                  },
+                  {
+                    // Its own card rather than a second figure inside the Diet one. A patient
+                    // sold both would otherwise read one total they cannot match against
+                    // either receipt, on the card whose whole job is saying what they owe.
+                    //
+                    // Shown only where the chart was actually ticked, so it stays off every
+                    // patient who was referred for the consultation alone.
+                    key: "diet_chart",
+                    label: "Diet Chart Fee",
+                    sub: selectedLead.diet_chart_package_name,
+                    amount: selectedLead.diet_chart_fee_paid != null ? selectedLead.diet_chart_fee_paid : dietChartFeeDue,
+                    paid: selectedLead.diet_chart_fee_paid != null,
+                    note: selectedLead.diet_chart_fee_paid != null ? selectedLead.diet_chart_fee_payment_mode : null,
+                    show: !!selectedLead.diet_chart,
+                    ...balanceStep("diet_chart", () => openDetail("diet"), "Open"),
+                    ...(feeBalances.diet_chart ? {} : { paid: selectedLead.diet_chart_fee_paid != null }),
+                  },
+                ].filter((f) => f.show);
+
+                // The one fee that can be taken right now. Everything after the Consultation
+                // Fee waits on it — the server's rule, not a habit of this screen — so only
+                // that card gets the filled button and the rest stay quiet outlines.
+                const nextFeeStep = feeSteps.find((f) => !f.paid && (f.key === "consultation" || consultationPaid));
+
+                // And the Consultation Fee itself waits on the prescription — the server's
+                // rule too, since collect-package-payment refuses without it.
+                //
+                // The tab above these cards is already locked while the page is missing, but
+                // that lock only closes once the count has arrived: leadRxCount is null until
+                // the fetch lands, the effect that jumps to Documents waits for it, and the
+                // cards render in the meantime with a live Collect button on them. Reading the
+                // null as "no prescription" here is the safe way round — a card that waits a
+                // moment for an answer costs nothing, and one that collects before the answer
+                // arrives is the bug.
+                const consultationRxBlocked = docsRequired && !consultationPaid && !hasRx;
+
+                /**
+                 * The fee cards, drawn over whichever of the fees the caller wants shown.
+                 *
+                 * A function rather than one built element, because there are two readings of
+                 * this list and only one of them is the whole thing. Fee Collected shows every
+                 * fee the patient was quoted, ticks and all, because that panel IS the money:
+                 * the tick beside a settled fee is half of what it reports. Physio Assign shows
+                 * only what is still owed — the consultation and treatment fees are in by
+                 * definition once a patient stands there, and repeating two green ticks over
+                 * the course card would bury the one fee that still needs taking.
+                 *
+                 * `n` numbers each card. Handed in rather than taken from the index, so a card
+                 * keeps the step number it has on the full list when it is shown on a short
+                 * one: the Diet Fee is the fourth fee whether or not the three before it are
+                 * on screen beside it.
+                 */
+                const renderFeeSteps = (steps, testid = "cons-fee-steps") => (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid={testid}>
+                    {steps.map(({ step: f, n }) => (
+                      <div
+                        key={f.key}
+                        className={`flex flex-col gap-2 rounded-lg border p-3 ${
+                          f.paid ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-white"
+                        }`}
+                        data-testid={`cons-fee-step-${f.key}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                            f.paid ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
+                          }`}>
+                            {f.paid ? <CheckCircle2 className="h-3 w-3" /> : n}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-semibold text-slate-700">{f.label}</p>
+                            {f.sub ? <p className="truncate text-[11px] text-slate-400" title={String(f.sub)}>{f.sub}</p> : null}
+                          </div>
+                        </div>
+                        <p className="text-lg font-extrabold leading-none text-slate-800">
+                          {f.amount != null ? `Rs.${Number(f.amount).toLocaleString("en-IN")}` : "—"}
+                        </p>
+                        {f.paid ? (
+                          <>
+                            <span className="text-[11px] font-medium capitalize text-emerald-700">
+                              {f.note ? `Paid · ${f.note}` : "Paid"}
+                            </span>
+                            {/* The way back to the receipt for money already in. A settled
+                                card used to end at "Paid · Cash": the document the patient
+                                was handed existed for as long as the popup that raised it,
+                                so a patient who lost theirs could only be pointed at their
+                                own WhatsApp history. This reopens the same card — print,
+                                WhatsApp, share and download — rebuilt off the record.
+
+                                Sits where the Collect button sits on an unpaid card rather
+                                than beside the tick, so the fee grid keeps one shape: the
+                                bottom of every card is what to do about that fee, and for
+                                a fee that is in, that is hand it over again.
+
+                                Shown only where the record can actually produce one. A fee
+                                settled before payment_details were stored has no
+                                transaction id and no mode fields behind it, and a button
+                                that opened a receipt with a blank transaction number on it
+                                would be worse than no button. */}
+                            {REISSUE_FEES[f.key] && (selectedLead[REISSUE_FEES[f.key].details]?.transaction_id) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className={`w-full border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 ${ACT_BTN}`}
+                                onClick={() => openFeeReceipt(f.key)}
+                                title="Open the receipt for this payment — print, send or download it again"
+                                data-testid={`cons-fee-receipt-${f.key}`}
+                              >
+                                <Eye className="mr-1 h-3.5 w-3.5" />
+                                <Lbl full="View Receipt" short="Receipt" />
+                              </Button>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {f.pending ? <span className={`text-[11px] font-medium ${f.pendingTone}`}>{f.pending}</span> : null}
+                            <Button
+                              size="sm"
+                              variant={nextFeeStep && f.key === nextFeeStep.key ? undefined : "outline"}
+                              /* Everything after the consultation fee waits on it, and the
+                                 consultation fee waits on the prescription. Both say so
+                                 rather than failing when pressed. */
+                              disabled={f.key === "consultation" ? consultationRxBlocked : !consultationPaid}
+                              title={f.key === "consultation"
+                                ? (consultationRxBlocked ? "Upload the prescription first" : undefined)
+                                : (!consultationPaid ? "Collect the consultation fee first" : undefined)}
+                              className={`w-full ${nextFeeStep && f.key === nextFeeStep.key ? "bg-sky-600 text-white hover:bg-sky-700" : ""} ${ACT_BTN}`}
+                              onClick={f.act}
+                              data-testid={`cons-fee-act-${f.key}`}
+                            >
+                              {f.actLabel}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+
+                // Numbered once, here, so both readings below agree about which step a fee is.
+                const numberedFeeSteps = feeSteps.map((step, i) => ({ step, n: i + 1 }));
+                const FeeSteps = renderFeeSteps(numberedFeeSteps);
+                // What is still owed, for the panels that are not the money panel. Empty for
+                // the patient who paid for everything at the desk, which is most of them — so
+                // every caller has to be prepared to draw nothing.
+                const outstandingFeeSteps = numberedFeeSteps.filter(({ step }) => !step.paid);
+
+                const panel = (() => {
+                  // FIRST in this chain, deliberately. The Rehab tab is a cross-cutting view
+                  // rather than a position in the pipeline: a patient is on it because their
+                  // Rehab Fee is in, while their consultation_stage still says where they
+                  // actually are — which for almost all of them is Fee Collected. Placed any
+                  // lower, that branch returns first and the Rehab tab opens a patient onto
+                  // the fee panel with no way to reach Assign Physio.
+                  if (stageFilter === "Rehab" && selectedLead.rehab_fee_paid != null) {
+                    // Named for the course rather than the collection: `rehabDays` up in the
+                    // component is the days themselves, and one word for the two of them in
+                    // a block that reads both is how a count gets mapped over.
+                    const rehabCourseDays = selectedLead.rehab_package_sessions || 0;
+                    const rehabAssigned = !!selectedLead.rehab_physio_name;
+                    // Label/value pairs built once, so the rows below are a list rather than
+                    // four hand-repeated flex divs — and so a row that has nothing to say is
+                    // dropped instead of printing "0 days" or an empty physio.
+                    const rehabRows = [
+                      { label: "Course", value: selectedLead.rehab_package_name || "Rehab course" },
+                      rehabCourseDays > 0 ? { label: "Duration", value: `${rehabCourseDays} day${rehabCourseDays > 1 ? "s" : ""}` } : null,
+                      {
+                        label: "Rehab Fee",
+                        value: `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}`,
+                        note: selectedLead.rehab_fee_payment_mode || "",
+                        strong: true,
+                      },
+                      rehabAssigned ? { label: "Rehab Physio", value: selectedLead.rehab_physio_name } : null,
+                      // No count row here. What the course was sold as is what these rows are
+                      // for; how much of it has been delivered is the bar directly below them,
+                      // which says the same two numbers as a length and then lists the days
+                      // themselves. Saying it twice, three lines apart, only invited the reader
+                      // to check whether the two agreed.
+                    ].filter(Boolean);
+                    return (
+                      <div
+                        className="overflow-hidden rounded-xl border border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white shadow-sm ring-1 ring-inset ring-white/60"
+                        data-testid="cons-stage-panel-rehab"
+                      >
+                        {/* Header band: the icon gets a tile of its own and the state sits at
+                            the far end, so the panel says what it is and where it stands on
+                            one line before any figure is read. */}
+                        <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-2.5">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-600/10 text-cyan-700">
+                              <Activity className="h-4 w-4" />
+                            </span>
+                            <span className="truncate text-xs font-semibold uppercase tracking-wider text-cyan-800">Rehab</span>
+                          </div>
+                          {/* Who is delivering it, on the header line rather than only in the
+                              rows below. Assigning a physio is the one act this panel exists
+                              for, and until it says so on the line that says what the panel
+                              is, the answer to "did that go through" is four rows down. */}
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {rehabAssigned && (
+                              <span
+                                className="flex max-w-[10rem] items-center gap-1 rounded-full bg-cyan-600 px-2 py-0.5 text-[10px] font-semibold text-white"
+                                title={`Rehab Physio: ${selectedLead.rehab_physio_name}`}
+                                data-testid="cons-rehab-physio-chip"
+                              >
+                                <Users className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{selectedLead.rehab_physio_name}</span>
+                              </span>
+                            )}
+                            <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3" /> Fee Collected
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="p-4">
+                          {/* Hairline-divided rows rather than four bordered boxes: one card,
+                              one column of values, nothing for the eye to step over. */}
+                          <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-rehab-summary">
+                            <dl className="divide-y divide-slate-100">
+                              {rehabRows.map((row) => (
+                                <div key={row.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
+                                  <dt className="shrink-0 text-xs text-slate-500">{row.label}</dt>
+                                  <dd className={`min-w-0 truncate text-right font-semibold text-slate-800 ${row.strong ? "text-[15px]" : "text-sm"}`} title={String(row.value)}>
+                                    {row.value}
+                                    {/* Capitalised: the only note these rows carry is a payment
+                                        mode — "(Cash)" — which is written lowercase upstream. */}
+                                    {row.note && <span className="ml-1 text-xs font-medium capitalize text-emerald-600">({row.note})</span>}
+                                  </dd>
+                                </div>
+                              ))}
+                            </dl>
+                          </div>
+
+                          {RehabCourseStatus}
+
+                          <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                            {!rehabAssigned
+                              ? "Choose the physio who will deliver the course and fix a date and time for every day."
+                              : rehabProgress?.done
+                                ? "Every day of this course has been delivered."
+                                : "The course is booked — every day sits on this physio's calendar and on their board."}
+                          </p>
+                          {/* Said before the picker is opened rather than found inside it.
+                              Reassigning re-dates only what is left — assign-rehab keeps the
+                              completed days with the physio who ran them and replaces the
+                              upcoming ones — and the branch is about to be asked for exactly
+                              that many dates. */}
+                          {rehabAssigned && rehabProgress && !rehabProgress.done && rehabProgress.completed > 0 && (
+                            <p className="mt-1 text-xs leading-relaxed text-cyan-700" data-testid="cons-rehab-reassign-note">
+                              Reassigning keeps the {rehabProgress.completed} day{rehabProgress.completed === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {rehabProgress.remaining} get new dates.
+                            </p>
+                          )}
+
+                          {/* One solid action on the same left edge as everything above it,
+                              with Cancel beside it as a quiet outline rather than a second
+                              filled colour competing with the step to take. No Diet Details
+                              here: this tab is the rehab course, and a patient reached
+                              through it is being looked at for the days of that course --
+                              the diet programme is opened from the panel that owns it. */}
+                          <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
+                            <Button
+                              size="sm"
+                              className="bg-cyan-600 text-xs text-white shadow-sm transition hover:bg-cyan-700 hover:shadow"
+                              onClick={() => openPhysioModal("rehab")}
+                              data-testid="cons-open-rehab-assign"
+                            >
+                              <Activity className="mr-1.5 h-3.5 w-3.5" />
+                              {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
+                            </Button>
+                            {CancelButton}
+                          </div>
+                          {/* Opened from the row above, and shown under it for the same reason
+                              the Fee Collected panel does: the control that opened a
+                              programme has to stay on screen to close it again. */}
+                          {detailBody && <div className="mt-3 border-t border-cyan-100 pt-3">{detailBody}</div>}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Diet Consultation and Diet Chart are the same kind of pill as Rehab —
+                  // nothing writes either, a patient is under one because they are on a diet
+                  // plan — so both open the diet programme rather than whatever stage the
+                  // lead happens to sit at. One panel because they are one programme with two
+                  // fee lines, not two — see DietDetailBody below.
+                  //
+                  // The Rehab pill lands here too, but only for a course whose fee has not been
+                  // taken yet. Its own panel above is a record of a paid course — it prints the
+                  // collected amount and offers to book the days — so a referred patient with
+                  // nothing collected fell past it onto whatever stage they happened to sit at,
+                  // which is the treatment stage that knows nothing about rehab. The pill now
+                  // lists them (see matchesStage), so it has to open them somewhere that can
+                  // take the fee, and RehabDetailBody is that place.
+                  const onRehabPill = stageFilter === "Rehab";
+                  // Which of the two programmes this panel is showing. The tabs switch it, and
+                  // the pill that was clicked chooses which one it starts on: a patient opened
+                  // from Rehab opens on rehab, and one opened from either Diet pill on diet.
+                  const pillProgramme = programmeDetail === "rehab" || (onRehabPill && programmeDetail === "own")
+                    ? "rehab"
+                    : "diet";
+                  // Chart-only referrals belong to the Diet pills as much as consultations do
+                  // — diet_recommended is the Consultant's tick, and a chart the Nutritionist
+                  // recommended later carries diet_chart alone. See matchesStage.
+                  const onDietPill = (stageFilter === "Diet Consultation" || stageFilter === "Diet Chart")
+                    && (selectedLead.diet_recommended || selectedLead.diet_consultation || selectedLead.diet_chart
+                      || selectedLead.diet_fee_paid != null || selectedLead.diet_chart_fee_paid != null);
+                  if (onDietPill || onRehabPill) {
+                    return (
+                      <StagePanel
+                        tone={pillProgramme === "rehab" ? "cyan" : "orange"}
+                        icon={pillProgramme === "rehab" ? Activity : Salad}
+                        title={pillProgramme === "rehab" ? "Rehab Programme" : "Diet Programme"}
+                        testid="cons-stage-panel-diet"
+                        /* Both the chip and the own-tab follow whichever programme is on
+                           screen. This panel shows either, and it read "Diet Fee Due" over a
+                           rehab course — a patient on both was told the wrong fee was
+                           outstanding for the thing they were looking at. */
+                        // A fee part collected is neither of the two states this chip had:
+                        // it is not due from scratch, and it is not collected. It says what
+                        // is left, because that is the number somebody has to chase.
+                        chip={
+                          pillProgramme === "rehab" ? (
+                            <PanelChip tone={feeBalances.rehab || selectedLead.rehab_fee_paid == null ? "amber" : "emerald"} tick={!feeBalances.rehab && selectedLead.rehab_fee_paid != null}>
+                              {feeBalances.rehab
+                                ? `Balance Rs.${Number(feeBalances.rehab.balance).toLocaleString("en-IN")}`
+                                : selectedLead.rehab_fee_paid != null ? "Fee Collected" : "Rehab Fee Due"}
+                            </PanelChip>
+                          ) : (
+                            <PanelChip tone={feeBalances.diet || !dietFeePaid ? "amber" : "emerald"} tick={!feeBalances.diet && dietFeePaid}>
+                              {feeBalances.diet
+                                ? `Balance Rs.${Number(feeBalances.diet.balance).toLocaleString("en-IN")}`
+                                : dietFeePaid ? "Fee Collected" : "Diet Fee Due"}
+                            </PanelChip>
+                          )
+                        }
+                        /* Keyed to the PILL rather than to the view on screen. The pill decides
+                           which programme is home — the one OwnTab returns to, since OwnTab
+                           sets "own" and "own" means home here — and switching programmes must
+                           not rewrite the tab row underneath the reader. Read off the view, the
+                           row relabelled itself on every switch: a reader on the Diet pill who
+                           opened Rehab was handed a tab reading "Rehab Details", lit as nothing,
+                           which took them to Diet when pressed. */
+                        tabs={
+                          onRehabPill ? (
+                            <>
+                              <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" />
+                              {DietDetailButton}
+                              {CancelButton}
+                            </>
+                          ) : (
+                            <>
+                              <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" />
+                              {RehabDetailButton}
+                              {CancelButton}
+                            </>
+                          )
+                        }
+                      >
+                        {pillProgramme === "rehab" ? RehabDetailBody : DietDetailBody}
+                      </StagePanel>
+                    );
+                  }
+
+                  if (stage === "New Appointment") {
+                    return (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3" data-testid="cons-stage-panel-early">
+                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700">
+                          <Calendar className="h-3.5 w-3.5" /> Move to Stage
+                        </p>
+                        <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the CONSULTANT.</p>
+                        <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                           <Button
                             size="sm"
-                            variant="outline"
-                            className="h-7 shrink-0 text-[11px]"
+                            className="bg-amber-500 text-xs text-white hover:bg-amber-600"
+                            onClick={() => setFollowUpDraft({ date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: "10:00", remarks: "" })}
+                            data-testid="cons-move-followup"
+                          >
+                            Schedule Consultation & Move
+                          </Button>
+                          {CancelButton}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // "Follow Up" is the name this stage used to carry, and is still matched:
+                  // the rename happens in a backend migration on its own restart, so for a
+                  // window either label can be on a lead. Matching one alone would leave the
+                  // patients booked in that window looking at a card with no panel under it.
+                  if (stage === "Consultation Booked" || stage === "Follow Up") {
+                    // What the patient was actually booked for. A consultation follow-up
+                    // scheduled from this board writes one of these entries; an appointment
+                    // booked from Branch Leads -- which is how most patients arrive at this
+                    // stage -- writes the lead's own appointment fields and no entry at all,
+                    // so reading the entry alone left the commonest case saying nothing about
+                    // when the patient is expected.
+                    const bookedFor = activeFollowUp
+                      ? `${activeFollowUp.date} at ${activeFollowUp.time}`
+                      : selectedLead.appointment_date
+                        ? `${selectedLead.appointment_date}${selectedLead.appointment_time ? ` at ${selectedLead.appointment_time}` : ""}`
+                        : null;
+                    return (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="cons-stage-panel-followup">
+                        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
+                          <Bell className="h-3.5 w-3.5" /> Consultation Booked
+                        </p>
+                        <p className="mb-2 text-xs text-slate-600">
+                          {bookedFor ? `Booked for ${bookedFor} — waiting on the CONSULTANT.` : "Waiting on the CONSULTANT."}
+                        </p>
+                        <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
+                          <Button
+                            size="sm"
+                            className="bg-amber-500 text-xs text-white hover:bg-amber-600"
+                            // Reschedule always opens the reschedule popup now, with or
+                            // without a follow-up entry behind it. It used to fall through to
+                            // "Schedule Follow-Up" for the commonest case -- a patient booked
+                            // from Branch Leads, who has no entry -- and that popup neither
+                            // knew what it was moving off nor asked for a reason.
                             onClick={() => setRescheduleDraft({
-                              followupId: f.id,
-                              fromDate: f.date,
-                              fromTime: f.time,
-                              currentConsultant: f.consultant_name || selectedLead.assigned_physio_name || "",
+                              followupId: activeFollowUp?.id || null,
+                              fromDate: activeFollowUp?.date || selectedLead.appointment_date || "",
+                              fromTime: activeFollowUp?.time || selectedLead.appointment_time || "",
+                              currentConsultant: selectedLead.assigned_physio_name || "",
+                              // Deliberately blank rather than pre-filled with the slot being
+                              // left. The date it is on is the one date this cannot stay on,
+                              // and a picker that opens already answered invites a Reschedule
+                              // that moves nothing.
                               date: "", time: "", physio_id: "", duration: null, reason: "",
                             })}
-                            data-testid={`cons-followup-reschedule-${f.id}`}
+                            data-testid="cons-reschedule-btn"
                           >
                             Reschedule
                           </Button>
-                        )}
+                          {CancelButton}
+                        </div>
                       </div>
                     );
-                  })
-                )}
-              </div>
-            )}
+                  }
 
-            {/* Physio and Nutrition Coach can read a patient's documents but not add or
-                remove them — a report is ordered and filed by the branch or the Head
-                Physio, and a treating clinician deleting one is not a workflow. */}
-            {detailTab === "documents" && (
-              <LeadDocuments
-                leadId={selectedLead.id}
-                canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
-                /* Read here, filed elsewhere. The Consultant's card is where a
-                   consultation is written up, and the reports and scans on a patient's
-                   file are ordered and filed by the branch — so this popup shows the pile
-                   without an uploader on top of it. The branch's own board keeps one. */
-                canUpload={["branch_admin", "super_admin"].includes(viewerRole)}
-                /* Filing or deleting a page here moves the same count the stage panel's
-                   Documents tab shows, so it is retaken rather than left as it was when
-                   the card opened. */
-                onChanged={noteDocsChanged}
-              />
-            )}
+                  if (stage === "Consultation Visit") {
+                    return (
+                      <StagePanel
+                        tone={detailView ? detailView.tone : "sky"}
+                        icon={detailView ? detailView.icon : IndianRupee}
+                        title={detailView ? detailView.title : "Collect a Payment"}
+                        testid="cons-stage-panel-consultation-visit"
+                        chip={detailView ? (
+                          <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
+                        ) : consultationPaid ? (
+                          <PanelChip tone="emerald" tick>Consultation Fee In</PanelChip>
+                        ) : (
+                          <PanelChip>Payment Due</PanelChip>
+                        )}
+                        tabs={
+                          <>
+                            {/* The order is the order it happens in: the paperwork is filed,
+                                then the money is taken against it. Documents leads because it
+                                is the step that gates the other one — a row that opens on a
+                                payment it will not let you take is a row that reads as
+                                broken. */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className={`${programmeDetail === "documents"
+                                ? TAB_ON
+                                : hasRx
+                                ? "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
+                                : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"} ${ACT_BTN}`}
+                              onClick={() => openDetail("documents")}
+                              data-testid="cons-open-documents"
+                            >
+                              <FileText className="mr-1 h-3.5 w-3.5" />
+                              {/* Amber until the prescription is in, whatever else is on
+                                  file: the colour is about the step that is outstanding, and
+                                  a scheme letter does not finish this one. */}
+                              <Lbl full={!hasRx ? "Prescription — required" : leadDocCount == null ? "Documents" : `Documents (${leadDocCount})`} short="Docs" />
+                            </Button>
+                            {/* Always on screen, and shut until the scan is filed. This panel
+                                is a sequence — paperwork, then money — so a step that
+                                disappears once you reach it takes the shape of the sequence
+                                with it, and one that opens on a payment it will not take asks
+                                for something and refuses it in the same breath. */}
+                            <OwnTab
+                              label={consultationPaid ? "Payment" : "Collect Fees"}
+                              short="Fees"
+                              icon={IndianRupee}
+                              active={TAB_ON}
+                              locked={docsRequired && !hasRx && !consultationPaid}
+                              lockedTitle="Upload the prescription first"
+                            />
+                            {DietDetailButton}
+                            {RehabDetailButton}
+                            {CancelButton}
+                          </>
+                        }
+                      >
+                        {/* Each tab is its own step and shows only that step. The fees do not
+                            appear over the uploader: somebody filing a scan is filing a scan,
+                            and a figure on that screen is a figure they cannot act on yet. */}
+                        {detailBody || FeeSteps}
+                      </StagePanel>
+                    );
+                  }
 
-            {/* canVerify carries the same list the backend gates on, so a role that cannot
-                verify is not shown a button that would come back refused. The physio's own
-                page renders this tab with canVerify off for the same reason. */}
-            {detailTab === "progression" && (
-              <ProgressionTab
-                leadId={selectedLead.id}
-                /* The Consultant verifies but does not gather. The clips and the review
-                   come from the physio delivering the course, and this tab is on the
-                   Consultant's popup so somebody other than the person who filmed them
-                   says they count — checking your own work makes the requirement prove
-                   nothing. So: view and verify here, upload elsewhere. */
-                canUpload={["branch_admin", "super_admin"].includes(viewerRole)}
-                canVerify={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
-              />
-            )}
-
-            {detailTab === "timeline" && (
-              <div className="space-y-3" data-testid="cons-lead-timeline">
-                {(() => {
-                  const events = [
-                    ...timelineRemarks.map((r) => ({ ...r, _kind: "remark" })),
-                    ...timelineActivity.map((a) => ({ ...a, _kind: "activity" })),
-                  ].sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
-                  if (events.length === 0) return <p className="py-8 text-center text-sm text-slate-400">No timeline events yet</p>;
-                  return (
-                    <ol className="ml-3 space-y-4 border-l-2 border-slate-200 py-1 pl-6">
-                      {events.map((h) => (
-                        <li key={`${h._kind}-${h.id}`} className="relative" data-testid={`cons-timeline-${h._kind}-${h.id}`}>
-                          <span className={`absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-white ${h._kind === "remark" ? "bg-amber-400" : "bg-sky-500"}`} />
-                          <div className={`rounded-lg border p-3 ${h._kind === "remark" ? "border-amber-100 bg-amber-50/50" : "border-slate-100 bg-slate-50"}`}>
-                            <p className="text-sm text-slate-700">{h._kind === "remark" ? h.text : h.details}</p>
-                            <p className="mt-1 text-[10px] text-slate-400">{h.created_by} · {h.created_at?.slice(0, 16).replace("T", " ")}</p>
+                  if (stage === "Fee Collected") {
+                    if (decision === "consultation_only") {
+                      return (
+                        <div
+                          className="overflow-hidden rounded-xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-emerald-50/60 to-white shadow-sm ring-1 ring-inset ring-white/60"
+                          data-testid="cons-stage-panel-fee-collected"
+                        >
+                          <div className="flex items-center justify-between gap-3 border-b border-emerald-100 px-4 py-2.5">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-600/10 text-emerald-700">
+                                <ClipboardCheck className="h-4 w-4" />
+                              </span>
+                              <span className="truncate text-xs font-semibold uppercase tracking-wider text-emerald-800">Fee Collected</span>
+                            </div>
+                            <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3" /> Consultation Only
+                            </span>
                           </div>
-                        </li>
-                      ))}
-                    </ol>
-                  );
-                })()}
-              </div>
-            )}
+                          <div className="p-4">
+                            {FeeSteps}
+                            <p className="mt-3 text-xs leading-relaxed text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
+                            <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
+                              <Button size="sm" className="bg-emerald-600 text-xs text-white shadow-sm transition hover:bg-emerald-700 hover:shadow" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
+                                {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
+                              </Button>
+                              {DietDetailButton}
+                              {RehabDetailButton}
+                              {CancelButton}
+                            </div>
+                            {detailBody && <div className="mt-3 border-t border-emerald-100 pt-3">{detailBody}</div>}
+                            </div>
+                        </div>
+                      );
+                    }
+                    // Money is taken on the cards below, each fee on its own. What is left
+                    // for the tab row is the schedule behind a part-paid Treatment Fee —
+                    // a view of what was agreed, not another way to collect it.
+                    const FeeActions = partialPlan ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
+                        onClick={openPartialScheduleDraft}
+                        data-testid="cons-open-partial-schedule-sidebar"
+                      >
+                        <Calendar className="mr-1 h-3.5 w-3.5" />
+                        <Lbl full="Payment Schedule" short="Schedule" />
+                      </Button>
+                    ) : null;
 
-            {detailTab === "profile" && (
-              <div className="space-y-3" data-testid="cons-lead-profile">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Contact</p>
-                  <div className="space-y-1.5 text-xs text-slate-700">
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Phone</span><span className="font-medium">{selectedLead.phone || "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Alternative Phone</span><span className="font-medium">{selectedLead.alternative_phone || "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Email</span><span className="font-medium">{selectedLead.email || "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Address</span><span className="font-medium">{selectedLead.address || "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">City / State</span><span className="font-medium">{[selectedLead.city, selectedLead.state].filter(Boolean).join(", ") || "—"}</span></div>
+                    return (
+                      <StagePanel
+                        /* The heading follows the work rather than the stage name. A lead
+                           lands here the moment the Consultation Fee is taken, usually with
+                           the Treatment Fee still to come — and the Branch Admin taking it
+                           is mid-job, not looking at a receipt. While a fee is still due
+                           this stays the payment screen it was a click ago; once the last
+                           one is in it becomes what the pipeline calls it. */
+                        tone={detailView ? detailView.tone : nextFeeStep ? "sky" : "indigo"}
+                        icon={detailView ? detailView.icon : nextFeeStep ? IndianRupee : ClipboardCheck}
+                        title={detailView ? detailView.title : nextFeeStep ? "Collect a Payment" : "Fee Collected"}
+                        testid="cons-stage-panel-fee-collected"
+                        chip={detailView ? (
+                          <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
+                        ) : partialPlan ? (
+                          <PanelChip tone={partialPlan.overdue ? "rose" : "amber"}>{partialPlan.overdue ? "Balance Overdue" : "Part-paid"}</PanelChip>
+                        ) : treatmentFeePaid ? (
+                          <PanelChip tone="emerald" tick>Both Fees Collected</PanelChip>
+                        ) : (
+                          <PanelChip>Treatment Fee Due</PanelChip>
+                        )}
+                        tabs={
+                          <>
+                            {FeeActions}
+                            {/* Only ever the way back. On the panel's own view this tab was
+                                the words "Assign Physio" sitting directly above the button of
+                                the same name that does the work, and pressing it went nowhere.
+                                Off that view -- Documents, Diet, Rehab -- it is the only road
+                                home, so that is the only time it is drawn. */}
+                            {treatmentFeePaid && programmeDetail !== "own" && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
+                            {/* No Diet tab on this row. The Diet Fee card below is the way
+                                into the diet programme from here — a button in the tab row
+                                as well put the same view two doors apart on one screen,
+                                above a panel whose job right now is the fee that is due. */}
+                            {RehabDetailButton}
+                            {CancelButton}
+                          </>
+                        }
+                      >
+                        {detailBody || (
+                          <>
+                            {FeeSteps}
+
+                            {/* What is still owed and when it is due, across every fee that
+                                has a balance — the cards above are what collect them. */}
+                            {allBalances && (
+                              <div className={`mt-2 rounded-lg border px-3 py-2 ${allBalances.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-[11px] font-semibold ${allBalances.overdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
+                                  <span className={`text-sm font-bold ${allBalances.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{Number(allBalances.total).toLocaleString("en-IN")}</span>
+                                </div>
+                                {/* One line per fee still owed, because a patient can owe on
+                                    two at once and a single total says nothing about which
+                                    card to press. */}
+                                {allBalances.plans.map((plan) => (
+                                  <p key={plan.fee} className={`mt-0.5 text-[10px] ${plan.overdue ? "text-rose-600" : "text-amber-600"}`}>
+                                    {FEE_LABELS[plan.fee]} · {plan.fee === "treatment" ? installmentLabelFor(plan.nextIdx) : "Balance"}
+                                    {plan.next.sessions ? ` · ${plan.next.sessions} sessions` : ""}
+                                    {plan.next.amount != null ? ` · Rs.${plan.next.amount}` : ""}
+                                    {plan.next.due_date ? ` · due ${plan.next.due_date}` : ""}
+                                    {plan.overdue ? " · OVERDUE" : ""}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+
+                            {treatmentFeePaid && (
+                              <>
+                                {/* The act itself lives in the view, not in the tab that opens
+                                    the view. A tab that also fired the picker could not be
+                                    pressed to come back to what it was showing. */}
+                                <div className="mt-3">
+                                  <Button
+                                    size="sm"
+                                    className={`bg-violet-600 text-white shadow-sm transition hover:bg-violet-700 hover:shadow ${ACT_BTN}`}
+                                    onClick={() => openPhysioModal("treatment")}
+                                    data-testid="cons-open-physio-assign-from-fee-collected"
+                                  >
+                                    <Users className="mr-1 h-3.5 w-3.5" />
+                                    {/* Never "Reassign" here. assigned_physio_name is written
+                                        when the appointment is booked -- it is the physio who
+                                        took the consultation, set by the Branch Admin long
+                                        before anyone picks who delivers the treatment -- so
+                                        reading it as "a physio is already assigned" made this
+                                        button say Reassign for every patient who ever had a
+                                        consultation, which is all of them.
+
+                                        The stage is the honest test and it needs no field:
+                                        assign-consultation-physio is what moves a lead off
+                                        Fee Collected, so a lead sitting on this panel has no
+                                        treatment physio yet. Reassigning belongs to the
+                                        Physio Assign panel below, where the name does mean
+                                        what it says. */}
+                                    Assign Physio
+                                  </Button>
+                                </div>
+                              </>
+                            )}
+                          </>
+                        )}
+                      </StagePanel>
+                    );
+                  }
+
+                  if (stage === "Physio Assign") {
+                    const assigned = !!selectedLead.assigned_physio_name;
+                    // The course as sold and the course as delivered. Both are counted off
+                    // the session rows themselves — the board stamps them onto every lead it
+                    // returns (see _stamp_session_progress), and the physio-progress fetch
+                    // recounts the same rows — so this panel and the physio's own board can
+                    // never disagree about how far in a patient is.
+                    const totalCourseSessions = physioProgress?.package_sessions
+                      || selectedLead.session_package_sessions
+                      || selectedLead.total_sessions
+                      || 0;
+                    const courseCompleted = physioProgress?.completed_sessions ?? (selectedLead.completed_sessions || 0);
+                    const courseRemaining = Math.max(0, totalCourseSessions - courseCompleted);
+                    const coursePct = totalCourseSessions > 0
+                      ? Math.min(100, Math.round((courseCompleted / totalCourseSessions) * 100))
+                      : 0;
+                    const courseDone = totalCourseSessions > 0 && courseRemaining === 0;
+                    // Physio Assign is a stage on the TREATMENT pipeline, and it used to be
+                    // written as though treatment were the only thing a consultation could
+                    // sell. It has a tab row again, because it is not: the Consultant can send
+                    // one patient away with treatment, rehab and a diet plan at once, and
+                    // assigning the treatment physio is what moves them off Fee Collected --
+                    // the one panel that could take the other two fees or reach the other two
+                    // programmes. Everything still owed became uncollectable at the exact
+                    // moment the branch did the next right thing.
+                    //
+                    // The Diet and Rehab tabs are the same pair every other panel carries, so
+                    // the programme opens here exactly as it does from Fee Collected. The
+                    // OwnTab beside them is drawn only off this panel's own view, for the
+                    // reason Fee Collected gives: on the stage itself it would be a tab above
+                    // the panel it opens, and pressing it would go nowhere.
+                    const physioAssignTabs = (DietDetailButton || RehabDetailButton) ? (
+                      <>
+                        {programmeDetail !== "own" && (
+                          <OwnTab label="Physio Assign" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />
+                        )}
+                        {DietDetailButton}
+                        {RehabDetailButton}
+                      </>
+                    ) : null;
+                    return (
+                      <StagePanel
+                        tone={detailView ? detailView.tone : assigned ? "emerald" : "violet"}
+                        icon={detailView ? detailView.icon : Users}
+                        title={detailView ? detailView.title : "Physio Assign"}
+                        testid="cons-stage-panel-physio-assign"
+                        chip={detailView ? (
+                          <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
+                        ) : assigned ? (
+                          <PanelChip tone="emerald" tick>Sessions In Progress</PanelChip>
+                        ) : (
+                          <PanelChip>Physio Not Assigned</PanelChip>
+                        )}
+                        tabs={physioAssignTabs}
+                      >
+                        {detailBody || (
+                          <>
+                            <PanelCard testid="cons-physio-assign-summary">
+                              <PanelRow
+                                label="Treatment Package"
+                                value={`${selectedLead.session_package_name || "—"}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`}
+                              />
+                              <PanelRow
+                                label="Assigned Physio"
+                                value={selectedLead.assigned_physio_name || "Not assigned"}
+                                tone={assigned ? "" : "text-amber-700"}
+                              />
+                              {/* The two numbers this card is opened for. Sessions Completed
+                                  carries what is left rather than making the reader subtract,
+                                  because "4 left" is the thing the branch acts on. */}
+                              <PanelRow label="Total Sessions" value={totalCourseSessions || "—"} />
+                              <PanelRow
+                                label="Sessions Completed"
+                                value={`${courseCompleted} of ${totalCourseSessions || "—"}`}
+                                tone={courseCompleted > 0 ? "text-emerald-700" : ""}
+                                note={totalCourseSessions > 0 ? (courseDone ? "course complete" : `${courseRemaining} left`) : ""}
+                                noteTone={courseDone ? "text-emerald-600" : "text-slate-500"}
+                              />
+                              {selectedLead.diet_coach_name && (
+                                <PanelRow
+                                  label="Diet Consultation"
+                                  value={`${selectedLead.diet_coach_name}${selectedLead.diet_appointment_at ? ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}` : ""}`}
+                                />
+                              )}
+                            </PanelCard>
+
+                            {/* The same two numbers as one length, so how far in the patient
+                                is reads at a glance instead of by subtraction. */}
+                            {totalCourseSessions > 0 && (
+                              <div className="mt-2" data-testid="cons-physio-assign-progress">
+                                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                                  <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${coursePct}%` }} />
+                                </div>
+                                <p className="mt-1 text-[10px] font-medium text-slate-500">
+                                  {coursePct}% of the course delivered
+                                  {courseRemaining > 0 ? ` · ${courseRemaining} session${courseRemaining === 1 ? "" : "s"} to go` : ""}
+                                </p>
+                              </div>
+                            )}
+
+                            {/* Who delivered it, in the order the patient had them: every
+                                physio before this one, then this one. A reassignment leaves
+                                the previous physio's completed days behind it, and the branch
+                                needs to see where they left off before it reads what the new
+                                physio has picked up. */}
+                            {physioProgress && (physioProgress.previous.length > 0 || physioProgress.current) && (
+                              <div className="mt-3 space-y-1.5" data-testid="cons-physio-assign-journey">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                  {physioProgress.reassigned
+                                    ? `Physio History · ${physioProgress.previous.length + (physioProgress.current ? 1 : 0)} physios`
+                                    : "Delivered By"}
+                                </p>
+                                {physioProgress.previous.map((spell, i) => (
+                                  <PhysioSpell
+                                    key={`${spell.physio_id}-${i}`}
+                                    spell={spell}
+                                    packageSessions={totalCourseSessions}
+                                    testid={`cons-physio-spell-previous-${i}`}
+                                  />
+                                ))}
+                                {physioProgress.current && (
+                                  <PhysioSpell
+                                    spell={physioProgress.current}
+                                    packageSessions={totalCourseSessions}
+                                    testid="cons-physio-spell-current"
+                                  />
+                                )}
+                              </div>
+                            )}
+
+                            <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                              {!assigned
+                                ? "Treatment Fee collected. Choose the physiotherapist who will deliver the sessions."
+                                : courseDone
+                                  ? "Every session of this course has been delivered."
+                                  : "Treatment sessions are in progress — every day is on this physio's calendar and on their board."}
+                            </p>
+                            {/* Said before the picker is opened rather than discovered inside
+                                it: reassigning mid-course re-dates only what is left, and the
+                                branch is about to be asked for exactly that many dates. */}
+                            {assigned && !courseDone && courseCompleted > 0 && (
+                              <p className="mt-1 text-xs leading-relaxed text-violet-700" data-testid="cons-physio-reassign-note">
+                                Reassigning keeps the {courseCompleted} session{courseCompleted === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {courseRemaining} get new dates.
+                              </p>
+                            )}
+                            <div className="mt-3">
+                              <Button
+                                size="sm"
+                                disabled={assigned && courseDone}
+                                title={assigned && courseDone ? "The course is finished — there are no sessions left to reassign" : undefined}
+                                className={`${assigned ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200 hover:bg-violet-50" : "bg-violet-600 text-white shadow-sm hover:bg-violet-700"} ${ACT_BTN}`}
+                                onClick={() => openPhysioModal("treatment")}
+                                data-testid={assigned ? "cons-reassign-physio" : "cons-open-physio-assign"}
+                              >
+                                <Users className="mr-1 h-3.5 w-3.5" />
+                                {assigned ? "Reassign Physio" : "Assign Physio & Book Sessions"}
+                              </Button>
+                            </div>
+
+                            {/* And whatever the patient still owes, on the same cards Fee Collected
+                                takes it on. A rehab course or a diet plan is sold at the same
+                                consultation as the treatment and is not paid for by it, so a
+                                patient can stand at this stage — physio assigned, sessions
+                                running — with two fees never collected. This panel showed neither,
+                                and the stage before it is the one nobody can go back to.
+
+                                Only the unpaid ones: the consultation and treatment fees are in by
+                                definition here, and two green ticks under a course card say nothing
+                                the panel above them has not already said. */}
+                            {outstandingFeeSteps.length > 0 && (
+                              <div className="mt-4 border-t border-slate-200 pt-3" data-testid="cons-physio-assign-fees">
+                                <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                  <IndianRupee className="h-3 w-3" /> Still to Collect
+                                </p>
+                                {renderFeeSteps(outstandingFeeSteps, "cons-physio-assign-fee-steps")}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </StagePanel>
+                    );
+                  }
+
+                  if (stage === "Consultation Completed") {
+                    return (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-stage-panel-completed">
+                        <p className="text-sm font-semibold text-slate-700">Consultation completed</p>
+                        <p className="mt-1 text-xs text-slate-500">Consultation Only — no treatment sessions were required.</p>
+                        {selectedLead.diet_coach_name && (
+                          <p className="mt-1 text-xs text-slate-600">Diet Consultation: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
+                            {selectedLead.diet_appointment_at && ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`}</p>
+                        )}
+                        {/* A closed consultation can still start a diet plan. "Consultation +
+                            Diet" patients land here the moment the consultation is marked
+                            completed, and that is exactly when their plan gets booked. */}
+                        {(DietButton || RehabButton) && <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">{DietButton}{RehabButton}</div>}
+                      </div>
+                    );
+                  }
+
+                  if (stage === "Cancel") {
+                    return (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 p-3" data-testid="cons-stage-panel-cancelled">
+                        <p className="text-sm font-semibold text-rose-700">This consultation was cancelled.</p>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })();
+
+                return (
+                  <div className="order-1 space-y-3">
+                    {panel}
                   </div>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Profile</p>
-                  <div className="space-y-1.5 text-xs text-slate-700">
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Age</span><span className="font-medium">{selectedLead.age ?? "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Gender</span><span className="font-medium">{selectedLead.gender || "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Occupation</span><span className="font-medium">{selectedLead.occupation || "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Department</span><span className="font-medium">{selectedLead.department || "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Condition</span><span className="font-medium">{selectedLead.condition || "—"}</span></div>
-                    <div className="flex items-center justify-between"><span className="text-slate-500">Months of Pain</span><span className="font-medium">{selectedLead.months_of_pain ?? "—"}</span></div>
-                  </div>
-                </div>
+                );
+              })()}
+
               </div>
-            )}
+              )}
+
+              {detailTab === "followup" && (
+                <div className="space-y-1.5" data-testid="cons-followups-list">
+                  {(selectedLead.consultation_follow_ups || []).length === 0 ? (
+                    <p className="py-6 text-center text-sm text-slate-400">No follow-ups scheduled yet.</p>
+                  ) : (
+                    selectedLead.consultation_follow_ups.slice().reverse().map((f) => {
+                      const isActive = f.status !== "rescheduled";
+                      return (
+                        <div
+                          key={f.id}
+                          className={`flex items-start justify-between gap-3 rounded-lg border p-2.5 text-xs ${isActive ? "border-orange-200 bg-orange-50/60" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                          data-testid={`cons-followup-row-${f.id}`}
+                        >
+                          <div>
+                            <p className={`font-semibold ${isActive ? "text-orange-700" : "text-slate-400 line-through"}`}>{f.date} at {f.time}</p>
+                            {f.consultant_name && (
+                              <p className="mt-0.5 text-[11px] font-medium text-slate-500" data-testid={`cons-followup-consultant-${f.id}`}>
+                                with {f.consultant_name}
+                              </p>
+                            )}
+                            {f.remarks && <p className="mt-0.5 text-slate-600">{f.remarks}</p>}
+                            {f.status === "rescheduled" && f.reschedule_reason && (
+                              <p className="mt-0.5 italic text-slate-400">Rescheduled: {f.reschedule_reason}</p>
+                            )}
+                          </div>
+                          {isActive && !isConsultant && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 shrink-0 text-[11px]"
+                              onClick={() => setRescheduleDraft({
+                                followupId: f.id,
+                                fromDate: f.date,
+                                fromTime: f.time,
+                                currentConsultant: f.consultant_name || selectedLead.assigned_physio_name || "",
+                                date: "", time: "", physio_id: "", duration: null, reason: "",
+                              })}
+                              data-testid={`cons-followup-reschedule-${f.id}`}
+                            >
+                              Reschedule
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              {/* Physio and Nutrition Coach can read a patient's documents but not add or
+                  remove them — a report is ordered and filed by the branch or the Head
+                  Physio, and a treating clinician deleting one is not a workflow. */}
+              {detailTab === "documents" && (
+                <LeadDocuments
+                  leadId={selectedLead.id}
+                  canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                  /* Read here, filed elsewhere. The Consultant's card is where a
+                     consultation is written up, and the reports and scans on a patient's
+                     file are ordered and filed by the branch — so this popup shows the pile
+                     without an uploader on top of it. The branch's own board keeps one. */
+                  canUpload={["branch_admin", "super_admin"].includes(viewerRole)}
+                  /* Filing or deleting a page here moves the same count the stage panel's
+                     Documents tab shows, so it is retaken rather than left as it was when
+                     the card opened. */
+                  onChanged={noteDocsChanged}
+                />
+              )}
+
+              {/* canVerify carries the same list the backend gates on, so a role that cannot
+                  verify is not shown a button that would come back refused. The physio's own
+                  page renders this tab with canVerify off for the same reason. */}
+              {detailTab === "progression" && (
+                <ProgressionTab
+                  leadId={selectedLead.id}
+                  /* The Consultant verifies but does not gather. The clips and the review
+                     come from the physio delivering the course, and this tab is on the
+                     Consultant's popup so somebody other than the person who filmed them
+                     says they count — checking your own work makes the requirement prove
+                     nothing. So: view and verify here, upload elsewhere. */
+                  canUpload={["branch_admin", "super_admin"].includes(viewerRole)}
+                  canVerify={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                />
+              )}
+
+              {detailTab === "timeline" && (
+                <div className="space-y-3" data-testid="cons-lead-timeline">
+                  {(() => {
+                    const events = [
+                      ...timelineRemarks.map((r) => ({ ...r, _kind: "remark" })),
+                      ...timelineActivity.map((a) => ({ ...a, _kind: "activity" })),
+                    ].sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
+                    if (events.length === 0) return <p className="py-8 text-center text-sm text-slate-400">No timeline events yet</p>;
+                    return (
+                      <ol className="ml-3 space-y-4 border-l-2 border-slate-200 py-1 pl-6">
+                        {events.map((h) => (
+                          <li key={`${h._kind}-${h.id}`} className="relative" data-testid={`cons-timeline-${h._kind}-${h.id}`}>
+                            <span className={`absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-white ${h._kind === "remark" ? "bg-amber-400" : "bg-sky-500"}`} />
+                            <div className={`rounded-lg border p-3 ${h._kind === "remark" ? "border-amber-100 bg-amber-50/50" : "border-slate-100 bg-slate-50"}`}>
+                              <p className="text-sm text-slate-700">{h._kind === "remark" ? h.text : h.details}</p>
+                              <p className="mt-1 text-[10px] text-slate-400">{h.created_by} · {h.created_at?.slice(0, 16).replace("T", " ")}</p>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {detailTab === "profile" && (
+                <div className="space-y-3" data-testid="cons-lead-profile">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Contact</p>
+                    <div className="space-y-1.5 text-xs text-slate-700">
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Phone</span><span className="font-medium">{selectedLead.phone || "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Alternative Phone</span><span className="font-medium">{selectedLead.alternative_phone || "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Email</span><span className="font-medium">{selectedLead.email || "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Address</span><span className="font-medium">{selectedLead.address || "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">City / State</span><span className="font-medium">{[selectedLead.city, selectedLead.state].filter(Boolean).join(", ") || "—"}</span></div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Profile</p>
+                    <div className="space-y-1.5 text-xs text-slate-700">
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Age</span><span className="font-medium">{selectedLead.age ?? "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Gender</span><span className="font-medium">{selectedLead.gender || "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Occupation</span><span className="font-medium">{selectedLead.occupation || "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Department</span><span className="font-medium">{selectedLead.department || "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Condition</span><span className="font-medium">{selectedLead.condition || "—"}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">Months of Pain</span><span className="font-medium">{selectedLead.months_of_pain ?? "—"}</span></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Collect Fee popup (Branch Admin) — Consultation Visit stage. When the
                 Head Physio's decision is "Consultation + Treatment" and the Treatment
@@ -11923,23 +12005,28 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
   );
 }
 
+/**
+ * One of the consultation's written boxes — a heading, the text under it, and whatever the
+ * reader is allowed to do to that text.
+ *
+ * Drawn on a plain card. These two used to be a blue card beside a purple one, above a
+ * green card and beside a grey one, and the colours meant nothing: everything on this half
+ * of the popup is the same kind of thing — something already written, being read back. The
+ * tint is spent where it does say something (a stage panel's tone, a fee's state), and what
+ * separates these is the heading, which was doing the work anyway.
+ */
 function LockableTextBox({
-  icon: Icon, label, accent, value, onChange, editing, locked, savedText,
+  icon: Icon, label, value, onChange, editing, locked, savedText,
   saving, canEdit, onEdit, onUnlock, rows, placeholder, testPrefix, presetKind,
   choices, lockNote,
 }) {
-  const colors = {
-    sky: { border: "border-sky-200", bg: "bg-sky-50", text: "text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" },
-    indigo: { border: "border-indigo-200", bg: "bg-indigo-50", text: "text-indigo-700", btn: "bg-indigo-600 hover:bg-indigo-700" },
-  }[accent] || { border: "border-sky-200", bg: "bg-sky-50", text: "text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" };
-
   const showEditor = canEdit && (editing || !savedText);
   const hasChoices = Array.isArray(choices) && choices.length > 0;
 
   return (
-    <div className={`rounded-lg border ${colors.border} ${colors.bg} p-3`} data-testid={testPrefix}>
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid={testPrefix}>
       <div className="mb-1.5 flex items-center justify-between">
-        <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${colors.text}`}>
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           <Icon className="h-3.5 w-3.5" /> {label}
         </p>
         {/* Both kinds of shut, under one padlock. `locked` is the Consultant's own lock,
