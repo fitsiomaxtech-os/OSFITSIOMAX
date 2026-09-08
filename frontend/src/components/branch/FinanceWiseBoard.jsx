@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Building2, Layers, TrendingUp, Receipt, BadgeIndianRupee } from "lucide-react";
+import { Building2, Layers, TrendingUp, Receipt, BadgeIndianRupee, Wallet } from "lucide-react";
 import { FinanceBoard } from "@/components/FinanceBoard";
 import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
+import { FinanceOverviewBoard } from "@/components/finance/FinanceOverviewBoard";
 import { ProfitBoard } from "@/components/finance/ProfitBoard";
 
 // Every default vertical is named "online_.../offline_..." — same helper as
@@ -10,14 +11,20 @@ const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
 const ALL_KEY = "all";
 
-// Income is FinanceBoard exactly as it already stood; Expense and Overview are the
+// Overview first, because it is the only one that answers all three questions at once —
+// Income, Expense and Profit are each that same page opened up one line at a time, and
+// landing on the summary is landing on the answer rather than on one of its terms.
+//
+// Income is FinanceBoard exactly as it already stood; Expense and Profit are the
 // Accountant's own ExpenseBoard/ProfitBoard, reused rather than rebuilt — both already
 // carry approvals, payment-mode capture and a Revenue-less-Expense read, and now take
-// branchId/mode from this screen's own pill row instead of asking a second time.
+// branchId/mode from this screen's own pill row instead of asking a second time. Overview
+// reads the same /finance/profit that Profit does, so the two cannot disagree.
 const LEDGER_TABS = [
+  { key: "overview", label: "Overview", icon: BadgeIndianRupee },
   { key: "income", label: "Income", icon: TrendingUp },
   { key: "expense", label: "Expense", icon: Receipt },
-  { key: "overview", label: "Overview", icon: BadgeIndianRupee },
+  { key: "profit", label: "Profit", icon: Wallet },
 ];
 
 /**
@@ -27,8 +34,8 @@ const LEDGER_TABS = [
  * FinanceBoard already carries its own date-range and fee-type filters, so this wrapper
  * is only the branch switch around it.
  *
- * A second, Income/Expense/Overview row sits under the branch switch — the branch pill
- * picks WHOSE book, this picks WHICH page of it, and both apply together whichever
+ * A second, Overview/Income/Expense/Profit row sits under the branch switch — the branch
+ * pill picks WHOSE book, this picks WHICH page of it, and both apply together whichever
  * branch (or All Branches) is selected above.
  */
 export const FinanceWiseBoard = ({ branches }) => {
@@ -38,7 +45,7 @@ export const FinanceWiseBoard = ({ branches }) => {
     return (a.branch_name || "").localeCompare(b.branch_name || "");
   });
   const [selectedId, setSelectedId] = useState(ALL_KEY);
-  const [ledger, setLedger] = useState("income");
+  const [ledger, setLedger] = useState("overview");
   const branchId = selectedId === ALL_KEY ? undefined : selectedId;
 
   return (
@@ -80,8 +87,8 @@ export const FinanceWiseBoard = ({ branches }) => {
         ))}
       </div>
 
-      {/* Income / Expense / Overview — the branch pill above already picked whose book,
-          this picks which page of it. */}
+      {/* Overview / Income / Expense / Profit — the branch pill above already picked
+          whose book, this picks which page of it. */}
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="finance-wise-ledger-tabs">
         {LEDGER_TABS.map((t) => {
           const Icon = t.icon;
@@ -103,12 +110,13 @@ export const FinanceWiseBoard = ({ branches }) => {
 
       {/* Keyed on the branch selection so switching remounts the board — its own filters
           (fee type, search, date range) belong to one branch's book and must not survive
-          the switch to another. Not keyed on `ledger` too: Income, Expense and Overview
-          are three different components, already unmounted/remounted by React swapping
-          which one renders below. */}
+          the switch to another. Not keyed on `ledger` too: these are four different
+          components, already unmounted/remounted by React swapping which one renders
+          below. */}
+      {ledger === "overview" && <FinanceOverviewBoard key={selectedId} branchId={branchId} />}
       {ledger === "income" && <FinanceBoard key={selectedId} branchId={branchId} />}
       {ledger === "expense" && <ExpenseBoard key={selectedId} branchId={branchId} scoped />}
-      {ledger === "overview" && <ProfitBoard key={selectedId} branchId={branchId} scoped />}
+      {ledger === "profit" && <ProfitBoard key={selectedId} branchId={branchId} scoped />}
     </div>
   );
 };
