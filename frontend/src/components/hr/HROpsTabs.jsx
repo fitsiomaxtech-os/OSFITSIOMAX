@@ -975,7 +975,12 @@ const PayrollBoard = ({ slips, editable, onAdjust, onOpen }) => {
         Pay is pro-rated on calendar days: a day of loss of pay costs base ÷ days in month. Bonuses and deductions are editable while the run is a draft.
       </p>
 
-      <div className="flex flex-wrap gap-1.5 border-b border-slate-200 pb-2" data-testid="hr-pay-lane-tabs">
+      {/* Across the whole width rather than packed to the left. Five tabs sitting in the
+          first third of a wide screen read as a leftover row of chips; stretched, they
+          read as the five compartments the month is actually divided into. Two up on a
+          phone and three on a tablet, because five across a narrow screen is five
+          truncated words. */}
+      <div className="grid grid-cols-2 gap-1.5 border-b border-slate-200 pb-2 sm:grid-cols-3 lg:grid-cols-5" data-testid="hr-pay-lane-tabs">
         {PAY_LANES.map((l) => {
           const on = l.key === lane;
           const count = (lanes[l.key] || []).length;
@@ -985,14 +990,19 @@ const PayrollBoard = ({ slips, editable, onAdjust, onOpen }) => {
               type="button"
               onClick={() => { picked.current = true; setLane(l.key); }}
               aria-pressed={on}
-              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
+              className={`flex w-full items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition ${
                 on ? `${l.tone} border-transparent text-slate-800 shadow-sm` : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
               }`}
               data-testid={`hr-pay-lane-${l.key}`}
             >
-              <span className={`h-2 w-2 shrink-0 rounded-full ${l.dot}`} />
-              {l.label}
-              <span className={`rounded-full px-1.5 text-[10px] font-bold ${on ? "bg-white/70 text-slate-700" : "bg-slate-100 text-slate-500"}`} data-testid={`hr-pay-lane-count-${l.key}`}>
+              {/* The dot and the words are one thing and the count is the other, so the
+                  count sits at the far edge of a stretched tab instead of floating in
+                  the middle of it. */}
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${l.dot}`} />
+                <span className="truncate">{l.label}</span>
+              </span>
+              <span className={`shrink-0 rounded-full px-1.5 text-[10px] font-bold ${on ? "bg-white/70 text-slate-700" : "bg-slate-100 text-slate-500"}`} data-testid={`hr-pay-lane-count-${l.key}`}>
                 {count}
               </span>
             </button>
