@@ -876,7 +876,10 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showSuperAdminBoard = role === "super_admin";
   // Who /branch/feedback answers for. A branch reads its own patients' feedback; head
   // office reads that and its own. Anyone else has no board behind the bell.
-  const canReadFeedback = showSuperAdminBoard || isBranchAdminRole(role);
+  // A consultant now has post of their own -- what their patients wrote to them, and
+  // nothing else. The endpoint scopes it from their login, so the same bell and the same
+  // board serve all three without any of them seeing another's.
+  const canReadFeedback = showSuperAdminBoard || isBranchAdminRole(role) || isHeadPhysioRole(role);
   const showBusinessDevBoard = role === "business_dev";
   const showPreSalesBoard = isPreSalesRole(role);
   // Its own flag rather than folded into isPreSalesRole/PRE_SALES_ROLES — it mounts the
@@ -1106,6 +1109,9 @@ export const CRMPage = ({ auth, onLogout }) => {
             // Only a Branch Admin is pinned to a branch. Super Admin opens it unscoped and
             // narrows from inside, which is what reading every branch's post requires.
             branchId={isBranchAdminRole(role) ? auth?.user?.branch_id : undefined}
+            // Who is reading, said outright. A consultant has no branch either, so the
+            // board cannot work this out from the absence of one.
+            headOffice={showSuperAdminBoard}
             onClose={() => setShowFeedback(false)}
             onCounts={(data) => setFeedbackUnread(data?.unread || 0)}
           />

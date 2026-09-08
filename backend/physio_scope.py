@@ -1,4 +1,8 @@
-"""Which expert records are a physio's, and which leads they are responsible for."""
+"""Which expert records belong to which expert, and which leads they are responsible for.
+
+Both desks, because both ask the same two questions and got different answers when the
+physio half lived here and the consultant half lived in its own board.
+"""
 from typing import Optional
 
 from database import v3_col
@@ -180,38 +184,87 @@ async def physio_owns_lead(physio_id, lead_id: str) -> bool:
     ))
 
 
-async def physio_of_lead(lead: dict) -> dict:
-    """The physio treating this patient -- physio_lead_ids read the other way round.
+async def resolve_consultant_doctor(user_id: str, role: str = "") -> Optional[dict]:
+    """The expert record belonging to the consultant who is logged in, and the rest of theirs.
 
-    The same two routes in, taken in the same order, because the two answers have to
-    agree: the physio a patient is offered as an address for their feedback must be the
-    physio whose own Patients list holds them. Resolved from the assignment and the rehab
-    course rather than from a session row, so a patient between packages still has one.
+    A consultant is SUPPOSED to have exactly one, branchless record -- they cover the whole
+    organisation -- so their own user_id ought to resolve it outright. In practice they end
+    up with more than one: several paths mint these records, and consolidate_head_physio_doctors
+    in seed.py exists because they have.
 
-    Returns the id and the name together. Every caller needs both -- the id is who the
-    thread belongs to, the name is who the patient is told they are writing to -- and
-    looking the name up separately is how a row ends up addressed to a blank.
+    find_one against that is a coin toss, and every screen a consultant has rides on the
+    answer: their patients are the appointments carrying this record's id and their calendar
+    is its slots, so landing on the empty twin shows a consultant with a full book an empty
+    board with nothing on screen saying why.
+
+    So every record is read and the one holding the work is chosen: the one with
+    appointments against it, else the one with published slots, else the oldest, which is
+    the one the others were duplicated from. Read-only -- throwing away a record with
+    bookings on it is not a repair a page load should be making.
+
+    Lives here rather than in the consultation board because it is no longer only that
+    board's question: what a patient wrote to their consultant is scoped by these ids too,
+    and a second resolver answering it slightly differently is the exact bug
+    resolve_physio_doctor above was written to end. `consultant_ids` carries the whole set
+    for that reason -- the board opens on one record, but a read must not miss post filed
+    against a twin.
+    """
+    mine = await v3_col("doctors").find(
+        {"user_id": user_id, "profile_type": "head_physio"}, {"_id": 0},
+    ).to_list(50)
+    if mine:
+        if len(mine) > 1:
+            ids = [d["id"] for d in mine]
+            # Which of them anything is actually booked against. distinct rather than a
+            # count per record: one query, and the question is only ever "does this hold any".
+            busy = set(await v3_col("appointments").distinct("doctor_id", {"doctor_id": {"$in": ids}}))
+            mine.sort(key=lambda d: (
+                0 if d["id"] in busy else 1,
+                0 if (d.get("slots") or []) else 1,
+                str(d.get("created_at") or ""),
+            ))
+        return {**mine[0], "consultant_ids": list(dict.fromkeys([d["id"] for d in mine if d.get("id")]))}
+    if role == "super_admin":
+        # Driving somebody else's board. Any consultant record answers, which is right for
+        # that and wrong for a page called My Consultation -- see hp_resolved_consultant,
+        # which is what says so on screen.
+        one = await v3_col("doctors").find_one({"profile_type": "head_physio"}, {"_id": 0})
+        return {**one, "consultant_ids": [one["id"]]} if one else None
+    return None
+
+
+async def consultant_of_lead(lead: dict) -> dict:
+    """The consultant who saw this patient -- hp_my_patients read the other way round.
+
+    That board is every lead with an appointment against the consultant's record, so this
+    is the newest appointment on the lead and the record it was booked against. The two
+    have to agree: the consultant a patient is offered as an address must be the consultant
+    whose own patient list holds them, or the thread lands on a board that will not open it.
+
+    Not read off the lead. `assigned_physio_id` there is the treating physio despite the
+    consultation booking copying it onto `consultant_id` at times -- see physio_lead_ids --
+    and the appointment is the only record that says who actually took the consultation.
+
+    Returns the id and the name together: the id is whose thread it is, the name is who the
+    patient is told they are writing to, and looking the name up separately is how a row
+    ends up addressed to a blank.
     """
     if not lead:
         return {"id": "", "name": ""}
-    physio_id = str(lead.get("assigned_physio_id") or "").strip()
-    name = str(lead.get("assigned_physio_name") or "").strip()
-    if not physio_id:
-        # Never stamped on the lead for a rehab patient: the course is its own collection,
-        # deliberately, and the newest day is the one that says who has them now.
-        day = await v3_col("rehab_sessions").find_one(
-            {"lead_id": lead.get("id"), "physio_id": {"$nin": [None, ""]}},
-            {"_id": 0, "physio_id": 1, "physio_name": 1},
-            sort=[("slot_time", -1)],
-        ) or {}
-        physio_id = str(day.get("physio_id") or "").strip()
-        name = name or str(day.get("physio_name") or "").strip()
-    # A name copied onto the lead months ago is still the right one to show -- it is who
-    # the patient has been seeing -- but an assignment carrying none has to be looked up
-    # or the portal offers "send to " with nothing after it.
-    if physio_id and not name:
+    appointment = await v3_col("appointments").find_one(
+        {"lead_id": lead.get("id"), "doctor_id": {"$nin": [None, ""]}},
+        {"_id": 0, "doctor_id": 1, "consultant_name": 1, "doctor_name": 1},
+        sort=[("slot_time", -1)],
+    ) or {}
+    doctor_id = str(appointment.get("doctor_id") or "").strip()
+    if not doctor_id:
+        return {"id": "", "name": ""}
+    name = str(appointment.get("consultant_name") or appointment.get("doctor_name") or "").strip()
+    # An appointment carrying no name still has to be addressed to somebody by name, or the
+    # portal offers "send to " with nothing after it.
+    if not name:
         doctor = await v3_col("doctors").find_one(
-            {"id": physio_id}, {"_id": 0, "full_name": 1},
+            {"id": doctor_id}, {"_id": 0, "full_name": 1},
         ) or {}
         name = str(doctor.get("full_name") or "").strip()
-    return {"id": physio_id, "name": name}
+    return {"id": doctor_id, "name": name}

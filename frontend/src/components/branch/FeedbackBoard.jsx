@@ -376,7 +376,7 @@ const TicketPane = ({ client, ticket, onPickTicket, onMove, onSend, moving, send
  * above the thread. Merging them into one conversation would be the opposite mistake:
  * answering about the parking would close the complaint about the Physio.
  */
-export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
+export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [moving, setMoving] = useState(null);
@@ -413,9 +413,15 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
 
   // Only head office ever sees both kinds, so the strip only exists for them. A branch is
   // already held to its own by the server and would be choosing between one thing and it.
-  const isHeadOffice = !branchId && rows.some((r) => ["super_admin", "physio"].includes(r.audience || "branch_admin"));
+  // Told, not inferred. This used to read "has no branch pinned", which was a fair
+  // proxy for head office while they were the only reader without one -- and stopped
+  // being one the moment a consultant could open this board. A consultant has no branch
+  // either, so they were about to be shown the audience strip and every branch's name.
+  const isHeadOffice = headOffice && rows.some((r) => ["super_admin", "consultant", "physio"].includes(r.audience || "branch_admin"));
   const byAudience = useMemo(
-    () => (audience === "all" ? rows : rows.filter((r) => (r.audience || "branch_admin") === audience)),
+    () => (audience === "all" ? rows
+      : audience === "consultant" ? rows.filter((r) => ["consultant", "physio"].includes(r.audience || "branch_admin"))
+      : rows.filter((r) => (r.audience || "branch_admin") === audience)),
     [rows, audience],
   );
 
@@ -548,11 +554,12 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   const AUDIENCE_TABS = [
     { key: "all", label: "Everything", icon: Bell, count: rows.length },
     { key: "super_admin", label: "Direct to head chief", icon: Bell, count: rows.filter((r) => (r.audience || "branch_admin") === "super_admin").length },
-    // Head office reads these too, and is the only side that reads all three. A physio
+    // Head office reads these too, and is the only side that reads all three. A consultant
     // thread is not the branch's -- see BRANCH_HIDDEN_AUDIENCES -- so counting it under
     // Branch-wise, which is what "not head office's" used to do, filed it with the people
-    // who cannot open it.
-    { key: "physio", label: "Direct to a physio", icon: Stethoscope, count: rows.filter((r) => (r.audience || "branch_admin") === "physio").length },
+    // who cannot open it. The retired physio audience is folded in here rather than given a
+    // fourth tab: it is the same thing under the name it was offered under for half a day.
+    { key: "consultant", label: "Direct to a consultant", icon: Stethoscope, count: rows.filter((r) => ["consultant", "physio"].includes(r.audience || "branch_admin")).length },
     { key: "branch_admin", label: "Branch-wise", icon: Building2, count: rows.filter((r) => (r.audience || "branch_admin") === "branch_admin").length },
   ];
 

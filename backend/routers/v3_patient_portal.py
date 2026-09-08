@@ -28,11 +28,11 @@ from security import hash_password, verify_password
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_lead_documents import DIET_CHART, DOC_DIR, is_shared_with_patient
 from routers.v3_feedback import (
-    AUDIENCE_PHYSIO, AUDIENCE_SUPER, AUTHOR_PATIENT, AUTHOR_STAFF, MAX_MESSAGE,
+    AUDIENCE_CONSULTANT, AUDIENCE_SUPER, AUTHOR_PATIENT, AUTHOR_STAFF, MAX_MESSAGE,
     STATUS_AWAITING, STATUS_IN_PROGRESS, STATUS_NEW, STATUS_RESOLVED,
     _audience, _rating, _thread,
 )
-from physio_scope import physio_of_lead
+from physio_scope import consultant_of_lead
 from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin
 
 router = APIRouter(prefix="/api/v3")
@@ -333,7 +333,7 @@ async def _build_portal_payload(lead: dict) -> dict:
 
     # Who may be written to on the Feedback tab. Resolved beside the branch lookup because
     # it is the same kind of fact about this patient: who answers for their care.
-    physio = await physio_of_lead(lead)
+    consultant = await consultant_of_lead(lead)
 
     branch = {}
     if lead.get("branch_id"):
@@ -372,15 +372,12 @@ async def _build_portal_payload(lead: dict) -> dict:
         "physio_name": next((s.get("physio_name") for s in sessions if s.get("physio_name")), ""),
         "head_physio_name": next((s.get("head_physio_name") for s in sessions if s.get("head_physio_name")), ""),
 
-        # Who Feedback may be addressed to, which is a different question from the name on
-        # the card above. That one is read off the session days -- who has actually been
-        # treating them -- and this is read off the assignment, which is what decides whose
-        # board the thread lands on. They agree wherever the branch assigned the physio it
-        # then booked the days against, which is the normal case and what Assign Physio
-        # does in one action. Where they ever disagree, the thread must follow the one that
-        # owns the patient, or it arrives on a board that cannot open it.
-        "feedback_physio_id": physio["id"],
-        "feedback_physio_name": physio["name"],
+        # Who Feedback may be addressed to. Read off the newest appointment rather than off
+        # anything on the lead, because the appointment is what the consultant's own patient
+        # list is built from -- see consultant_of_lead. A thread has to follow the record
+        # that holds the patient or it arrives on a board that will not open it.
+        "feedback_consultant_id": consultant["id"],
+        "feedback_consultant_name": consultant["name"],
 
         "branch_name": branch.get("branch_name", ""),
         "branch_phone": branch.get("phone", ""),
@@ -541,9 +538,9 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
 class V3PatientFeedbackIn(BaseModel):
     rating: Optional[int] = None
     message: Optional[str] = ""
-    # Who it is for: the branch that runs their care, Super Admin, or the physio treating
-    # them. Anything unrecognised reads as the branch, which is where a patient who was not
-    # asked would have sent it.
+    # Who it is for: the branch that runs their care, Super Admin, or the consultant who
+    # saw them. Anything unrecognised reads as the branch, which is where a patient who was
+    # not asked would have sent it.
     audience: Optional[str] = None
 
 
@@ -579,22 +576,22 @@ async def patient_portal_feedback(
     lead = await _lead_or_404(lead_id)
     # Copied onto the row, like the patient and the branch beside it, and for the same
     # reason: this is a thing somebody said to a particular person on a day. Resolving it
-    # when the physio opens their board would hand the thread to whoever holds the patient
-    # by then, which is not who the patient wrote to.
-    physio = await physio_of_lead(lead) if audience == AUDIENCE_PHYSIO else {"id": "", "name": ""}
-    if audience == AUDIENCE_PHYSIO and not physio["id"]:
+    # when the consultant opens their board would hand the thread to whoever saw the patient
+    # most recently by then, which is not who they wrote to.
+    consultant = await consultant_of_lead(lead) if audience == AUDIENCE_CONSULTANT else {"id": "", "name": ""}
+    if audience == AUDIENCE_CONSULTANT and not consultant["id"]:
         # The portal does not offer the card without one, so this is a stale tab or a
         # hand-made request. Falling back to the branch would be quietly showing it to the
         # people the patient chose not to write to.
-        raise HTTPException(status_code=400, detail="No physio is treating you yet")
+        raise HTTPException(status_code=400, detail="You have not seen a consultant yet")
     row = {
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "branch_id": lead.get("branch_id"),
-        # Empty on everything not addressed to a physio, which is what the physio's own
-        # read filters on -- an unaddressed thread is nobody's inbox.
-        "physio_id": physio["id"],
-        "physio_name": physio["name"],
+        # Empty on everything not addressed to a consultant, which is what their own read
+        # filters on -- an unaddressed thread is nobody's inbox.
+        "consultant_id": consultant["id"],
+        "consultant_name": consultant["name"],
         "patient_name": (lead.get("name") or "").strip(),
         "patient_phone": (lead.get("phone") or "").strip(),
         "rating": rating,
@@ -619,10 +616,10 @@ async def patient_portal_feedback(
     # patient deliberately sent past the branch would be the one thing they were avoiding.
     if audience == AUDIENCE_SUPER:
         thanks = "Thank you — Super Admin has it."
-    elif audience == AUDIENCE_PHYSIO:
+    elif audience == AUDIENCE_CONSULTANT:
         # By name. The patient picked a person off a card with that name on it, and "your
-        # physio has it" would leave them wondering which one.
-        thanks = f"Thank you — {physio['name']} has it." if physio["name"] else "Thank you — your physio has it."
+        # consultant has it" would leave them wondering which one.
+        thanks = f"Thank you — {consultant['name']} has it." if consultant["name"] else "Thank you — your consultant has it."
     else:
         thanks = "Thank you — your branch has it."
     return {"message": thanks, "feedback": row}

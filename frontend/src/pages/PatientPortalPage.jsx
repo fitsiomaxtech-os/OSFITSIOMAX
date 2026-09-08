@@ -1059,22 +1059,22 @@ const PORTAL_TABS = [
 // patient would use. Named rather than described as "escalation": somebody unhappy enough
 // to go past their branch should not have to work out which word means that.
 //
-// Built per patient rather than held as a constant, because the third one is a person. A
-// patient with nobody treating them yet is not offered it -- an address with no name on it
-// is a card that cannot say who reads it, which is the one thing these cards are for.
-const feedbackTo = (physioName, hasPhysioThreads) => [
+// Built per patient rather than held as a constant, because the second one is a person. A
+// patient who has not seen a consultant yet is not offered it -- an address with no name on
+// it is a card that cannot say who reads it, which is the one thing these cards are for.
+const feedbackTo = (consultantName, hasConsultantThreads) => [
   {
     key: "branch_admin",
     label: "My branch",
     who: "Branch Admin",
     blurb: "Anything about the branch, your appointments or your bill. Your branch runs your care and answers for it.",
   },
-  ...((physioName || hasPhysioThreads) ? [{
-    key: "physio",
-    label: "My physio",
-    // The name, not the role. The patient knows who has been treating them, and this is
-    // the card that says the words land with that person rather than in an inbox.
-    who: physioName || "Your physio",
+  ...((consultantName || hasConsultantThreads) ? [{
+    key: "consultant",
+    label: "My consultant",
+    // The name, not the role. The patient knows who they saw, and this is the card that
+    // says the words land with that person rather than in an inbox.
+    who: consultantName || "Your consultant",
     blurb: "About your treatment — how a session felt, or something that is not getting better. Goes to them directly.",
   }] : []),
   {
@@ -1137,35 +1137,35 @@ function FeedbackTab({ data }) {
   }, []);
   useEffect(() => { loadMine(); }, [loadMine]);
 
-  const physioName = (data?.feedback_physio_name || "").trim();
-  // Offered while there is a physio to write to, and kept while there is a conversation
-  // with one. A patient handed on to somebody else would otherwise lose what they had
-  // already said, and the answer to it, the day the assignment changed.
-  const hasPhysioThreads = mine.some((f) => f.audience === "physio");
-  const canWriteToPhysio = Boolean(physioName || hasPhysioThreads);
-  const audiences = feedbackTo(physioName, hasPhysioThreads);
+  const consultantName = (data?.feedback_consultant_name || "").trim();
+  // Offered while there is a consultant to write to, and kept while there is a conversation
+  // with one. A patient who sees somebody else next would otherwise lose what they had
+  // already said, and the answer to it, the day the next appointment was booked.
+  const hasConsultantThreads = mine.some((f) => f.audience === "consultant");
+  const canWriteToConsultant = Boolean(consultantName || hasConsultantThreads);
+  const audiences = feedbackTo(consultantName, hasConsultantThreads);
   // Rows arrive newest first, which is right for a list and backwards for a conversation.
   const channelRows = mine.filter((f) => (f.audience || "branch_admin") === audience);
   const messages = channelMessages([...channelRows].reverse());
   const asked = channelRows.find((f) => (f.status || "new") === "awaiting_patient") || null;
   const open = openThreadOf(channelRows);
   const them = audience === "super_admin" ? "Head chief"
-    : audience === "physio" ? (physioName || "Your physio")
+    : audience === "consultant" ? (consultantName || "Your consultant")
     : "Your branch";
   // The same side, named mid-sentence. Two of these are descriptions and fold to lower
   // case in "with your branch"; the third is a person, and lower-casing a name reads as a
   // typo rather than as a sentence — which is what "with abdul azis" was doing from the
   // day the physio card went in. The head chief takes an article here and not on the
   // card: "Nothing sent to head chief yet" is not a sentence either.
-  const themInline = audience === "physio" && physioName ? physioName
+  const themInline = audience === "consultant" && consultantName ? consultantName
     : audience === "super_admin" ? "the head chief"
     : them.toLowerCase();
 
-  // A patient whose physio is unassigned mid-visit would otherwise be left writing into a
-  // channel whose card has gone, with no way back to one that exists.
+  // A patient whose consultant card goes mid-visit would otherwise be left writing into a
+  // channel that is no longer on screen, with no way back to one that is.
   useEffect(() => {
-    if (audience === "physio" && !canWriteToPhysio) setAudience("branch_admin");
-  }, [canWriteToPhysio, audience]);
+    if (audience === "consultant" && !canWriteToConsultant) setAudience("branch_admin");
+  }, [canWriteToConsultant, audience]);
 
   // The newest message, not the top of the history. A conversation that opens scrolled to
   // a paragraph from three weeks ago hides the answer somebody came back to read.
@@ -1321,7 +1321,7 @@ function FeedbackTab({ data }) {
         >
           {sending ? "Sending…"
             : audience === "super_admin" ? "Send to head chief"
-            : audience === "physio" ? "Send to my physio"
+            : audience === "consultant" ? "Send to my consultant"
             : "Send to my branch"}
         </Button>
       </CardContent>

@@ -19,7 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from database import v3_col
-from deps import v3_require_roles, is_branch_admin_role
+from deps import v3_require_roles, is_branch_admin_role, is_head_physio_role
+from physio_scope import resolve_consultant_doctor
 from schemas.v3 import V3UserOut
 from utils import now_iso
 
@@ -57,27 +58,34 @@ MAX_MESSAGE = 2000
 # were sent and where they have been read since.
 AUDIENCE_BRANCH = "branch_admin"
 AUDIENCE_SUPER = "super_admin"
-# The person actually treating them. A patient who wants to say something to their physio
+# The consultant who saw them. A patient who wants to say something about their treatment
 # was writing it to the Branch Admin and hoping it was passed on, which is a slow way to
-# say "you hurt my shoulder on Tuesday" -- and a strange one, since the physio is the one
-# who can do something about it on Thursday.
+# say "you hurt my shoulder on Tuesday" -- and a strange one, since the consultant is the
+# one who can do something about it at the next appointment.
 #
 # Addressed by name rather than by role: the portal shows whose name it is going to, and a
-# patient with no physio is not offered it at all. Which physio is decided by
-# physio_of_lead, the inverse of the helper their own Patients list is built from, so the
+# patient who has seen nobody is not offered it at all. Which consultant is decided by
+# consultant_of_lead, the inverse of the query their own patient list is built from, so the
 # thread cannot land with somebody who does not have the patient.
+AUDIENCE_CONSULTANT = "consultant"
+
+# Offered to a patient for half a day and then withdrawn, before it had a board of its own.
+# Kept recognised rather than deleted: a row written in that window is somebody's words,
+# and dropping the slug would re-read it as the branch's and show it to the one desk it was
+# deliberately sent past. Nothing offers it now -- see feedbackTo in the portal.
 AUDIENCE_PHYSIO = "physio"
-AUDIENCES = (AUDIENCE_BRANCH, AUDIENCE_SUPER, AUDIENCE_PHYSIO)
+
+AUDIENCES = (AUDIENCE_BRANCH, AUDIENCE_SUPER, AUDIENCE_CONSULTANT, AUDIENCE_PHYSIO)
 
 # What a Branch Admin's board must not show, for two different reasons that come to the
-# same query. Super Admin's post is kept from them because half of it is about them.
-# The physio's is kept from them because the patient picked a person: routing a private
-# word to the physio through their manager is not the thing the patient asked for.
+# same query. Super Admin's post is kept from them because half of it is about them. The
+# consultant's is kept from them because the patient picked a person: routing a private
+# word about treatment through the branch office is not the thing the patient asked for.
 #
-# Head office still reads both. That asymmetry is the existing one -- confidentiality runs
-# upward, not down -- and a physio thread nobody but the physio could see would be a
-# complaint about care with no oversight on it at all.
-BRANCH_HIDDEN_AUDIENCES = (AUDIENCE_SUPER, AUDIENCE_PHYSIO)
+# Head office still reads all of it. That asymmetry is the existing one -- confidentiality
+# runs upward, not down -- and a thread about care that nobody but its subject could see
+# would be a complaint with no oversight on it at all.
+BRANCH_HIDDEN_AUDIENCES = (AUDIENCE_SUPER, AUDIENCE_CONSULTANT, AUDIENCE_PHYSIO)
 
 
 def _audience(value) -> str:
@@ -149,10 +157,28 @@ class FeedbackStatusIn(BaseModel):
     reply: Optional[str] = ""
 
 
+async def _consultant_scope(user: V3UserOut) -> Optional[dict]:
+    """The query narrowing a read to the consultant who is asking, or None if they are not one.
+
+    Every record they hold, not just the one their board opens on: which of a consultant's
+    twins the branch happened to book against decides what gets stamped on the row, and a
+    read scoped to one of them silently loses the rest. See resolve_consultant_doctor.
+
+    A consultant with no expert record at all matches nothing rather than everything -- the
+    empty $in is deliberate. Falling through to an unscoped query would hand somebody the
+    whole clinic's private post because their profile was not set up.
+    """
+    if not is_head_physio_role(user.role):
+        return None
+    doctor = await resolve_consultant_doctor(user.id, user.role)
+    ids = (doctor or {}).get("consultant_ids") or []
+    return {"audience": AUDIENCE_CONSULTANT, "consultant_id": {"$in": ids}}
+
+
 @router.get("/branch/feedback")
 async def list_feedback(
     branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
 ):
     """The feedback addressed to whoever is asking, and the count their bell reads.
 
@@ -172,12 +198,18 @@ async def list_feedback(
     number kept beside it is one that can disagree with what is on screen.
     """
     query: dict = {}
-    if is_branch_admin_role(user.role):
+    consultant = await _consultant_scope(user)
+    if consultant is not None:
+        # A consultant reads what was addressed to them and nothing else -- not their
+        # branch's post, and not another consultant's. They are not a supervisor here, they
+        # are one of the two people in a conversation.
+        query = consultant
+    elif is_branch_admin_role(user.role):
         if not user.branch_id:
             return {"feedback": [], "counts": {s: 0 for s in STATUSES}, "unread": 0}
         query["branch_id"] = user.branch_id
         # Anything the patient addressed past the branch is kept off this board -- head
-        # office because half of it is about the Branch Admin, the physio because the
+        # office because half of it is about the Branch Admin, the consultant because the
         # patient wrote to a person. See BRANCH_HIDDEN_AUDIENCES.
         query["audience"] = {"$nin": list(BRANCH_HIDDEN_AUDIENCES)}
     else:
@@ -232,7 +264,7 @@ async def list_feedback(
 async def move_feedback(
     feedback_id: str,
     payload: FeedbackStatusIn,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
 ):
     """Move a piece of feedback to another column, and record who moved it.
 
@@ -248,7 +280,12 @@ async def move_feedback(
     existing = await v3_col("patient_feedback").find_one({"id": feedback_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="No such feedback")
-    if is_branch_admin_role(user.role):
+    consultant = await _consultant_scope(user)
+    if consultant is not None:
+        if (_audience(existing.get("audience")) != AUDIENCE_CONSULTANT
+                or existing.get("consultant_id") not in consultant["consultant_id"]["$in"]):
+            raise HTTPException(status_code=403, detail="Not addressed to you")
+    elif is_branch_admin_role(user.role):
         if existing.get("branch_id") != user.branch_id:
             raise HTTPException(status_code=403, detail="Not your branch")
         # The wall the board is built on, applied to the door beside it. Only the reply
@@ -295,7 +332,7 @@ async def move_feedback(
 async def reply_to_feedback(
     feedback_id: str,
     payload: FeedbackMessageIn,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
 ):
     """Write back to the patient on their own thread.
 
@@ -319,11 +356,19 @@ async def reply_to_feedback(
     existing = await v3_col("patient_feedback").find_one({"id": feedback_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="No such feedback")
-    if is_branch_admin_role(user.role):
+    consultant = await _consultant_scope(user)
+    if consultant is not None:
+        # The other half of the same wall. A consultant answers on the threads addressed to
+        # them, and on nothing else -- the id is guessable and the board is not the only
+        # way in.
+        if (_audience(existing.get("audience")) != AUDIENCE_CONSULTANT
+                or existing.get("consultant_id") not in consultant["consultant_id"]["$in"]):
+            raise HTTPException(status_code=403, detail="Not addressed to you")
+    elif is_branch_admin_role(user.role):
         if existing.get("branch_id") != user.branch_id:
             raise HTTPException(status_code=403, detail="Not your branch")
-        # The same wall the board is built on: what a patient sent past their branch is
-        # not theirs to answer, whether it went over their head or straight to the physio.
+        # The same wall the board is built on: what a patient sent past their branch is not
+        # theirs to answer, whether it went over their head or straight to the consultant.
         if _audience(existing.get("audience")) in BRANCH_HIDDEN_AUDIENCES:
             raise HTTPException(status_code=403, detail="Not your branch")
 
