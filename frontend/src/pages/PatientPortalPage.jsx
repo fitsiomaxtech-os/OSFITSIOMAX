@@ -1325,6 +1325,7 @@ function FeedbackTab({ data }) {
   const hasConsultantThreads = mine.some((f) => f.audience === "consultant");
   const canWriteToConsultant = Boolean(consultantName || hasConsultantThreads);
   const audiences = feedbackTo(consultantName, hasConsultantThreads);
+  const chosen = audiences.find((a) => a.key === audience) || null;
   // Rows arrive newest first, which is right for a list and backwards for a conversation.
   const channelRows = mine.filter((f) => (f.audience || "branch_admin") === audience);
   const messages = channelMessages([...channelRows].reverse());
@@ -1427,7 +1428,7 @@ function FeedbackTab({ data }) {
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to</p>
           {/* Two across on a phone reads as two columns of small print; three would read
               as three. They stack, and go side by side once there is room. */}
-          <div className={`grid items-start gap-2 ${audiences.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`} data-testid="portal-feedback-audience">
+          <div className={`grid gap-2 ${audiences.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`} data-testid="portal-feedback-audience">
             {audiences.map((a) => {
               const on = audience === a.key;
               return (
@@ -1446,17 +1447,20 @@ function FeedbackTab({ data }) {
                   )}
                   <p className={`text-xs font-bold ${on ? "text-sky-700" : "text-slate-700"}`}>{a.label}</p>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{a.who}</p>
-                  {/* Only on the one that is open. Three of these side by side is three
-                      paragraphs asking to be read before a word is written, and the two
-                      you did not pick are the two you do not need — the names carry the
-                      choice, and the wording is there for whoever wants to check it. */}
-                  {on && (
-                    <p className="mt-1 text-[11px] leading-snug text-slate-500">{a.blurb}</p>
-                  )}
                 </button>
               );
             })}
           </div>
+          {/* One explanation, under all three, for whichever is open. Three of them side by
+              side was three paragraphs asking to be read before a word is written; putting
+              it back inside the open card only made that card grow and left the other two
+              ragged beside it. Here the row stays level whatever is picked, and the
+              wording still follows the choice. */}
+          {chosen?.blurb && (
+            <p className="mt-2 text-[11px] leading-snug text-slate-500" data-testid="portal-feedback-blurb">
+              {chosen.blurb}
+            </p>
+          )}
         </div>
 
         <div>
