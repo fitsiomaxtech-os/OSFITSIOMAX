@@ -1427,7 +1427,7 @@ function FeedbackTab({ data }) {
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to</p>
           {/* Two across on a phone reads as two columns of small print; three would read
               as three. They stack, and go side by side once there is room. */}
-          <div className={`grid gap-2 ${audiences.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`} data-testid="portal-feedback-audience">
+          <div className={`grid items-start gap-2 ${audiences.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`} data-testid="portal-feedback-audience">
             {audiences.map((a) => {
               const on = audience === a.key;
               return (
@@ -1446,7 +1446,13 @@ function FeedbackTab({ data }) {
                   )}
                   <p className={`text-xs font-bold ${on ? "text-sky-700" : "text-slate-700"}`}>{a.label}</p>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{a.who}</p>
-                  <p className="mt-1 text-[11px] leading-snug text-slate-500">{a.blurb}</p>
+                  {/* Only on the one that is open. Three of these side by side is three
+                      paragraphs asking to be read before a word is written, and the two
+                      you did not pick are the two you do not need — the names carry the
+                      choice, and the wording is there for whoever wants to check it. */}
+                  {on && (
+                    <p className="mt-1 text-[11px] leading-snug text-slate-500">{a.blurb}</p>
+                  )}
                 </button>
               );
             })}
