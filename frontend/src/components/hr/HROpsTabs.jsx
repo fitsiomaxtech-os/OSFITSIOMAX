@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlarmClock, ArrowLeft, Ban, CalendarOff, Check, ChevronLeft, ChevronRight, Coffee,
   Clock3, Download, Eye, Filter, IndianRupee, LayoutGrid, List, Lock, Palmtree, Pencil,
-  Pin, PinOff, Plus, Quote, RefreshCw, Trash2, Undo2, UserRound, Wallet, X,
+  Pin, PinOff, Plus, Quote, RefreshCw, Search, Trash2, Undo2, UserRound, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1462,6 +1462,7 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
 export const PayrollTab = () => {
   const [month, setMonth] = useState(todayIso().slice(0, 7));
   const [view, setView] = useState("board");
+  const [query, setQuery] = useState("");
   const [opened, setOpened] = useState(null);
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1474,8 +1475,27 @@ export const PayrollTab = () => {
   useEffect(() => { load(month); }, [month, load]);
 
   const run = data?.run || null;
-  const slips = data?.slips || [];
+  // Memoised, not just defaulted. `data?.slips || []` mints a new empty array on every
+  // render, and the search below depends on this -- so the filter would re-run for every
+  // keystroke anywhere on the screen and the memo would never once hold.
+  const everyone = useMemo(() => data?.slips || [], [data?.slips]);
   const totals = data?.totals || {};
+
+  // Name, code, department or designation, because a payroll of fifty is searched for all
+  // four: "Abdul" to find a person, "EMP0055" when the name is spelled three ways in the
+  // records, and "Sales" or "Nutritionist" to work through a desk at a time.
+  //
+  // Every word has to match somewhere, not the phrase as a whole -- "abdul doctors" finds
+  // the Abdul in Doctors, which is what somebody typing two words is asking for.
+  const slips = useMemo(() => {
+    const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return everyone;
+    return everyone.filter((s) => {
+      const hay = [s.employee_name, s.employee_code, s.department, s.designation]
+        .filter(Boolean).join(" ").toLowerCase();
+      return words.every((w) => hay.includes(w));
+    });
+  }, [everyone, query]);
   const status = run?.status || "";
   const editable = status === "draft";
 
@@ -1533,6 +1553,37 @@ export const PayrollTab = () => {
           )}
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            {/* Narrows the lists, not the totals. The tiles above describe the month's run
+                and go on saying what it comes to while somebody looks for one person in
+                it — a search that quietly rewrote them would answer "what is this month"
+                with "what did I just type". The count beside the box says how many are
+                left, so nothing is hidden silently. */}
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name, code, department…"
+                className="h-9 w-52 rounded-md border border-slate-200 pl-7 pr-7 text-sm outline-none transition focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
+                data-testid="hr-pay-search"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                  aria-label="Clear search"
+                  data-testid="hr-pay-search-clear"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            {query.trim() && (
+              <span className="text-xs font-medium text-slate-500" data-testid="hr-pay-search-count">
+                {slips.length} of {everyone.length}
+              </span>
+            )}
             {/* Two readings of the same run. The board is the default because a draft is
                 open to be corrected and the board is what shows where; the table stays a
                 click away for reading every figure at once and for checking the CSV. */}
@@ -1554,7 +1605,7 @@ export const PayrollTab = () => {
                 </button>
               ))}
             </div>
-            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!slips.length} data-testid="hr-pay-csv">
+            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!slips.length} title={query.trim() ? "Exports what the search leaves" : "Exports the whole month"} data-testid="hr-pay-csv">
               <Download className="h-4 w-4" />CSV
             </Button>
             {status !== "paid" && (
@@ -1591,7 +1642,7 @@ export const PayrollTab = () => {
 
       {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : view === "board" ? (
         slips.length === 0
-          ? <Empty>No active employees to pay.</Empty>
+          ? <Empty>{query.trim() ? `Nobody matches “${query.trim()}”.` : "No active employees to pay."}</Empty>
           : <PayrollBoard slips={slips} editable={editable} onAdjust={adjust} onOpen={setOpened} />
       ) : (
         <>
@@ -1614,7 +1665,7 @@ export const PayrollTab = () => {
                 </div>
               </div>
             ))}
-            {slips.length === 0 && <Empty>No active employees to pay.</Empty>}
+            {slips.length === 0 && <Empty>{query.trim() ? `Nobody matches “${query.trim()}”.` : "No active employees to pay."}</Empty>}
           </div>
 
           <Card className="hidden lg:block">
@@ -1668,7 +1719,7 @@ export const PayrollTab = () => {
                         <td className="px-3 py-2 text-right font-bold text-sky-700">{money(s.net_payable)}</td>
                       </tr>
                     ))}
-                    {slips.length === 0 && <tr><td colSpan="9" className="px-3 py-6 text-center text-slate-400">No active employees to pay.</td></tr>}
+                    {slips.length === 0 && <tr><td colSpan="9" className="px-3 py-6 text-center text-slate-400">{query.trim() ? `Nobody matches “${query.trim()}”.` : "No active employees to pay."}</td></tr>}
                   </tbody>
                 </table>
               </div>
