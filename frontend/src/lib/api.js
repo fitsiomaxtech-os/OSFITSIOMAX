@@ -238,6 +238,13 @@ export const updateShift = async (shiftId, payload) => (await api.patch(`/shifts
 export const deleteShift = async (shiftId) => (await api.delete(`/shifts/${shiftId}`)).data;
 export const getShiftRoster = async (branchId, profileType) => (await api.get(`/branches/${branchId}/shift-roster`, { params: { profile_type: profileType } })).data;
 export const setDoctorShift = async (doctorId, shiftId) => (await api.patch(`/doctors/${doctorId}/shift`, { shift_id: shiftId || null })).data;
+// The branch's WORKING DAY — its hours, its grace before Late, and which days it is closed.
+// A different thing from the shifts above and easy to confuse: a shift is when patients may
+// be booked with an expert, this is when staff are expected in, and it is what HR's
+// attendance register reads to decide whether somebody was late, half a day, or absent.
+// See backend/attendance_rules.py.
+export const getAttendanceRules = async (branchId) => (await api.get(`/branches/${branchId}/attendance-rules`)).data;
+export const saveAttendanceRules = async (branchId, payload) => (await api.put(`/branches/${branchId}/attendance-rules`, payload)).data;
 // A one-off: these particular days run on a different shift, without moving the expert off
 // their usual one. Passing shift_id null puts the days back on it.
 export const setDoctorDayShift = async (doctorId, dates, shiftId) => (await api.patch(`/doctors/${doctorId}/day-shift`, { dates, shift_id: shiftId || null })).data;

@@ -267,10 +267,25 @@ const BOARD_STATUS = {
   holiday: { label: "Holiday", tone: "bg-violet-100 text-violet-700" },
 };
 
-const StatusBadge = ({ status }) => {
+/** A day's status, and whether anybody chose it.
+ *
+ *  The dot is the whole point of the control now that attendance is read off the clock
+ *  rather than typed: a status with one was worked out from when this person pressed in and
+ *  out, measured against their branch's working day, and it will move if either changes. A
+ *  status without one is somebody's decision and will not. HR needs to be able to tell
+ *  those apart at a glance, because the first is worth checking and the second is worth
+ *  asking about.
+ */
+const StatusBadge = ({ status, auto }) => {
   const s = BOARD_STATUS[status] || BOARD_STATUS.yet_to_login;
   return (
-    <span className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold ${s.tone}`}>{s.label}</span>
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${s.tone}`}
+      title={auto ? "Read from the clock and this branch's working day" : "Set by hand — a decision, not a reading"}
+    >
+      {auto && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-40" />}
+      {s.label}
+    </span>
   );
 };
 
@@ -397,8 +412,15 @@ const DayDetailModal = ({ row, date, onClose, onSaved }) => {
         <div className="mt-4 border-t border-slate-100 pt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">HR mark</p>
           <p className="mt-0.5 text-[11px] text-slate-400">
-            What payroll reads. Leave it unset and the day counts as worked; the clock cannot say somebody was absent.
+            The day is read off the clock against this branch&apos;s working day — set on
+            <b> Branch &rarr; Management &rarr; Time Management</b>. Marking it here overrules that reading for this
+            one day, and what you set stays set whatever the clock does afterwards.
           </p>
+          {row.auto && row.status && (
+            <p className="mt-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500" data-testid="hr-att-detail-derived">
+              Currently reading as <b>{(BOARD_STATUS[row.status] || {}).label || row.status}</b> — nobody has marked this day.
+            </p>
+          )}
           {row.locked ? (
             <p className="mt-2 flex items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs text-sky-800">
               <Lock className="h-3.5 w-3.5 shrink-0" />
@@ -666,7 +688,7 @@ export const AttendanceTab = () => {
                       </td>
                       {single ? (
                         <>
-                          <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                          <td className="px-4 py-3"><StatusBadge status={r.status} auto={r.auto} /></td>
                           <td className="px-4 py-3 text-slate-700">{r.check_in ? prettyTime(r.check_in) : "—"}</td>
                           <td className="px-4 py-3 text-slate-700">{r.check_out ? prettyTime(r.check_out) : "—"}</td>
                         </>

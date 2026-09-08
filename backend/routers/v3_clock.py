@@ -209,18 +209,21 @@ async def _mirror_to_register(user_id: str, on: str, day: Dict[str, Any]) -> Non
     reach it -- their clock is still their own record, and Credentials is where the link is
     made. Nothing is invented on their behalf.
 
-    Two things are never touched. A row an approved leave wrote (`approval_id`) belongs to
-    that decision rather than to a button. And a status HR set by hand stands: somebody who
-    clocks in on a day marked half-day was still marked half-day by a person who knew why.
-    The clock fills in a status only where nobody has given one, and only ever `present` --
-    what the other marks mean is HR's to decide, and this reports one thing, that somebody
-    was here.
+    A row an approved leave wrote (`approval_id`) is never touched: it belongs to that
+    decision rather than to a button.
+
+    No status is written here at all any more, and that is the point of the change. This
+    used to stamp `present` on any day somebody clocked into, which made nine o'clock and
+    eleven o'clock the same word and left late, half day and absent to HR to type by hand
+    over fifty rows. The times are the fact; what they add up to is now read off them by
+    attendance_rules.py against the branch's own working day, everywhere attendance is
+    shown. So this writes what was pressed and nothing about what it means.
     """
     employee_id = await _employee_id_of(user_id)
     if not employee_id:
         return
     existing = await v3_col("attendance").find_one(
-        {"date": on, "employee_id": employee_id}, {"_id": 0, "status": 1, "approval_id": 1}
+        {"date": on, "employee_id": employee_id}, {"_id": 0, "approval_id": 1}
     )
     if existing and existing.get("approval_id"):
         return
@@ -235,11 +238,6 @@ async def _mirror_to_register(user_id: str, on: str, day: Dict[str, Any]) -> Non
         "clocked": True,
         "marked_at": now_iso(),
     }
-    if not (existing or {}).get("status"):
-        fields["status"] = "present"
-        # Named rather than left as the person's own name, so the register can tell at a
-        # glance which marks somebody decided and which are simply what happened.
-        fields["marked_by"] = "Clocked in"
     await v3_col("attendance").update_one(
         {"date": on, "employee_id": employee_id},
         {"$set": fields, "$setOnInsert": {"id": str(uuid.uuid4()), "date": on, "employee_id": employee_id}},
