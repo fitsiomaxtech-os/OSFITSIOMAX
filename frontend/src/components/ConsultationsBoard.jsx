@@ -3292,6 +3292,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   };
 
   // ---- Head Physio's treatment summary ----
+
+  // Written before the money, and closed by it. The Treatment Fee is collected against the
+  // course this box describes, and the patient is handed a copy of that plan at Move to
+  // Admin — so a summary rewritten once the fee is in leaves the branch delivering one
+  // course, holding a receipt for another, with nothing on file saying which was agreed.
+  // The server refuses the write either way (see save_treatment_summary); this is what
+  // stops the box offering in the first place.
+  //
+  // `!= null` rather than a positive amount: a Partial Payment schedule writes the full
+  // price the moment it is agreed, and its first installment is money already taken.
+  const treatmentSummaryFrozen = selectedLead?.treatment_fee_paid != null;
+
   const autoSaveTreatment = async (text) => {
     // Empty writes through, unlike the diagnosis box above. With a tick-list, clearing the
     // last box is a deliberate act; refusing it would leave the old summary on the server
@@ -3309,6 +3321,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   };
 
   const handleTreatmentChange = (text) => {
+    // Unreachable while the card is drawn read-only, and here for the case where it isn't:
+    // a collection landing under an open card would otherwise leave a debounce in flight
+    // carrying a write the server is about to refuse.
+    if (treatmentSummaryFrozen) return;
     setTreatmentDraft(text);
     pendingWriteRef.current.leadId = selectedLead?.id || null;
     pendingWriteRef.current.treat = text;
@@ -5833,7 +5849,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     locked={!!selectedLead.treatment_summary_locked}
                     savedText={selectedLead.treatment_summary}
                     saving={savingTreatment}
-                    canEdit={isConsultant}
+                    canEdit={isConsultant && !treatmentSummaryFrozen}
+                    // Why the Edit button is gone, said on the card rather than left to be
+                    // worked out — a Consultant who wrote this box yesterday and finds no
+                    // way back into it today is owed the reason. Said only to them, which
+                    // is what the isConsultant here is for: a Physio or Nutrition Coach has
+                    // never been able to write in here, and telling them a box they could
+                    // not edit anyway is now closed answers a question they never asked.
+                    lockNote={isConsultant && treatmentSummaryFrozen ? "Treatment fee collected — this plan is final." : null}
                     onEdit={() => setTreatmentEditing(true)}
                     onUnlock={unlockTreatment}
                     rows={3}
@@ -11526,7 +11549,7 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
 function LockableTextBox({
   icon: Icon, label, accent, value, onChange, editing, locked, savedText,
   saving, canEdit, onEdit, onUnlock, rows, placeholder, testPrefix, presetKind,
-  choices,
+  choices, lockNote,
 }) {
   const colors = {
     sky: { border: "border-sky-200", bg: "bg-sky-50", text: "text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" },
@@ -11542,7 +11565,10 @@ function LockableTextBox({
         <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${colors.text}`}>
           <Icon className="h-3.5 w-3.5" /> {label}
         </p>
-        {locked && <Lock className="h-3.5 w-3.5 text-slate-400" />}
+        {/* Both kinds of shut, under one padlock. `locked` is the Consultant's own lock,
+            which their Edit button reopens; `lockNote` is a shut this card cannot reopen
+            at all, and reading as unlocked would be the wrong picture of it. */}
+        {(locked || lockNote) && <Lock className="h-3.5 w-3.5 text-slate-400" />}
       </div>
 
       {showEditor ? (
@@ -11590,7 +11616,7 @@ function LockableTextBox({
       ) : savedText ? (
         <>
           <p className="whitespace-pre-wrap text-xs text-slate-700">{savedText}</p>
-          {canEdit && (
+          {canEdit ? (
             <Button
               size="sm"
               variant="outline"
@@ -11600,7 +11626,11 @@ function LockableTextBox({
             >
               <Pencil className="mr-1 h-3 w-3" /> Edit
             </Button>
-          )}
+          ) : lockNote ? (
+            <p className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-slate-500" data-testid={`${testPrefix}-lock-note`}>
+              <Lock className="h-3 w-3 shrink-0" /> {lockNote}
+            </p>
+          ) : null}
         </>
       ) : (
         <p className="text-xs text-slate-400">Not written yet.</p>

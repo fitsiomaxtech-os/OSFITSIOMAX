@@ -20,6 +20,13 @@ from routers.v3_lead_documents import has_prescription_on_file
 
 router = APIRouter(prefix="/api/v3", tags=["packages"])
 
+# Said once, because both the save and the unlock below say it. The two refusals are the
+# same refusal reached from either end of the same box, and a reader who has been told one
+# wording on the way in should not meet a different one on the way back.
+TREATMENT_FEE_COLLECTED_DETAIL = (
+    "Treatment fee collected — the treatment summary can no longer be edited"
+)
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
@@ -1276,6 +1283,17 @@ async def save_treatment_summary(lead_id: str, payload: V3TreatmentSummaryInput,
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    # Money in against this plan closes it. The Treatment Fee is collected for the course
+    # this summary describes, and the patient is handed a copy of that plan at Move to
+    # Admin — a summary rewritten afterwards leaves the branch delivering one thing,
+    # holding a receipt for another, and nothing on file saying which was agreed.
+    #
+    # `is not None` rather than a positive figure, and ahead of the lock check below: a
+    # Partial Payment schedule writes the full price the moment it is agreed, its first
+    # installment is money already taken, and "unlock it first" is the wrong instruction
+    # for a box that unlock can no longer open either (see unlock_treatment_summary).
+    if lead.get("treatment_fee_paid") is not None:
+        raise HTTPException(status_code=403, detail=TREATMENT_FEE_COLLECTED_DETAIL)
     if lead.get("treatment_summary_locked"):
         raise HTTPException(status_code=400, detail="Treatment summary is locked — unlock it first to edit")
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
@@ -1298,8 +1316,15 @@ async def save_treatment_summary(lead_id: str, payload: V3TreatmentSummaryInput,
 
 @router.put("/leads/{lead_id}/treatment-summary/unlock", response_model=V3LeadOut)
 async def unlock_treatment_summary(lead_id: str, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    # The unlock is the way back into the box, so it shuts for the same reason the save
+    # above does — see the note there. Refused at the door rather than by letting the
+    # unlock succeed and the next save fail: a box that opens and then will not keep what
+    # is typed into it is a worse account of what happened than being told it is closed.
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("treatment_fee_paid") is not None:
+        raise HTTPException(status_code=403, detail=TREATMENT_FEE_COLLECTED_DETAIL)
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {"treatment_summary_locked": False, "updated_at": _now()}})
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
-    if not updated:
-        raise HTTPException(status_code=404, detail="Lead not found")
     return V3LeadOut(**updated)
