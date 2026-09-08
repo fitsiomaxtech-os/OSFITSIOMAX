@@ -6098,64 +6098,122 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 head band above it is flush to the card edge and has to stay that way
                 for its border to run the full width. */}
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5" data-testid="cons-detail-body">
-              {/* A column with an order to it rather than a fragment: for everyone but the
-                  Consultant the panel that does the work is ordered first and the read-only
-                  record follows it. Written in reading order, ordered in working order. */}
+              {/* A column with an order to it rather than a fragment. For everyone but the
+                  Consultant it is the summary of the consultation, then the panel that
+                  does the work: what was found is read before it is acted on, and now that
+                  the finding costs two lines rather than four cards, reading it first no
+                  longer costs the panel its place on the screen. */}
               {detailTab === "overview" && (
               <div className="flex flex-col gap-3">
               {/* The consultation as it was written up — what pre-sales heard, what the
                   Consultant diagnosed, what they wrote down as the treatment, and the plan
-                  they confirmed — kept together and folded away for everybody but the
-                  Consultant.
+                  they confirmed.
 
-                  A branch admin opens this card to do something: take a fee, book a
-                  physio, chase a follow-up. All four of these are read-only to them, and
-                  stacked above the panel that does the work they pushed it most of a
-                  screen down — so the panel comes first and the write-up folds up under
-                  it, with the plan named on the closed row. The Consultant writes two of
-                  these boxes, so for them it is neither folded nor moved. */}
+                  Two lines each on one band, rather than four full cards or nothing at
+                  all. A branch admin opens this card to act on what the Consultant found,
+                  so the finding cannot sit behind a press; but the four cards it used to
+                  take pushed the panel that does the work most of a screen down, which is
+                  what folding them away was answering. A summary answers both: the
+                  diagnosis and the treatment in the two lines they are nearly always
+                  worth, the plan beside them, and the written record itself one press
+                  away for when two lines is not enough.
+
+                  The Consultant writes two of these boxes, so for them there is no
+                  summary and nothing folded — a person does not read a précis of their
+                  own writing, they edit the writing. */}
               {(isConsultant
                 || selectedLead.diagnosis
                 || selectedLead.physio_diagnosis_report
                 || selectedLead.treatment_summary
                 || selectedLead.consultation_decision) && (
               <section
-                className={isConsultant ? "space-y-3" : "order-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"}
+                className={isConsultant ? "space-y-3" : "order-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"}
                 data-testid="cons-case-record"
               >
-                {!isConsultant && (
-                  <button
-                    type="button"
-                    onClick={() => setCaseRecordOpen((open) => !open)}
-                    aria-expanded={caseRecordOpen}
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-slate-50"
-                    data-testid="cons-case-record-toggle"
-                  >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-                      <ClipboardList className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-semibold uppercase tracking-wider text-slate-600">Consultation Record</span>
-                      {/* The plan itself on the closed row, so folding the record away
-                          does not fold away the one line of it the branch reads most. */}
-                      <span className="block truncate text-[11px] text-slate-500" data-testid="cons-case-record-preview">
-                        {selectedLead.consultation_decision
-                          ? addonsLabel({
-                              treatment: selectedLead.consultation_decision === "consultation_treatment",
-                              diet: !!selectedLead.diet_recommended,
-                              dietConsultation: !!selectedLead.diet_consultation,
-                              dietChart: !!selectedLead.diet_chart,
-                              rehab: !!selectedLead.rehab_referred,
-                              fitness: !!selectedLead.fitness_recommended,
-                              zumba: !!selectedLead.zumba_recommended,
-                            })
-                          : "Diagnosis and treatment summary"}
-                      </span>
-                    </span>
-                    <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${caseRecordOpen ? "rotate-180" : ""}`} />
-                  </button>
-                )}
+                {!isConsultant && (() => {
+                  // The Consultant's own diagnosis where there is one, and what pre-sales
+                  // wrote down otherwise — named as pre-sales when it is, because the two
+                  // are not the same claim and a branch reading the second as the first
+                  // would be reading a caller's guess as a physio's finding.
+                  const written = (selectedLead.physio_diagnosis_report || "").trim();
+                  const presales = (selectedLead.diagnosis || "").trim();
+                  // A band reads across, so what was written down a column comes back up
+                  // onto one line. Three complaints stacked in a third of the popup is the
+                  // shape the full record below already has.
+                  const oneLine = (t) => String(t || "").split(/\n+/).map((s) => s.trim()).filter(Boolean).join(" · ");
+                  const cells = [
+                    {
+                      label: written ? "Diagnosis" : "Diagnosis · Pre-Sales",
+                      value: oneLine(written || presales),
+                      testid: "cons-case-record-diagnosis",
+                    },
+                    {
+                      label: "Treatment Summary",
+                      value: oneLine(selectedLead.treatment_summary),
+                      testid: "cons-case-record-treatment",
+                    },
+                    {
+                      label: "Plan",
+                      value: selectedLead.consultation_decision
+                        ? addonsLabel({
+                            treatment: selectedLead.consultation_decision === "consultation_treatment",
+                            diet: !!selectedLead.diet_recommended,
+                            dietConsultation: !!selectedLead.diet_consultation,
+                            dietChart: !!selectedLead.diet_chart,
+                            rehab: !!selectedLead.rehab_referred,
+                            fitness: !!selectedLead.fitness_recommended,
+                            zumba: !!selectedLead.zumba_recommended,
+                          })
+                        : "",
+                      testid: "cons-case-record-plan",
+                    },
+                  ];
+                  return (
+                    <>
+                      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2">
+                        <ClipboardList className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Consultation Record</p>
+                        {/* The way to the writing itself, worded as what it opens rather
+                            than as which way the chevron will turn. */}
+                        <button
+                          type="button"
+                          onClick={() => setCaseRecordOpen((open) => !open)}
+                          aria-expanded={caseRecordOpen}
+                          className="ml-auto flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+                          data-testid="cons-case-record-toggle"
+                        >
+                          {caseRecordOpen ? "Hide record" : "Full record"}
+                          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${caseRecordOpen ? "rotate-180" : ""}`} />
+                        </button>
+                      </div>
 
+                      {/* Put away while the full record is open: the same sentence in a
+                          summary above the box it summarises is one sentence too many. */}
+                      {!caseRecordOpen && (
+                        <dl
+                          className="grid grid-cols-1 divide-y divide-slate-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+                          data-testid="cons-case-record-summary"
+                        >
+                          {cells.map((c) => (
+                            <div key={c.label} className="min-w-0 px-4 py-2.5" data-testid={c.testid}>
+                              <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{c.label}</dt>
+                              {/* Two lines, then it stops — with the whole of it on the
+                                  title and under Full record. A box that grows with
+                                  whatever was typed into it is how four of these came to
+                                  fill the screen. */}
+                              <dd
+                                className={`mt-0.5 line-clamp-2 text-xs leading-5 ${c.value ? "text-slate-700" : "text-slate-400"}`}
+                                title={c.value || undefined}
+                              >
+                                {c.value || "Not written yet"}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      )}
+                    </>
+                  );
+                })()}
                 {(isConsultant || caseRecordOpen) && (
                   <div className={isConsultant ? "space-y-3" : "space-y-3 border-t border-slate-200 p-4"} data-testid="cons-case-record-body">
                     {/* Three columns for a reader, two for the Consultant — their Treatment
@@ -8482,7 +8540,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 })();
 
                 return (
-                  <div className="order-1 space-y-3">
+                  <div className="order-2 space-y-3">
                     {panel}
                   </div>
                 );
