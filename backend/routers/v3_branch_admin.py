@@ -960,6 +960,12 @@ async def v3_available_experts(
     # time is gone. Read off the appointment row, which already carries lead_name — no
     # second lookup against leads.
     booked_names: Dict[tuple, str] = {}
+    # And which lead it is, not just their name. The booking popup's slot grid can move a
+    # taken slot — to another consultant, or to another time — and every one of those is
+    # the same POST against the lead holding it, addressed by id. Without this the grid
+    # can say a slot is spoken for but not act on it, which is a pencil that opens a
+    # dialog with nothing behind it.
+    booked_leads: Dict[tuple, str] = {}
     for r in booked_rows:
         # A slot this same lead already holds isn't "taken" as far as they're concerned —
         # reopening their own booking has to keep offering the slot they're sitting in,
@@ -969,6 +975,8 @@ async def v3_available_experts(
         booked_by_doc.setdefault(r.get("doctor_id"), set()).add(r.get("slot_time"))
         if r.get("lead_name"):
             booked_names[(r.get("doctor_id"), r.get("slot_time"))] = r.get("lead_name")
+        if r.get("lead_id"):
+            booked_leads[(r.get("doctor_id"), r.get("slot_time"))] = r.get("lead_id")
 
     # Faces for the picker's Consultant column, resolved once for the whole branch list
     # rather than per row. See _expert_photos.
@@ -1019,6 +1027,7 @@ async def v3_available_experts(
                     "time": s.split("T")[1],
                     "duration": (detail_by_slot.get(s) or {}).get("duration") or 30,
                     "lead_name": booked_names.get((d.get("id"), s)),
+                    "lead_id": booked_leads.get((d.get("id"), s)),
                 }
                 for s in sorted(taken)
             ],
