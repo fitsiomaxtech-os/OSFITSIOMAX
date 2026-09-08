@@ -106,20 +106,37 @@ function SlotPicker({ session, onClose, onBooked }) {
   const capacity = calendar?.slot_capacity || 1;
   const today = useMemo(localToday, []);
 
-  // Every slot this physio has published from today on, grouped by the day it falls on.
-  // Full slots stay in, unlike the chip list this replaced: the day panel has the room to
-  // draw them for what they are, and a time shown as taken tells the branch more than a
-  // time that silently isn't there.
+  // Where this day is allowed to land. Treatment days are worked in number order — the
+  // physio is refused a day whose predecessors are not signed off — so the day that fell
+  // out of the course has to be re-booked after the rest of it, not into the first gap
+  // going. Offering next Tuesday when the patient is booked solid until October produces a
+  // slot nobody can deliver: the physio opens the day, the board refuses it, and the
+  // patient is turned away a second time over the same absence.
+  //
+  // `next_day_at` is the other end, and is usually empty — a second absence before the
+  // first was re-booked can strand two days, and then the earlier one has a day in front
+  // of it as well as behind. Both come from the server, which applies the same two bounds
+  // before it accepts the booking.
+  const courseEnd = session.course_end || "";
+  const nextDayAt = session.next_day_at || "";
+
+  // Every slot this physio has published that falls in that window, grouped by the day it
+  // falls on. Full slots stay in, unlike the chip list this replaced: the day panel has
+  // the room to draw them for what they are, and a time shown as taken tells the branch
+  // more than a time that silently isn't there.
   const slotsByDate = useMemo(() => {
     const map = {};
     for (const slot of calendar?.slots || []) {
       const [d, t] = String(slot).split("T");
       if (!d || !t || d < today) continue;
+      // Slots are normalized `YYYY-MM-DDTHH:MM`, so they compare as strings in time order.
+      if (courseEnd && slot <= courseEnd) continue;
+      if (nextDayAt && slot >= nextDayAt) continue;
       (map[d] = map[d] || []).push(t);
     }
     Object.values(map).forEach((times) => times.sort());
     return map;
-  }, [calendar, today]);
+  }, [calendar, today, courseEnd, nextDayAt]);
 
   const seatsTaken = useCallback((slot) => calendar?.occupancy?.[slot] || 0, [calendar]);
 
@@ -204,7 +221,8 @@ function SlotPicker({ session, onClose, onBooked }) {
               {session.physio_name || "the physio"}
             </h3>
             <p className="truncate text-[11px] text-slate-400">
-              Day {session.session_number} of {session.total_sessions} · {sessionMinutes} min ·{" "}
+              {session.track === "rehab" ? "Rehab day" : "Day"} {session.session_number} of{" "}
+              {session.total_sessions} · {sessionMinutes} min ·{" "}
               {openSlotCount} slot{openSlotCount === 1 ? "" : "s"} open
             </p>
           </div>
@@ -241,6 +259,18 @@ function SlotPicker({ session, onClose, onBooked }) {
                 )}
               </span>
             )}
+            {/* Why the calendar starts where it does. Without this the grid simply has no
+                dots on the next three weeks and reads as a physio with no free time, when
+                what it actually means is that the patient is booked until here. */}
+            {courseEnd && (
+              <span
+                className="shrink-0 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 sm:px-3 sm:text-[12px]"
+                data-testid="missed-class-picker-course-end"
+              >
+                Slots end {shortDate(courseEnd.split("T")[0])}
+                <span className="ml-2 font-medium text-emerald-600">{to12h(courseEnd.split("T")[1])}</span>
+              </span>
+            )}
             <span className="ml-auto hidden shrink-0 self-center pl-1 text-[11px] font-bold text-slate-600 sm:inline sm:text-[12px]">
               {capacity} patient{capacity === 1 ? "" : "s"} per slot
             </span>
@@ -254,8 +284,11 @@ function SlotPicker({ session, onClose, onBooked }) {
             Couldn't load {session.physio_name || "this physio"}'s calendar.
           </p>
         ) : openDates.length === 0 ? (
-          <p className="m-4 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-10 text-center text-sm text-amber-800">
-            {session.physio_name || "This physio"} has no free slots published from today on.
+          <p className="m-4 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-10 text-center text-sm text-amber-800" data-testid="missed-class-no-slots">
+            {session.physio_name || "This physio"} has no free slots published
+            {courseEnd
+              ? ` after ${longDate(courseEnd.split("T")[0])}, when ${session.lead_name || "this patient"}'s booked days run out.`
+              : " from today on."}
             <span className="mt-1 block text-xs font-normal text-amber-700">
               Open some days in MANAGEMENT → PHYSIO CALENDAR, then come back.
             </span>
@@ -457,7 +490,8 @@ export default function MissedClassPanel() {
 
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-slate-500">
-          A day here is a day the patient has paid for and not been given. Book it onto the physio's calendar.
+          A day here is a day the patient has paid for and not been given. Book it onto the physio's calendar,
+          after the days they already hold.
         </p>
         <Button size="sm" variant="outline" onClick={load} disabled={loading} className="shrink-0" data-testid="missed-class-refresh">
           <RefreshCw className={`mr-1 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -492,11 +526,21 @@ export default function MissedClassPanel() {
                     <p className="truncate text-sm font-semibold text-slate-800">{s.lead_name || "Unknown"}</p>
                     <p className="truncate text-[11px] text-slate-400">{s.patient_number || s.phone || "—"}</p>
                   </td>
+                  {/* Which course the day fell out of, not only its number. Rehab and
+                      treatment are separate runs of days for the same patient, and both
+                      land in this queue — "Day 3" alone would have the branch placing a
+                      rehab day back into the treatment course. */}
                   <td className="px-3 py-3">
-                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+                    <span
+                      className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${
+                        s.track === "rehab" ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
                       Day {s.session_number}
                     </span>
-                    <p className="mt-0.5 text-[10px] text-slate-400">of {s.total_sessions}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-400">
+                      of {s.total_sessions} · {s.track === "rehab" ? "Rehab" : "Treatment"}
+                    </p>
                   </td>
                   <td className="truncate px-3 py-3 text-xs text-slate-600">{s.physio_name || "—"}</td>
                   <td className="px-3 py-3">

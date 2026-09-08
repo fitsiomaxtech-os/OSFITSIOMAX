@@ -132,48 +132,118 @@ async def assign_sessions(
 # first place. Until this is done the patient is a day short of the package they paid for.
 
 
+# A physio runs two courses out of the same room, and each names the same two facts
+# differently: a treatment day is session_number of total_sessions, a rehab day is
+# day_number of total_days. Marking a patient absent already writes needs_assignment to
+# whichever collection the day came from, but only `sessions` was ever read back — so a
+# rehab day stranded by an absence was owed to the patient and shown to nobody, which is
+# the one thing this queue exists to stop. Both are read here and flattened onto the
+# treatment names once, at the read, so everything downstream sees a single shape.
+_COURSES = (
+    ("sessions", "treatment", "session_number", "total_sessions"),
+    ("rehab_sessions", "rehab", "day_number", "total_days"),
+)
+
+
+def _order_bounds(siblings: list, number: int, num_field: str) -> tuple:
+    """The window a dateless day's new date has to land in, as (after, before).
+
+    Days are worked in number order — the physio is refused a day whose predecessors are
+    not signed off — so the date has to sit where the number does: after every earlier day
+    of the same course and before every later one. Either end is "" when nothing bounds it.
+    """
+    earlier = [
+        (r.get("slot_time") or "").strip()
+        for r in siblings
+        if (r.get(num_field) or 0) < number and (r.get("slot_time") or "").strip()
+    ]
+    later = [
+        (r.get("slot_time") or "").strip()
+        for r in siblings
+        if (r.get(num_field) or 0) > number and (r.get("slot_time") or "").strip()
+    ]
+    return (max(earlier, default=""), min(later, default=""))
+
+
 class ScheduleSessionInput(BaseModel):
     slot_time: str
 
 
 @router.get("/branch/sessions/unscheduled")
 async def unscheduled_sessions(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    """Treatment days waiting on a date, oldest patient first."""
+    """Treatment and rehab days waiting on a date, oldest patient first."""
     query: dict = {"needs_assignment": True, "status": {"$ne": "completed"}}
     if user.branch_id:
         query["branch_id"] = user.branch_id
 
-    rows = await v3_col("sessions").find(query, {"_id": 0}).to_list(500)
+    rows: list = []
+    for collection, track, num_field, total_field in _COURSES:
+        found = await v3_col(collection).find(query, {"_id": 0}).to_list(500)
+        for s in found:
+            s["track"] = track
+            if track != "treatment":
+                s["session_number"] = s.get(num_field)
+                s["total_sessions"] = s.get(total_field)
+        rows.extend(found)
     rows.sort(key=lambda s: (s.get("lead_name") or "", s.get("session_number") or 0))
 
     # The absence that caused this is what the Branch Admin needs to read to place the day —
     # who missed, when, and what the physio wrote. It sits on the session that was missed,
-    # not on the one left dateless, so the two are matched up by lead here.
-    lead_ids = list({s.get("lead_id") for s in rows if s.get("lead_id")})
+    # not on the one left dateless, so the two are matched up by lead here. Matched by
+    # course as well: a patient can be running treatment and rehab at once, and the rehab
+    # absence that stranded a rehab day says nothing about a stranded treatment day.
+    #
+    # The same pass reads back every day of the patient's course, which is what says where
+    # the new date is allowed to go — see _order_bounds.
+    latest_absence: dict = {}
+    bounds: dict = {}
+    for collection, track, num_field, _total in _COURSES:
+        ids = list({s.get("lead_id") for s in rows if s.get("track") == track and s.get("lead_id")})
+        if not ids:
+            continue
+
+        siblings = await v3_col(collection).find(
+            {"lead_id": {"$in": ids}},
+            {"_id": 0, "id": 1, "lead_id": 1, num_field: 1, "slot_time": 1, "absences": 1},
+        ).to_list(2000)
+
+        by_lead: dict = {}
+        for row in siblings:
+            by_lead.setdefault(row.get("lead_id"), []).append(row)
+
+        for s in rows:
+            if s.get("track") != track:
+                continue
+            others = [r for r in by_lead.get(s.get("lead_id"), []) if r.get("id") != s.get("id")]
+            bounds[s["id"]] = _order_bounds(others, s.get("session_number") or 0, num_field)
+
+        for row in siblings:
+            for ab in row.get("absences") or []:
+                key = (row.get("lead_id"), track)
+                current = latest_absence.get(key)
+                if not current or (ab.get("marked_at") or "") > (current.get("marked_at") or ""):
+                    latest_absence[key] = {**ab, "session_number": row.get(num_field)}
 
     # A session carries the patient's name but not their patient number, and the number is
     # how the branch actually identifies someone on the phone.
+    lead_ids = list({s.get("lead_id") for s in rows if s.get("lead_id")})
     leads = await v3_col("leads").find(
         {"id": {"$in": lead_ids}}, {"_id": 0, "id": 1, "patient_number": 1, "phone": 1},
     ).to_list(500)
     lead_map = {l["id"]: l for l in leads}
 
-    missed = await v3_col("sessions").find(
-        {"lead_id": {"$in": lead_ids}, "absences": {"$exists": True, "$ne": []}},
-        {"_id": 0, "lead_id": 1, "session_number": 1, "absences": 1},
-    ).to_list(1000)
-    latest_absence: dict = {}
-    for row in missed:
-        for ab in row.get("absences") or []:
-            current = latest_absence.get(row["lead_id"])
-            if not current or (ab.get("marked_at") or "") > (current.get("marked_at") or ""):
-                latest_absence[row["lead_id"]] = {**ab, "session_number": row.get("session_number")}
-
     for s in rows:
-        s["last_absence"] = latest_absence.get(s.get("lead_id"))
+        s["last_absence"] = latest_absence.get((s.get("lead_id"), s.get("track")))
         lead = lead_map.get(s.get("lead_id"), {})
         s["patient_number"] = lead.get("patient_number", "")
         s["phone"] = lead.get("phone", "")
+        after, before = bounds.get(s["id"], ("", ""))
+        # Named for what the branch reads them as: the day the patient's booked days run
+        # out, and — if an earlier absence stranded two days — the day that follows this
+        # one. The picker offers only the gap between them, which is exactly what
+        # schedule_session below will accept.
+        s["course_end"] = after
+        s["next_day_at"] = before
 
     return {"sessions": rows}
 
@@ -184,8 +254,13 @@ async def schedule_session(
     payload: ScheduleSessionInput,
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
 ):
-    """Put a dateless treatment day onto one of its physio's published slots."""
-    session = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    """Put a dateless treatment or rehab day onto one of its physio's published slots."""
+    session = None
+    for name, track_name, field, _total in _COURSES:
+        found = await v3_col(name).find_one({"id": session_id}, {"_id": 0})
+        if found:
+            session, collection, track, num_field = found, name, track_name, field
+            break
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.get("status") == "completed":
@@ -207,27 +282,62 @@ async def schedule_session(
             detail="That time isn't published by this physio — open it in MANAGEMENT → PHYSIO CALENDAR first",
         )
 
+    # Where the number says the date has to sit. A slot earlier in the course is real, and
+    # the physio is free on it, and the day still cannot be delivered when it comes round:
+    # the board refuses a day whose predecessors are not signed off, so the patient is
+    # turned away a second time over the same absence. Checked against the days themselves
+    # rather than against today, because "the end of the course" is the only date that
+    # moves as the rest of it does.
+    number = session.get(num_field) or 0
+    siblings = await v3_col(collection).find(
+        {"lead_id": session.get("lead_id"), "id": {"$ne": session_id}},
+        {"_id": 0, num_field: 1, "slot_time": 1},
+    ).to_list(2000)
+    after, before = _order_bounds(siblings, number, num_field)
+    if after and slot <= after:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Day {number} is worked after the days already booked — pick a time after"
+                f" {after.replace('T', ' at ')}, when this patient's slots run out"
+            ),
+        )
+    if before and slot >= before:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Day {number} is worked before the next day already booked — pick a time"
+                f" before {before.replace('T', ' at ')}"
+            ),
+        )
+
+    # Both of the physio's courses count against the slot. A rehab day and a treatment day
+    # take the same physio in the same half hour, so counting only one of them hands out a
+    # seat the calendar has already drawn as taken.
     capacity = slot_capacity_of(physio)
-    taken = await v3_col("sessions").count_documents({
-        "physio_id": session.get("physio_id"),
-        "slot_time": slot,
-        "status": {"$ne": "completed"},
-        "id": {"$ne": session_id},
-    })
+    taken = 0
+    for name, _track, _field, _total in _COURSES:
+        taken += await v3_col(name).count_documents({
+            "physio_id": session.get("physio_id"),
+            "slot_time": slot,
+            "status": {"$ne": "completed"},
+            "id": {"$ne": session_id},
+        })
     if taken >= capacity:
         raise HTTPException(status_code=409, detail=f"That slot is full — it already holds {taken} of {capacity}")
 
-    await v3_col("sessions").update_one(
+    await v3_col(collection).update_one(
         {"id": session_id},
         {"$set": {"slot_time": slot, "needs_assignment": False, "updated_at": now_iso()}},
     )
 
+    day_word = "Rehab day" if track == "rehab" else "Day"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": session.get("lead_id"),
         "action": "session_rescheduled",
         "details": (
-            f"Day {session.get('session_number')} was left without a date by an absence and has been"
+            f"{day_word} {number} was left without a date by an absence and has been"
             f" booked for {slot.replace('T', ' at ')} with {physio.get('full_name', 'the physio')}."
         ),
         "created_by": user.full_name,
@@ -235,7 +345,7 @@ async def schedule_session(
         "created_at": now_iso(),
     })
 
-    updated = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    updated = await v3_col(collection).find_one({"id": session_id}, {"_id": 0})
     return {"session": updated}
 
 
