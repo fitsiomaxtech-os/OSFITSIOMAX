@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Dumbbell, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Video, X } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -1307,6 +1307,9 @@ function FeedbackTab({ data }) {
   const [sending, setSending] = useState(false);
   const [mine, setMine] = useState([]);
   const endRef = useRef(null);
+  const chatRef = useRef(null);
+  // How tall three messages happen to be, once they are on screen.
+  const [chatMax, setChatMax] = useState(null);
 
   const loadMine = useCallback(() => {
     patientPortalMyFeedback()
@@ -1349,6 +1352,38 @@ function FeedbackTab({ data }) {
   // a paragraph from three weeks ago hides the answer somebody came back to read.
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
+  }, [messages.length, audience]);
+
+  // Three messages showing, the rest scrolled. Measured rather than given a pixel height,
+  // because these bubbles run from one line to five: any fixed number that fits three of
+  // the short ones cuts a long one in half, and one that clears a long one shows five
+  // short ones. The last three, because the box opens at the bottom — the newest are the
+  // ones somebody came back to read.
+  useLayoutEffect(() => {
+    const box = chatRef.current;
+    if (!box) return undefined;
+    const measure = () => {
+      // Every child but the scroll anchor, which is an empty div with no height.
+      const rows = Array.from(box.children).filter((el) => el !== endRef.current);
+      if (rows.length <= 3) { setChatMax(null); return; }
+      const GAP = 8;      // space-y-2
+      const PADDING = 24; // p-3, top and bottom
+      const last = rows.slice(-3);
+      const next = Math.ceil(
+        last.reduce((total, el) => total + el.offsetHeight, 0) + GAP * (last.length - 1) + PADDING,
+      );
+      // Only on a real change: this runs from a ResizeObserver watching the box it sizes,
+      // and writing the same number back every time would be a loop that never settles.
+      setChatMax((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    // A bubble's height is a function of the width it wraps at, so a narrowed window is a
+    // remeasure. Watching the box rather than the window also catches its own scrollbar
+    // appearing, which takes width away from the text inside it.
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
   }, [messages.length, audience]);
 
   const waiting = (key) => mine.some(
@@ -1423,7 +1458,12 @@ function FeedbackTab({ data }) {
             {messages.length > 0 ? `With ${themInline}` : "In your words"}
           </p>
           <div
+            ref={chatRef}
+            // The class is the fallback and the style is the answer: until the first
+            // measurement lands — or at all, somewhere without a ResizeObserver — a long
+            // conversation still has to stop somewhere rather than run down the page.
             className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-3"
+            style={chatMax ? { maxHeight: chatMax } : undefined}
             data-testid={`portal-feedback-chat-${audience}`}
           >
             {messages.length === 0 ? (
