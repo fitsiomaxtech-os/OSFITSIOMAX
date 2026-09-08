@@ -812,6 +812,34 @@ const WorkModeToggle = ({ value, disabled, onPick, testid }) => (
   </div>
 );
 
+/**
+ * What this person is on, read the way payroll reads it.
+ *
+ * Gross where there is one and net otherwise — the same order _monthly_base picks in on
+ * the server, and the same figure the salary panel calls "current", so the directory
+ * cannot name a different salary from the one that pays.
+ *
+ * This column showed net_salary alone under a "Net Salary" heading. A salary set from
+ * Payroll Management goes to whichever of the two fields already means something (see
+ * _salary_field), and for anybody who had neither — everybody paid through the salary
+ * timeline and nothing else — that is gross. So a directory of forty-eight people read
+ * ₹0 down the whole column while payroll held a figure for every one of them.
+ *
+ * The heading is "Salary" for the same reason: which of the two an employee is on is a
+ * fact about that employee, and the View dialog breaks both out for anybody who needs to
+ * know which.
+ */
+const monthlySalary = (e) => Number(e.gross_salary) || Number(e.net_salary) || 0;
+
+/** Which of the two figures the number beside it came from, for the hover. */
+const salaryBasis = (e) => (
+  Number(e.gross_salary) > 0
+    ? "Gross salary"
+    : Number(e.net_salary) > 0
+      ? "Net salary"
+      : "No salary set yet"
+);
+
 const EmployeeDirectory = ({ employees, onView }) => (
   <>
     <div className="space-y-2 md:hidden" data-testid="hr-emp-cards">
@@ -829,7 +857,7 @@ const EmployeeDirectory = ({ employees, onView }) => (
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
             <span>{e.designation || "—"}{e.department ? ` · ${e.department}` : ""}</span>
-            <span className="font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</span>
+            <span className="font-semibold text-emerald-600" title={salaryBasis(e)}>₹{monthlySalary(e).toLocaleString("en-IN")}</span>
           </div>
           {e.work_type && (
             <div className="mt-1.5">
@@ -851,7 +879,7 @@ const EmployeeDirectory = ({ employees, onView }) => (
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Dept</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Work Type</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Joining</th><th className="px-3 py-2">Net Salary</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr>
+              <tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Dept</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Work Type</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Joining</th><th className="px-3 py-2">Salary</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr>
             </thead>
             <tbody>
               {employees.map((e, i) => (
@@ -871,7 +899,7 @@ const EmployeeDirectory = ({ employees, onView }) => (
                   <td className="px-3 py-2"><WorkTypeCell e={e} /></td>
                   <td className="px-3 py-2 text-xs text-slate-600">{e.email}<br />{e.phone}</td>
                   <td className="px-3 py-2 text-slate-500">{e.joining_date || "—"}</td>
-                  <td className="px-3 py-2 font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</td>
+                  <td className="px-3 py-2 font-semibold text-emerald-600" title={salaryBasis(e)}>₹{monthlySalary(e).toLocaleString("en-IN")}</td>
                   <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span></td>
                   <td className="px-3 py-2">
                     <button onClick={() => onView(e)} title="View employee" className="text-slate-500 hover:text-sky-600" data-testid={`hr-emp-view-${e.id}`}><Eye className="h-4 w-4" /></button>
