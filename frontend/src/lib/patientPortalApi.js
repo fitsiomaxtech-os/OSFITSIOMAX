@@ -84,7 +84,7 @@ export const patientPortalDocuments = async () => {
   return data;
 };
 
-/** The patient's Diet Chart, as an object URL.
+/** The patient's Diet Chart, as an object URL and the type of the thing behind it.
  *
  *  Its own route and no document id, because the chart is not fetched the way the documents
  *  above are: the server decides which chart is theirs and refuses it outright until the
@@ -97,16 +97,21 @@ export const patientPortalDietChartUrl = async () => {
     headers: authHeaders(),
     responseType: "blob",
   });
-  return URL.createObjectURL(data);
+  return { url: URL.createObjectURL(data), type: data.type || "" };
 };
 
-/** The bytes, as an object URL. Fetched as a blob rather than linked to directly: the
-    route needs the session token in a header, which a plain <a href> cannot send. The
-    caller owns the URL and must revokeObjectURL it when done. */
+/** The bytes, as an object URL, with the blob's content type beside it. Fetched as a blob
+    rather than linked to directly: the route needs the session token in a header, which a
+    plain <a href> cannot send. The caller owns the URL and must revokeObjectURL it.
+
+    The type comes back because the screen that shows these has to decide how — a picture
+    is drawn, a PDF is framed, and everything else is offered as a download. Reading it off
+    the blob rather than off the filename means the server's Content-Type is what settles
+    it, and the extension is only the fallback (see viewerKindOf in the portal page). */
 export const patientPortalDocumentUrl = async (docId) => {
   const { data } = await portalApi.get(`/patient-portal/documents/${docId}/download`, {
     headers: authHeaders(),
     responseType: "blob",
   });
-  return URL.createObjectURL(data);
+  return { url: URL.createObjectURL(data), type: data.type || "" };
 };

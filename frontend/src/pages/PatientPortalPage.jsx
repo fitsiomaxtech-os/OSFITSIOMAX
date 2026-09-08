@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Dumbbell, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Video } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Dumbbell, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Video, X } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -573,8 +574,199 @@ function RehabCourse({ rehab }) {
  *  download route refuses independently — so this component could not reveal it by mistake
  *  even if it tried to.
  */
+/**
+ * What kind of thing a file is, for the viewer below.
+ *
+ * The blob's own content type first, because that is the server's answer and it is the one
+ * that is right when a file was uploaded with a misleading name. The extension is only
+ * consulted when the server said nothing useful — an octet-stream, which is what a strict
+ * store hands back for everything it is unsure of.
+ */
+const viewerKindOf = (type, name) => {
+  const mime = String(type || "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime === "application/pdf") return "pdf";
+  const ext = String(name || "").toLowerCase().split(".").pop();
+  if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic"].includes(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  return "other";
+};
+
+/**
+ * A file, shown where the patient is rather than in a tab they have to find their way back
+ * from.
+ *
+ * These used to open with window.open, which on a phone means the portal disappears and
+ * the picture arrives in a second tab -- and the way back is the browser's tab switcher,
+ * not anything this app put on screen. For a chart somebody glances at between one card
+ * and the next, that is the whole interaction gone wrong. So it opens over the page, and
+ * closing it puts them back exactly where they were.
+ *
+ * Portalled to the body because the page has a fixed bottom nav at z-40 and cards with
+ * their own stacking; rendered in place, the overlay would be cropped by whichever one it
+ * happened to sit inside.
+ *
+ * Three ways to draw one, because a portal serves pictures and PDFs and has no say in
+ * which: an image is drawn, a PDF is framed, and anything else is offered as a download
+ * rather than shown as a blank rectangle. The escape hatch stays on all three -- a browser
+ * that will not render a blob PDF in a frame (which is most phones) must not leave the
+ * patient looking at nothing, so "Open in a new tab" is still there, as a fallback now
+ * rather than as the only behaviour.
+ */
+function FileViewer({ file, onClose }) {
+  const kind = viewerKindOf(file?.type, file?.name);
+
+  // Escape closes it, and the page behind stops scrolling while it is up -- a body that
+  // scrolls under a full-screen overlay is how somebody closes the viewer and finds
+  // themselves somewhere else on the page.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  if (!file) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-slate-900/90 p-3 sm:p-6"
+      onClick={onClose}
+      data-testid="patient-portal-file-viewer"
+    >
+      <div
+        className="mx-auto flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+          <p className="min-w-0 truncate text-sm font-semibold text-slate-800" title={file.name}>
+            {file.name || "Document"}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close"
+            data-testid="patient-portal-file-viewer-close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto bg-slate-50 p-3">
+          {kind === "image" && (
+            <img
+              src={file.url}
+              alt={file.name || "Document"}
+              className="mx-auto h-auto max-w-full rounded-lg"
+              data-testid="patient-portal-file-viewer-image"
+            />
+          )}
+          {kind === "pdf" && (
+            <iframe
+              src={file.url}
+              title={file.name || "Document"}
+              className="h-[70vh] w-full rounded-lg border-0 bg-white"
+              data-testid="patient-portal-file-viewer-pdf"
+            />
+          )}
+          {kind === "other" && (
+            <p className="py-10 text-center text-sm text-slate-500" data-testid="patient-portal-file-viewer-other">
+              This file can&apos;t be previewed here. Download it to open it.
+            </p>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 px-4 py-2.5">
+          {/* Still here, and still doing what it always did. A phone that refuses to draw
+              a blob PDF in a frame would otherwise leave the patient with a white box and
+              no way on. */}
+          <a
+            href={file.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] font-semibold text-slate-500 hover:text-slate-700"
+            data-testid="patient-portal-file-viewer-newtab"
+          >
+            Open in a new tab
+          </a>
+          <a
+            href={file.url}
+            download={file.name || "document"}
+            className="rounded-md bg-slate-800 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-slate-900"
+            data-testid="patient-portal-file-viewer-download"
+          >
+            Download
+          </a>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** Let go of an object URL, but not this second.
+ *
+ *  The viewer's own footer hands this URL to two things that outlive it: a download, and
+ *  the new-tab fallback. Both are still reading from it after the viewer they were pressed
+ *  in has closed, and revoking it out from under them is a failed download or a blank tab.
+ *  So the allocation is held a minute past its last use — the same delay, and the same
+ *  reason, as the window.open this replaced.
+ */
+const releaseLater = (url) => {
+  if (url) setTimeout(() => URL.revokeObjectURL(url), 60000);
+};
+
+/** Fetching a file, holding it while it is on screen, and letting go of it afterwards.
+ *
+ *  One hook because both the Diet Chart and the documents list do exactly this, and the
+ *  part that is easy to get wrong is the same in both: the object URL is a real allocation,
+ *  and it has to be released when the viewer closes and again if the component unmounts
+ *  with one still open.
+ */
+function useFileViewer(failureMessage) {
+  const [opening, setOpening] = useState(null);
+  const [file, setFile] = useState(null);
+
+  const close = useCallback(() => {
+    setFile((current) => {
+      releaseLater(current?.url);
+      return null;
+    });
+  }, []);
+
+  // Only on unmount -- the patient navigating away with the viewer open.
+  useEffect(() => close, [close]);
+
+  const open = useCallback(async (key, name, fetcher) => {
+    setOpening(key);
+    try {
+      const { url, type } = await fetcher();
+      // Replacing rather than assuming there is nothing to replace. The viewer covers the
+      // buttons that open it, so in practice one is always closed before the next is
+      // opened -- but "in practice" is not a reason to leak the allocation if that ever
+      // stops being true.
+      setFile((previous) => {
+        releaseLater(previous?.url);
+        return { url, type, name };
+      });
+    } catch {
+      toast.error(failureMessage);
+    }
+    setOpening(null);
+  }, [failureMessage]);
+
+  return { opening, file, open, close };
+}
+
 function DietChartRow({ chart }) {
-  const [opening, setOpening] = useState(false);
+  const { opening, file, open, close } = useFileViewer(
+    "Your Diet Chart couldn't be opened. Please ask your branch.",
+  );
   if (!chart || (!chart.available && !chart.awaiting_payment)) return null;
 
   if (chart.awaiting_payment) {
@@ -590,40 +782,34 @@ function DietChartRow({ chart }) {
     );
   }
 
-  // A blob and an object URL rather than a link: the route needs the session token in a
-  // header, which a plain <a href> cannot send.
-  const open = async () => {
-    setOpening(true);
-    try {
-      const url = await patientPortalDietChartUrl();
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch {
-      toast.error("Your Diet Chart couldn't be opened. Please ask your branch.");
-    }
-    setOpening(false);
-  };
+  const name = chart.original_name || "Diet Chart";
 
   return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={opening}
-      className="flex w-full items-center justify-between gap-3 rounded-lg border border-orange-200 bg-orange-50/60 p-3 text-left transition hover:border-orange-300 hover:bg-orange-50 disabled:opacity-50"
-      data-testid="patient-portal-diet-chart"
-    >
-      <div className="min-w-0">
-        <p className="text-[9px] font-semibold uppercase tracking-wide text-orange-500">Your Diet Chart</p>
-        <p className="truncate text-xs font-semibold text-orange-900">{chart.original_name || "Diet Chart"}</p>
-        <p className="text-[10px] text-orange-400">
-          {chart.sent_by || "Your Nutritionist"}
-          {chart.sent_at ? ` · ${String(chart.sent_at).slice(0, 10)}` : ""}
-        </p>
-      </div>
-      <span className="shrink-0 text-[11px] font-semibold text-orange-600">
-        {opening ? "Opening..." : "View"}
-      </span>
-    </button>
+    <>
+      <button
+        type="button"
+        // A blob rather than a link: the route needs the session token in a header, which
+        // a plain <a href> cannot send. What is new is where it goes — over the page
+        // instead of into a tab the patient has to find their way back from.
+        onClick={() => open("chart", name, patientPortalDietChartUrl)}
+        disabled={!!opening}
+        className="flex w-full items-center justify-between gap-3 rounded-lg border border-orange-200 bg-orange-50/60 p-3 text-left transition hover:border-orange-300 hover:bg-orange-50 disabled:opacity-50"
+        data-testid="patient-portal-diet-chart"
+      >
+        <div className="min-w-0">
+          <p className="text-[9px] font-semibold uppercase tracking-wide text-orange-500">Your Diet Chart</p>
+          <p className="truncate text-xs font-semibold text-orange-900">{name}</p>
+          <p className="text-[10px] text-orange-400">
+            {chart.sent_by || "Your Nutritionist"}
+            {chart.sent_at ? ` · ${String(chart.sent_at).slice(0, 10)}` : ""}
+          </p>
+        </div>
+        <span className="shrink-0 text-[11px] font-semibold text-orange-600">
+          {opening ? "Opening..." : "View"}
+        </span>
+      </button>
+      {file && <FileViewer file={file} onClose={close} />}
+    </>
   );
 }
 
@@ -901,11 +1087,15 @@ const prettyBytes = (n) => {
  * because an empty "Documents" card reads as something having gone missing.
  *
  * Opened through a blob URL rather than a direct link: the download route needs the
- * session token in a header, which an <a href> cannot send.
+ * session token in a header, which an <a href> cannot send. Shown over the page rather
+ * than in a new tab, for the reason set out on FileViewer — the same control as the Diet
+ * Chart above, so it behaves the same way.
  */
 function PatientDocuments() {
   const [docs, setDocs] = useState([]);
-  const [opening, setOpening] = useState(null);
+  const { opening, file, open, close } = useFileViewer(
+    "That document couldn't be opened. Please ask your branch.",
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -915,51 +1105,39 @@ function PatientDocuments() {
     return () => { cancelled = true; };
   }, []);
 
-  const open = async (doc) => {
-    setOpening(doc.id);
-    try {
-      const url = await patientPortalDocumentUrl(doc.id);
-      window.open(url, "_blank", "noopener");
-      // Revoked on a delay rather than immediately: the new tab has to have started
-      // loading from it first, and revoking straight away leaves a blank tab.
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch {
-      toast.error("That document couldn't be opened. Please ask your branch.");
-    }
-    setOpening(null);
-  };
-
   if (docs.length === 0) return null;
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="patient-portal-documents">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Your Documents</p>
       <div className="space-y-2">
-        {docs.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            onClick={() => open(d)}
-            disabled={opening === d.id}
-            className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 p-2.5 text-left transition hover:border-sky-300 hover:bg-sky-50/50 disabled:opacity-50"
-            data-testid={`patient-portal-document-${d.id}`}
-          >
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold text-slate-800">
-                {d.label || d.original_name}
-              </p>
-              <p className="text-[10px] text-slate-400">
-                {d.kind === "consultation_form" ? "Consultation Form" : "Report"}
-                {d.size_bytes ? ` · ${prettyBytes(d.size_bytes)}` : ""}
-                {d.created_at ? ` · ${String(d.created_at).slice(0, 10)}` : ""}
-              </p>
-            </div>
-            <span className="shrink-0 text-[11px] font-semibold text-sky-600">
-              {opening === d.id ? "Opening..." : "View"}
-            </span>
-          </button>
-        ))}
+        {docs.map((d) => {
+          const name = d.label || d.original_name;
+          return (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => open(d.id, name, () => patientPortalDocumentUrl(d.id))}
+              disabled={opening === d.id}
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 p-2.5 text-left transition hover:border-sky-300 hover:bg-sky-50/50 disabled:opacity-50"
+              data-testid={`patient-portal-document-${d.id}`}
+            >
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-slate-800">{name}</p>
+                <p className="text-[10px] text-slate-400">
+                  {d.kind === "consultation_form" ? "Consultation Form" : "Report"}
+                  {d.size_bytes ? ` · ${prettyBytes(d.size_bytes)}` : ""}
+                  {d.created_at ? ` · ${String(d.created_at).slice(0, 10)}` : ""}
+                </p>
+              </div>
+              <span className="shrink-0 text-[11px] font-semibold text-sky-600">
+                {opening === d.id ? "Opening..." : "View"}
+              </span>
+            </button>
+          );
+        })}
       </div>
+      {file && <FileViewer file={file} onClose={close} />}
     </div>
   );
 }
