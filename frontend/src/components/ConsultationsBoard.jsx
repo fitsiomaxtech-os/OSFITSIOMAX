@@ -1100,6 +1100,24 @@ const Lbl = ({ full, short }) => (
 const ACT_BTN = "px-2 text-[11px] sm:px-3 sm:text-xs";
 
 /**
+ * The mark a tab wears while the programme behind it still has money to take.
+ *
+ * A dot rather than a figure: the tab row is a way of getting somewhere, and what is owed
+ * is answered in full one press away, on the panel that can actually take it. What the row
+ * has to say is only which door to press.
+ *
+ * Rose on white, ringed so it holds against a filled tab as well as an outlined one. It
+ * sits on the tab you are already on too -- it reports the programme, not the way there.
+ */
+const DueDot = ({ testid }) => (
+  <span
+    className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white"
+    aria-hidden="true"
+    data-testid={testid}
+  />
+);
+
+/**
  * What was knocked off this patient's Consultation Fee, or null if nothing was.
  *
  * Taken from the lead itself — the listed price against what was actually collected. The
@@ -7667,6 +7685,26 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 // fee already taken is a fact no cleared tick can undo. Both used to leave a
                 // patient with a Diet Chart Fee on their fee card and no tab that would open
                 // the programme it belongs to. Same reading as the fee cards and the pill.
+
+                // Which of the three programmes still has money to take. Read off the same
+                // lead fields and the same balances the fee cards are built from, and gated
+                // on the same "is this patient even on that programme" test their `show` uses
+                // -- kept in step with feeSteps below, which is the list these three describe.
+                //
+                // A part-collected fee counts as owing: feeBalances holds a plan only while
+                // there is a balance left on it, which is the same reason its card refuses to
+                // tick itself green.
+                const treatmentDue = selectedLead.consultation_decision === "consultation_treatment"
+                  && (selectedLead.treatment_fee_paid == null || !!feeBalances.treatment);
+                const rehabDue = !!selectedLead.rehab_referred
+                  && (selectedLead.rehab_fee_paid == null || !!feeBalances.rehab);
+                // Two fees can be outstanding on the diet programme and one tab carries both,
+                // so either one lights it.
+                const dietDue = (!!selectedLead.diet_recommended
+                    && (selectedLead.diet_fee_paid == null || !!feeBalances.diet))
+                  || (!!selectedLead.diet_chart
+                    && (selectedLead.diet_chart_fee_paid == null || !!feeBalances.diet_chart));
+
                 const onDietProgramme = !!selectedLead.diet_recommended || !!selectedLead.diet_consultation
                   || !!selectedLead.diet_chart || selectedLead.diet_fee_paid != null
                   || selectedLead.diet_chart_fee_paid != null;
@@ -7674,12 +7712,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   <Button
                     size="sm"
                     variant="outline"
-                    className={`${programmeDetail === "diet" ? "border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                    className={`relative ${programmeDetail === "diet" ? "border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
                     onClick={() => openDetail("diet")}
+                    title={dietDue ? "Diet fee still to collect" : undefined}
                     data-testid="cons-open-diet-detail"
                   >
                     <Salad className="mr-1 h-3.5 w-3.5" />
                     <Lbl full="Diet Details" short="Diet" />
+                    {dietDue && <DueDot testid="cons-diet-due-dot" />}
                   </Button>
                 ) : null;
 
@@ -7694,12 +7734,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   <Button
                     size="sm"
                     variant="outline"
-                    className={`${programmeDetail === "rehab" ? "border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                    className={`relative ${programmeDetail === "rehab" ? "border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
                     onClick={() => openDetail("rehab")}
+                    title={rehabDue ? "Rehab fee still to collect" : undefined}
                     data-testid="cons-open-rehab-detail"
                   >
                     <Activity className="mr-1 h-3.5 w-3.5" />
                     <Lbl full="Rehab Details" short="Rehab" />
+                    {rehabDue && <DueDot testid="cons-rehab-due-dot" />}
                   </Button>
                 ) : null;
 
@@ -7710,13 +7752,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     // tab on this row so the selected one always looks the same, whichever it is.
     const TAB_ON = "border-sky-600 bg-sky-600 text-white shadow-sm hover:bg-sky-700 hover:text-white";
 
-    const OwnTab = ({ label, short, icon: TabIcon, active, locked = false, lockedTitle }) => (
+    const OwnTab = ({ label, short, icon: TabIcon, active, locked = false, lockedTitle, due = false, dueTitle }) => (
                   <Button
                     size="sm"
                     variant="outline"
                     disabled={locked}
-                    title={locked ? lockedTitle : undefined}
-                    className={`${locked
+                    title={locked ? lockedTitle : due ? dueTitle : undefined}
+                    className={`relative ${locked
                       ? "border-slate-200 bg-slate-50 text-slate-400"
                       : programmeDetail === "own" ? active : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
                     onClick={() => openDetail("own")}
@@ -7724,6 +7766,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   >
                     <TabIcon className="mr-1 h-3.5 w-3.5" />
                     <Lbl full={label} short={short || label} />
+                    {/* Not while the tab is locked: a shut door with a red mark on it says
+                        there is something to do behind it and then refuses to open. */}
+                    {due && !locked && <DueDot testid="cons-own-due-dot" />}
                   </Button>
                 );
 
@@ -7866,13 +7911,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 /**
                  * The fee cards, drawn over whichever of the fees the caller wants shown.
                  *
-                 * A function rather than one built element, because there are two readings of
-                 * this list and only one of them is the whole thing. Fee Collected shows every
-                 * fee the patient was quoted, ticks and all, because that panel IS the money:
-                 * the tick beside a settled fee is half of what it reports. Physio Assign shows
-                 * only what is still owed — the consultation and treatment fees are in by
-                 * definition once a patient stands there, and repeating two green ticks over
-                 * the course card would bury the one fee that still needs taking.
+                 * A function rather than one built element, because the caller says which fees
+                 * it wants. Fee Collected asks for every fee the patient was quoted, ticks and
+                 * all, because that panel IS the money: the tick beside a settled fee is half
+                 * of what it reports.
+                 *
+                 * Nowhere else asks for a subset any more. Physio Assign used to draw what was
+                 * still owed under its course card, and that put a fee on two panels at once —
+                 * a payment belongs to the programme it was sold with, and is taken there. The
+                 * tab's dot is what carries the news across; the cards stay home.
                  *
                  * `n` numbers each card. Handed in rather than taken from the index, so a card
                  * keeps the step number it has on the full list when it is shown on a short
@@ -7965,13 +8012,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   </div>
                 );
 
-                // Numbered once, here, so both readings below agree about which step a fee is.
+                // Numbered once, here, so every reading of this list agrees about which step
+                // a fee is.
                 const numberedFeeSteps = feeSteps.map((step, i) => ({ step, n: i + 1 }));
                 const FeeSteps = renderFeeSteps(numberedFeeSteps);
-                // What is still owed, for the panels that are not the money panel. Empty for
-                // the patient who paid for everything at the desk, which is most of them — so
-                // every caller has to be prepared to draw nothing.
-                const outstandingFeeSteps = numberedFeeSteps.filter(({ step }) => !step.paid);
 
                 const panel = (() => {
                   // FIRST in this chain, deliberately. The Rehab tab is a cross-cutting view
@@ -8172,13 +8216,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         tabs={
                           onRehabPill ? (
                             <>
-                              <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" />
+                              <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" due={rehabDue} dueTitle="Rehab fee still to collect" />
                               {DietDetailButton}
                               {CancelButton}
                             </>
                           ) : (
                             <>
-                              <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" />
+                              <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" due={dietDue} dueTitle="Diet fee still to collect" />
                               {RehabDetailButton}
                               {CancelButton}
                             </>
@@ -8516,15 +8560,26 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     // moment the branch did the next right thing.
                     //
                     // The Diet and Rehab tabs are the same pair every other panel carries, so
-                    // the programme opens here exactly as it does from Fee Collected. The
-                    // OwnTab beside them is drawn only off this panel's own view, for the
-                    // reason Fee Collected gives: on the stage itself it would be a tab above
-                    // the panel it opens, and pressing it would go nowhere.
+                    // the programme opens here exactly as it does from Fee Collected.
+                    //
+                    // All three are drawn, the one you are on included. It used to be dropped
+                    // on its own view, on the reasoning that a tab above the panel it opens
+                    // goes nowhere — true of the press, and beside the point of the row. Two
+                    // tabs on Physio Assign and three on Diet is a row that changes shape as
+                    // you move along it, and the third one is what says where you are: the
+                    // patient is on three programmes and this is the first of them. Pressing
+                    // the lit tab returns you to the view you are already on, which is what
+                    // every other tab row on this board does.
                     const physioAssignTabs = (DietDetailButton || RehabDetailButton) ? (
                       <>
-                        {programmeDetail !== "own" && (
-                          <OwnTab label="Physio Assign" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />
-                        )}
+                        <OwnTab
+                          label="Physio Assign"
+                          short="Physio"
+                          icon={Users}
+                          active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white"
+                          due={treatmentDue}
+                          dueTitle="Treatment fee still to collect"
+                        />
                         {DietDetailButton}
                         {RehabDetailButton}
                       </>
@@ -8673,24 +8728,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                               </div>
                             </div>
 
-                            {/* And whatever the patient still owes, on the same cards Fee Collected
-                                takes it on. A rehab course or a diet plan is sold at the same
-                                consultation as the treatment and is not paid for by it, so a
-                                patient can stand at this stage — physio assigned, sessions
-                                running — with two fees never collected. This panel showed neither,
-                                and the stage before it is the one nobody can go back to.
+                            {/* No fee cards down here any more. A rehab course or a diet plan is
+                                sold at the same consultation as the treatment and is not paid
+                                for by it, so a patient can stand at this stage with two fees
+                                never collected — and this panel used to answer that by
+                                reprinting those cards under the course, which put the Diet Fee
+                                in two places at once: here, and on the Diet tab that actually
+                                owns it. Two doors to one payment, a scroll apart.
 
-                                Only the unpaid ones: the consultation and treatment fees are in by
-                                definition here, and two green ticks under a course card say nothing
-                                the panel above them has not already said. */}
-                            {outstandingFeeSteps.length > 0 && (
-                              <div className="mt-4 border-t border-slate-200 pt-3" data-testid="cons-physio-assign-fees">
-                                <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                                  <IndianRupee className="h-3 w-3" /> Still to Collect
-                                </p>
-                                {renderFeeSteps(outstandingFeeSteps, "cons-physio-assign-fee-steps")}
-                              </div>
-                            )}
+                                The dot on the tab does that job now. It says which programme is
+                                owed something; the programme's own panel says how much and takes
+                                it. Each fee is collected in one place, which is the place that
+                                knows what the money is for. */}
                           </>
                         )}
                       </StagePanel>
