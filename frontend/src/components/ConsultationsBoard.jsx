@@ -62,9 +62,15 @@ const INSTALLMENT_PAYMENT_MODES = [
   { value: "account_transfer", label: "Account Transfer" },
   { value: "cheque", label: "Cheque" },
 ];
-// Modes that collect the bank's own account details. Card and Account Transfer ask for
-// the same four fields; Account Transfer additionally needs the transfer's reference.
-const BANK_DETAIL_MODES = ["card", "account_transfer"];
+// Modes that collect the bank's own account details: the account the money moved out of,
+// plus the reference it moved under.
+//
+// Card is deliberately not one of them. It used to ask for the same four fields, which
+// nobody at the desk could answer honestly -- a card is swiped on a terminal that prints
+// one reference, and the card in the patient's hand carries no account number and no IFSC.
+// Whatever was typed into those boxes to get past the check was invented. Card now asks
+// for the transaction id alone, which is what a disputed swipe is actually traced by.
+const BANK_DETAIL_MODES = ["account_transfer"];
 
 // What a booking on each of an expert's calendars is called, keyed by the `course` tag
 // get_doctor_calendar puts on every occupant. Used to tell a patient why a slot they can
@@ -89,6 +95,7 @@ const SPLIT_PAYMENT_MODES = STANDARD_PAYMENT_MODES.filter((m) => SETTLED_NOW_MOD
 // transaction id left over from the last one would be filed against this one.
 const BLANK_TREATMENT_TENDER = {
   upi_transaction_id: "",
+  card_transaction_id: "",
   account_number: "",
   account_holder_name: "",
   bank_name: "",
@@ -563,6 +570,7 @@ const storedPaymentPayload = (details, mode, amount) => ({
   denominations: details.denominations,
   upi_transaction_id: details.upi_transaction_id,
   upi_utr: details.upi_utr,
+  card_transaction_id: details.card_transaction_id,
   transfer_reference: details.transfer_reference,
   cheque_number: details.cheque_number,
   bank_name: details.bank_name,
@@ -661,7 +669,7 @@ const coinRemainder = (notes, amount) => {
 // What identifies a tender, per mode. Cash has nothing to quote, so it asks for nothing.
 const SPLIT_REFERENCE_LABEL = {
   upi: "UPI Transaction ID",
-  card: "Card / Approval Reference",
+  card: "Card Transaction ID",
   account_transfer: "Reference / UTR No.",
   cheque: "Cheque Number",
 };
@@ -3752,18 +3760,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       payment_mode: mode,
       ...(settlesNow ? {} : { amount: String(consultationPrice || ""), discount: "", balance_due_date: "" }),
     });
-    setPackageConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null, cash_notes: {} });
+    setPackageConfirmDraft({ upi_transaction_id: "", card_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null, cash_notes: {} });
   };
 
-  // Card and Account Transfer share the same four bank fields; Account Transfer also
-  // needs the reference the money arrived under. Returns false (after a toast) if any
-  // required field is blank, so both fee flows validate them identically.
-  const attachBankDetails = (payload, draft, mode) => {
+  // An Account Transfer records the account the money came out of and the reference it
+  // arrived under. Returns false (after a toast) if any of them is blank, so every fee
+  // flow validates them identically.
+  const attachBankDetails = (payload, draft) => {
     if (!draft.account_number.trim() || !draft.account_holder_name.trim() || !draft.bank_name.trim() || !draft.ifsc_code.trim()) {
       toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
       return false;
     }
-    if (mode === "account_transfer" && !draft.transfer_reference.trim()) {
+    if (!draft.transfer_reference.trim()) {
       toast.error("Reference / UTR No. is required for an Account Transfer");
       return false;
     }
@@ -3771,7 +3779,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     payload.account_holder_name = draft.account_holder_name.trim();
     payload.bank_name = draft.bank_name.trim();
     payload.ifsc_code = draft.ifsc_code.trim();
-    if (mode === "account_transfer") payload.transfer_reference = draft.transfer_reference.trim();
+    payload.transfer_reference = draft.transfer_reference.trim();
+    return true;
+  };
+
+  // A card payment records one thing: the transaction id the terminal printed. See
+  // BANK_DETAIL_MODES for why the bank block it used to share with an Account Transfer
+  // was never something the desk could fill in.
+  const attachCardDetails = (payload, draft) => {
+    const txn = (draft.card_transaction_id || "").trim();
+    if (!txn) {
+      toast.error("Card Transaction ID is required");
+      return false;
+    }
+    payload.card_transaction_id = txn;
     return true;
   };
 
@@ -3852,8 +3873,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
         return;
       }
       payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
+    } else if (mode === "card") {
+      if (!attachCardDetails(payload, packageConfirmDraft)) return;
     } else if (BANK_DETAIL_MODES.includes(mode)) {
-      if (!attachBankDetails(payload, packageConfirmDraft, mode)) return;
+      if (!attachBankDetails(payload, packageConfirmDraft)) return;
     }
     submitConsultationFee(payload);
   };
@@ -3922,7 +3945,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const treatmentTenderReference = (mode, draft) => {
     if (mode === "upi") return (draft.upi_transaction_id || "").trim();
     if (mode === "account_transfer") return (draft.transfer_reference || "").trim();
-    if (mode === "card") return (draft.account_number || "").trim();
+    if (mode === "card") return (draft.card_transaction_id || "").trim();
     return "";
   };
 
@@ -3947,6 +3970,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       toast.error(noteTotal(treatmentConfirmDraft.cash_notes) === 0
         ? "Count the cash being taken before collecting it"
         : "The cash counted does not match the amount being taken");
+      return null;
+    }
+    if (mode === "card" && !(treatmentConfirmDraft.card_transaction_id || "").trim()) {
+      toast.error("Card Transaction ID is required");
       return null;
     }
     if (BANK_DETAIL_MODES.includes(mode)
@@ -4102,8 +4129,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
         payload.denominations = countedNotes(detail.cash_notes);
       } else if (only.mode === "upi") {
         payload.upi_transaction_id = (detail.upi_transaction_id || "").trim();
+      } else if (only.mode === "card") {
+        if (!attachCardDetails(payload, detail)) return;
       } else if (BANK_DETAIL_MODES.includes(only.mode)) {
-        if (!attachBankDetails(payload, detail, only.mode)) return;
+        if (!attachBankDetails(payload, detail)) return;
       }
     }
     const splitPayload = attachSessionsSplit(payload);
@@ -4199,6 +4228,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       amount: amount > 0 ? String(amount) : "",
       payment_mode: "cash",
       upi_transaction_id: "",
+      card_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
       cheque_number: "", transfer_reference: "",
       payment_lines: null,
@@ -4373,8 +4403,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       payload.denominations = countedNotes(draft.cash_notes);
     } else if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
+    } else if (mode === "card") {
+      if (!attachCardDetails(payload, draft)) return;
     } else if (BANK_DETAIL_MODES.includes(mode)) {
-      if (!attachBankDetails(payload, draft, mode)) return;
+      if (!attachBankDetails(payload, draft)) return;
     } else if (mode === "cheque") {
       if (!draft.bank_name.trim() || !draft.cheque_number.trim()) {
         toast.error("Bank Name and Cheque Number are required");
@@ -4864,10 +4896,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       discount: selectedLead.rehab_fee_payment_details?.discount_amount ?? "",
       balance_due_date: (selectedLead.rehab_fee_payment_details?.installments || []).find((i) => !i.paid)?.due_date || "",
       upi_transaction_id: "",
+      card_transaction_id: "",
       account_number: "",
       account_holder_name: "",
-      // Shared with Cheque, which is drawn on a bank the same way a card is issued by
-      // one. Only ever one mode's fields are on the screen at a time.
+      // Shared with Cheque, which is drawn on a bank the same way a transfer leaves one.
+      // Only ever one mode's fields are on the screen at a time.
       bank_name: "",
       ifsc_code: "",
       transfer_reference: "",
@@ -5053,6 +5086,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     setDietFeeDraft((d) => ({ ...d, amount: String(settlesNow ? round2(price - (Math.max(0, parseFloat(d.discount) || 0))) : price) }));
     setDietFeeConfirmDraft({
       upi_transaction_id: "",
+      card_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "",
     });
   };
@@ -5103,8 +5137,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
           return;
         }
         payload.upi_transaction_id = dietFeeConfirmDraft.upi_transaction_id.trim();
+      } else if (mode === "card") {
+        if (!attachCardDetails(payload, dietFeeConfirmDraft)) return;
       } else if (BANK_DETAIL_MODES.includes(mode)) {
-        if (!attachBankDetails(payload, dietFeeConfirmDraft, mode)) return;
+        if (!attachBankDetails(payload, dietFeeConfirmDraft)) return;
       }
     }
 
@@ -8996,6 +9032,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       </div>
                     )}
 
+                    {/* One field, because one field is all a card swipe leaves behind:
+                        the transaction id off the terminal slip. */}
+                    {!packageConfirmDraft.payment_lines && mode === "card" && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Transaction ID <span className="text-rose-500">*</span></label>
+                        <Input
+                          value={packageConfirmDraft.card_transaction_id}
+                          onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, card_transaction_id: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-collect-fee-card-txn"
+                        />
+                      </div>
+                    )}
+
                     {!packageConfirmDraft.payment_lines && BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
@@ -9128,6 +9178,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                Math.abs(packageConfirmDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(collectFeeDraft.amount)) > 0.01)
                             : ((mode === "cash" && !notesSettled(packageConfirmDraft.cash_notes, collectFeeDraft.amount)) ||
                                (mode === "upi" && !packageConfirmDraft.upi_transaction_id.trim()) ||
+                               (mode === "card" && !packageConfirmDraft.card_transaction_id.trim()) ||
                                (BANK_DETAIL_MODES.includes(mode) && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim())) ||
                                (mode === "account_transfer" && !packageConfirmDraft.transfer_reference.trim())))))
                         }
@@ -9423,6 +9474,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       </div>
                     )}
 
+                    {/* One field, because one field is all a card swipe leaves behind:
+                        the transaction id off the terminal slip. */}
+                    {!picking && mode === "card" && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Transaction ID <span className="text-rose-500">*</span></label>
+                        <Input
+                          value={treatmentConfirmDraft.card_transaction_id}
+                          onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, card_transaction_id: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-card-txn"
+                        />
+                      </div>
+                    )}
+
                     {!picking && BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
@@ -9521,6 +9586,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           // Cash is counted before it is banked, and counted against the
                           // amount of this tender rather than the fee it is a part of.
                           (!picking && mode === "cash" && !notesSettled(treatmentConfirmDraft.cash_notes, treatmentFeeDraft.amount)) ||
+                          (!picking && mode === "card" && !treatmentConfirmDraft.card_transaction_id.trim()) ||
                           (!picking && BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
                           (!picking && mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim())
                         }
@@ -9743,6 +9809,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       </div>
                     )}
 
+                    {/* One field, because one field is all a card swipe leaves behind:
+                        the transaction id off the terminal slip. */}
+                    {!partialCollectDraft.payment_lines && mode === "card" && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Transaction ID <span className="text-rose-500">*</span></label>
+                        <Input
+                          value={partialCollectDraft.card_transaction_id}
+                          onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, card_transaction_id: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-partial-collect-card-txn"
+                        />
+                      </div>
+                    )}
+
                     {!partialCollectDraft.payment_lines && BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
@@ -9829,6 +9909,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                              partialCollectDraft.payment_lines.some((l) => l.mode === "cash" && !notesSettled(l.notes, l.amount)) ||
                              Math.abs(partialCollectDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(partialCollectDraft.amount)) > 0.01)
                           : ((mode === "cash" && !notesSettled(partialCollectDraft.cash_notes, partialCollectDraft.amount)) ||
+                             (mode === "card" && !partialCollectDraft.card_transaction_id.trim()) ||
                              (BANK_DETAIL_MODES.includes(mode) && (!partialCollectDraft.account_number.trim() || !partialCollectDraft.account_holder_name.trim() || !partialCollectDraft.bank_name.trim() || !partialCollectDraft.ifsc_code.trim())) ||
                              (mode === "account_transfer" && !partialCollectDraft.transfer_reference.trim()) ||
                              (mode === "cheque" && (!partialCollectDraft.bank_name.trim() || !partialCollectDraft.cheque_number.trim()))))
@@ -9939,6 +10020,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       </div>
                     )}
 
+                    {/* One field, because one field is all a card swipe leaves behind:
+                        the transaction id off the terminal slip. */}
+                    {mode === "card" && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Transaction ID <span className="text-rose-500">*</span></label>
+                        <Input value={rehabFeeDraft.card_transaction_id} onChange={(e) => setRehabFeeDraft({ ...rehabFeeDraft, card_transaction_id: e.target.value })} className="h-9" data-testid="cons-rehab-fee-card-txn" />
+                      </div>
+                    )}
+
                     {BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
@@ -9980,6 +10070,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                (rehabFeeDraft.partial_installments || []).some((i) => !(parseFloat(i.amount) > 0) || !i.due_date) ||
                                Math.abs(round2((rehabFeeDraft.partial_installments || []).reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0)) - rehabPrice) > 0.01)
                             : (!(parseFloat(rehabFeeDraft.amount) > 0) ||
+                               (mode === "card" && !(rehabFeeDraft.card_transaction_id || "").trim()) ||
                                (rehabHasBalance && !rehabFeeDraft.balance_due_date) ||
                                rehabDiscountRs > rehabPrice))
                         }
@@ -10162,6 +10253,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       </div>
                     )}
 
+                    {/* One field, because one field is all a card swipe leaves behind:
+                        the transaction id off the terminal slip. */}
+                    {mode === "card" && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Transaction ID <span className="text-rose-500">*</span></label>
+                        <Input value={dietFeeConfirmDraft.card_transaction_id} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, card_transaction_id: e.target.value })} className="h-9" data-testid="cons-diet-fee-card-txn" />
+                      </div>
+                    )}
+
                     {BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
@@ -10205,6 +10305,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                (dietFeeDraft.partial_installments || []).some((i) => !(parseFloat(i.amount) > 0) || !i.due_date) ||
                                Math.abs(round2((dietFeeDraft.partial_installments || []).reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0)) - dietPrice) > 0.01)
                             : (!(parseFloat(dietFeeDraft.amount) > 0) ||
+                               (mode === "card" && !(dietFeeConfirmDraft.card_transaction_id || "").trim()) ||
                                (dietHasBalance && !dietFeeDraft.balance_due_date) ||
                                dietDiscountRs > dietPrice))
                         }

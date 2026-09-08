@@ -1778,6 +1778,7 @@ async def client_transaction_history(
             "payment_mode": inst.get("payment_mode"),
             "upi_transaction_id": inst.get("upi_transaction_id"),
             "upi_utr": inst.get("upi_utr"),
+            "card_transaction_id": inst.get("card_transaction_id"),
             "account_last4": inst.get("account_last4"),
             "account_holder_name": inst.get("account_holder_name"),
             "bank_name": inst.get("bank_name"),
@@ -1957,17 +1958,14 @@ async def mark_installment_paid(
                 if utr:
                     detail_suffix += f", UTR {utr}"
         elif mode == "card":
-            if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
-                        payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip()]):
-                raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name and IFSC Code are required")
-            last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
-            mode_fields = {
-                "account_last4": last4,
-                "account_holder_name": payload.account_holder_name.strip(),
-                "bank_name": payload.bank_name.strip(),
-                "ifsc_code": payload.ifsc_code.strip().upper(),
-            }
-            detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()})"
+            # One field: the transaction id off the terminal. Same rule as a card payment
+            # against the whole fee -- see build_payment_details in v3_packages.py, which
+            # explains why the four bank fields were never the desk's to answer.
+            txn = (payload.card_transaction_id or "").strip()
+            if not txn:
+                raise HTTPException(status_code=400, detail="Card Transaction ID is required")
+            mode_fields = {"card_transaction_id": txn}
+            detail_suffix = f" · Card txn {txn}"
         elif mode == "cheque":
             if not payload.bank_name or not payload.bank_name.strip() or not payload.cheque_number or not payload.cheque_number.strip():
                 raise HTTPException(status_code=400, detail="Bank Name and Cheque Number are required")

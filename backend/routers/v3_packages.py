@@ -371,8 +371,9 @@ def build_payment_details(payload) -> tuple:
     the amount to say anything at all (what the notes came to, what the installments add up
     to). They are settled in _standard_payment_record below, which has it.
 
-    Card and Account Transfer persist only the last four digits of the account number; the
+    An Account Transfer persists only the last four digits of the account number; the
     full number is never stored, and that rule lives here so no future caller can forget it.
+    Card keeps no account at all -- see below.
     """
     mode = payload.payment_mode
     if mode == "upi":
@@ -387,21 +388,37 @@ def build_payment_details(payload) -> tuple:
             return {"upi_transaction_id": txn, "upi_utr": utr}, f" · UPI txn {txn}, UTR {utr}"
         return {"upi_transaction_id": txn}, f" · UPI txn {txn}"
 
-    if mode in ("card", "account_transfer"):
+    if mode == "card":
+        # The terminal's transaction id, and nothing else. Card used to be held to an
+        # Account Transfer's four bank fields, which the desk had no way of answering
+        # truthfully: a card is swiped on a machine that prints one reference, and the
+        # card in the patient's hand carries no account number and no IFSC. Whatever got
+        # typed into those boxes to get past the check was invented, and a made-up account
+        # on a payment record is worse than no account at all. The transaction id is the
+        # one thing a disputed swipe is actually traced by.
+        txn = (payload.card_transaction_id or "").strip()
+        if not txn:
+            raise HTTPException(status_code=400, detail="Card Transaction ID is required")
+        return {"card_transaction_id": txn}, f" · Card txn {txn}"
+
+    if mode == "account_transfer":
         required = [payload.account_number, payload.account_holder_name, payload.bank_name, payload.ifsc_code]
         if not all((f or "").strip() for f in required):
             raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name and IFSC Code are required")
-        if mode == "account_transfer" and not (payload.transfer_reference or "").strip():
+        if not (payload.transfer_reference or "").strip():
             raise HTTPException(status_code=400, detail="Reference/UTR No. is required for an Account Transfer")
         last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
         holder = payload.account_holder_name.strip()
         bank = payload.bank_name.strip()
         ifsc = payload.ifsc_code.strip().upper()
-        details = {"account_last4": last4, "account_holder_name": holder, "bank_name": bank, "ifsc_code": ifsc}
-        suffix = f" · A/C ****{last4}, {holder}, {bank} ({ifsc})"
-        if mode == "account_transfer":
-            details["transfer_reference"] = payload.transfer_reference.strip()
-            suffix += f" · Ref {details['transfer_reference']}"
+        details = {
+            "account_last4": last4,
+            "account_holder_name": holder,
+            "bank_name": bank,
+            "ifsc_code": ifsc,
+            "transfer_reference": payload.transfer_reference.strip(),
+        }
+        suffix = f" · A/C ****{last4}, {holder}, {bank} ({ifsc}) · Ref {details['transfer_reference']}"
         return details, suffix
 
     if mode == "cheque":
