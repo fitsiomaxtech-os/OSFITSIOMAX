@@ -72,6 +72,11 @@ from routers.v3_hr import resolve_employee_branches
 # pressed for themselves, so the arithmetic behind them belongs where the presses are
 # handled -- see day_totals in routers/v3_clock.py. That module imports nothing from here.
 from routers.v3_clock import day_totals
+# What a day of attendance IS -- read off the clock against the branch's own working day
+# rather than typed onto fifty rows by hand. Every screen below asks this module the same
+# question over the rows it already has, which is what keeps the register, the board and
+# payroll from disagreeing about the same Tuesday. See attendance_rules.py.
+from attendance_rules import DEFAULTS as RULE_DEFAULTS, day_status, is_week_off, rules_of
 
 router = APIRouter(prefix="/api/v3/hr")
 
@@ -232,6 +237,123 @@ def permission_of(mark: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     }
 
 
+# ---------- reading a span of days the same way everywhere ----------
+
+async def _employee_by_user() -> Dict[str, str]:
+    """user_id -> employee_id, for the accounts linked to one.
+
+    The clock is keyed by the login and the register by the employee, because a person is
+    both and neither list is the other. Somebody with no employee record clocks in for
+    themselves and simply does not appear on this board -- which is a gap in Credentials,
+    not something to invent a row for.
+    """
+    rows = await v3_col("users").find(
+        {"employee_id": {"$nin": [None, ""]}}, {"_id": 0, "id": 1, "employee_id": 1}
+    ).to_list(2000)
+    return {r["id"]: r["employee_id"] for r in rows}
+
+
+async def _employees_with_logins() -> set:
+    """The employees who have an account, and so a way to clock at all.
+
+    The one thing standing between this register and forty-eight wrong payslips. A day
+    nobody clocked is read as absent, and absence costs pay -- but plenty of people on the
+    books have never needed a login, and they cannot press a button they were never given.
+    Their silence is not evidence, so they stay unmarked, exactly as they were before any
+    of this. See has_login in attendance_rules.day_status.
+    """
+    rows = await v3_col("users").find(
+        {"employee_id": {"$nin": [None, ""]}}, {"_id": 0, "employee_id": 1},
+    ).to_list(2000)
+    return {r["employee_id"] for r in rows}
+
+
+async def _rules_by_branch() -> Dict[str, Dict[str, Any]]:
+    """Every branch's working day, keyed by branch id. Read once per request, not per row."""
+    rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "attendance_rules": 1}).to_list(500)
+    return {r["id"]: rules_of(r) for r in rows}
+
+
+def _rules_for(employee: Dict[str, Any], by_branch: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """The working day an employee is measured against.
+
+    Their branch's, or the defaults where they have none -- a multi-branch desk is measured
+    against the branch they are primarily on, which is the one resolve_employee_branches
+    settled onto the row. Measuring somebody against several sets of hours at once has no
+    answer, and picking the strictest would make being on two branches a punishment.
+    """
+    return by_branch.get(employee.get("branch_id") or "", RULE_DEFAULTS)
+
+
+class SpanContext:
+    """Everything needed to say what each employee's each day was, fetched once.
+
+    Assembled per request rather than per row: a month of fifty people is fifteen hundred
+    days, and asking the database for each one would be fifteen hundred queries to answer a
+    question three collections already hold.
+    """
+
+    def __init__(self, marks, clocks, rules, logins, today, now_at):
+        self.marks = marks
+        self.clocks = clocks
+        self.rules = rules
+        self.logins = logins
+        self.today = today
+        self.now_at = now_at
+
+    def clock(self, employee_id: str, iso: str) -> Optional[dict]:
+        return self.clocks.get((employee_id, iso))
+
+    def mark(self, employee_id: str, iso: str) -> dict:
+        return self.marks.get((employee_id, iso)) or {}
+
+    def totals(self, employee_id: str, iso: str) -> Dict[str, Any]:
+        return day_totals(self.clock(employee_id, iso), self.now_at)
+
+    def status(self, employee: Dict[str, Any], iso: str) -> Dict[str, Any]:
+        """The day, and whether anybody chose it. One call, one answer, every screen."""
+        emp_id = employee["id"]
+        return day_status(
+            self.rules.get(emp_id, RULE_DEFAULTS),
+            iso,
+            self.clock(emp_id, iso),
+            self.totals(emp_id, iso),
+            self.mark(emp_id, iso),
+            self.today,
+            emp_id in self.logins,
+        )
+
+    def rules_of_employee(self, employee: Dict[str, Any]) -> Dict[str, Any]:
+        return self.rules.get(employee["id"], RULE_DEFAULTS)
+
+
+async def _span_context(first: str, last: str, roster: List[Dict[str, Any]]) -> SpanContext:
+    marks = await v3_col("attendance").find(
+        {"date": {"$gte": first, "$lte": last}}, {"_id": 0},
+    ).to_list(50000)
+    clocks = await v3_col("clock_days").find(
+        {"date": {"$gte": first, "$lte": last}}, {"_id": 0},
+    ).to_list(50000)
+    emp_of_user = await _employee_by_user()
+    by_branch = await _rules_by_branch()
+    logins = await _employees_with_logins()
+
+    clocks_by: Dict[tuple, dict] = {}
+    for c in clocks:
+        emp = emp_of_user.get(c.get("user_id") or "")
+        if emp:
+            clocks_by[(emp, c["date"])] = c
+
+    return SpanContext(
+        marks={(m["employee_id"], m["date"]): m for m in marks},
+        clocks=clocks_by,
+        rules={e["id"]: _rules_for(e, by_branch) for e in roster},
+        logins=logins,
+        today=clinic_today(),
+        now_at=now_iso(),
+    )
+
+
 @router.get("/attendance")
 async def attendance_day(
     day: Optional[str] = Query(None, alias="date"),
@@ -239,14 +361,18 @@ async def attendance_day(
 ):
     """The register for one day: every active employee, with their mark if they have one.
 
-    Unmarked is its own answer, not an absence. A day nobody has filled in yet reads as
-    blank rather than as everybody being away, because the second is a claim about people
-    that nobody made.
+    Most of it is read rather than typed now. The status on each row comes from the clock
+    measured against that person's branch working day (attendance_rules.py) -- present,
+    late, half day, week off, or absent for a working day nobody clocked. A mark HR made by
+    hand still beats all of it, and `auto` on each row says which of the two this is.
+
+    Unmarked is still its own answer where nothing can be concluded: a day still running,
+    or somebody with no login, who cannot clock and whose silence therefore says nothing.
     """
     on = _valid_date(day) if day else clinic_today()
     roster = await _roster()
-    marks = await v3_col("attendance").find({"date": on}, {"_id": 0}).to_list(2000)
-    by_emp = {m["employee_id"]: m for m in marks}
+    ctx = await _span_context(on, on, roster)
+    by_emp = {e["id"]: ctx.mark(e["id"], on) for e in roster}
 
     rows = []
     summary = {s: 0 for s in ATTENDANCE_STATUSES}
@@ -257,7 +383,8 @@ async def attendance_day(
     summary["clocked"] = 0
     for e in roster:
         m = by_emp.get(e["id"]) or {}
-        status = m.get("status") or ""
+        read = ctx.status(e, on)
+        status = read["status"]
         if m.get("clocked"):
             summary["clocked"] += 1
         rows.append({
@@ -269,6 +396,10 @@ async def attendance_day(
             "branch_name": e.get("branch_name") or "",
             "photo_url": e.get("photo_url") or "",
             "status": status,
+            # Whether this day was read off the clock or decided by a person. The screens
+            # draw the difference because it is a real one: a reading moves when the rules
+            # or the times do, a decision does not.
+            "auto": read["auto"],
             "check_in": m.get("check_in") or "",
             "check_out": m.get("check_out") or "",
             "note": m.get("note") or "",
@@ -305,6 +436,9 @@ PERIODS = (PERIOD_DAY, PERIOD_RANGE, PERIOD_MONTH, PERIOD_YEAR)
 # nine in the morning is too early to have made it.
 YET_TO_LOGIN = "yet_to_login"
 
+# The clock's own word for a day somebody has finished -- see _state in routers/v3_clock.py.
+DONE_STATE = "done"
+
 # The marks that mean somebody is not expected in. Counted apart from Yet to Login so the
 # figure that says "chase these people" does not include the ones nobody is waiting for.
 AWAY_STATUSES = (ABSENT, LEAVE)
@@ -340,35 +474,32 @@ def _period_span(period: str, day, start, end, month, year) -> tuple:
     return text + "-01-01", text + "-12-31", text
 
 
-def _board_status(clock_state: str, mark_status: str) -> str:
-    """What the board calls a person's day, from their clock and HR's mark together.
+def _board_status(clock_state: str, read_status: str) -> str:
+    """What the board calls a person's day: what is happening, else what the day amounts to.
 
-    The clock wins while it says something. Somebody at their desk right now is Working
-    whatever a stale mark says, and that is the point of this board -- it reports what is
-    happening rather than what was expected.
+    A clock still running wins. Somebody at their desk right now is Working, and somebody
+    away from it is On break, whatever the day will add up to by six -- that is the point
+    of this board, which reports the floor as it stands rather than the month as it will be
+    counted.
 
-    HR's mark is what speaks when the clock is silent: a day marked leave or absent is a
-    decision, and it stands. Only when there is neither does the day read Yet to Login.
+    Once the clock is done or was never started, the day itself speaks: the status read off
+    it against the branch's working day, or the mark HR made, whichever attendance_rules
+    settled on. `done` is deliberately not shown any more -- "Present" and "Late" say
+    everything "Done" said and one thing more.
+
+    Only when there is nothing at all -- no clock, nothing concluded, a day still going --
+    does it read Yet to Login.
     """
-    if clock_state and clock_state != "out":
+    if clock_state in ("working", "on_break"):
         return clock_state
-    if mark_status:
-        return mark_status
+    if read_status:
+        return read_status
+    # A finished day always reads as something -- present, late, half day -- so this is
+    # reached only if the rules produced nothing at all for one. Better to say the day was
+    # worked and ended than to file somebody who clocked out at six under Yet to Login.
+    if clock_state == DONE_STATE:
+        return DONE_STATE
     return YET_TO_LOGIN
-
-
-async def _employee_by_user() -> Dict[str, str]:
-    """user_id -> employee_id, for the accounts linked to one.
-
-    The clock is keyed by the login and the register by the employee, because a person is
-    both and neither list is the other. Somebody with no employee record clocks in for
-    themselves and simply does not appear on this board -- which is a gap in Credentials,
-    not something to invent a row for.
-    """
-    rows = await v3_col("users").find(
-        {"employee_id": {"$nin": [None, ""]}}, {"_id": 0, "id": 1, "employee_id": 1}
-    ).to_list(2000)
-    return {r["id"]: r["employee_id"] for r in rows}
 
 
 @router.get("/attendance/overview")
@@ -398,24 +529,11 @@ async def attendance_overview(
     span_days = _dates_between(first, last)
 
     roster = await _roster()
-    marks = await v3_col("attendance").find(
-        {"date": {"$gte": first, "$lte": last}}, {"_id": 0}
-    ).to_list(50000)
-    clocks = await v3_col("clock_days").find(
-        {"date": {"$gte": first, "$lte": last}}, {"_id": 0}
-    ).to_list(50000)
-    emp_of_user = await _employee_by_user()
-
     # Both sides keyed the same way, so a row is assembled by employee and date without
-    # rescanning either list per person.
-    marks_by: Dict[tuple, dict] = {(m["employee_id"], m["date"]): m for m in marks}
-    clocks_by: Dict[tuple, dict] = {}
-    for c in clocks:
-        emp = emp_of_user.get(c.get("user_id") or "")
-        if emp:
-            clocks_by[(emp, c["date"])] = c
-
-    now_at = now_iso()
+    # rescanning either list per person -- and the branch rules each person is measured
+    # against come down with them. See _span_context.
+    ctx = await _span_context(first, last, roster)
+    marks_by, clocks_by, now_at = ctx.marks, ctx.clocks, ctx.now_at
     single = first == last
     rows = []
     for e in roster:
@@ -424,16 +542,23 @@ async def attendance_overview(
         away_days = 0
         permission_days = 0
         permission_minutes = 0
+        off_days = 0
         for d in span_days:
             clock = clocks_by.get((e["id"], d))
             mark = marks_by.get((e["id"], d)) or {}
             t = day_totals(clock, now_at)
             for k in totals:
                 totals[k] += t[k]
+            read = ctx.status(e, d)
             if t["state"] != "out":
                 present_days += 1
-            elif mark.get("status") in AWAY_STATUSES:
+            elif read["status"] in AWAY_STATUSES:
+                # Absent counts here whether HR typed it or the clock's silence produced
+                # it -- a day nobody worked and nobody accounted for is the thing this
+                # column exists to surface.
                 away_days += 1
+            elif read["status"] in (WEEK_OFF, HOLIDAY):
+                off_days += 1
             # Counted on its own axis rather than folded into either of the two above: a
             # day with two hours' permission on it is a day the person was present for,
             # and adding it to "away" would say they were not.
@@ -455,6 +580,9 @@ async def attendance_overview(
             "remote": str(e.get("work_type") or "").strip().lower() == "online",
             "present_days": present_days,
             "away_days": away_days,
+            # Days nobody was expected in. Counted so the board can say a person is not
+            # behind on a month that happened to hold five Sundays.
+            "off_days": off_days,
             "permission_days": permission_days,
             "permission_minutes": permission_minutes,
         }
@@ -462,8 +590,10 @@ async def attendance_overview(
         if single:
             clock = clocks_by.get((e["id"], first)) or {}
             mark = marks_by.get((e["id"], first)) or {}
+            read = ctx.status(e, first)
             row.update({
-                "status": _board_status(day_totals(clock, now_at)["state"], mark.get("status") or ""),
+                "status": _board_status(day_totals(clock, now_at)["state"], read["status"]),
+                "auto": read["auto"],
                 "check_in": clock.get("clock_in") or mark.get("check_in") or "",
                 "check_out": clock.get("clock_out") or mark.get("check_out") or "",
                 "note": mark.get("note") or "",
@@ -500,10 +630,13 @@ async def attendance_overview(
         "yet_to_login": None,
     }
     if single:
+        # Read off the assembled status rather than the stored mark, so a week off the
+        # branch set and an absence the clock's silence produced both drop out of the
+        # chase-these-people figure -- one because nobody is waiting for them, the other
+        # because the day has already been concluded.
         kpis["yet_to_login"] = len([
             r for r in rows
-            if r["present_days"] == 0
-            and (marks_by.get((r["employee_id"], first)) or {}).get("status") not in NOT_EXPECTED
+            if r["present_days"] == 0 and r.get("status") not in NOT_EXPECTED
         ])
 
     return {
@@ -596,16 +729,37 @@ async def mark_attendance(payload: AttendanceDay, user: V3UserOut = Depends(requ
 
 
 async def _month_marks(month: str) -> Dict[str, Dict[str, float]]:
-    """Per-employee counts of each status across a month, keyed by employee id."""
+    """Per-employee counts of each status across a month, keyed by employee id.
+
+    Counted over every day of the month for every person on the books, rather than over
+    the rows somebody happened to type. This is what payroll pro-rates against, so it is
+    the place the change of method actually reaches money: a working day nobody clocked is
+    counted `absent` here and costs a day, where before it was silence and was paid.
+
+    Two things keep that from being brutal. A day HR marked stands, whatever the clock did
+    or did not record. And an employee with no login is never counted absent at all -- see
+    _employees_with_logins -- because they have no way to clock and their silence is not
+    evidence of anything.
+
+    Days that have not happened yet are not counted. A month still running is measured to
+    today, so a payroll preview on the 5th does not read the rest of the month as
+    twenty-five absences.
+    """
     start, end, _ = _month_span(month)
-    rows = await v3_col("attendance").find(
-        {"date": {"$gte": start, "$lte": end}}, {"_id": 0, "employee_id": 1, "status": 1}
-    ).to_list(50000)
+    roster = await _roster()
+    ctx = await _span_context(start, end, roster)
+    today = ctx.today
+
     tally: Dict[str, Dict[str, float]] = {}
-    for r in rows:
-        emp = tally.setdefault(r["employee_id"], {s: 0 for s in ATTENDANCE_STATUSES})
-        if r.get("status") in emp:
-            emp[r["status"]] += 1
+    for e in roster:
+        counts = {s: 0 for s in ATTENDANCE_STATUSES}
+        for iso in _dates_between(start, end):
+            if iso > today:
+                break
+            status = ctx.status(e, iso)["status"]
+            if status in counts:
+                counts[status] += 1
+        tally[e["id"]] = counts
     return tally
 
 
@@ -1369,3 +1523,160 @@ async def delete_quote(quote_id: str, _: V3UserOut = Depends(require_hr)):
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Quote not found")
     return {"deleted": True}
+
+
+# ---------- what somebody is paid, and why it changed ----------
+
+# The reasons a salary moves, as slugs. A dropdown rather than a free-text box because the
+# whole point of recording it is being able to read it back a year later: "increment",
+# "incr", "annual hike" and "yearly" are four spellings of one thing, and a history written
+# in four spellings cannot answer how many promotions a department gave out.
+#
+# `other` keeps the free-text escape open for the case none of these is honest, and that
+# note is required when it is picked -- an "other" with nothing after it is worse than no
+# reason at all, because it looks like one.
+SALARY_REASONS = {
+    "annual_increment": "Annual increment",
+    "promotion": "Promotion",
+    "performance": "Performance",
+    # A wrong figure being fixed is not a raise, and a history that cannot tell the two
+    # apart reports a pay rise every time somebody corrects a typo.
+    "correction": "Correction",
+    "other": "Other",
+}
+
+MAX_SALARY_NOTE = 300
+
+
+def _salary_field(emp: dict) -> str:
+    """Which of the two figures to write, so that payroll reads back what was typed.
+
+    _monthly_base prefers gross and falls back to net, so writing gross is what makes a
+    number take effect -- except where the record carries only a net figure, which is how
+    most of them were entered. Overwriting gross there would leave two salaries on one
+    employee and the net one silently ignored, so the field that already means something
+    is the field that gets edited.
+    """
+    if float(emp.get("gross_salary") or 0) > 0:
+        return "gross_salary"
+    if float(emp.get("net_salary") or 0) > 0:
+        return "net_salary"
+    # Nothing set at all -- the No pay set lane. Gross, because that is what payroll reads
+    # first and a figure typed here should be the figure that pays.
+    return "gross_salary"
+
+
+class SalaryChangeIn(BaseModel):
+    amount: float
+    reason: str
+    note: Optional[str] = ""
+
+
+@router.get("/employees/{emp_id}/salary")
+async def employee_salary(emp_id: str, _: V3UserOut = Depends(require_hr)):
+    """What this person is paid, and every change that got them there.
+
+    The history is its own collection rather than a list on the employee: it only grows,
+    it is read on one screen, and an employee document that carries every raise since
+    hiring is one that gets longer every year in every query that never wanted it.
+
+    Newest first. This is read to answer "what happened recently", and a list that opens
+    on a raise from four years ago answers a question nobody asked.
+    """
+    emp = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="No such employee")
+    rows = await v3_col("salary_history").find(
+        {"employee_id": emp_id}, {"_id": 0},
+    ).sort("changed_at", -1).to_list(200)
+    return {
+        "employee_id": emp_id,
+        "employee_name": emp.get("full_name") or "",
+        "employee_code": emp.get("employee_code") or "",
+        "department": emp.get("department") or "",
+        "designation": emp.get("designation") or "",
+        "amount": _monthly_base(emp),
+        "field": _salary_field(emp),
+        "reasons": [{"key": k, "label": v} for k, v in SALARY_REASONS.items()],
+        "history": rows,
+    }
+
+
+@router.post("/employees/{emp_id}/salary")
+async def change_employee_salary(
+    emp_id: str,
+    payload: SalaryChangeIn,
+    user: V3UserOut = Depends(require_hr),
+):
+    """Set what this person is paid, and say why.
+
+    One door for every change, whether it is a raise or a wrong figure being fixed. Two
+    doors -- one that asks and one that does not -- would put the unexplained changes in
+    the history beside the explained ones with nothing to say which was which, and the
+    correction is the entry somebody most wants a note against a year later.
+
+    Held to the roles that run payroll rather than to Super Admin alone, which is what
+    PATCH /employees is held to. The No pay set lane is HR's job to empty and they already
+    read every salary in the company on the screen this is reached from; making them ask
+    somebody else to type the figure they are looking at would not protect anything.
+
+    Does NOT touch a payroll run that already exists. A generated run froze its figures on
+    purpose -- that is what generating one is -- so a raise typed today changes what the
+    next Regenerate produces and leaves a finalised month alone. Any other rule would let
+    a salary edit quietly rewrite a month somebody has already been paid for.
+    """
+    reason = str(payload.reason or "").strip().lower()
+    if reason not in SALARY_REASONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reason must be one of: {', '.join(SALARY_REASONS)}",
+        )
+    note = (payload.note or "").strip()[:MAX_SALARY_NOTE]
+    # An "other" with nothing after it looks like a reason and is not one.
+    if reason == "other" and not note:
+        raise HTTPException(status_code=400, detail="Say what the reason is")
+
+    amount = float(payload.amount or 0)
+    if amount < 0:
+        raise HTTPException(status_code=400, detail="A salary cannot be negative")
+    # Ten million a month is not a salary anybody at this clinic is on, and it is what a
+    # mistyped figure looks like. Refused rather than clamped: quietly paying somebody a
+    # different number from the one on screen is the worse failure.
+    if amount > 10_000_000:
+        raise HTTPException(status_code=400, detail="That figure looks wrong — check it")
+
+    emp = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="No such employee")
+
+    field = _salary_field(emp)
+    before = _monthly_base(emp)
+    if round(before, 2) == round(amount, 2):
+        raise HTTPException(status_code=400, detail="That is what they are paid already")
+
+    now = now_iso()
+    entry = {
+        "id": str(uuid.uuid4()),
+        "employee_id": emp_id,
+        # Copied, not looked up on read. This is a thing somebody did on a day, and it
+        # should still name who it was about after the employee record is gone.
+        "employee_name": emp.get("full_name") or "",
+        "employee_code": emp.get("employee_code") or "",
+        "field": field,
+        "from_amount": round(before, 2),
+        "to_amount": round(amount, 2),
+        "change": round(amount - before, 2),
+        # Stored beside the amounts rather than worked out on read: a raise from nothing is
+        # a division by zero, and every reader would have to know that.
+        "percent": round((amount - before) / before * 100, 2) if before > 0 else None,
+        "reason": reason,
+        "reason_label": SALARY_REASONS[reason],
+        "note": note,
+        "changed_by": user.full_name or user.email,
+        "changed_at": now,
+    }
+    await v3_col("employees").update_one(
+        {"id": emp_id}, {"$set": {field: round(amount, 2), "updated_at": now}},
+    )
+    await v3_col("salary_history").insert_one(dict(entry))
+    return {"amount": round(amount, 2), "field": field, "entry": entry}

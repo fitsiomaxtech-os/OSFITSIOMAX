@@ -41,6 +41,7 @@ import {
   hrApprovals, hrCreateApproval, hrDecideApproval, hrDeleteApproval,
   hrPayroll, hrGeneratePayroll, hrAdjustPayslip, hrPayrollStatus,
   hrQuotes, hrAddQuote, hrUpdateQuote, hrDeleteQuote,
+  hrEmployeeSalary, hrChangeEmployeeSalary,
 } from "@/lib/api";
 
 // ---------- shared ----------
@@ -267,10 +268,25 @@ const BOARD_STATUS = {
   holiday: { label: "Holiday", tone: "bg-violet-100 text-violet-700" },
 };
 
-const StatusBadge = ({ status }) => {
+/** A day's status, and whether anybody chose it.
+ *
+ *  The dot is the whole point of the control now that attendance is read off the clock
+ *  rather than typed: a status with one was worked out from when this person pressed in and
+ *  out, measured against their branch's working day, and it will move if either changes. A
+ *  status without one is somebody's decision and will not. HR needs to be able to tell
+ *  those apart at a glance, because the first is worth checking and the second is worth
+ *  asking about.
+ */
+const StatusBadge = ({ status, auto }) => {
   const s = BOARD_STATUS[status] || BOARD_STATUS.yet_to_login;
   return (
-    <span className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold ${s.tone}`}>{s.label}</span>
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${s.tone}`}
+      title={auto ? "Read from the clock and this branch's working day" : "Set by hand — a decision, not a reading"}
+    >
+      {auto && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-40" />}
+      {s.label}
+    </span>
   );
 };
 
@@ -397,8 +413,15 @@ const DayDetailModal = ({ row, date, onClose, onSaved }) => {
         <div className="mt-4 border-t border-slate-100 pt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">HR mark</p>
           <p className="mt-0.5 text-[11px] text-slate-400">
-            What payroll reads. Leave it unset and the day counts as worked; the clock cannot say somebody was absent.
+            The day is read off the clock against this branch&apos;s working day — set on
+            <b> Branch &rarr; Management &rarr; Time Management</b>. Marking it here overrules that reading for this
+            one day, and what you set stays set whatever the clock does afterwards.
           </p>
+          {row.auto && row.status && (
+            <p className="mt-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500" data-testid="hr-att-detail-derived">
+              Currently reading as <b>{(BOARD_STATUS[row.status] || {}).label || row.status}</b> — nobody has marked this day.
+            </p>
+          )}
           {row.locked ? (
             <p className="mt-2 flex items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs text-sky-800">
               <Lock className="h-3.5 w-3.5 shrink-0" />
@@ -666,7 +689,7 @@ export const AttendanceTab = () => {
                       </td>
                       {single ? (
                         <>
-                          <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                          <td className="px-4 py-3"><StatusBadge status={r.status} auto={r.auto} /></td>
                           <td className="px-4 py-3 text-slate-700">{r.check_in ? prettyTime(r.check_in) : "—"}</td>
                           <td className="px-4 py-3 text-slate-700">{r.check_out ? prettyTime(r.check_out) : "—"}</td>
                         </>
@@ -839,12 +862,20 @@ const laneOf = (slip) => PAY_LANES.find((l) => l.match(slip));
  *  figures a human is allowed to move. The sum is shown as a sum — earned, bonus,
  *  deduction, net — because on a card there is no column heading to say where the last
  *  number came from. */
-const PayslipCard = ({ slip: s, editable, onAdjust }) => (
+const PayslipCard = ({ slip: s, editable, onAdjust, onOpen }) => (
   <div
     className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:shadow-md"
     data-testid={`hr-pay-kanban-card-${s.employee_id}`}
   >
-    <div className="flex items-start gap-2">
+    {/* The name is the button, not the card. The two boxes below take a figure each, and a
+        card that opened a dialog wherever it was clicked would open one every time somebody
+        went to type a bonus. */}
+    <button
+      type="button"
+      onClick={() => onOpen?.(s)}
+      className="flex w-full items-start gap-2 rounded-lg text-left transition hover:bg-slate-50"
+      data-testid={`hr-pay-open-${s.employee_id}`}
+    >
       <EmployeeAvatar employee={{ full_name: s.employee_name }} size={32} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-slate-800">{s.employee_name}</p>
@@ -853,7 +884,7 @@ const PayslipCard = ({ slip: s, editable, onAdjust }) => (
         </p>
       </div>
       <span className="shrink-0 text-sm font-extrabold text-sky-700">{money(s.net_payable)}</span>
-    </div>
+    </button>
 
     <div className="mt-2 flex flex-wrap gap-1">
       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600" title={`From the employee record's ${s.base_from}`}>
@@ -893,62 +924,254 @@ const PayslipCard = ({ slip: s, editable, onAdjust }) => (
   </div>
 );
 
-/** The month as a board rather than as sixty identical rows.
+/** The month, one lane at a time.
  *
- *  The table answers "what is everybody getting"; the board answers "what is still wrong
- *  with this run", which is the question a draft is open in order to answer. Each lane
- *  carries its own head count and its own net, so what a problem costs is legible without
- *  anybody adding it up.
+ *  Five columns side by side gave every lane a fifth of the width and none of them enough:
+ *  a card had to wrap a name onto two lines, four of the five columns were usually empty,
+ *  and the one with everybody in it scrolled inside a strip 280px wide. The lanes are the
+ *  same five and mean the same thing — this is which of them is on screen, not how many
+ *  there are.
+ *
+ *  Opens on the first lane with anybody in it, and stops choosing the moment somebody
+ *  clicks: a screen that keeps moving you to whichever tab has work on it is one you
+ *  cannot stand still in.
  */
-const PayrollBoard = ({ slips, editable, onAdjust }) => {
+const PayrollBoard = ({ slips, editable, onAdjust, onOpen }) => {
   const lanes = useMemo(() => {
     const out = Object.fromEntries(PAY_LANES.map((l) => [l.key, []]));
     for (const s of slips) out[laneOf(s).key].push(s);
     return out;
   }, [slips]);
 
+  const [lane, setLane] = useState(PAY_LANES[0].key);
+  const picked = useRef(false);
+  useEffect(() => {
+    if (picked.current) return;
+    const first = PAY_LANES.find((l) => (lanes[l.key] || []).length > 0);
+    if (first) setLane(first.key);
+  }, [lanes]);
+
+  const current = PAY_LANES.find((l) => l.key === lane) || PAY_LANES[0];
+  const cards = lanes[current.key] || [];
+  const net = cards.reduce((t, s) => t + Number(s.net_payable || 0), 0);
+
   return (
-    <div className="space-y-2">
-      {/* The one rule the whole board is downstream of. It lived in the table header;
+    <div className="space-y-3">
+      {/* The one rule the whole screen is downstream of. It lived in the table header;
           without it here a pro-rated figure looks like an arithmetic mistake. */}
       <p className="text-xs text-slate-500">
         Pay is pro-rated on calendar days: a day of loss of pay costs base ÷ days in month. Bonuses and deductions are editable while the run is a draft.
       </p>
-      <div className="flex gap-3 overflow-x-auto pb-2" data-testid="hr-pay-kanban">
-        {PAY_LANES.map((lane) => {
-          const cards = lanes[lane.key];
-          const net = cards.reduce((t, s) => t + Number(s.net_payable || 0), 0);
-          return (
-            <div
-              key={lane.key}
-              className={`flex min-w-[280px] flex-1 flex-col rounded-xl border p-3 ${lane.tone}`}
-              data-testid={`hr-pay-col-${lane.key}`}
-            >
-              <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 shrink-0 rounded-full ${lane.dot}`} />
-                <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{lane.label}</p>
-                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-600 shadow-sm" data-testid={`hr-pay-col-count-${lane.key}`}>
-                  {cards.length}
-                </span>
-              </div>
-              <p className="mt-1 text-[11px] leading-snug text-slate-500">{lane.hint}</p>
-              <p className="mt-1 text-[11px] font-bold text-slate-600">{money(net)} net</p>
 
-              {/* Capped rather than left to run: one heavy lane would otherwise push every
-                  other lane's cards off the bottom of a screen with room for them. */}
-              <div className="mt-3 max-h-[62vh] space-y-2 overflow-y-auto pr-0.5">
-                {cards.map((s) => (
-                  <PayslipCard key={s.employee_id} slip={s} editable={editable} onAdjust={onAdjust} />
-                ))}
-                {cards.length === 0 && (
-                  <p className="rounded-lg border border-dashed border-slate-300 bg-white/60 py-6 text-center text-xs text-slate-400">
-                    Nobody here.
-                  </p>
-                )}
-              </div>
-            </div>
+      <div className="flex flex-wrap gap-1.5 border-b border-slate-200 pb-2" data-testid="hr-pay-lane-tabs">
+        {PAY_LANES.map((l) => {
+          const on = l.key === lane;
+          const count = (lanes[l.key] || []).length;
+          return (
+            <button
+              key={l.key}
+              type="button"
+              onClick={() => { picked.current = true; setLane(l.key); }}
+              aria-pressed={on}
+              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
+                on ? `${l.tone} border-transparent text-slate-800 shadow-sm` : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+              }`}
+              data-testid={`hr-pay-lane-${l.key}`}
+            >
+              <span className={`h-2 w-2 shrink-0 rounded-full ${l.dot}`} />
+              {l.label}
+              <span className={`rounded-full px-1.5 text-[10px] font-bold ${on ? "bg-white/70 text-slate-700" : "bg-slate-100 text-slate-500"}`} data-testid={`hr-pay-lane-count-${l.key}`}>
+                {count}
+              </span>
+            </button>
           );
         })}
+      </div>
+
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[11px] leading-snug text-slate-500">{current.hint}</p>
+        <p className="text-[11px] font-bold text-slate-600">{money(net)} net</p>
+      </div>
+
+      {cards.length === 0 ? (
+        <Empty>Nobody here.</Empty>
+      ) : (
+        // Two or three across instead of five, so a name fits on one line and a card can
+        // carry the sum being made without being a column of its own.
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid={`hr-pay-lane-list-${current.key}`}>
+          {cards.map((s) => (
+            <PayslipCard key={s.employee_id} slip={s} editable={editable} onAdjust={onAdjust} onOpen={onOpen} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** One employee's pay, and every change that got them there.
+ *
+ *  Reached by clicking a name on the payroll board, because that is where somebody is
+ *  already looking when they notice the figure is wrong — 47 people in No pay set is a
+ *  list of salaries to type, and sending each one round to the Employees tab to type it
+ *  is the reason they are still empty.
+ *
+ *  Every change asks why, corrections included. Two doors — one that asks and one that
+ *  does not — would put unexplained jumps in the history beside the explained ones with
+ *  nothing to say which was which, and a corrected typo is the entry somebody most wants
+ *  a note against a year later.
+ */
+const SalaryModal = ({ slip, onClose, onSaved }) => {
+  const [data, setData] = useState(null);
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("annual_increment");
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    return hrEmployeeSalary(slip.employee_id)
+      .then((res) => { setData(res); setAmount(String(Math.round(res.amount || 0))); })
+      .catch(fail)
+      .finally(() => setLoading(false));
+  }, [slip.employee_id]);
+  useEffect(() => { load(); }, [load]);
+
+  const current = Number(data?.amount || 0);
+  const next = Number(amount || 0);
+  const delta = next - current;
+  // A raise from nothing has no percentage — the first salary somebody is put on is not
+  // an increase on zero, it is the figure they are paid.
+  const percent = current > 0 ? (delta / current) * 100 : null;
+  const changed = Boolean(amount !== "" && Math.round(next) !== Math.round(current));
+  const needsNote = reason === "other";
+
+  const save = async () => {
+    if (!changed) { toast.error("That is what they are paid already"); return; }
+    if (needsNote && !note.trim()) { toast.error("Say what the reason is"); return; }
+    setSaving(true);
+    try {
+      await hrChangeEmployeeSalary(slip.employee_id, { amount: next, reason, note: note.trim() });
+      toast.success(`${slip.employee_name} is now on ${money(next)} a month.`);
+      setNote("");
+      await load();
+      // The board behind this is showing the old figure, and the lane a slip sits in is
+      // read off it — somebody just moved out of No pay set.
+      onSaved?.();
+    } catch (e) { fail(e); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="hr-pay-salary-modal">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <EmployeeAvatar employee={{ full_name: slip.employee_name }} size={40} />
+            <div className="min-w-0">
+              <p className="truncate font-bold text-slate-800">{slip.employee_name}</p>
+              <p className="truncate text-xs text-slate-400">
+                {[slip.employee_code, slip.designation, slip.department].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="shrink-0 text-slate-400 hover:text-slate-700" data-testid="hr-pay-salary-close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {loading ? <p className="py-10 text-center text-sm text-slate-400">Loading…</p> : (
+          <>
+            <div className="mt-4 rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Monthly salary</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-lg font-bold text-slate-400 line-through decoration-slate-300">{money(current)}</span>
+                <span className="text-slate-300">→</span>
+                <div className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 focus-within:border-sky-400 focus-within:ring-1 focus-within:ring-sky-300">
+                  <span className="text-sm text-slate-400">₹</span>
+                  <input
+                    value={amount}
+                    inputMode="numeric"
+                    onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))}
+                    className="h-9 w-32 bg-transparent text-lg font-bold text-slate-800 outline-none"
+                    data-testid="hr-pay-salary-amount"
+                  />
+                </div>
+              </div>
+              {/* What the figure typed actually does, in the two forms a raise gets talked
+                  about in. Shown as it is typed rather than after saving, because "is
+                  12,000 the right number" is the question being answered at that moment. */}
+              {changed && (
+                <p className={`mt-2 text-xs font-semibold ${delta > 0 ? "text-emerald-600" : "text-rose-600"}`} data-testid="hr-pay-salary-delta">
+                  {delta > 0 ? "+" : "−"}{money(Math.abs(delta))}
+                  {percent === null ? " · first salary set" : ` · ${delta > 0 ? "+" : "−"}${Math.abs(percent).toFixed(1)}%`}
+                </p>
+              )}
+              <p className="mt-2 text-[11px] leading-snug text-slate-400">
+                Takes effect on the next run you generate. A month already generated keeps the figures it froze.
+              </p>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="hr-pay-salary-reason">Reason</label>
+                <select
+                  id="hr-pay-salary-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
+                  data-testid="hr-pay-salary-reason"
+                >
+                  {(data?.reasons || []).map((r) => (
+                    <option key={r.key} value={r.key}>{r.label}</option>
+                  ))}
+                </select>
+              </div>
+              <Input
+                value={note}
+                onChange={(e) => setNote(e.target.value.slice(0, 300))}
+                placeholder={needsNote ? "Say what the reason is" : "Note (optional)"}
+                data-testid="hr-pay-salary-note"
+              />
+            </div>
+
+            <div className="mt-3 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+              <Button size="sm" disabled={saving || !changed} onClick={save} data-testid="hr-pay-salary-save">
+                <Check className="h-4 w-4" />{saving ? "Saving…" : "Save salary"}
+              </Button>
+            </div>
+
+            <div className="mt-5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">History</p>
+              {(data?.history || []).length === 0 ? (
+                <p className="mt-2 rounded-lg border border-dashed border-slate-200 py-6 text-center text-xs text-slate-400" data-testid="hr-pay-salary-history-empty">
+                  Nothing recorded yet. Every change from here on is kept.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-1.5" data-testid="hr-pay-salary-history">
+                  {data.history.map((h) => (
+                    <li key={h.id} className="rounded-lg border border-slate-200 px-3 py-2">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                        <span className="text-xs font-semibold text-slate-700">
+                          {money(h.from_amount)} <span className="text-slate-300">→</span> {money(h.to_amount)}
+                        </span>
+                        <span className={`text-[11px] font-bold ${Number(h.change) > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                          {Number(h.change) > 0 ? "+" : "−"}{money(Math.abs(Number(h.change)))}
+                          {h.percent === null || h.percent === undefined ? "" : ` · ${Number(h.percent) > 0 ? "+" : "−"}${Math.abs(Number(h.percent)).toFixed(1)}%`}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        <span className="font-semibold text-slate-600">{h.reason_label || h.reason}</span>
+                        {h.note ? ` — ${h.note}` : ""}
+                      </p>
+                      <p className="text-[10px] text-slate-400">{h.changed_by} · {prettyDate((h.changed_at || "").slice(0, 10))}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -957,6 +1180,7 @@ const PayrollBoard = ({ slips, editable, onAdjust }) => {
 export const PayrollTab = () => {
   const [month, setMonth] = useState(todayIso().slice(0, 7));
   const [view, setView] = useState("board");
+  const [opened, setOpened] = useState(null);
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -1102,7 +1326,7 @@ export const PayrollTab = () => {
       {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : view === "board" ? (
         slips.length === 0
           ? <Empty>No active employees to pay.</Empty>
-          : <PayrollBoard slips={slips} editable={editable} onAdjust={adjust} />
+          : <PayrollBoard slips={slips} editable={editable} onAdjust={adjust} onOpen={setOpened} />
       ) : (
         <>
           <div className="space-y-2 lg:hidden" data-testid="hr-pay-cards">
@@ -1185,6 +1409,16 @@ export const PayrollTab = () => {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {opened && (
+        <SalaryModal
+          slip={opened}
+          onClose={() => setOpened(null)}
+          // The lane a slip sits in is read off the salary that just changed, so the board
+          // behind this is now showing somebody in the wrong one.
+          onSaved={() => load(month)}
+        />
       )}
     </div>
   );

@@ -66,6 +66,9 @@ from routers.v3_hr_ops import (
 # several. Same reason v3_hr_ops.py imports it: two implementations would print one branch
 # on HR's tab and another on the person's own profile.
 from routers.v3_hr import resolve_employee_branches
+# What a day amounts to, and which days the branch is closed. The same module HR's register
+# reads, so a person's own month and the register cannot disagree about their Tuesday.
+from attendance_rules import DEFAULTS as RULE_DEFAULTS, day_status, is_week_off, rules_of
 
 router = APIRouter(prefix="/api/v3/me")
 
@@ -81,11 +84,10 @@ STANDARD_START = "09:00"
 STANDARD_END = "18:00"
 STANDARD_MINUTES = 8 * 60
 
-# The day of the week nobody is expected in when HR has marked nothing. Sunday.
-#
-# Only a default. A week off HR actually marked wins over it -- see _expected_day -- so a
-# clinic that works Sundays and rests Tuesdays says so on the register and this follows.
-DEFAULT_WEEK_OFF = 6  # Monday is 0, as date.weekday() counts
+# Which days nobody is expected in is the branch's own answer now -- its Branch Admin sets
+# it on Management -> Time Management, and attendance_rules.py is where it is read. This
+# page asks that module rather than assuming Sunday, so a clinic that rests on Tuesday
+# sees its Tuesdays off here and its Sundays counted as working days.
 
 # Marks that mean the person was not expected at work that day. No expected hours are
 # counted against them, so a month is not "behind" by the holidays in it.
@@ -116,18 +118,18 @@ def _month_days(month: str) -> List[str]:
     return ["%s-%02d" % (month, d) for d in range(1, last + 1)]
 
 
-def _expected_day(iso: str, status: str) -> bool:
+def _expected_day(iso: str, status: str, rules: Dict[str, Any]) -> bool:
     """Was this person expected at work on this date?
 
-    HR's mark decides where there is one: a marked week off, holiday, approved leave or
-    absence costs nobody expected hours. Where there is no mark, the weekly rest day is
-    assumed and every other day is expected.
+    The status decides where there is one: a week off, holiday, approved leave or absence
+    costs nobody expected hours. Where there is none, the branch's own rest days say -- and
+    every other day is expected.
     """
     if status in NOT_EXPECTED:
         return False
     if status:
         return True
-    return date.fromisoformat(iso).weekday() != DEFAULT_WEEK_OFF
+    return not is_week_off(rules, iso)
 
 
 # ---------- my profile ----------
@@ -221,13 +223,20 @@ async def my_profile(user: V3UserOut = Depends(v3_current_user)):
 
 # ---------- my attendance ----------
 
-def _row(iso: str, clock: Optional[dict], mark: dict, now_at: str) -> Dict[str, Any]:
-    """One line of the month: what was pressed, what was marked, and what it adds up to."""
+def _row(iso: str, clock: Optional[dict], mark: dict, now_at: str, rules: Dict[str, Any],
+         today: str, has_login: bool) -> Dict[str, Any]:
+    """One line of the month: what was pressed, what it amounts to, and whether it is behind.
+
+    The status is read the way HR's register reads it -- off the clock against the branch's
+    working day -- rather than being whatever HR had time to type. So a person opening this
+    sees the same word for their Tuesday that payroll will count.
+    """
     totals = day_totals(clock, now_at)
-    status = mark.get("status") or ""
-    # Only a day somebody was expected on can be behind. A Sunday worked is all credit and
+    read = day_status(rules, iso, clock, totals, mark, today, has_login)
+    status = read["status"]
+    # Only a day somebody was expected on can be behind. A rest day worked is all credit and
     # no debit, which is what makes the extra hours at the foot of the month mean anything.
-    target = STANDARD_MINUTES if _expected_day(iso, status) else 0
+    target = STANDARD_MINUTES if _expected_day(iso, status, rules) else 0
     return {
         "date": iso,
         "weekday": date.fromisoformat(iso).strftime("%a"),
@@ -247,6 +256,9 @@ def _row(iso: str, clock: Optional[dict], mark: dict, now_at: str) -> Dict[str, 
         # back to the clock for an unmarked day -- the same rule as _board_status in
         # routers/v3_hr_ops.py, which is HR's side of this table.
         "status": status,
+        # Whether the day was read off the clock or decided by a person. Shown because a
+        # reading is worth querying with HR and a decision is worth asking about.
+        "auto": read["auto"],
         "state": totals["state"],
         "note": mark.get("note") or "",
         # The hours an approved permission agreed on this day. Not a status -- they were
@@ -280,8 +292,24 @@ async def my_attendance(
     first, last = days[0], days[-1]
     today = clinic_today()
 
-    account = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1}) or {}
+    account = await v3_col("users").find_one(
+        {"id": user.id}, {"_id": 0, "employee_id": 1, "branch_id": 1},
+    ) or {}
     employee_id = account.get("employee_id") or ""
+
+    # The branch whose working day this person is measured against -- their employee
+    # record's, falling back to the one on their login. The same resolution HR's register
+    # makes, so the two screens agree about which Tuesdays are off.
+    branch_id = account.get("branch_id") or ""
+    if employee_id:
+        emp_row = await v3_col("employees").find_one(
+            {"id": employee_id}, {"_id": 0, "branch_id": 1},
+        ) or {}
+        branch_id = emp_row.get("branch_id") or branch_id
+    branch = await v3_col("branches").find_one(
+        {"id": branch_id}, {"_id": 0, "attendance_rules": 1},
+    ) if branch_id else None
+    rules = rules_of(branch) if branch else dict(RULE_DEFAULTS)
 
     clocks = await v3_col("clock_days").find(
         {"user_id": user.id, "date": {"$gte": first, "$lte": last}}, {"_id": 0},
@@ -300,7 +328,10 @@ async def my_attendance(
     # have not happened are not attendance, they are a calendar, and a run of empty ones
     # under the last real day reads as a fortnight of absences.
     shown = [d for d in days if d <= today] if mon == today[:7] else days
-    rows = [_row(d, clock_by.get(d), marks.get(d) or {}, now_at) for d in shown]
+    rows = [
+        _row(d, clock_by.get(d), marks.get(d) or {}, now_at, rules, today, bool(employee_id))
+        for d in shown
+    ]
 
     # Counted off the same rows the table draws, so a tile and the column under it cannot
     # disagree. The expected figure is the whole month; the balance is measured only
@@ -314,7 +345,7 @@ async def my_attendance(
     worked = sum(r["worked_minutes"] for r in rows)
     expected_so_far = sum(r["expected_minutes"] for r in rows)
     expected_month = sum(
-        STANDARD_MINUTES if _expected_day(d, (marks.get(d) or {}).get("status") or "") else 0
+        STANDARD_MINUTES if _expected_day(d, (marks.get(d) or {}).get("status") or "", rules) else 0
         for d in days
     )
     # Present is what somebody did, not only what they were marked: a day clocked is a day
@@ -325,6 +356,9 @@ async def my_attendance(
         "month": mon,
         "today": today,
         "standard": {"start": STANDARD_START, "end": STANDARD_END, "minutes": STANDARD_MINUTES},
+        # The branch's own working day, so the screen can say which days are off and why a
+        # 09:20 start was called late without having to guess at the rule behind it.
+        "rules": rules,
         "linked": bool(employee_id),
         "totals": {
             "working_days": expected_month // STANDARD_MINUTES,

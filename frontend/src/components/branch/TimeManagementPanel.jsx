@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock, Loader2, Plus, RefreshCw, Save, Salad, Stethoscope, Activity, Trash2 } from "lucide-react";
+import { CalendarDays, Clock, Loader2, Plus, RefreshCw, Save, Salad, Stethoscope, Activity, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
@@ -7,8 +7,10 @@ import { toast } from "@/components/ui/sonner";
 import {
   createShift,
   deleteShift,
+  getAttendanceRules,
   getShiftRoster,
   listShifts,
+  saveAttendanceRules,
   setDoctorShift,
   updateShift,
 } from "@/lib/api";
@@ -32,6 +34,11 @@ import { to12h } from "@/lib/time";
  * Changing a shift never touches slots already published. It governs the days opened from
  * then on, so a patient booked into a 6 PM slot keeps it when the physio moves to mornings;
  * closing that day down is the Unsave button on the calendar, deliberately a separate act.
+ *
+ * Below the shifts sits the other kind of hours this branch keeps: the WORKING DAY its
+ * staff are due on, and the days it is closed. That one has nothing to do with patient
+ * bookings — it is what HR's attendance register reads to decide who was late and who was
+ * absent — and it is a section of its own for exactly that reason.
  */
 
 // The three calendars this rosters, in the order MANAGEMENT lists them. `profile_type` is
@@ -176,6 +183,196 @@ function ShiftCard({ shift, onSaved, onDeleted }) {
     </div>
   );
 }
+
+/**
+ * THE WORKING DAY — when staff are expected in, and which days the branch is closed.
+ *
+ * Deliberately not a shift. A shift is when patients may be booked with an expert; this is
+ * when the people who work here are due, and it is what HR's attendance register reads to
+ * decide whether somebody was on time, half a day, or absent. The two sit on one screen
+ * because a Branch Admin thinks of both as "our hours", and in two sections because
+ * confusing them would put a physio's booking window onto somebody's payslip.
+ *
+ * What it changes is worth being plain about, and the panel says so on screen: attendance
+ * is read off these rules rather than stored against them, so moving the week off to
+ * Tuesday re-reads every Tuesday this month as a rest day and every Sunday back into a
+ * working day. Any day HR marked by hand is untouched either way — a decision always beats
+ * a reading. See backend/attendance_rules.py.
+ */
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const RuleField = ({ label, hint, children }) => (
+  <label className="block">
+    <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+    {children}
+    {hint && <span className="mt-1 block text-[10px] leading-snug text-slate-400">{hint}</span>}
+  </label>
+);
+
+const WorkingDayCard = ({ branchId }) => {
+  const [rules, setRules] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!branchId) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    getAttendanceRules(branchId)
+      .then((r) => { if (!cancelled) setRules(r.rules); })
+      .catch((e) => { if (!cancelled) toast.error(e?.response?.data?.detail || "Could not read the working day"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [branchId]);
+
+  const set = (patch) => setRules((r) => ({ ...r, ...patch }));
+
+  // A day is toggled rather than picked from a list: the question is "is the branch closed
+  // on this day", which is seven yes/no answers, and a multi-select would make the common
+  // case (one day, Sunday) two clicks and a scroll.
+  const toggleDay = (index) => {
+    const on = rules.week_offs || [];
+    set({ week_offs: on.includes(index) ? on.filter((d) => d !== index) : [...on, index].sort((a, b) => a - b) });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const saved = await saveAttendanceRules(branchId, {
+        work_start: rules.work_start,
+        work_end: rules.work_end,
+        grace_minutes: Number(rules.grace_minutes || 0),
+        half_day_minutes: Number(rules.half_day_minutes || 0),
+        week_offs: rules.week_offs || [],
+      });
+      setRules(saved.rules);
+      toast.success("Working day saved — the attendance register reads it from now on");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save the working day");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading || !rules) {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white p-4" data-testid="working-day-loading">
+        <p className="flex items-center gap-2 text-xs text-slate-400">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading the working day…
+        </p>
+      </section>
+    );
+  }
+
+  const offDays = rules.week_offs || [];
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white" data-testid="working-day-card">
+      <div className="border-b border-slate-100 bg-slate-50/60 p-4">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+          <CalendarDays className="h-4 w-4 text-emerald-500" /> Working Day &amp; Week Off
+        </h3>
+        <p className="mt-1 text-[11px] text-slate-400">
+          When your staff are due in, and which days you are closed. HR&apos;s attendance register reads this to
+          decide who was on time, who was half a day and who was absent — this is not the patient booking window above.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
+        <RuleField label="Day starts">
+          <input
+            type="time"
+            value={rules.work_start || ""}
+            onChange={(e) => set({ work_start: e.target.value })}
+            className="mt-1 h-9 w-full rounded-md border border-slate-200 px-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300"
+            data-testid="working-day-start"
+          />
+        </RuleField>
+        <RuleField label="Day ends">
+          <input
+            type="time"
+            value={rules.work_end || ""}
+            onChange={(e) => set({ work_end: e.target.value })}
+            className="mt-1 h-9 w-full rounded-md border border-slate-200 px-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300"
+            data-testid="working-day-end"
+          />
+        </RuleField>
+        <RuleField label="Grace" hint="Minutes after the start that still count as on time.">
+          <input
+            type="number"
+            min={0}
+            max={120}
+            value={rules.grace_minutes ?? 0}
+            onChange={(e) => set({ grace_minutes: e.target.value })}
+            className="mt-1 h-9 w-full rounded-md border border-slate-200 px-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300"
+            data-testid="working-day-grace"
+          />
+        </RuleField>
+        <RuleField label="Half day under" hint="Hours actually worked, breaks already taken off.">
+          <input
+            type="number"
+            min={0}
+            max={12}
+            step={0.5}
+            value={Number(rules.half_day_minutes || 0) / 60}
+            onChange={(e) => set({ half_day_minutes: Math.round(Number(e.target.value || 0) * 60) })}
+            className="mt-1 h-9 w-full rounded-md border border-slate-200 px-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300"
+            data-testid="working-day-halfday"
+          />
+        </RuleField>
+      </div>
+
+      <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Week off</p>
+        <p className="mt-0.5 text-[10px] text-slate-400">
+          Days nobody at this branch is expected in. They are never counted absent and never cost pay.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5" data-testid="working-day-week-offs">
+          {DAY_LABELS.map((label, index) => {
+            const off = offDays.includes(index);
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => toggleDay(index)}
+                className={`h-9 w-14 rounded-md border text-xs font-semibold transition ${
+                  off
+                    ? "border-emerald-500 bg-emerald-500 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50"
+                }`}
+                data-testid={`working-day-off-${index}`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {offDays.length === 0 && (
+          <p className="mt-2 text-[11px] font-medium text-amber-600" data-testid="working-day-no-off">
+            No day off selected — every day of the week will be counted as a working day.
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3">
+        <p className="max-w-lg text-[11px] text-slate-400">
+          Saving applies to days already past as well as days to come: attendance is read from these rules, not
+          frozen against them. Anything HR marked by hand on the register stays exactly as they marked it.
+        </p>
+        <Button
+          size="sm"
+          onClick={save}
+          disabled={saving}
+          className="h-8 shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-700"
+          data-testid="working-day-save"
+        >
+          {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1 h-3.5 w-3.5" />}
+          Save working day
+        </Button>
+      </div>
+    </section>
+  );
+};
 
 export const TimeManagementPanel = ({ branchId }) => {
   const [shifts, setShifts] = useState([]);
@@ -439,6 +636,10 @@ export const TimeManagementPanel = ({ branchId }) => {
           dropped by a settings change.
         </p>
       </section>
+
+      {/* Last, because it is set once and then left alone, where the two above are worked
+          with. It is also the only thing on this screen that reaches somebody's pay. */}
+      <WorkingDayCard branchId={branchId} />
     </div>
   );
 };

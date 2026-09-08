@@ -7,6 +7,12 @@ across those hours.
 
 See shift_utils for why assignment lives on the `doctors` row and why shifts are looked up
 by id rather than by branch.
+
+The same screen also sets the branch's WORKING DAY -- its hours, its grace, and which days
+it is closed -- at the foot of this file. That is a different thing from a shift and the
+two are easy to confuse: a shift is when patients may be booked with an expert, the working
+day is when staff are expected in, and the second is what the attendance register reads to
+decide whether somebody was late. See attendance_rules.py, which owns that reasoning.
 """
 
 import uuid
@@ -15,6 +21,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from attendance_rules import DEFAULTS, WEEKDAY_NAMES, clean_rules, rules_of
 from database import v3_col
 from deps import is_branch_admin_role, v3_require_roles
 from schemas.v3 import V3UserOut
@@ -290,3 +297,80 @@ async def shift_roster(
             for e in experts
         ],
     }
+
+
+# ---------- the working week, and what it makes of a clocked day ----------
+
+# Same two roles as the shifts above, and the same reasoning: the hours a branch keeps are
+# the branch's own business, and Super Admin can reach any of them. HR Admin reads what
+# comes out of these on their register but does not set them -- the Branch Admin is the
+# person who knows which day their floor is closed.
+#
+# What is set here is not a calendar window. A shift decides when patients may be booked;
+# this decides when staff are expected, which is a different question with pay behind it.
+# They live on one screen because a Branch Admin thinks of both as "our hours", and in two
+# sections because confusing them would put a physio's booking window on somebody's
+# payslip.
+
+
+class AttendanceRulesInput(BaseModel):
+    work_start: Optional[str] = None
+    work_end: Optional[str] = None
+    grace_minutes: Optional[int] = None
+    half_day_minutes: Optional[int] = None
+    # Monday is 0, Sunday is 6 -- date.weekday()'s numbering, so nothing anywhere has to
+    # remember an offset.
+    week_offs: Optional[List[int]] = None
+
+
+def _rules_reply(branch_id: str, rules: dict) -> dict:
+    return {
+        "branch_id": branch_id,
+        "rules": rules,
+        # Sent rather than hardcoded in the browser, so a screen that says "Sunday by
+        # default" says it because the server does.
+        "defaults": DEFAULTS,
+        "weekday_names": list(WEEKDAY_NAMES),
+    }
+
+
+@router.get("/branches/{branch_id}/attendance-rules")
+async def get_attendance_rules(branch_id: str, user: V3UserOut = Depends(v3_require_roles(*MANAGE_ROLES))):
+    """The branch's working day. Answers with the defaults for a branch that has never set one."""
+    bid = _scoped_branch(user, branch_id)
+    branch = await v3_col("branches").find_one({"id": bid}, {"_id": 0, "attendance_rules": 1})
+    if branch is None:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return _rules_reply(bid, rules_of(branch))
+
+
+@router.put("/branches/{branch_id}/attendance-rules")
+async def set_attendance_rules(
+    branch_id: str,
+    payload: AttendanceRulesInput,
+    user: V3UserOut = Depends(v3_require_roles(*MANAGE_ROLES)),
+):
+    """Set them. Takes effect on the register immediately, including for days already past.
+
+    That is deliberate and worth being plain about: attendance is derived on read, not
+    stored, so moving the week off to Tuesday re-reads every Tuesday this month as a week
+    off -- and the Sundays back into working days. It is the honest behaviour for a rule
+    that describes how the branch works rather than what happened on one day, and any day
+    HR has marked by hand is untouched either way, because a mark somebody made always
+    beats a reading.
+    """
+    bid = _scoped_branch(user, branch_id)
+    branch = await v3_col("branches").find_one({"id": bid}, {"_id": 0, "attendance_rules": 1})
+    if branch is None:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    # Merged onto what is stored rather than onto the bare defaults, so saving one section
+    # of the screen cannot blank the other.
+    merged = {**rules_of(branch), **{k: v for k, v in payload.model_dump().items() if v is not None}}
+    try:
+        rules = clean_rules(merged)
+    except ValueError as bad:
+        raise HTTPException(status_code=400, detail=str(bad))
+    await v3_col("branches").update_one(
+        {"id": bid}, {"$set": {"attendance_rules": rules, "updated_at": now_iso()}},
+    )
+    return _rules_reply(bid, rules)
