@@ -343,7 +343,7 @@ class V3LeadOut(BaseModel):
     package_id: Optional[str] = None
     package_name: Optional[str] = None
     package_price: Optional[float] = None
-    package_paid: Optional[float] = None  # the Consultation Fee payment — Cash/UPI/Card only
+    package_paid: Optional[float] = None  # the Consultation Fee payment, by any of the standard modes
     package_payment_mode: Optional[str] = None  # "cash" | "upi" | "card"
     package_payment_details: Optional[dict] = None  # mode-specific fields (UPI txn/UTR, card/account last 4)
     treatment_fee_paid: Optional[float] = None  # the Treatment Fee payment — any payment method
@@ -589,6 +589,17 @@ class V3PaymentLineInput(BaseModel):
     denominations: Optional[dict] = None
 
 
+class V3PartialInstallment(BaseModel):
+    """One dated promise in a Partial Payment schedule.
+
+    Defined ahead of the fee inputs rather than beside the Treatment Fee it started on:
+    every fee is now collected by the same set of payment modes, so every fee can be put
+    on a schedule and every fee input needs to be able to name one of these.
+    """
+    amount: float
+    due_date: str
+
+
 class V3CollectPackagePaymentInput(BaseModel):
     payment_mode: str = "cash"
     # Set when the fee arrived in more than one tender. Present, it settles both the
@@ -613,9 +624,23 @@ class V3CollectPackagePaymentInput(BaseModel):
     account_holder_name: Optional[str] = None
     bank_name: Optional[str] = None
     ifsc_code: Optional[str] = None
+    # Cheque — the bank the cheque is drawn on (bank_name, shared with Card) and its
+    # number. A cheque is a promise rather than money on the desk, so the fee keeps its
+    # listed price: there is no amount to override and no discount to negotiate against
+    # a payment that has not happened yet.
+    cheque_number: Optional[str] = None
     # Account Transfer — reuses the four bank fields above (same last-4 rule) and adds
     # the bank's own reference for the transfer, which is what a dispute is traced by.
     transfer_reference: Optional[str] = None
+    # Partial Payment — the schedule the fee is spread over, each installment with its
+    # own amount and due date, together adding up to the whole fee. Two at least, and no
+    # ceiling: some patients want it in two, others in six.
+    #
+    # Here rather than only on the Treatment Fee, which is where it began. A branch takes
+    # its money one way, and a patient who can pay a Rs.8000 treatment package across
+    # three dates can as reasonably ask the same of a Rs.4000 rehab course — so every fee
+    # is collected by the same set of modes, and a schedule is one of them.
+    partial_installments: Optional[List[V3PartialInstallment]] = None
     # A discount is typed here or it does not exist, and an `amount` below what is then
     # payable is a part payment, not a write-off. Both were the same number before: the
     # gap between the price and the amount was booked as a discount, so a desk taking
@@ -632,7 +657,7 @@ class V3CollectDietFeeInput(V3CollectPackagePaymentInput):
     """The Diet Consultation Fee.
 
     Inherits every payment field from the Consultation Fee — it is collected the same way,
-    in one go, by the same four modes — and adds only what is particular to diet: which
+    in one go, by the same six modes — and adds only what is particular to diet: which
     Diet Package from FITSIO STORE, and whether it was sold at the online or offline price.
     The Head Physio never picks a diet package the way they pick a treatment one, so it is
     chosen here at the point of collection.
@@ -649,26 +674,21 @@ class V3CollectDietChartFeeInput(V3CollectPackagePaymentInput):
     endpoint discriminating on a string would be one typo away from a Diet Chart payment
     landing on the Diet Consultation Fee and overwriting it.
 
-    Identical in shape to V3CollectDietFeeInput — same four payment modes, taken in one go,
-    against an item chosen at the point of collection — so it inherits the same payment
-    fields for the same reason V3CollectRehabFeeInput does: build_payment_details validates
-    every one of them, and a hand-written copy that missed ifsc_code would throw on the
-    first card payment.
+    Identical in shape to V3CollectDietFeeInput — the same six payment modes, against an
+    item chosen at the point of collection — so it inherits the same payment fields for the
+    same reason V3CollectRehabFeeInput does: build_payment_details validates every one of
+    them, and a hand-written copy that missed ifsc_code would throw on the first card
+    payment.
     """
     item_id: str
     mode: Literal["online", "offline"] = "offline"
-
-
-class V3PartialInstallment(BaseModel):
-    amount: float
-    due_date: str
 
 
 class V3CollectRehabFeeInput(V3CollectPackagePaymentInput):
     """The Rehab course fee.
 
     Inherits every payment field from the Consultation Fee, exactly as the Diet fee does —
-    it is collected the same way, in one go, by the same four modes — and adds nothing.
+    it is collected the same way, by the same six modes — and adds nothing.
     The course itself is locked in by the Consultant's decision the way the Treatment
     package is, so there is nothing to choose here: Branch Admin collects against what is
     already on the lead.
@@ -683,11 +703,11 @@ class V3CollectTreatmentFeeInput(BaseModel):
     # The Session/Treatment package itself is locked in by the Head Physio's earlier
     # consultation-decision — Branch Admin can't choose or change item_id/mode/
     # sessions_override here. The amount defaults to the locked session_package_price
-    # but can be manually overridden for Cash/UPI/Card (discount, rounding, etc);
+    # but can be manually overridden for the modes that settle now (discount, rounding, etc);
     # Cheque and Partial Payment keep using the locked amount as before.
     payment_mode: str
     amount: Optional[float] = None
-    # Branch Admin must explicitly tick a confirmation before Cash/UPI/Card is
+    # Branch Admin must explicitly tick a confirmation before money taken at the desk is
     # accepted — a deliberate double-check step, not just clicking Collect once.
     confirmed: bool = False
     # Cash -- the notes this fee was counted out in, when the desk counted them. Same

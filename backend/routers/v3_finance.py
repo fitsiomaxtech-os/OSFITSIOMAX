@@ -1997,13 +1997,19 @@ async def mark_installment_paid(
         installments[idx]["paid"] = True
 
     # Keep the fee's own *_paid field in step with the money that has actually arrived,
-    # but only where it is tracking that. A Treatment Fee Partial Payment plan books the
-    # whole price the moment the schedule is created, so adding to it here would count the
-    # same money twice. Every other schedule — including all four of the other fees' —
-    # exists because a collection came up short and books only what was handed over that
-    # day, so the balance has to be added as it arrives or no revenue total ever sees it.
+    # but only where it is tracking that. A Partial Payment plan books the whole price the
+    # moment the schedule is created, so adding to it here would count the same money
+    # twice. A schedule that exists because a collection came up short is the other case:
+    # it books only what was handed over that day, so the balance has to be added as it
+    # arrives or no revenue total ever sees it.
+    #
+    # Told apart by the fee's recorded mode, not by which fee it is. This used to also
+    # require `payload.fee == "treatment"`, from when the Treatment Fee was the only one
+    # that could be put on a Partial Payment plan at all. Every fee can now — they are all
+    # collected the same way — and a Consultation or Rehab Fee scheduled that way would
+    # otherwise have had each installment added on top of a price already booked in full.
     set_fields = {f"{cfg['details']}.installments": installments}
-    if not (payload.fee == "treatment" and lead.get(cfg["mode"]) == "partial"):
+    if lead.get(cfg["mode"]) != "partial":
         collected = installments[idx].get("amount") or 0
         set_fields[cfg["paid"]] = round((lead.get(cfg["paid"]) or 0) + collected, 2)
 

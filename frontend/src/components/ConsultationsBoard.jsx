@@ -36,13 +36,18 @@ import { isCourseComplete } from "@/lib/leadStage";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { SeatDots } from "@/components/ui/seat-dots";
 
-const CONSULTATION_FEE_PAYMENT_MODES = [
-  { value: "cash", label: "Cash" },
-  { value: "upi", label: "UPI" },
-  { value: "card", label: "Card" },
-  { value: "account_transfer", label: "Account Transfer" },
-];
-const TREATMENT_FEE_PAYMENT_MODES = [
+// How this branch takes money. One list, offered by every fee it collects.
+//
+// There used to be two. The Treatment Fee showed all six; the Consultation, Diet, Diet
+// Chart and Rehab fees showed only the first four, so a patient at the desk could pay for
+// their treatment package by cheque or across a schedule and, in the same breath, could
+// not do either for the rehab course sold beside it. Nobody set that rule -- it is where
+// the screens had got to, the newest one having learnt things the older ones were never
+// told. The Treatment Fee's way is the way now, everywhere.
+//
+// Mirrors STANDARD_PAYMENT_MODES in the backend's v3_packages.py, which every collect
+// endpoint validates against; the two must be kept in step.
+const STANDARD_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
   { value: "upi", label: "UPI" },
   { value: "card", label: "Card" },
@@ -72,12 +77,12 @@ const COURSE_DAY_NOUN = { session: "treatment day", rehab: "rehab day", diet: "c
 // sessions today and leave the rest as a scheduled balance.
 const SETTLED_NOW_MODES = ["cash", "upi", "card", "account_transfer"];
 const PART_SESSION_MODES = ["cash", "upi", "card", "cheque", "account_transfer"];
-// What a Treatment Fee split can be made of, for both of its Collect popups. A split
-// is money settled at the desk today, so Cheque (which clears when it clears) and
-// Partial Payment (a plan, not a payment) are not pieces of one.
-const TREATMENT_SPLIT_MODES = TREATMENT_FEE_PAYMENT_MODES.filter((m) => SETTLED_NOW_MODES.includes(m.value));
-// The per-tender half of the Treatment Fee's Collect popup: the fields that belong to
-// the one payment being entered, and nothing that belongs to the collection as a whole.
+// What a split can be made of, for every fee's Collect popups. A split is money settled
+// at the desk today, so Cheque (which clears when it clears) and Partial Payment (a plan,
+// not a payment) are not pieces of one.
+const SPLIT_PAYMENT_MODES = STANDARD_PAYMENT_MODES.filter((m) => SETTLED_NOW_MODES.includes(m.value));
+// The per-tender half of a Collect popup: the fields that belong to the one payment being
+// entered, and nothing that belongs to the collection as a whole.
 //
 // A collection can now be made of several tenders (Rs.5000 cash, then Rs.2000 UPI), and
 // each of them starts from these. Cleared between tenders on purpose -- a UPI
@@ -3443,6 +3448,22 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       // The date already promised for a balance still outstanding, so correcting a
       // collection doesn't make somebody re-agree a date the patient was given.
       balance_due_date: (existing || []).find((i) => !i.paid)?.due_date || "",
+      // Cheque, and the schedule a Partial Payment is spread over -- carried here, on the
+      // fee's own draft rather than the tender's, for the same reason the Treatment Fee
+      // carries them: neither is a payment being made at the desk, so neither belongs to
+      // the tender the desk is filling in.
+      bank_name: "",
+      cheque_number: "",
+      // A schedule already on the record is reloaded from its real rows, paid ones
+      // included, so reopening this shows what is actually still owed rather than two
+      // blank lines. The first row of a new one is dated today: it is the one the patient
+      // is standing there to pay.
+      partial_installments: existing && existing.length
+        ? existing.map((inst) => ({ amount: String(inst.amount ?? ""), due_date: inst.due_date || "", paid: !!inst.paid }))
+        : [
+            { amount: "", due_date: new Date().toISOString().slice(0, 10) },
+            { amount: "", due_date: "" },
+          ],
     });
     if (lead.consultation_decision === "consultation_treatment" && lead.treatment_fee_paid == null) {
       openTreatmentFeeDraft(lead);
@@ -3708,15 +3729,23 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     return payload;
   };
 
-  // Clicking "Collect Consultation Fee" in the main popup always opens the
-  // second "Confirm Payment" popup — a simple, explicit confirm/cancel step
-  // (with the amount still editable there) before anything is actually saved.
-  const startCollectConsultationFee = () => {
-    const amount = parseFloat(collectFeeDraft.amount);
-    if (!(amount > 0)) {
-      toast.error("Enter a valid Consultation Fee amount");
-      return;
-    }
+  // Clicking one of the six Payment Mode buttons opens that mode's own Collect popup —
+  // the same step the Treatment Fee has always taken, and now the step every fee takes.
+  // There used to be a "Collect Consultation Fee" button between the two, which is a
+  // click that asks nothing: the mode had already been chosen, and the popup it opened
+  // was the next thing either way.
+  //
+  // Cheque and Partial Payment keep the assigned price, so choosing one snaps the amount
+  // back to it and drops any discount that was being typed against another mode. The
+  // server will not take a discount on either, and leaving one on the screen would show a
+  // figure the collection is not going to be for.
+  const chooseConsultationPaymentMode = (mode) => {
+    const settlesNow = SETTLED_NOW_MODES.includes(mode);
+    setCollectFeeDraft({
+      ...collectFeeDraft,
+      payment_mode: mode,
+      ...(settlesNow ? {} : { amount: String(consultationPrice || ""), discount: "", balance_due_date: "" }),
+    });
     setPackageConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null, cash_notes: {} });
   };
 
@@ -3745,6 +3774,40 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const confirmCollectConsultationFee = () => {
     const amount = parseFloat(collectFeeDraft.amount);
     const mode = collectFeeDraft.payment_mode;
+
+    // Neither of these is money on the desk, so neither takes an amount, a discount or a
+    // balance: a cheque is written for the fee and a schedule adds up to it. Handled
+    // ahead of everything below for that reason -- there is nothing to confirm about a
+    // payment that has not happened yet.
+    if (mode === "cheque") {
+      if (!(collectFeeDraft.bank_name || "").trim() || !(collectFeeDraft.cheque_number || "").trim()) {
+        toast.error("Bank Name and Cheque Number are required");
+        return;
+      }
+      submitConsultationFee({
+        payment_mode: "cheque",
+        bank_name: collectFeeDraft.bank_name.trim(),
+        cheque_number: collectFeeDraft.cheque_number.trim(),
+      });
+      return;
+    }
+    if (mode === "partial") {
+      const rows = (collectFeeDraft.partial_installments || []).filter((i) => !i.paid || parseFloat(i.amount) > 0);
+      if (rows.length < 2 || rows.some((i) => !(parseFloat(i.amount) > 0) || !i.due_date)) {
+        toast.error("Every installment needs an amount and a due date");
+        return;
+      }
+      if (Math.abs(round2(rows.reduce((sum, i) => sum + parseFloat(i.amount), 0)) - consultationPrice) > 0.01) {
+        toast.error("Installment amounts must add up to the Consultation Fee");
+        return;
+      }
+      submitConsultationFee({
+        payment_mode: "partial",
+        partial_installments: rows.map((i) => ({ amount: round2(parseFloat(i.amount)), due_date: i.due_date })),
+      });
+      return;
+    }
+
     const payload = { payment_mode: mode, amount, confirmed: true };
     // The discount that was agreed, and the date the rest is promised for. The server
     // takes only what is sent here as a discount and schedules the rest as a balance,
@@ -3806,7 +3869,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     }
     setCollectingFee(false);
 
-    toast.success(selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected");
+    // A schedule collected nothing -- saying "collected" over a plan is how a branch
+    // comes to believe money is in that nobody has handed over. Same wording, and the
+    // same distinction, the Treatment Fee has always drawn.
+    const scheduleOnly = payload.payment_mode === "partial";
+    const savedInst = res.lead?.package_payment_details?.installments || [];
+    toast.success(scheduleOnly
+      ? (selectedLead.package_paid != null ? "Consultation Fee payment schedule updated" : "Consultation Fee payment schedule saved")
+      : (selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected"));
     setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     setPackageConfirmDraft(null);
     // The receipt closes on its own button; the patient stays open behind it so the
@@ -3815,12 +3885,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     setTreatmentFeeDraft(null);
     setSelectedLead(res.lead);
     showReceipt(() => makeReceipt({
-      lead: selectedLead, payload, prefix: "CF",
+      lead: selectedLead, payload,
+      // The patient still leaves with a sheet -- it is the plan they agreed to rather
+      // than a receipt for money, which is what `kind` says and what stops it printing
+      // "PAYMENT RECEIVED" over a fee nobody has paid yet.
+      prefix: scheduleOnly ? "CS" : "CF",
+      kind: scheduleOnly ? "schedule" : "paid",
       paidFor: "Consultation Fee",
       packageName: selectedLead.package_name || "",
-      assignedPrice: selectedLead.package_price,
+      assignedPrice: scheduleOnly ? null : selectedLead.package_price,
       discount: payload.discount_amount || 0,
-      balanceDue: balanceDueLabel(res.lead?.package_payment_details?.installments),
+      balanceDue: balanceDueLabel(savedInst),
+      installments: scheduleOnly ? savedInst : [],
       transactionId: res.transaction_id,
     }));
   }
@@ -4784,13 +4860,83 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       upi_transaction_id: "",
       account_number: "",
       account_holder_name: "",
+      // Shared with Cheque, which is drawn on a bank the same way a card is issued by
+      // one. Only ever one mode's fields are on the screen at a time.
       bank_name: "",
       ifsc_code: "",
       transfer_reference: "",
+      cheque_number: "",
+      // The schedule a Partial Payment is spread over, reloaded from the real rows when
+      // this fee already has one -- see openCollectFeeDraft, which does the same.
+      partial_installments: (selectedLead.rehab_fee_payment_details?.installments || []).length
+        ? selectedLead.rehab_fee_payment_details.installments.map((inst) => ({
+            amount: String(inst.amount ?? ""), due_date: inst.due_date || "", paid: !!inst.paid,
+          }))
+        : [
+            { amount: "", due_date: new Date().toISOString().slice(0, 10) },
+            { amount: "", due_date: "" },
+          ],
     });
   }
 
+  // Choosing a method for the Rehab Fee. Cheque and Partial Payment keep the assigned
+  // price, so picking either snaps the amount back to it and drops a discount that was
+  // being typed against another mode -- the same rule the Consultation Fee follows, for
+  // the same reason: the server takes neither, and showing one would promise a figure the
+  // collection is not going to be for.
+  const chooseRehabPaymentMode = (mode) => {
+    const settlesNow = SETTLED_NOW_MODES.includes(mode);
+    setRehabFeeDraft({
+      ...rehabFeeDraft,
+      payment_mode: mode,
+      ...(settlesNow ? {} : { amount: String(rehabPrice || ""), discount: "", balance_due_date: "" }),
+    });
+  };
+
   const confirmCollectRehabFee = async () => {
+    const mode = rehabFeeDraft.payment_mode;
+
+    // Neither a cheque nor a schedule is money on the desk, so neither carries an amount,
+    // a discount or a balance -- see the Consultation Fee's own submit, which forks here
+    // for the same reason and in the same place.
+    if (mode === "cheque" || mode === "partial") {
+      const payload = { payment_mode: mode };
+      if (mode === "cheque") {
+        if (!(rehabFeeDraft.bank_name || "").trim() || !(rehabFeeDraft.cheque_number || "").trim()) {
+          toast.error("Bank Name and Cheque Number are required");
+          return;
+        }
+        payload.bank_name = rehabFeeDraft.bank_name.trim();
+        payload.cheque_number = rehabFeeDraft.cheque_number.trim();
+      } else {
+        const rows = rehabFeeDraft.partial_installments || [];
+        if (rows.length < 2 || rows.some((i) => !(parseFloat(i.amount) > 0) || !i.due_date)) {
+          toast.error("Every installment needs an amount and a due date");
+          return;
+        }
+        if (Math.abs(round2(rows.reduce((sum, i) => sum + parseFloat(i.amount), 0)) - rehabPrice) > 0.01) {
+          toast.error("Installment amounts must add up to the Rehab Fee");
+          return;
+        }
+        payload.partial_installments = rows.map((i) => ({ amount: round2(parseFloat(i.amount)), due_date: i.due_date }));
+      }
+      setCollectingRehabFee(true);
+      try {
+        const res = await collectRehabFee(selectedLead.id, payload);
+        toast.success(mode === "cheque" ? "Rehab Fee recorded against the cheque" : "Rehab Fee payment schedule saved");
+        setRehabFeeDraft(null);
+        if (res?.lead) {
+          setSelectedLead(res.lead);
+          setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === res.lead.id ? res.lead : l)) }));
+        }
+        load();
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Failed to collect the Rehab Fee");
+      }
+      setCollectingRehabFee(false);
+      return;
+    }
+
     const amount = parseFloat(rehabFeeDraft.amount);
     if (!(amount > 0)) { toast.error("Enter the amount collected"); return; }
     // Named rather than carried across by the spread below: the draft calls it `discount`
@@ -4864,15 +5010,41 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       // fee, since the chart and the consultation are separate money.
       discount: selectedLead[cfg.detailsField]?.discount_amount ?? "",
       balance_due_date: (selectedLead[cfg.detailsField]?.installments || []).find((i) => !i.paid)?.due_date || "",
+      // Cheque, and the schedule a Partial Payment is spread over — every fee is taken
+      // the same way, so both belong on every fee's draft. See openCollectFeeDraft.
+      bank_name: "",
+      cheque_number: "",
+      partial_installments: (selectedLead[cfg.detailsField]?.installments || []).length
+        ? selectedLead[cfg.detailsField].installments.map((inst) => ({
+            amount: String(inst.amount ?? ""), due_date: inst.due_date || "", paid: !!inst.paid,
+          }))
+        : [
+            { amount: "", due_date: new Date().toISOString().slice(0, 10) },
+            { amount: "", due_date: "" },
+          ],
     });
   }
+
+  // Choosing a method for a Diet fee. Cheque and Partial Payment keep the listed price,
+  // so picking either drops a discount typed against another mode — the same rule the
+  // Consultation and Rehab fees follow.
+  const chooseDietPaymentMode = (mode) => {
+    const settlesNow = SETTLED_NOW_MODES.includes(mode);
+    setDietFeeDraft({
+      ...dietFeeDraft,
+      payment_mode: mode,
+      ...(settlesNow ? {} : { discount: "", balance_due_date: "" }),
+    });
+  };
 
   const startCollectDietFee = () => {
     const price = dietListPrice(dietFeeDraft);
     if (!dietFeeDraft.item_id) { toast.error("Choose a Diet Package"); return; }
     if (!(price > 0)) { toast.error(`This Diet Package has no ${dietFeeDraft.mode} price set`); return; }
-    // Net of any discount already agreed, for the same reason the Rehab Fee's is.
-    setDietFeeDraft((d) => ({ ...d, amount: String(round2(price - (Math.max(0, parseFloat(d.discount) || 0)))) }));
+    // Net of any discount already agreed, for the same reason the Rehab Fee's is — except
+    // for the two methods that cannot discount, which open on the listed price itself.
+    const settlesNow = SETTLED_NOW_MODES.includes(dietFeeDraft.payment_mode);
+    setDietFeeDraft((d) => ({ ...d, amount: String(settlesNow ? round2(price - (Math.max(0, parseFloat(d.discount) || 0))) : price) }));
     setDietFeeConfirmDraft({
       upi_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "",
@@ -4882,26 +5054,52 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const confirmCollectDietFee = async () => {
     const amount = parseFloat(dietFeeDraft.amount);
     const mode = dietFeeDraft.payment_mode;
-    if (!(amount > 0)) { toast.error("Enter the amount collected"); return; }
-    const payload = { item_id: dietFeeDraft.item_id, mode: dietFeeDraft.mode, payment_mode: mode, amount, confirmed: true };
-    // The discount that was agreed, and the date the rest is promised for — the server
-    // takes only what is sent here as a discount and schedules the rest as a balance.
-    if (dietDiscountRs > 0) payload.discount_amount = dietDiscountRs;
-    if (dietHasBalance) {
-      if (!dietFeeDraft.balance_due_date) {
-        toast.error("Enter a Due Date for the balance amount");
+    const payload = { item_id: dietFeeDraft.item_id, mode: dietFeeDraft.mode, payment_mode: mode };
+
+    // Cheque and Partial Payment first, because neither is money on the desk: no amount to
+    // confirm, no discount to agree, no balance to date. The same fork the Consultation and
+    // Rehab fees take, in the same place, for the same reason.
+    if (mode === "cheque") {
+      if (!(dietFeeDraft.bank_name || "").trim() || !(dietFeeDraft.cheque_number || "").trim()) {
+        toast.error("Bank Name and Cheque Number are required");
         return;
       }
-      payload.balance_due_date = dietFeeDraft.balance_due_date;
-    }
-    if (mode === "upi") {
-      if (!dietFeeConfirmDraft.upi_transaction_id.trim()) {
-        toast.error("UPI Transaction ID is required");
+      payload.bank_name = dietFeeDraft.bank_name.trim();
+      payload.cheque_number = dietFeeDraft.cheque_number.trim();
+    } else if (mode === "partial") {
+      const rows = dietFeeDraft.partial_installments || [];
+      if (rows.length < 2 || rows.some((i) => !(parseFloat(i.amount) > 0) || !i.due_date)) {
+        toast.error("Every installment needs an amount and a due date");
         return;
       }
-      payload.upi_transaction_id = dietFeeConfirmDraft.upi_transaction_id.trim();
-    } else if (BANK_DETAIL_MODES.includes(mode)) {
-      if (!attachBankDetails(payload, dietFeeConfirmDraft, mode)) return;
+      if (Math.abs(round2(rows.reduce((sum, i) => sum + parseFloat(i.amount), 0)) - dietPrice) > 0.01) {
+        toast.error("Installment amounts must add up to the fee");
+        return;
+      }
+      payload.partial_installments = rows.map((i) => ({ amount: round2(parseFloat(i.amount)), due_date: i.due_date }));
+    } else {
+      if (!(amount > 0)) { toast.error("Enter the amount collected"); return; }
+      payload.amount = amount;
+      payload.confirmed = true;
+      // The discount that was agreed, and the date the rest is promised for — the server
+      // takes only what is sent here as a discount and schedules the rest as a balance.
+      if (dietDiscountRs > 0) payload.discount_amount = dietDiscountRs;
+      if (dietHasBalance) {
+        if (!dietFeeDraft.balance_due_date) {
+          toast.error("Enter a Due Date for the balance amount");
+          return;
+        }
+        payload.balance_due_date = dietFeeDraft.balance_due_date;
+      }
+      if (mode === "upi") {
+        if (!dietFeeConfirmDraft.upi_transaction_id.trim()) {
+          toast.error("UPI Transaction ID is required");
+          return;
+        }
+        payload.upi_transaction_id = dietFeeConfirmDraft.upi_transaction_id.trim();
+      } else if (BANK_DETAIL_MODES.includes(mode)) {
+        if (!attachBankDetails(payload, dietFeeConfirmDraft, mode)) return;
+      }
     }
 
     const cfg = DIET_FEE_KINDS[dietFeeDraft.kind] || DIET_FEE_KINDS.consultation;
@@ -4918,20 +5116,26 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       setCollectingDietFee(false);
       return;
     }
-    toast.success(`${cfg.label} collected — Rs.${amount}`);
+    toast.success(mode === "partial" ? `${cfg.label} payment schedule saved` : `${cfg.label} collected — Rs.${res.lead[cfg.paidField] ?? amount}`);
     setDietFeeConfirmDraft(null);
     setDietFeeDraft(null);
     setSelectedLead(res.lead);
     setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === res.lead.id ? res.lead : l)) }));
+    // A schedule still prints -- it is the patient's copy of the plan they agreed to --
+    // but as a schedule, not a receipt: no money has come in, and `kind` is what keeps
+    // "PAYMENT RECEIVED" off a sheet for a fee nobody has paid yet.
+    const dietSavedInst = res.lead[cfg.detailsField]?.installments || [];
     showReceipt(() => makeReceipt({
       lead: res.lead,
       payload,
-      prefix: cfg.receiptPrefix,
+      prefix: mode === "partial" ? `${cfg.receiptPrefix}S` : cfg.receiptPrefix,
+      kind: mode === "partial" ? "schedule" : "paid",
       paidFor: cfg.label,
       packageName: res.lead[cfg.nameField] || "",
-      assignedPrice: res.lead[cfg.priceField],
+      assignedPrice: mode === "partial" ? null : res.lead[cfg.priceField],
       discount: payload.discount_amount || 0,
-      balanceDue: balanceDueLabel(res.lead[cfg.detailsField]?.installments),
+      balanceDue: balanceDueLabel(dietSavedInst),
+      installments: mode === "partial" ? dietSavedInst : [],
       transactionId: res.transaction_id,
     }));
     setCollectingDietFee(false);
@@ -8411,26 +8615,19 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             data-testid="cons-collect-fee-amount"
                           />
                           {selectedLead.package_price != null && (
-                            <p className="mt-1 text-[11px] text-slate-400">Assigned package price: Rs.{selectedLead.package_price} — a discount can be agreed in the next step; the fee itself is not editable.</p>
+                            <p className="mt-1 text-[11px] text-slate-400">Assigned package price: Rs.{selectedLead.package_price} — the fee itself is not editable; a discount can be agreed in the next step, on the methods that settle at the desk.</p>
                           )}
                         </div>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                           <PaymentModeSelect
                             value={collectFeeDraft.payment_mode}
-                            options={CONSULTATION_FEE_PAYMENT_MODES}
-                            onChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: v })}
+                            options={STANDARD_PAYMENT_MODES}
+                            onChange={chooseConsultationPaymentMode}
                             testId="cons-collect-fee-mode"
                           />
+                          <p className="mt-1 text-[11px] text-slate-400">Pick a payment method to open its own Collect popup.</p>
                         </div>
-                        <Button
-                          className="w-full bg-sky-600 text-xs hover:bg-sky-700"
-                          onClick={startCollectConsultationFee}
-                          disabled={collectingFee || !(parseFloat(collectFeeDraft.amount) > 0)}
-                          data-testid="cons-collect-fee-submit"
-                        >
-                          {collectingFee ? "Saving..." : "Collect Consultation Fee"}
-                        </Button>
                       </>
                     )}
                   </div>
@@ -8510,7 +8707,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                         <PaymentModeSelect
                           value={treatmentFeeDraft.payment_mode}
-                          options={TREATMENT_FEE_PAYMENT_MODES}
+                          options={STANDARD_PAYMENT_MODES}
                           onChange={chooseTreatmentPaymentMode}
                           testId="cons-treatment-fee-mode"
                         />
@@ -8525,17 +8722,26 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
               </div>
             )}
 
-            {/* Confirm Consultation Fee Payment — second-step popup, only shown when the
-                entered amount doesn't match the assigned package price and/or the mode
-                (UPI/Card) needs its own fields. Layered above the main popup. */}
+            {/* The chosen method's own Collect popup — opened by picking a Payment Mode
+                on the popup behind it, exactly as the Treatment Fee's is. What it asks for
+                is what that method needs: an amount and a discount for the four that
+                settle at the desk, a cheque's bank and number, or the schedule a Partial
+                Payment is spread over. Layered above the main popup. */}
             {packageConfirmDraft && collectFeeDraft && (() => {
               const expected = selectedLead.package_price;
               const mode = collectFeeDraft.payment_mode;
+              // Cheque and Partial Payment are promises of money rather than money, so
+              // neither has an amount to move, a discount to agree, a balance to date, a
+              // drawer to count or a second tender to add. Everything that belongs to
+              // money on the desk hangs off this.
+              const settlesNow = SETTLED_NOW_MODES.includes(mode);
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-collect-fee-confirm-modal">
                   <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">Confirm Consultation Fee Payment</p>
+                      <p className="text-sm font-semibold text-slate-800">
+                        {mode === "partial" ? "Consultation Fee Payment Schedule" : mode === "cheque" ? "Collect Consultation Fee by Cheque" : "Confirm Consultation Fee Payment"}
+                      </p>
                       <button onClick={() => setPackageConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
@@ -8544,24 +8750,62 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         fee. `lockAmount` is why the fee itself is shown rather than typed
                         — it is the assigned price less that discount, which is not Branch
                         Admin's to overtype, so there is no box to overtype it in. */}
-                    <FeeAmountEntry
-                      assignedPrice={expected}
-                      discount={collectFeeDraft.discount}
-                      amount={collectFeeDraft.amount}
-                      onChange={(patch) => setCollectFeeDraft({ ...collectFeeDraft, ...patch })}
-                      label="Consultation Fee (₹)"
-                      testPrefix="cons-collect-fee-confirm"
-                      lockAmount
-                    />
+                    {settlesNow && (
+                      <FeeAmountEntry
+                        assignedPrice={expected}
+                        discount={collectFeeDraft.discount}
+                        amount={collectFeeDraft.amount}
+                        onChange={(patch) => setCollectFeeDraft({ ...collectFeeDraft, ...patch })}
+                        label="Consultation Fee (₹)"
+                        testPrefix="cons-collect-fee-confirm"
+                        lockAmount
+                      />
+                    )}
 
-                    <BalanceDueBlock
-                      balance={consultationBalanceDue}
-                      dueDate={collectFeeDraft.balance_due_date}
-                      onDueDateChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, balance_due_date: v })}
-                      amount={consultationAmountNow}
-                      discount={consultationDiscountRs}
-                      testPrefix="cons-collect-fee-confirm"
-                    />
+                    {settlesNow && (
+                      <BalanceDueBlock
+                        balance={consultationBalanceDue}
+                        dueDate={collectFeeDraft.balance_due_date}
+                        onDueDateChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, balance_due_date: v })}
+                        amount={consultationAmountNow}
+                        discount={consultationDiscountRs}
+                        testPrefix="cons-collect-fee-confirm"
+                      />
+                    )}
+
+                    {mode === "cheque" && (
+                      <>
+                        <LockedFeeRow
+                          label="Consultation Fee"
+                          price={expected}
+                          note="A cheque is written for the assigned fee, so there is no amount or discount to agree here."
+                          testId="cons-collect-fee-cheque-amount"
+                        />
+                        <ChequeFields
+                          draft={collectFeeDraft}
+                          onChange={(patch) => setCollectFeeDraft({ ...collectFeeDraft, ...patch })}
+                          testPrefix="cons-collect-fee"
+                        />
+                      </>
+                    )}
+
+                    {mode === "partial" && (
+                      <>
+                        <LockedFeeRow
+                          label="Consultation Fee"
+                          price={expected}
+                          note="The installments below have to add up to this. Scheduling collects nothing — each payment is taken on its own day, from here or from Accountant Manage."
+                          testId="cons-collect-fee-partial-total"
+                        />
+                        <PartialInstallmentsEditor
+                          installments={collectFeeDraft.partial_installments || []}
+                          setInstallments={(next) => setCollectFeeDraft({ ...collectFeeDraft, partial_installments: next })}
+                          totalSessions={0}
+                          totalAmount={consultationPrice}
+                          testPrefix="cons-collect-fee"
+                        />
+                      </>
+                    )}
 
                     {/* Cash chosen on the popup behind this one lands here: the fee is
                         settled above, and this is where it gets counted out. Sits under
@@ -8580,7 +8824,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       <>
                         <SplitPaymentLines
                           lines={packageConfirmDraft.payment_lines}
-                          modes={CONSULTATION_FEE_PAYMENT_MODES}
+                          modes={SPLIT_PAYMENT_MODES}
                           expected={collectFeeDraft.amount}
                           onChange={(next) => setPackageConfirmDraft({ ...packageConfirmDraft, payment_lines: next })}
                           testPrefix="cons-collect-fee"
@@ -8676,7 +8920,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         counted, UPI reference, account and IFSC -- and only then decides
                         the rest is coming in something else. Sitting above those fields
                         it read as a step to take before them. */}
-                    {!packageConfirmDraft.payment_lines && (
+                    {settlesNow && !packageConfirmDraft.payment_lines && (
                       <button
                         type="button"
                         onClick={() => setPackageConfirmDraft({
@@ -8715,7 +8959,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         onClick={confirmCollectConsultationFee}
                         disabled={
                           collectingFee ||
-                          !(parseFloat(collectFeeDraft.amount) > 0) ||
+                          // A cheque needs the two things it is traced by, and nothing else.
+                          (mode === "cheque"
+                            ? (!(collectFeeDraft.bank_name || "").trim() || !(collectFeeDraft.cheque_number || "").trim())
+                            : mode === "partial"
+                            // A schedule is refused until it is a whole one: at least two
+                            // dated installments, each worth something, together coming to
+                            // the fee. Anything less is a plan that leaves money unaccounted
+                            // for the moment it is saved.
+                            ? ((collectFeeDraft.partial_installments || []).length < 2 ||
+                               (collectFeeDraft.partial_installments || []).some((i) => !(parseFloat(i.amount) > 0) || !i.due_date) ||
+                               Math.abs(round2((collectFeeDraft.partial_installments || []).reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0)) - consultationPrice) > 0.01)
+                            : (!(parseFloat(collectFeeDraft.amount) > 0) ||
                           // Money still owed has to be dated, and a discount bigger than
                           // the fee it comes off is a typo rather than a gift.
                           (consultationHasBalance && !collectFeeDraft.balance_due_date) ||
@@ -8734,11 +8989,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             : ((mode === "cash" && !notesSettled(packageConfirmDraft.cash_notes, collectFeeDraft.amount)) ||
                                (mode === "upi" && !packageConfirmDraft.upi_transaction_id.trim()) ||
                                (BANK_DETAIL_MODES.includes(mode) && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim())) ||
-                               (mode === "account_transfer" && !packageConfirmDraft.transfer_reference.trim())))
+                               (mode === "account_transfer" && !packageConfirmDraft.transfer_reference.trim())))))
                         }
                         data-testid="cons-collect-fee-confirm-submit"
                       >
-                        {collectingFee ? "Saving..." : "Confirm & Collect"}
+                        {collectingFee ? "Saving..." : mode === "partial" ? "Save Payment Schedule" : "Confirm & Collect"}
                       </Button>
                     </div>
                   </div>
@@ -8766,7 +9021,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                     <PaymentModeSelect
                       value={treatmentFeeDraft.payment_mode}
-                      options={TREATMENT_FEE_PAYMENT_MODES}
+                      options={STANDARD_PAYMENT_MODES}
                       onChange={chooseTreatmentPaymentMode}
                       testId="cons-treatment-fee-mode"
                     />
@@ -8789,7 +9044,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 ? treatmentComputedAmount
                 : selectedLead.session_package_price;
               const mode = treatmentFeeDraft.payment_mode;
-              const modeLabel = TREATMENT_FEE_PAYMENT_MODES.find((m) => m.value === mode)?.label || "";
+              const modeLabel = STANDARD_PAYMENT_MODES.find((m) => m.value === mode)?.label || "";
               // Between tenders: the last payment is accepted, the next one has no mode
               // yet, and the popup is showing the mode buttons rather than a form.
               const picking = !!treatmentConfirmDraft.picking_mode;
@@ -8871,7 +9126,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     {/* The next tender's mode. The same buttons the first one was chosen
                         from, minus Cheque and Partial Payment: a split is money settling
                         at the desk today, and neither of those is (see
-                        TREATMENT_SPLIT_MODES). The way out of the loop without taking any
+                        SPLIT_PAYMENT_MODES). The way out of the loop without taking any
                         more money is the link underneath. */}
                     {picking && (
                       <>
@@ -8879,7 +9134,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Method for the Rs.{outstandingLabel} balance</label>
                           <PaymentModeSelect
                             value=""
-                            options={TREATMENT_SPLIT_MODES}
+                            options={SPLIT_PAYMENT_MODES}
                             onChange={pickNextTreatmentTenderMode}
                             testId="cons-treatment-fee-next-mode"
                           />
@@ -9081,26 +9336,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     )}
 
                     {mode === "cheque" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
-                          <Input
-                            value={treatmentFeeDraft.bank_name}
-                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, bank_name: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-treatment-fee-bank-name"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Cheque Number</label>
-                          <Input
-                            value={treatmentFeeDraft.cheque_number}
-                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, cheque_number: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-treatment-fee-cheque-number"
-                          />
-                        </div>
-                      </>
+                      <ChequeFields
+                        draft={treatmentFeeDraft}
+                        onChange={(patch) => setTreatmentFeeDraft({ ...treatmentFeeDraft, ...patch })}
+                        testPrefix="cons-treatment-fee"
+                      />
                     )}
 
                     {mode === "partial" && (
@@ -9331,7 +9571,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       <>
                         <SplitPaymentLines
                           lines={partialCollectDraft.payment_lines}
-                          modes={TREATMENT_SPLIT_MODES}
+                          modes={SPLIT_PAYMENT_MODES}
                           expected={partialCollectDraft.amount}
                           onChange={(next) => setPartialCollectDraft({ ...partialCollectDraft, payment_lines: next })}
                           testPrefix="cons-partial-collect"
@@ -9467,11 +9707,16 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 amount stays editable for a discount agreed at the desk. */}
             {rehabFeeDraft && (() => {
               const mode = rehabFeeDraft.payment_mode;
+              // See the Consultation Fee's Collect popup: cheque and schedule are promises
+              // of money, so everything belonging to money on the desk hangs off this.
+              const settlesNow = SETTLED_NOW_MODES.includes(mode);
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-rehab-fee-modal">
                   <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">Collect Rehab Fee</p>
+                      <p className="text-sm font-semibold text-slate-800">
+                        {mode === "partial" ? "Rehab Fee Payment Schedule" : mode === "cheque" ? "Collect Rehab Fee by Cheque" : "Collect Rehab Fee"}
+                      </p>
                       <button onClick={() => setRehabFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-rehab-fee-close"><X className="h-4 w-4" /></button>
                     </div>
 
@@ -9481,33 +9726,71 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       {selectedLead.rehab_package_mode ? <> · <span className="capitalize">{selectedLead.rehab_package_mode}</span></> : null}
                     </p>
 
-                    <FeeAmountEntry
-                      assignedPrice={selectedLead.rehab_package_price}
-                      discount={rehabFeeDraft.discount}
-                      amount={rehabFeeDraft.amount}
-                      onChange={(patch) => setRehabFeeDraft({ ...rehabFeeDraft, ...patch })}
-                      label="Rehab Fee (₹)"
-                      testPrefix="cons-rehab-fee"
-                    />
+                    {settlesNow && (
+                      <FeeAmountEntry
+                        assignedPrice={selectedLead.rehab_package_price}
+                        discount={rehabFeeDraft.discount}
+                        amount={rehabFeeDraft.amount}
+                        onChange={(patch) => setRehabFeeDraft({ ...rehabFeeDraft, ...patch })}
+                        label="Rehab Fee (₹)"
+                        testPrefix="cons-rehab-fee"
+                      />
+                    )}
 
-                    <BalanceDueBlock
-                      balance={rehabBalanceDue}
-                      dueDate={rehabFeeDraft.balance_due_date}
-                      onDueDateChange={(v) => setRehabFeeDraft({ ...rehabFeeDraft, balance_due_date: v })}
-                      amount={rehabAmountNow}
-                      discount={rehabDiscountRs}
-                      testPrefix="cons-rehab-fee"
-                    />
+                    {settlesNow && (
+                      <BalanceDueBlock
+                        balance={rehabBalanceDue}
+                        dueDate={rehabFeeDraft.balance_due_date}
+                        onDueDateChange={(v) => setRehabFeeDraft({ ...rehabFeeDraft, balance_due_date: v })}
+                        amount={rehabAmountNow}
+                        discount={rehabDiscountRs}
+                        testPrefix="cons-rehab-fee"
+                      />
+                    )}
 
                     <div>
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                       <PaymentModeSelect
                         value={rehabFeeDraft.payment_mode}
-                        options={CONSULTATION_FEE_PAYMENT_MODES}
-                        onChange={(v) => setRehabFeeDraft({ ...rehabFeeDraft, payment_mode: v })}
+                        options={STANDARD_PAYMENT_MODES}
+                        onChange={chooseRehabPaymentMode}
                         testId="cons-rehab-fee-mode"
                       />
                     </div>
+
+                    {mode === "cheque" && (
+                      <>
+                        <LockedFeeRow
+                          label="Rehab Fee"
+                          price={rehabPrice}
+                          note="A cheque is written for the assigned fee, so there is no amount or discount to agree here."
+                          testId="cons-rehab-fee-cheque-amount"
+                        />
+                        <ChequeFields
+                          draft={rehabFeeDraft}
+                          onChange={(patch) => setRehabFeeDraft({ ...rehabFeeDraft, ...patch })}
+                          testPrefix="cons-rehab-fee"
+                        />
+                      </>
+                    )}
+
+                    {mode === "partial" && (
+                      <>
+                        <LockedFeeRow
+                          label="Rehab Fee"
+                          price={rehabPrice}
+                          note="The installments below have to add up to this. Scheduling collects nothing — each payment is taken on its own day from Accountant Manage."
+                          testId="cons-rehab-fee-partial-total"
+                        />
+                        <PartialInstallmentsEditor
+                          installments={rehabFeeDraft.partial_installments || []}
+                          setInstallments={(next) => setRehabFeeDraft({ ...rehabFeeDraft, partial_installments: next })}
+                          totalSessions={0}
+                          totalAmount={rehabPrice}
+                          testPrefix="cons-rehab-fee"
+                        />
+                      </>
+                    )}
 
                     {mode === "upi" && (
                       <div>
@@ -9550,13 +9833,25 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         onClick={confirmCollectRehabFee}
                         disabled={
                           collectingRehabFee ||
-                          !(parseFloat(rehabFeeDraft.amount) > 0) ||
-                          (rehabHasBalance && !rehabFeeDraft.balance_due_date) ||
-                          rehabDiscountRs > rehabPrice
+                          (mode === "cheque"
+                            ? (!(rehabFeeDraft.bank_name || "").trim() || !(rehabFeeDraft.cheque_number || "").trim())
+                            : mode === "partial"
+                            ? ((rehabFeeDraft.partial_installments || []).length < 2 ||
+                               (rehabFeeDraft.partial_installments || []).some((i) => !(parseFloat(i.amount) > 0) || !i.due_date) ||
+                               Math.abs(round2((rehabFeeDraft.partial_installments || []).reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0)) - rehabPrice) > 0.01)
+                            : (!(parseFloat(rehabFeeDraft.amount) > 0) ||
+                               (rehabHasBalance && !rehabFeeDraft.balance_due_date) ||
+                               rehabDiscountRs > rehabPrice))
                         }
                         data-testid="cons-rehab-fee-submit"
                       >
-                        {collectingRehabFee ? "Saving..." : `Confirm Rs.${rehabFeeDraft.amount || 0}`}
+                        {collectingRehabFee
+                          ? "Saving..."
+                          : mode === "partial"
+                          ? "Save Payment Schedule"
+                          : mode === "cheque"
+                          ? `Record Cheque Rs.${rehabPrice || 0}`
+                          : `Confirm Rs.${rehabFeeDraft.amount || 0}`}
                       </Button>
                     </div>
                   </div>
@@ -9624,8 +9919,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                     <PaymentModeSelect
                       value={dietFeeDraft.payment_mode}
-                      options={CONSULTATION_FEE_PAYMENT_MODES}
-                      onChange={(v) => setDietFeeDraft({ ...dietFeeDraft, payment_mode: v })}
+                      options={STANDARD_PAYMENT_MODES}
+                      onChange={chooseDietPaymentMode}
                       testId="cons-diet-fee-mode-select"
                     />
                   </div>
@@ -9647,11 +9942,16 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 and UPI/Card/Transfer ask for what a dispute would be traced by. */}
             {dietFeeConfirmDraft && dietFeeDraft && (() => {
               const mode = dietFeeDraft.payment_mode;
+              // See the Consultation Fee's Collect popup: cheque and schedule are promises
+              // of money, so everything belonging to money on the desk hangs off this.
+              const settlesNow = SETTLED_NOW_MODES.includes(mode);
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-diet-fee-confirm-modal">
                   <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">Confirm {dietFeeCfg.label}</p>
+                      <p className="text-sm font-semibold text-slate-800">
+                        {mode === "partial" ? `${dietFeeCfg.label} Payment Schedule` : mode === "cheque" ? `${dietFeeCfg.label} by Cheque` : `Confirm ${dietFeeCfg.label}`}
+                      </p>
                       <button onClick={() => setDietFeeConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-diet-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
@@ -9659,23 +9959,61 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       {dietItemById(dietFeeDraft.item_id)?.name || "Diet Package"} · <span className="capitalize">{dietFeeDraft.mode}</span>
                     </p>
 
-                    <FeeAmountEntry
-                      assignedPrice={dietListPrice(dietFeeDraft)}
-                      discount={dietFeeDraft.discount}
-                      amount={dietFeeDraft.amount}
-                      onChange={(patch) => setDietFeeDraft({ ...dietFeeDraft, ...patch })}
-                      label={`${dietFeeCfg.label} (₹)`}
-                      testPrefix="cons-diet-fee-confirm"
-                    />
+                    {settlesNow && (
+                      <FeeAmountEntry
+                        assignedPrice={dietListPrice(dietFeeDraft)}
+                        discount={dietFeeDraft.discount}
+                        amount={dietFeeDraft.amount}
+                        onChange={(patch) => setDietFeeDraft({ ...dietFeeDraft, ...patch })}
+                        label={`${dietFeeCfg.label} (₹)`}
+                        testPrefix="cons-diet-fee-confirm"
+                      />
+                    )}
 
-                    <BalanceDueBlock
-                      balance={dietBalanceDue}
-                      dueDate={dietFeeDraft.balance_due_date}
-                      onDueDateChange={(v) => setDietFeeDraft({ ...dietFeeDraft, balance_due_date: v })}
-                      amount={dietAmountNow}
-                      discount={dietDiscountRs}
-                      testPrefix="cons-diet-fee-confirm"
-                    />
+                    {settlesNow && (
+                      <BalanceDueBlock
+                        balance={dietBalanceDue}
+                        dueDate={dietFeeDraft.balance_due_date}
+                        onDueDateChange={(v) => setDietFeeDraft({ ...dietFeeDraft, balance_due_date: v })}
+                        amount={dietAmountNow}
+                        discount={dietDiscountRs}
+                        testPrefix="cons-diet-fee-confirm"
+                      />
+                    )}
+
+                    {mode === "cheque" && (
+                      <>
+                        <LockedFeeRow
+                          label={dietFeeCfg.label}
+                          price={dietPrice}
+                          note="A cheque is written for the listed fee, so there is no amount or discount to agree here."
+                          testId="cons-diet-fee-cheque-amount"
+                        />
+                        <ChequeFields
+                          draft={dietFeeDraft}
+                          onChange={(patch) => setDietFeeDraft({ ...dietFeeDraft, ...patch })}
+                          testPrefix="cons-diet-fee"
+                        />
+                      </>
+                    )}
+
+                    {mode === "partial" && (
+                      <>
+                        <LockedFeeRow
+                          label={dietFeeCfg.label}
+                          price={dietPrice}
+                          note="The installments below have to add up to this. Scheduling collects nothing — each payment is taken on its own day from Accountant Manage."
+                          testId="cons-diet-fee-partial-total"
+                        />
+                        <PartialInstallmentsEditor
+                          installments={dietFeeDraft.partial_installments || []}
+                          setInstallments={(next) => setDietFeeDraft({ ...dietFeeDraft, partial_installments: next })}
+                          totalSessions={0}
+                          totalAmount={dietPrice}
+                          testPrefix="cons-diet-fee"
+                        />
+                      </>
+                    )}
 
                     {mode === "upi" && (
                       <div>
@@ -9720,13 +10058,25 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         onClick={confirmCollectDietFee}
                         disabled={
                           collectingDietFee ||
-                          !(parseFloat(dietFeeDraft.amount) > 0) ||
-                          (dietHasBalance && !dietFeeDraft.balance_due_date) ||
-                          dietDiscountRs > dietPrice
+                          (mode === "cheque"
+                            ? (!(dietFeeDraft.bank_name || "").trim() || !(dietFeeDraft.cheque_number || "").trim())
+                            : mode === "partial"
+                            ? ((dietFeeDraft.partial_installments || []).length < 2 ||
+                               (dietFeeDraft.partial_installments || []).some((i) => !(parseFloat(i.amount) > 0) || !i.due_date) ||
+                               Math.abs(round2((dietFeeDraft.partial_installments || []).reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0)) - dietPrice) > 0.01)
+                            : (!(parseFloat(dietFeeDraft.amount) > 0) ||
+                               (dietHasBalance && !dietFeeDraft.balance_due_date) ||
+                               dietDiscountRs > dietPrice))
                         }
                         data-testid="cons-diet-fee-confirm-submit"
                       >
-                        {collectingDietFee ? "Saving..." : `Confirm Rs.${dietFeeDraft.amount || 0}`}
+                        {collectingDietFee
+                          ? "Saving..."
+                          : mode === "partial"
+                          ? "Save Payment Schedule"
+                          : mode === "cheque"
+                          ? `Record Cheque Rs.${dietPrice || 0}`
+                          : `Confirm Rs.${dietFeeDraft.amount || 0}`}
                       </Button>
                     </div>
                   </div>
@@ -10929,6 +11279,55 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
 // Colored, centered replacement for a native <select> of payment modes —
 // every option is shown inline as its own button (no click-to-open dropdown),
 // since native <option> backgrounds also can't be reliably styled cross-browser.
+/**
+ * A fee that is not the desk's to move, shown rather than typed.
+ *
+ * Cheque and Partial Payment both keep the assigned price — a cheque is written for what
+ * is owed, and a schedule has to add up to it — so neither has an amount box, and the
+ * server would refuse an amount either way. This says what the fee is and why it is fixed.
+ */
+const LockedFeeRow = ({ label, price, note, testId }) => (
+  <div className="space-y-1">
+    <div className="flex items-center justify-between rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px]">
+      <span className="text-slate-500">{label}</span>
+      <span className="font-semibold text-slate-700" data-testid={testId}>Rs.{Number(price || 0).toLocaleString("en-IN")}</span>
+    </div>
+    {note && <p className="text-[11px] text-slate-400">{note}</p>}
+  </div>
+);
+
+/**
+ * The two things a cheque is identified by, asked for identically wherever one is taken.
+ *
+ * The bank it is drawn on and its number are between them what anybody chasing an
+ * uncleared cheque a fortnight later has to be able to quote, and build_payment_details
+ * on the server refuses a collection missing either.
+ */
+function ChequeFields({ draft, onChange, testPrefix }) {
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name <span className="text-rose-500">*</span></label>
+        <Input
+          value={draft.bank_name || ""}
+          onChange={(e) => onChange({ bank_name: e.target.value })}
+          className="h-9"
+          data-testid={`${testPrefix}-bank-name`}
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-500">Cheque Number <span className="text-rose-500">*</span></label>
+        <Input
+          value={draft.cheque_number || ""}
+          onChange={(e) => onChange({ cheque_number: e.target.value })}
+          className="h-9"
+          data-testid={`${testPrefix}-cheque-number`}
+        />
+      </div>
+    </>
+  );
+}
+
 function PaymentModeSelect({ value, options, onChange, testId }) {
   return (
     <div className="flex flex-wrap gap-1.5" data-testid={testId}>
@@ -10955,22 +11354,37 @@ function PaymentModeSelect({ value, options, onChange, testId }) {
 }
 
 /**
- * Partial Payment schedule, split by session count rather than a raw rupee amount —
- * each installment's amount is computed from how many sessions it covers at the
- * package's own per-session rate, so it always agrees with "N sessions x rate/session"
- * shown elsewhere. The first installment's due date defaults to today (set by the
- * caller); later ones are scheduled ahead.
+ * The Partial Payment schedule a fee is spread over, for whichever fee is being spread.
  *
- * Only a row whose due date is today can be collected right here — clicking its
- * Collect button saves the whole schedule (every other row stays unpaid) and marks
- * just that one row paid, in one action. Future-dated rows have no Collect button;
- * they're picked up later from Accountant Manage's Outstanding Amount / Payment
- * Schedules boards once their date arrives.
+ * Split two ways, because the fees are two shapes. A treatment package buys sessions, so
+ * its rows are entered as session counts and priced at the package's own per-session rate
+ * — the numbers then always agree with the "N sessions x Rs.rate/session" shown elsewhere,
+ * and a row cannot be scheduled for half a session. Every other fee buys one thing at one
+ * price, so its rows are entered as rupees and have to add up to that price. `totalSessions`
+ * is what picks between them; `totalAmount` is the bill in the rupee case.
+ *
+ * The first installment's due date defaults to today (set by the caller); later ones are
+ * scheduled ahead.
+ *
+ * A row can be collected right here when the caller offers `onCollectRow` — clicking its
+ * Collect button saves the whole schedule (every other row stays unpaid) and marks just
+ * that one row paid, in one action. Without it the schedule is only being planned, and the
+ * rows are picked up later from Accountant Manage's Outstanding Amount / Payment Schedules
+ * boards once their dates arrive.
  */
-function PartialInstallmentsEditor({ installments, setInstallments, totalSessions, perSessionRate, onCollectRow, collecting }) {
+function PartialInstallmentsEditor({ installments, setInstallments, totalSessions, perSessionRate, totalAmount, onCollectRow, collecting, testPrefix = "cons-treatment-fee" }) {
+  const bySessions = totalSessions > 0;
+  const rowAmount = (inst) => (bySessions
+    ? Math.round((parseInt(inst.sessions, 10) || 0) * perSessionRate)
+    : Math.round((parseFloat(inst.amount) || 0) * 100) / 100);
   const sessionsTotal = installments.reduce((sum, i) => sum + (parseInt(i.sessions, 10) || 0), 0);
-  const mismatch = totalSessions > 0 && sessionsTotal !== totalSessions;
-  const allFilled = installments.length >= 2 && installments.every((i) => parseInt(i.sessions, 10) > 0 && i.due_date);
+  const scheduledTotal = Math.round(installments.reduce((sum, i) => sum + rowAmount(i), 0) * 100) / 100;
+  const mismatch = bySessions
+    ? sessionsTotal !== totalSessions
+    : Math.abs(scheduledTotal - (totalAmount || 0)) > 0.01;
+  const allFilled = installments.length >= 2
+    && installments.every((i) => (bySessions ? parseInt(i.sessions, 10) > 0 : parseFloat(i.amount) > 0) && i.due_date);
+  const blankRow = bySessions ? { sessions: "", due_date: "" } : { amount: "", due_date: "" };
   const todayIso = new Date().toISOString().slice(0, 10);
 
   return (
@@ -10979,16 +11393,16 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
         <p className="text-[11px] font-semibold text-slate-600">Payment Schedule</p>
         <button
           type="button"
-          onClick={() => setInstallments([...installments, { sessions: "", due_date: "" }])}
+          onClick={() => setInstallments([...installments, { ...blankRow }])}
           className="flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
-          data-testid="cons-treatment-fee-partial-add"
+          data-testid={`${testPrefix}-partial-add`}
         >
           <Plus className="h-3.5 w-3.5" /> Add Payment
         </button>
       </div>
       {installments.map((inst, idx) => {
         const sessionsNum = parseInt(inst.sessions, 10) || 0;
-        const amount = Math.round(sessionsNum * perSessionRate);
+        const amount = rowAmount(inst);
         const isToday = !!inst.due_date && inst.due_date === todayIso;
         const overdue = !!inst.due_date && inst.due_date < todayIso;
         const isPaid = !!inst.paid;
@@ -11000,13 +11414,13 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
           <div
             key={idx}
             className="rounded-lg border border-slate-200 p-2 sm:rounded-none sm:border-0 sm:border-t sm:border-slate-100 sm:p-0 sm:pt-2"
-            data-testid={`cons-treatment-fee-partial-row-${idx}`}
+            data-testid={`${testPrefix}-partial-row-${idx}`}
           >
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="text-[11px] font-bold text-slate-700">{partialInstallmentLabel(idx)}</span>
               <div className="flex items-center gap-1.5">
                 {isPaid ? (
-                  <span className="rounded-md bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700" data-testid={`cons-treatment-fee-partial-paid-${idx}`}>
+                  <span className="rounded-md bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700" data-testid={`${testPrefix}-partial-paid-${idx}`}>
                     PAID
                   </span>
                 ) : (
@@ -11017,7 +11431,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                     className={`rounded-md px-2 py-1 text-[10px] font-bold ${
                       overdue ? "bg-rose-100 text-rose-700" : isToday ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
                     }`}
-                    data-testid={`cons-treatment-fee-partial-due-${idx}`}
+                    data-testid={`${testPrefix}-partial-due-${idx}`}
                   >
                     {overdue ? "OVERDUE" : isToday ? "DUE TODAY" : "DUE"}
                   </span>
@@ -11027,7 +11441,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                     type="button"
                     onClick={() => setInstallments(installments.filter((_, i) => i !== idx))}
                     className="rounded p-1 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
-                    data-testid={`cons-treatment-fee-partial-remove-${idx}`}
+                    data-testid={`${testPrefix}-partial-remove-${idx}`}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -11039,29 +11453,53 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                 button full width under them. Squeezing all three fields onto one line
                 leaves the date box too narrow to read at 360px, which is most phones. */}
             <div className="grid grid-cols-2 items-end gap-2 sm:flex sm:flex-wrap sm:gap-1.5">
-              <div className="min-w-0 sm:flex-1">
-                <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions *</label>
-                <Input
-                  type="number"
-                  min="1"
-                  max={totalSessions || undefined}
-                  value={inst.sessions}
-                  disabled={isPaid}
-                  onChange={(e) => {
-                    const next = [...installments];
-                    next[idx] = { ...next[idx], sessions: e.target.value };
-                    setInstallments(next);
-                  }}
-                  className="h-9"
-                  data-testid={`cons-treatment-fee-partial-sessions-${idx}`}
-                />
-              </div>
-              <div className="min-w-0 sm:w-[62px] sm:shrink-0">
-                <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount</label>
-                <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700" data-testid={`cons-treatment-fee-partial-computed-amount-${idx}`}>
-                  {sessionsNum > 0 ? `₹${amount}` : "—"}
+              {bySessions ? (
+                <>
+                  <div className="min-w-0 sm:flex-1">
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions *</label>
+                    <Input
+                      type="number"
+                      min="1"
+                      max={totalSessions || undefined}
+                      value={inst.sessions}
+                      disabled={isPaid}
+                      onChange={(e) => {
+                        const next = [...installments];
+                        next[idx] = { ...next[idx], sessions: e.target.value };
+                        setInstallments(next);
+                      }}
+                      className="h-9"
+                      data-testid={`${testPrefix}-partial-sessions-${idx}`}
+                    />
+                  </div>
+                  <div className="min-w-0 sm:w-[62px] sm:shrink-0">
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount</label>
+                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700" data-testid={`${testPrefix}-partial-computed-amount-${idx}`}>
+                      {sessionsNum > 0 ? `₹${amount}` : "—"}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // Typed straight in, because there is nothing to derive it from: this fee
+                // is one price for one thing, so what each installment is worth is the
+                // desk's to agree with the patient.
+                <div className="min-w-0 sm:flex-1">
+                  <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹) *</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={inst.amount}
+                    disabled={isPaid}
+                    onChange={(e) => {
+                      const next = [...installments];
+                      next[idx] = { ...next[idx], amount: e.target.value };
+                      setInstallments(next);
+                    }}
+                    className="h-9"
+                    data-testid={`${testPrefix}-partial-amount-${idx}`}
+                  />
                 </div>
-              </div>
+              )}
               <div className="col-span-2 min-w-0 sm:col-auto sm:min-w-[126px] sm:flex-[1.4]">
                 <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
                 {/* centered, so the calendar opens as its own dialog in the middle of the
@@ -11079,16 +11517,16 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                     setInstallments(next);
                   }}
                   className="h-9"
-                  data-testid={`cons-treatment-fee-partial-date-${idx}`}
+                  data-testid={`${testPrefix}-partial-date-${idx}`}
                 />
               </div>
-              {!isPaid && (
+              {!isPaid && onCollectRow && (
                 <Button
                   size="sm"
                   onClick={() => onCollectRow(idx)}
                   disabled={collecting || !allFilled || mismatch}
                   className="col-span-2 h-9 w-full bg-emerald-600 text-xs hover:bg-emerald-700 sm:col-auto sm:w-auto"
-                  data-testid={`cons-treatment-fee-partial-collect-${idx}`}
+                  data-testid={`${testPrefix}-partial-collect-${idx}`}
                 >
                   Collect
                 </Button>
@@ -11097,9 +11535,11 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
           </div>
         );
       })}
-      {sessionsTotal > 0 && mismatch && (
-        <p className="text-[11px] text-rose-600" data-testid="cons-treatment-fee-partial-mismatch">
-          Installments total ({sessionsTotal} sessions) must equal the Total Sessions ({totalSessions})
+      {mismatch && (bySessions ? sessionsTotal > 0 : scheduledTotal > 0) && (
+        <p className="text-[11px] text-rose-600" data-testid={`${testPrefix}-partial-mismatch`}>
+          {bySessions
+            ? `Installments total (${sessionsTotal} sessions) must equal the Total Sessions (${totalSessions})`
+            : `Installments total (Rs.${scheduledTotal.toLocaleString("en-IN")}) must equal the fee (Rs.${(totalAmount || 0).toLocaleString("en-IN")})`}
         </p>
       )}
     </div>
