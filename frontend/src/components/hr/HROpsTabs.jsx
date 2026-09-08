@@ -863,19 +863,21 @@ const laneOf = (slip) => PAY_LANES.find((l) => l.match(slip));
  *  deduction, net — because on a card there is no column heading to say where the last
  *  number came from. */
 const PayslipCard = ({ slip: s, editable, onAdjust, onOpen }) => (
+  // The whole card opens the person. A div rather than a button because the two boxes
+  // below take a figure each, and an input inside a button is markup no browser is
+  // obliged to make sense of — so it carries the button's keyboard behaviour by hand
+  // instead, and the boxes stop the click before it gets here.
   <div
-    className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:shadow-md"
+    role="button"
+    tabIndex={0}
+    onClick={() => onOpen?.(s)}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen?.(s); }
+    }}
+    className="cursor-pointer rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-sky-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
     data-testid={`hr-pay-kanban-card-${s.employee_id}`}
   >
-    {/* The name is the button, not the card. The two boxes below take a figure each, and a
-        card that opened a dialog wherever it was clicked would open one every time somebody
-        went to type a bonus. */}
-    <button
-      type="button"
-      onClick={() => onOpen?.(s)}
-      className="flex w-full items-start gap-2 rounded-lg text-left transition hover:bg-slate-50"
-      data-testid={`hr-pay-open-${s.employee_id}`}
-    >
+    <div className="flex items-start gap-2" data-testid={`hr-pay-open-${s.employee_id}`}>
       <EmployeeAvatar employee={{ full_name: s.employee_name }} size={32} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-slate-800">{s.employee_name}</p>
@@ -884,7 +886,7 @@ const PayslipCard = ({ slip: s, editable, onAdjust, onOpen }) => (
         </p>
       </div>
       <span className="shrink-0 text-sm font-extrabold text-sky-700">{money(s.net_payable)}</span>
-    </button>
+    </div>
 
     <div className="mt-2 flex flex-wrap gap-1">
       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600" title={`From the employee record's ${s.base_from}`}>
@@ -911,13 +913,23 @@ const PayslipCard = ({ slip: s, editable, onAdjust, onOpen }) => (
       <div className="flex items-center justify-between gap-2">
         <span className="text-slate-500">Bonus</span>
         {editable
-          ? <AmountBox value={s.bonus} onCommit={(n) => onAdjust(s.employee_id, { bonus: n })} testid={`hr-pay-bonus-${s.employee_id}`} />
+          ? (
+            // Typing a bonus is not asking for the salary dialog. Only the box swallows
+            // the click — the word beside it still opens the person, like the rest of the card.
+            <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} role="presentation">
+              <AmountBox value={s.bonus} onCommit={(n) => onAdjust(s.employee_id, { bonus: n })} testid={`hr-pay-bonus-${s.employee_id}`} />
+            </span>
+          )
           : <span className={s.bonus ? "font-medium text-emerald-600" : "text-slate-400"}>{money(s.bonus)}</span>}
       </div>
       <div className="flex items-center justify-between gap-2">
         <span className="text-slate-500">Deduction</span>
         {editable
-          ? <AmountBox value={s.deduction} onCommit={(n) => onAdjust(s.employee_id, { deduction: n })} testid={`hr-pay-ded-${s.employee_id}`} />
+          ? (
+            <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} role="presentation">
+              <AmountBox value={s.deduction} onCommit={(n) => onAdjust(s.employee_id, { deduction: n })} testid={`hr-pay-ded-${s.employee_id}`} />
+            </span>
+          )
           : <span className={s.deduction ? "font-medium text-rose-600" : "text-slate-400"}>{money(s.deduction)}</span>}
       </div>
     </div>
@@ -1027,6 +1039,11 @@ const SalaryModal = ({ slip, onClose, onSaved }) => {
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Two different histories, and they answer two different questions: what this person is
+  // contracted at and why that moved, against what they were actually paid each month.
+  // A raise and a month of loss of pay both change a number, and reading them in one list
+  // would put a decision somebody made beside an arithmetic result of the register.
+  const [tab, setTab] = useState("salary");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -1142,8 +1159,59 @@ const SalaryModal = ({ slip, onClose, onSaved }) => {
             </div>
 
             <div className="mt-5">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">History</p>
-              {(data?.history || []).length === 0 ? (
+              <div className="flex gap-1.5 border-b border-slate-200 pb-2" data-testid="hr-pay-history-tabs">
+                {[
+                  { key: "salary", label: "Salary", count: (data?.history || []).length },
+                  { key: "income", label: "Income", count: (data?.income || []).length },
+                ].map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setTab(t.key)}
+                    aria-pressed={tab === t.key}
+                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                      tab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
+                    }`}
+                    data-testid={`hr-pay-history-tab-${t.key}`}
+                  >
+                    {t.label}
+                    <span className={`rounded-full px-1.5 text-[10px] font-bold ${tab === t.key ? "bg-white/80 text-sky-700" : "bg-slate-100 text-slate-500"}`}>{t.count}</span>
+                  </button>
+                ))}
+              </div>
+
+              {tab === "income" && (
+                (data?.income || []).length === 0 ? (
+                  <p className="mt-2 rounded-lg border border-dashed border-slate-200 py-6 text-center text-xs text-slate-400" data-testid="hr-pay-income-empty">
+                    No month has been generated for them yet.
+                  </p>
+                ) : (
+                  <ul className="mt-2 space-y-1.5" data-testid="hr-pay-income-history">
+                    {data.income.map((m) => (
+                      <li key={m.month} className="rounded-lg border border-slate-200 px-3 py-2">
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                          <span className="text-xs font-semibold text-slate-700">{prettyMonth(m.month)}</span>
+                          <span className="text-xs font-bold text-sky-700">{money(m.net_payable)}</span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          Earned {money(m.earned)}
+                          {Number(m.bonus) > 0 ? ` · bonus +${money(m.bonus)}` : ""}
+                          {Number(m.deduction) > 0 ? ` · deduction −${money(m.deduction)}` : ""}
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          On {money(m.base)} · {m.payable_days}/{m.days_in_month} days
+                          {Number(m.lop_days) > 0 ? ` · LOP ${m.lop_days}` : ""}
+                          {/* Whether the month was actually paid, not just worked out. A
+                              draft is a figure somebody is still editing. */}
+                          {m.status ? ` · ${m.status}` : ""}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              )}
+
+              {tab === "salary" && ((data?.history || []).length === 0 ? (
                 <p className="mt-2 rounded-lg border border-dashed border-slate-200 py-6 text-center text-xs text-slate-400" data-testid="hr-pay-salary-history-empty">
                   Nothing recorded yet. Every change from here on is kept.
                 </p>
@@ -1168,7 +1236,7 @@ const SalaryModal = ({ slip, onClose, onSaved }) => {
                     </li>
                   ))}
                 </ul>
-              )}
+              ))}
             </div>
           </>
         )}

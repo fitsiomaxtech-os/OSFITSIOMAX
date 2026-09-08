@@ -1589,6 +1589,37 @@ async def employee_salary(emp_id: str, _: V3UserOut = Depends(require_hr)):
     rows = await v3_col("salary_history").find(
         {"employee_id": emp_id}, {"_id": 0},
     ).sort("changed_at", -1).to_list(200)
+
+    # What they were actually paid, month by month, which is a different question from
+    # what they are contracted at. A raise is a decision somebody made; a month short by
+    # five days of loss of pay is the register doing arithmetic, and reading the two in
+    # one list would put them side by side as though they were the same kind of event.
+    slips = await v3_col("payslips").find(
+        {"employee_id": emp_id}, {"_id": 0},
+    ).sort("month", -1).to_list(60)
+    # Whether each of those months was actually paid or is still a draft somebody is
+    # editing. The status lives on the run, not the slip, so it is read once for the
+    # months in hand rather than per row.
+    statuses = {}
+    if slips:
+        statuses = {
+            r["month"]: r.get("status") or ""
+            for r in await v3_col("payroll_runs").find(
+                {"month": {"$in": [s["month"] for s in slips]}}, {"_id": 0, "month": 1, "status": 1},
+            ).to_list(60)
+        }
+    income = [{
+        "month": s.get("month") or "",
+        "status": statuses.get(s.get("month"), ""),
+        "base": s.get("base") or 0,
+        "earned": s.get("earned") or 0,
+        "bonus": s.get("bonus") or 0,
+        "deduction": s.get("deduction") or 0,
+        "net_payable": s.get("net_payable") or 0,
+        "lop_days": s.get("lop_days") or 0,
+        "payable_days": s.get("payable_days") or 0,
+        "days_in_month": s.get("days_in_month") or 0,
+    } for s in slips]
     return {
         "employee_id": emp_id,
         "employee_name": emp.get("full_name") or "",
@@ -1599,6 +1630,7 @@ async def employee_salary(emp_id: str, _: V3UserOut = Depends(require_hr)):
         "field": _salary_field(emp),
         "reasons": [{"key": k, "label": v} for k, v in SALARY_REASONS.items()],
         "history": rows,
+        "income": income,
     }
 
 
