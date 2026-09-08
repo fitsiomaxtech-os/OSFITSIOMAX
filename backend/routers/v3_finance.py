@@ -949,6 +949,66 @@ def _parse_payment_mode(details: str) -> str:
     return m.group(1).lower() if m else "unknown"
 
 
+# One tender inside a split, as _standard_payment_record wrote it onto the activity line:
+#
+#   " · Split: Rs.8000 cash [4xRs.2000], Rs.4000 upi (UTR123)"
+#
+# The mode word is required, and required to be one of the four a split can be paid in
+# (SETTLED_NOW_MODES in v3_packages.py). That is what keeps a counted-notes label out of
+# the reading: "4xRs.2000" is an amount with no mode after it, and matches nothing.
+_SPLIT_TENDER_RE = re.compile(
+    r"Rs\.?\s*([\d,]+(?:\.\d+)?)\s+(cash|upi|card|account_transfer)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_payment_split(details: str) -> list:
+    """The tenders behind a split collection: [{"mode", "amount"}], or [] for anything else.
+
+    A split is one payment made in two or three ways at the counter -- half in cash, the
+    rest by UPI -- and the record calls it "split" for the reason its own comment gives:
+    naming any one of the modes would make it say something only part true. That answers
+    what the payment WAS, and leaves every screen reading it unable to say what CAME IN:
+    a Cash figure that quietly omits the cash half of every split is wrong, and a Cash
+    filter that hides those payments is wrong in the other direction.
+
+    So the breakdown is handed back alongside the mode. Read off the activity line rather
+    than the details document because that is what these loops have in hand, and the line
+    is written from the same tenders in the same order.
+    """
+    if not details:
+        return []
+    segment = re.search(r"·\s*Split:\s*([^·]+)", details)
+    if not segment:
+        return []
+    out = []
+    for amount, mode in _SPLIT_TENDER_RE.findall(segment.group(1)):
+        try:
+            out.append({"mode": mode.lower(), "amount": float(amount.replace(",", ""))})
+        except ValueError:
+            continue
+    return out
+
+
+def _lines_to_split(lines) -> list:
+    """The same shape, for the records that keep their tenders as a field of their own.
+
+    A Zumba or Fitness registration stores payment_lines rather than writing them into an
+    activity line, so there is nothing to parse -- but every reader of this payload should
+    get one shape whichever collection a row came out of.
+    """
+    out = []
+    for ln in lines or []:
+        mode = str((ln or {}).get("mode") or "").strip().lower()
+        if not mode:
+            continue
+        try:
+            out.append({"mode": mode, "amount": float((ln or {}).get("amount") or 0)})
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _installment_status(inst: dict, today: str) -> str:
     if inst.get("paid"):
         return "paid"
@@ -1269,11 +1329,26 @@ async def revenue_overview(
     payment_modes = {}
     transactions = []
 
+    def _tally_modes(mode: str, amount: float, split: list) -> None:
+        """Add one collection to the Cash/UPI/Card/Transfer figures this payload reports.
+
+        A split lands on each mode it was actually paid in, for its own share. Counted
+        under "split" instead, these figures answered a question nobody asks -- how much
+        came in awkwardly -- while the Cash figure quietly left out the cash half of every
+        one of them. The sum over all modes is the same either way, which is the test.
+        """
+        if split:
+            for line in split:
+                payment_modes[line["mode"]] = payment_modes.get(line["mode"], 0.0) + line["amount"]
+            return
+        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+
     for act in activities:
         details = act.get("details", "")
         amount = _parse_rs_amount(details)
         category = _revenue_category(act.get("action", ""))
         mode = _parse_payment_mode(details)
+        split = _parse_payment_split(details)
         if category == "session" and mode == "partial":
             # The activity log's Rs. figure is the Partial Payment schedule's total,
             # not what was actually collected at that moment — only the first
@@ -1305,7 +1380,7 @@ async def revenue_overview(
         b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b[f"{category}_total"] += amount
 
-        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+        _tally_modes(mode, amount, split)
 
         progress = lead_progress_map.get(act.get("lead_id"))
         session = lead_session_map.get(act.get("lead_id")) or {}
@@ -1337,6 +1412,11 @@ async def revenue_overview(
             "phone": lead_phone_map.get(act.get("lead_id"), ""),
             "patient_number": lead_patient_no_map.get(act.get("lead_id"), ""),
             "payment_mode": mode,
+            # Empty unless this was a split. The mode above still says "split" -- it is
+            # what the record says and what a receipt printed -- and this says what the
+            # split was made of, so a reader can show the tenders and count each one
+            # under its own mode.
+            "payment_split": split,
             "client_balance": lead_balance_map.get(act.get("lead_id"), 0.0),
             "payment_paid_amount": progress["paid_amount"] if progress else None,
             "payment_due_amount": progress["due_amount"] if progress else None,
@@ -1382,7 +1462,7 @@ async def revenue_overview(
         b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b["store_total"] = b.get("store_total", 0.0) + amount
 
-        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+        _tally_modes(mode, amount, [])
 
         transactions.append({
             "id": sale.get("id", ""),
@@ -1413,6 +1493,10 @@ async def revenue_overview(
             "client_name": (sale.get("customer_name") or "").strip() or "Counter sale",
             "phone": "",
             "payment_mode": mode,
+            # Always empty: a counter sale takes one mode (see VALID_PAYMENT_MODES in
+            # v3_inventory.py), so there is nothing to break down. Carried so every row
+            # in this list is one shape and no reader has to test for the key.
+            "payment_split": [],
             "client_balance": 0.0,
             # Store sales aren't reviewed here — see approve_transaction's docstring —
             # so this stays permanently false rather than left out, keeping every
@@ -1454,6 +1538,9 @@ async def revenue_overview(
         # pills can never match -- so picking any mode dropped Zumba from the total
         # even though the mode was sitting on the record all along.
         mode = reg.get("payment_mode") or "unknown"
+        # A class fee can be split across two tenders like any other -- the registration
+        # keeps them as payment_lines, so there is nothing to parse.
+        zumba_split = _lines_to_split(reg.get("payment_lines"))
 
         d = by_day.setdefault(day, _empty_day(day))
         d["zumba"] = d.get("zumba", 0.0) + amount
@@ -1461,7 +1548,7 @@ async def revenue_overview(
         b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b["zumba_total"] = b.get("zumba_total", 0.0) + amount
 
-        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+        _tally_modes(mode, amount, zumba_split)
 
         transactions.append({
             "id": reg.get("id", ""),
@@ -1484,6 +1571,7 @@ async def revenue_overview(
             "client_name": (reg.get("name") or "").strip() or "Zumba registration",
             "phone": reg.get("phone", ""),
             "payment_mode": mode,
+            "payment_split": zumba_split,
             "client_balance": max(float(reg.get("fee_amount") or 0) - amount, 0.0),
             # Read off the registration now that a class fee can actually be approved.
             # Hardcoded False was true while the Approvals tab could not see Zumba at
@@ -1524,6 +1612,7 @@ async def revenue_overview(
         # Read off the record rather than hardcoded, so the Cash/UPI/Card pills can match
         # it — the mistake Zumba's loop above had to be corrected for.
         mode = reg.get("payment_mode") or "unknown"
+        fitness_split = _lines_to_split(reg.get("payment_lines"))
 
         d = by_day.setdefault(day, _empty_day(day))
         d["fitness"] = d.get("fitness", 0.0) + amount
@@ -1531,7 +1620,7 @@ async def revenue_overview(
         b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b["fitness_total"] = b.get("fitness_total", 0.0) + amount
 
-        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+        _tally_modes(mode, amount, fitness_split)
 
         transactions.append({
             "id": reg.get("id", ""),
@@ -1554,6 +1643,7 @@ async def revenue_overview(
             "client_name": (reg.get("name") or "").strip() or "Fitness registration",
             "phone": reg.get("phone", ""),
             "payment_mode": mode,
+            "payment_split": fitness_split,
             "client_balance": max(float(reg.get("fee_amount") or 0) - amount, 0.0),
             "approved": bool(reg.get("approved")),
             "approved_by": reg.get("approved_by") or "",

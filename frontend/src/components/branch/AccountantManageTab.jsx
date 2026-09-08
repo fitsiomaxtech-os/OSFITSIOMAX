@@ -149,6 +149,49 @@ const PaymentModeBadge = ({ mode }) => (
 );
 
 /**
+ * The modes one collection actually arrived in.
+ *
+ * A fee taken half in cash and half by UPI is recorded as "split" — the right answer to
+ * what the payment was, and no answer at all to what came in. This book is about what came
+ * in, so a split reads back as the modes it was made of and "Split" is never shown: it is
+ * the name of an arrangement, not of money, and a row wearing it told an Accountant
+ * looking for their cash nothing.
+ *
+ * payment_split is [] on everything else, which is nearly every row — see
+ * _parse_payment_split in v3_finance.py, which reads the tenders back off the collection.
+ */
+const modesOf = (tx) => {
+  const split = tx?.payment_split || [];
+  if (split.length > 0) return split.map((l) => l.mode).filter(Boolean);
+  return tx?.payment_mode ? [tx.payment_mode] : [];
+};
+
+/** What of one collection landed under a given mode — the whole of it for an ordinary
+ *  payment, and only that tender's share of a split. */
+const amountInMode = (tx, mode) => {
+  const split = tx?.payment_split || [];
+  if (split.length === 0) return Number(tx?.gross) || 0;
+  return split.reduce((n, l) => (l.mode === mode ? n + (Number(l.amount) || 0) : n), 0);
+};
+
+/** One badge per mode, and the breakdown on hover for the rows that have one — the
+ *  figures live in the table's own Paid Amount column, so the badges stay a list of
+ *  ways rather than a second column of money. */
+const PaymentModes = ({ tx }) => {
+  const modes = modesOf(tx);
+  const split = tx?.payment_split || [];
+  if (modes.length === 0) return <PaymentModeBadge mode="" />;
+  return (
+    <span
+      className="inline-flex flex-wrap items-center justify-center gap-1"
+      title={split.length > 0 ? split.map((l) => `${fmt(l.amount)} ${formatMode(l.mode)}`).join(" + ") : undefined}
+    >
+      {modes.map((m, i) => <PaymentModeBadge key={`${m}-${i}`} mode={m} />)}
+    </span>
+  );
+};
+
+/**
  * Accountant Manage — Super Admin's Branch Management > Accountant Management >
  * Accountant Manage, the same view reused read-only-by-nature (it's all reporting,
  * nothing editable) as Branch Admin's own "Accountant Manage" tab, and again as the
@@ -276,7 +319,24 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   // branch two screens answering one question in two places.
   const filteredTxns = useMemo(() => {
     if (paymentModeFilter === "all") return transactions;
-    return transactions.filter((t) => t.payment_mode === paymentModeFilter);
+    return transactions
+      .filter((t) => modesOf(t).includes(paymentModeFilter))
+      // A split belongs under both its modes, but only for the part that arrived that
+      // way: Cash on a Rs.8,000 cash + Rs.4,000 UPI payment is Rs.8,000, and carrying the
+      // whole Rs.12,000 into both pills would make the two figures add to more than was
+      // ever collected. The row is rewritten to the tender being asked about, so the cards
+      // above and the amount on the row are the same money.
+      .map((t) => {
+        const split = t.payment_split || [];
+        if (split.length === 0) return t;
+        const amount = amountInMode(t, paymentModeFilter);
+        return {
+          ...t,
+          gross: amount,
+          net: amount,
+          payment_split: split.filter((l) => l.mode === paymentModeFilter),
+        };
+      });
   }, [transactions, paymentModeFilter]);
 
   // Every card's figure and the count under it, from one pass over whichever set the
@@ -887,7 +947,9 @@ const groupPaymentsByClient = (rows) => {
     // ways across two branches, and the collapsed row has to say so without printing
     // "Cash" once per collection.
     if (tx.source && !g.sources.includes(tx.source)) g.sources.push(tx.source);
-    if (tx.payment_mode && !g.modes.includes(tx.payment_mode)) g.modes.push(tx.payment_mode);
+    // Each way the money actually came in, so a split contributes Cash and UPI to the
+    // collapsed row rather than a mode nobody can bank.
+    modesOf(tx).forEach((m) => { if (!g.modes.includes(m)) g.modes.push(m); });
     if (tx.branch_name && !g.branches.includes(tx.branch_name)) g.branches.push(tx.branch_name);
   });
   return [...acc.values()]
@@ -985,7 +1047,7 @@ const RevenueDetailTable = ({ title, rows, onView, onReceipt }) => {
                 {g.payments.map((p) => (
                   <div key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
                     <span className="capitalize">{p.source}</span>
-                    <PaymentModeBadge mode={p.payment_mode} />
+                    <PaymentModes tx={p} />
                     <span>{dayOf(p.date)}</span>
                     {g.payments.length > 1 && <span className="ml-auto font-semibold text-slate-600">{fmt(p.gross)}</span>}
                   </div>
@@ -1133,7 +1195,7 @@ const RevenueDetailTable = ({ title, rows, onView, onReceipt }) => {
                       <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center capitalize text-slate-600">{p.source}</td>
                       <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5" />
                       <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center font-semibold text-emerald-600">{fmt(p.gross)}</td>
-                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center"><PaymentModeBadge mode={p.payment_mode} /></td>
+                      <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center"><PaymentModes tx={p} /></td>
                       <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center text-slate-600">{dayOf(p.date)}</td>
                       <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center text-slate-600">{p.branch_name || "—"}</td>
                       {/* The one cell on these sub-rows that is not blank. Each of them
