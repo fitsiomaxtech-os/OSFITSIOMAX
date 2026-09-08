@@ -2586,6 +2586,26 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   // the days worth clicking are visible without opening each one.
   const [apptOpenDates, setApptOpenDates] = useState({});
 
+  /** The booking sitting on one taken slot, opened from the pencil on its tile.
+   *
+   * A slot the grid shows as gone is not dead space — it is somebody's appointment, and
+   * the two reasons a branch is ringing about it are the two ways out offered here: the
+   * CONSULTANT cannot make it (hand the same time to another one) or the PATIENT cannot
+   * (keep the consultant, move the time). Both are the one POST that books anything;
+   * rebooking IS the reschedule, and the endpoint tags a genuine move on its own by
+   * comparing the new slot against the one the lead already sits on.
+   *
+   * The booking belongs to a different patient than the one whose card is open — this
+   * lead's own slot never appears as taken. That is deliberate: Branch Admin owns every
+   * calendar in the branch, and the moment a clash is visible is the moment it wants
+   * solving, not a trip through another patient's card to solve it.
+   *
+   * null | { date, time, duration, leadId, leadName, physioId, physioName, mode,
+   *          options, pickedPhysioId, loading, saving,
+   *          moveDate, moveTime, moveDuration, dayLoading, daySlots }
+   */
+  const [slotEdit, setSlotEdit] = useState(null);
+
   // Follow-up scheduling
   const tomorrowIso = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const [followUpForm, setFollowUpForm] = useState({ date: tomorrowIso(), time: "10:00", remarks: "" });
@@ -2707,6 +2727,102 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
     [apptExperts.experts, apptDraft?.physio_id],
   );
   const apptMeetLink = (apptSelectedExpert?.meet_link || "").trim();
+
+  /** Open the pencil on a taken slot. Asks who else is free at that exact time up front,
+   *  because CONSULTANT is the tab that opens and an empty list is itself the answer. */
+  const openSlotEdit = async (s) => {
+    if (!s?.lead_id) {
+      // Older appointment rows predate lead_id being stored on them. Nothing here can
+      // address a booking it cannot name, so say so rather than open a dead dialog.
+      toast.error("This booking is too old to move from here — open the patient's own card");
+      return;
+    }
+    const dateStr = apptDraft?.appointment_date;
+    setSlotEdit({
+      date: dateStr,
+      time: s.time,
+      duration: s.duration,
+      leadId: s.lead_id,
+      leadName: s.lead_name || "This patient",
+      physioId: apptSelectedExpert?.id || "",
+      physioName: apptSelectedExpert?.full_name || "",
+      mode: "consultant",
+      options: [],
+      pickedPhysioId: "",
+      loading: true,
+      saving: false,
+      moveDate: dateStr,
+      moveTime: "",
+      moveDuration: s.duration,
+      dayLoading: false,
+      daySlots: [],
+    });
+    try {
+      // Asked with the time, which is the form that answers "who is not already booked
+      // then" rather than "who published it" — the same distinction the handover on the
+      // lead card draws. lead_id keeps this booking from reading as a clash with itself.
+      const res = await getAvailableExperts(branchId, dateStr, s.time, s.lead_id);
+      setSlotEdit((p) => (p ? { ...p, options: res.experts || [], loading: false } : p));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not load consultants");
+      setSlotEdit((p) => (p ? { ...p, loading: false } : p));
+    }
+  };
+
+  /** The held consultant's own open times on whichever date the PATIENT tab is showing.
+   *  Ids are passed in rather than read off state: this runs from a click that has just
+   *  queued a state change, and the copy in scope would be the one before it. */
+  const loadSlotEditDay = async (dateStr, physioId, leadId) => {
+    setSlotEdit((p) => (p ? { ...p, moveDate: dateStr, moveTime: "", dayLoading: true, daySlots: [] } : p));
+    try {
+      const res = await getAvailableExperts(branchId, dateStr, undefined, leadId);
+      const doc = (res.experts || []).find((d) => d.id === physioId);
+      const slots = [...(doc?.free_slots || [])].sort((a, b) => (a.slot_time || "").localeCompare(b.slot_time || ""));
+      setSlotEdit((p) => (p ? { ...p, daySlots: slots, dayLoading: false } : p));
+    } catch {
+      setSlotEdit((p) => (p ? { ...p, daySlots: [], dayLoading: false } : p));
+    }
+  };
+
+  /** Apply whichever tab is open. One POST either way — CONSULTANT changes who holds the
+   *  slot, PATIENT changes when it is; the endpoint works out which of those happened.
+   *
+   *  final_stage is this board's Appointment stage. A lead booked under a different
+   *  vertical's pipeline is refused by name there rather than moved onto the wrong
+   *  stage, and the refusal is what the toast shows. */
+  const submitSlotEdit = async () => {
+    if (!slotEdit || slotEdit.saving) return;
+    const swappingConsultant = slotEdit.mode === "consultant";
+    const physioId = swappingConsultant ? slotEdit.pickedPhysioId : slotEdit.physioId;
+    const date = swappingConsultant ? slotEdit.date : slotEdit.moveDate;
+    const time = swappingConsultant ? slotEdit.time : slotEdit.moveTime;
+    const duration = swappingConsultant ? slotEdit.duration : slotEdit.moveDuration;
+    if (swappingConsultant && !physioId) { toast.error("Pick the consultant to move it to"); return; }
+    if (!swappingConsultant && !time) { toast.error("Pick the time to move it to"); return; }
+    setSlotEdit((p) => ({ ...p, saving: true }));
+    try {
+      await scheduleBranchAppointment(slotEdit.leadId, {
+        appointment_date: date,
+        appointment_time: time,
+        physio_id: physioId,
+        final_stage: appointmentStageName,
+        ...(duration ? { duration } : {}),
+      });
+      const movedTo = swappingConsultant
+        ? (slotEdit.options.find((d) => d.id === physioId)?.full_name || "another consultant")
+        : `${weekdayLabel(date)} ${to12h(time)}`;
+      toast.success(`${slotEdit.leadName} moved to ${movedTo}`);
+      setSlotEdit(null);
+      // The grid behind this dialog is a snapshot of the day taken before the move, so it
+      // still shows the slot as taken and the new one as free. Re-ask rather than patch:
+      // the same call feeds the CONSULTANT column's availability too.
+      await fetchAvailableExperts(branchId, apptDraft?.appointment_date, lead.id);
+      await onUpdate?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not reschedule");
+      setSlotEdit((p) => (p ? { ...p, saving: false } : p));
+    }
+  };
 
   useEffect(() => {
     if (!apptDraft || !apptDraft.appointment_date || !branchId) return;
@@ -3583,6 +3699,174 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
         </div>
       )}
 
+      {/* Moving a booking that is in the way, from the grid that showed it in the way.
+          Sits above the Appointment popup rather than replacing it, so the slot being
+          cleared and the day it is being cleared on stay on screen behind it. */}
+      {slotEdit && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget && !slotEdit.saving) setSlotEdit(null); }}
+          data-testid="branch-slot-edit-modal"
+        >
+          <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="shrink-0 border-b border-slate-200 bg-slate-100 px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 shrink-0 text-slate-500" />
+                <p className="text-sm font-bold text-slate-800">Reschedule</p>
+              </div>
+              {/* Whose appointment, and the one it is on now. Named because this is not
+                  the patient whose card is open, and moving the wrong person's booking is
+                  the mistake this dialog is one press away from. */}
+              <p className="mt-0.5 truncate text-xs text-slate-500" data-testid="branch-slot-edit-subject">
+                <b className="font-semibold text-slate-700">{slotEdit.leadName}</b>
+                {" · "}{weekdayLabel(slotEdit.date)} {to12h(slotEdit.time)}
+                {slotEdit.physioName ? <> {"·"} {slotEdit.physioName}</> : null}
+              </p>
+            </div>
+
+            {/* The two ways out of a clash. Which one is right depends on who cannot make
+                it, which is the thing the branch already knows and the system cannot. */}
+            <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-slate-200 bg-slate-50 p-1.5">
+              {[
+                ["consultant", "Consultant", ArrowLeftRight],
+                ["patient", "Patient", Clock],
+              ].map(([m, label, Icon]) => (
+                <button
+                  key={m}
+                  type="button"
+                  disabled={slotEdit.saving}
+                  onClick={() => {
+                    setSlotEdit((p) => (p ? { ...p, mode: m } : p));
+                    if (m === "patient" && slotEdit.daySlots.length === 0 && !slotEdit.dayLoading) {
+                      loadSlotEditDay(slotEdit.moveDate, slotEdit.physioId, slotEdit.leadId);
+                    }
+                  }}
+                  className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition ${
+                    slotEdit.mode === m
+                      ? "bg-white text-teal-700 shadow-sm ring-1 ring-teal-200"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                  data-testid={`branch-slot-edit-tab-${m}`}
+                >
+                  <Icon className="h-3.5 w-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {slotEdit.mode === "consultant" ? (
+                <>
+                  <p className="mb-2 text-xs text-slate-500">
+                    Same time, someone else takes it.
+                  </p>
+                  {slotEdit.loading && <p className="py-8 text-center text-sm text-slate-400">Checking who is free…</p>}
+                  {!slotEdit.loading && slotEdit.options.length === 0 && (
+                    <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
+                      Every consultant is already booked at {to12h(slotEdit.time)}. Move the patient instead.
+                    </p>
+                  )}
+                  {!slotEdit.loading && slotEdit.options.map((doc) => {
+                    const holds = doc.id === slotEdit.physioId;
+                    const picked = doc.id === slotEdit.pickedPhysioId;
+                    // Published means they had already opened this time; the rest can
+                    // still take it, which is the whole point of asking here rather than
+                    // in the slot picker.
+                    const publishedIt = (doc.free_slots || []).some((sl) => sl.time === slotEdit.time);
+                    return (
+                      <button
+                        key={doc.id}
+                        type="button"
+                        disabled={slotEdit.saving || holds}
+                        onClick={() => setSlotEdit((p) => (p ? { ...p, pickedPhysioId: doc.id } : p))}
+                        className={`mb-1.5 flex w-full items-center gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition disabled:opacity-60 ${
+                          picked ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"
+                        }`}
+                        data-testid={`branch-slot-edit-pick-${doc.id}`}
+                      >
+                        <EmployeeAvatar employee={doc} size={32} className="text-xs" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-slate-800">{doc.full_name}</span>
+                          <span className="block truncate text-[11px] text-slate-500">
+                            {holds ? "Holds it now" : publishedIt ? "Free — this time is on their calendar" : "Free — not on their calendar, but nothing is booked"}
+                          </span>
+                        </span>
+                        {holds && <span className="shrink-0 rounded bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">NOW</span>}
+                        {picked && <CheckCircle2 className="h-5 w-5 shrink-0 text-teal-600" />}
+                      </button>
+                    );
+                  })}
+                </>
+              ) : (
+                <>
+                  <p className="mb-2 text-xs text-slate-500">
+                    Same consultant{slotEdit.physioName ? <> — <b className="font-semibold text-slate-700">{slotEdit.physioName}</b></> : null}, a different time.
+                  </p>
+                  <div className="mb-3">
+                    <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-400">Move to date</label>
+                    <MilkDateInput
+                      value={slotEdit.moveDate}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => loadSlotEditDay(e.target.value, slotEdit.physioId, slotEdit.leadId)}
+                      className="w-44"
+                      data-testid="branch-slot-edit-date"
+                    />
+                  </div>
+                  <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-400">Move to time</label>
+                  {slotEdit.dayLoading ? (
+                    <p className="py-8 text-center text-sm text-slate-400">Reading their calendar…</p>
+                  ) : slotEdit.daySlots.length === 0 ? (
+                    // Only what this consultant has actually published, same as the grid
+                    // behind: a reschedule that invented a time would put the patient
+                    // somewhere the consultant never agreed to be.
+                    <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
+                      Nothing open on this date. Try another, or hand the slot to another consultant.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="branch-slot-edit-slots">
+                      {slotEdit.daySlots.map((sl) => {
+                        const picked = slotEdit.moveTime === sl.time;
+                        return (
+                          <button
+                            key={sl.slot_time}
+                            type="button"
+                            disabled={slotEdit.saving}
+                            onClick={() => setSlotEdit((p) => (p ? { ...p, moveTime: sl.time, moveDuration: sl.duration } : p))}
+                            className={`flex min-h-[3.5rem] items-center justify-between gap-2 rounded-lg border-2 px-3 py-2 text-left transition ${
+                              picked
+                                ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"
+                            }`}
+                            data-testid={`branch-slot-edit-slot-${sl.time}`}
+                          >
+                            <span className="truncate text-base font-bold">{to12h(sl.time)}</span>
+                            <span className="shrink-0 text-[11px] text-slate-400">{sl.duration} min</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-100 px-4 py-2.5">
+              <Button variant="outline" size="sm" disabled={slotEdit.saving} onClick={() => setSlotEdit(null)} data-testid="branch-slot-edit-cancel">
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="bg-teal-600 text-white hover:bg-teal-700"
+                disabled={slotEdit.saving || (slotEdit.mode === "consultant" ? !slotEdit.pickedPhysioId : !slotEdit.moveTime)}
+                onClick={submitSlotEdit}
+                data-testid="branch-slot-edit-save"
+              >
+                {slotEdit.saving ? "Moving…" : "Reschedule"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {apptDraft && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
           {/* A card, like every other popup here, but a tall one — three booking steps
@@ -3828,32 +4112,57 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                         <p className="mt-0.5 text-xs text-amber-700">Pick another date, or publish more availability in MANAGEMENT → CONSULTANT CALENDAR.</p>
                       </div>
                     )}
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="branch-appt-slots">
+                    {/* Three across, not four. The tiles carry a time, a duration and —
+                        where the slot is spoken for — a name and a button, which is more
+                        than a quarter-column can hold without wrapping every label. */}
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="branch-appt-slots">
                       {apptSlotsForExpert.map((s) => {
                         const active = !s.booked && apptDraft.appointment_time === s.time;
-                        // The whole day, with only the open half clickable. A taken time is
-                        // struck through and refuses the click rather than being missing, so
-                        // the grid reads as the consultant's day instead of as its leftovers
-                        // — and a slot that vanished between opening the popup and pressing
-                        // Confirm now says so here rather than only in the error afterwards.
+                        // A taken time is not a tile to pick, it is a booking to manage, so
+                        // it renders as a row with its own button rather than as a disabled
+                        // one: a button inside a button is not something a browser parses.
+                        // The pencil is the only thing on this grid that touches somebody
+                        // else's appointment, which is why it is a separate press and not
+                        // the tile itself.
+                        if (s.booked) {
+                          return (
+                            <div
+                              key={s.slot_time}
+                              className="flex min-h-[3.5rem] items-center justify-between gap-2 rounded-lg border-2 border-slate-200 bg-slate-100 px-3 py-2"
+                              data-testid={`branch-appt-slot-${s.time}`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-base font-bold text-slate-400 line-through decoration-slate-400">{to12h(s.time)}</span>
+                                <span className="block truncate text-[11px] font-semibold text-slate-400">
+                                  Booked{s.lead_name ? ` · ${s.lead_name}` : ""}
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => openSlotEdit(s)}
+                                className="shrink-0 rounded-md border border-slate-300 bg-white p-1.5 text-slate-500 transition hover:border-teal-400 hover:bg-teal-50 hover:text-teal-600"
+                                title={`Reschedule the ${to12h(s.time)} booking${s.lead_name ? ` — ${s.lead_name}` : ""}`}
+                                data-testid={`branch-appt-slot-edit-${s.time}`}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        }
                         return (
                           <button
                             key={s.slot_time}
                             type="button"
-                            disabled={s.booked}
                             onClick={() => setApptDraft({ ...apptDraft, appointment_time: s.time, duration: s.duration })}
-                            className={`rounded-lg border-2 px-2 py-2.5 text-center transition ${
-                              s.booked
-                                ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
-                                : active
+                            className={`flex min-h-[3.5rem] items-center justify-between gap-2 rounded-lg border-2 px-3 py-2 text-left transition ${
+                              active
                                 ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100"
                                 : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"
                             }`}
-                            title={s.booked ? (s.lead_name ? `Booked — ${s.lead_name}` : "Already booked") : undefined}
                             data-testid={`branch-appt-slot-${s.time}`}
                           >
-                            <span className={`block text-base font-bold ${s.booked ? "line-through decoration-slate-400" : ""}`}>{to12h(s.time)}</span>
-                            <span className="block text-[11px] text-slate-400">{s.booked ? "Booked" : `${s.duration} min`}</span>
+                            <span className="truncate text-base font-bold">{to12h(s.time)}</span>
+                            <span className="shrink-0 text-[11px] text-slate-400">{s.duration} min</span>
                           </button>
                         );
                       })}
