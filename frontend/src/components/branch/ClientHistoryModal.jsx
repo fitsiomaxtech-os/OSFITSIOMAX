@@ -77,6 +77,7 @@ const emptyCollectDraft = {
   amount: "",
   payment_mode: "cash",
   upi_transaction_id: "",
+  card_transaction_id: "",
   account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
   cheque_number: "", transfer_reference: "",
 };
@@ -109,6 +110,7 @@ const CollectField = ({ label, value, onChange, placeholder, testid }) => (
 const paidReference = (s) => [
   s.upi_transaction_id && `Txn ${s.upi_transaction_id}`,
   s.upi_utr && `UTR ${s.upi_utr}`,
+  s.card_transaction_id && `Card txn ${s.card_transaction_id}`,
   s.account_last4 && `A/C ****${s.account_last4}`,
   s.account_holder_name,
   s.cheque_number && `Cheque #${s.cheque_number}`,
@@ -120,7 +122,7 @@ const paidReference = (s) => [
  *  which only ever receives the rendered sentence. Anything before the mode marker is
  *  the description, not a reference, so it's left alone. */
 const detailReference = (details) => {
-  const m = /·\s*(UPI txn|UTR|A\/C \*\*\*\*|Cheque #)/.exec(details || "");
+  const m = /·\s*(UPI txn|UTR|Card txn|A\/C \*\*\*\*|Cheque #)/.exec(details || "");
   return m ? details.slice(m.index + 1).trim() : "";
 };
 
@@ -397,12 +399,20 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
     // a round trip that fails would otherwise send them back to an empty form.
     if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
-    } else if (mode === "card" || mode === "account_transfer") {
+    } else if (mode === "card") {
+      // The terminal's transaction id, and nothing else — the desk cannot read an account
+      // number or an IFSC off a card, so asking for them only ever got them invented.
+      if (!draft.card_transaction_id.trim()) {
+        toast.error("Card Transaction ID is required");
+        return;
+      }
+      payload.card_transaction_id = draft.card_transaction_id.trim();
+    } else if (mode === "account_transfer") {
       if (!draft.account_number.trim() || !draft.account_holder_name.trim() || !draft.bank_name.trim() || !draft.ifsc_code.trim()) {
         toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
         return;
       }
-      if (mode === "account_transfer" && !draft.transfer_reference.trim()) {
+      if (!draft.transfer_reference.trim()) {
         toast.error("Reference / UTR No. is required for an Account Transfer");
         return;
       }
@@ -410,7 +420,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
       payload.account_holder_name = draft.account_holder_name.trim();
       payload.bank_name = draft.bank_name.trim();
       payload.ifsc_code = draft.ifsc_code.trim();
-      if (mode === "account_transfer") payload.transfer_reference = draft.transfer_reference.trim();
+      payload.transfer_reference = draft.transfer_reference.trim();
     } else if (mode === "cheque") {
       if (!draft.bank_name.trim() || !draft.cheque_number.trim()) {
         toast.error("Bank Name and Cheque Number are required");
@@ -779,10 +789,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
 
                 {collectDraft.payment_mode === "card" && (
                   <div className="space-y-3 rounded-lg border border-violet-100 bg-violet-50/50 p-3">
-                    <CollectField label="Account Number *" value={collectDraft.account_number} onChange={(e) => setDraft({ account_number: e.target.value })} placeholder="Only the last 4 digits are stored" testid="client-collect-account-number" />
-                    <CollectField label="Account Holder Name *" value={collectDraft.account_holder_name} onChange={(e) => setDraft({ account_holder_name: e.target.value })} placeholder="Name on the card" testid="client-collect-account-holder" />
-                    <CollectField label="Bank Name *" value={collectDraft.bank_name} onChange={(e) => setDraft({ bank_name: e.target.value })} placeholder="e.g. HDFC Bank" testid="client-collect-bank" />
-                    <CollectField label="IFSC Code *" value={collectDraft.ifsc_code} onChange={(e) => setDraft({ ifsc_code: e.target.value })} placeholder="e.g. HDFC0001234" testid="client-collect-ifsc" />
+                    <CollectField label="Transaction ID *" value={collectDraft.card_transaction_id} onChange={(e) => setDraft({ card_transaction_id: e.target.value })} placeholder="From the card terminal slip" testid="client-collect-card-txn" />
                   </div>
                 )}
 

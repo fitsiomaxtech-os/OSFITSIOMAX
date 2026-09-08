@@ -24,7 +24,11 @@ export const ALL_PAYMENT_MODE_LABELS = { cash: "Cash", upi: "UPI", card: "Card",
 /** Whatever identifies this payment with the bank — the thing a dispute is traced by. */
 export const paymentReference = (p) => p.transfer_reference
   || p.upi_utr || p.upi_transaction_id
+  || p.card_transaction_id
   || (p.cheque_number ? `Cheque ${p.cheque_number}${p.bank_name ? ` · ${p.bank_name}` : ""}` : "")
+  // Cards taken before they stopped asking for the payer's bank details, which kept the
+  // account's last four and no transaction id. Reprinting one of those receipts has to
+  // still show what it showed the day it was handed over.
   || (p.account_number ? `Card ****${String(p.account_number).replace(/\D/g, "").slice(-4)}` : "");
 
 // `kind: "schedule"` is a Partial Payment plan — the installments are agreed but no money

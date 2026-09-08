@@ -618,13 +618,18 @@ class V3CollectPackagePaymentInput(BaseModel):
     # UPI
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
-    # Card — only the last 4 digits of the account number are ever persisted; the
-    # full number is never stored.
+    # Card -- the transaction id the terminal printed, and nothing else. This used to
+    # collect the same four bank fields as an Account Transfer, which no desk can fill in
+    # honestly: the swipe hands back one reference and the card itself carries no IFSC.
+    card_transaction_id: Optional[str] = None
+    # Account Transfer — the account the money moved from. Only the last 4 digits of the
+    # account number are ever persisted; the full number is never stored.
     account_number: Optional[str] = None
     account_holder_name: Optional[str] = None
     bank_name: Optional[str] = None
     ifsc_code: Optional[str] = None
-    # Cheque — the bank the cheque is drawn on (bank_name, shared with Card) and its
+    # Cheque — the bank the cheque is drawn on (bank_name, shared with Account
+    # Transfer) and its
     # number. A cheque is a promise rather than money on the desk, so the fee keeps its
     # listed price: there is no amount to override and no discount to negotiate against
     # a payment that has not happened yet.
@@ -677,8 +682,8 @@ class V3CollectDietChartFeeInput(V3CollectPackagePaymentInput):
     Identical in shape to V3CollectDietFeeInput — the same six payment modes, against an
     item chosen at the point of collection — so it inherits the same payment fields for the
     same reason V3CollectRehabFeeInput does: build_payment_details validates every one of
-    them, and a hand-written copy that missed ifsc_code would throw on the first card
-    payment.
+    them, and a hand-written copy that missed transfer_reference would throw on the first
+    Account Transfer.
     """
     item_id: str
     mode: Literal["online", "offline"] = "offline"
@@ -694,8 +699,8 @@ class V3CollectRehabFeeInput(V3CollectPackagePaymentInput):
     already on the lead.
 
     Inherited rather than restated so build_payment_details can reach every field it
-    validates; a hand-written copy that missed ifsc_code would have thrown on the first
-    card payment.
+    validates; a hand-written copy that missed transfer_reference would have thrown on
+    the first Account Transfer.
     """
 
 
@@ -727,11 +732,15 @@ class V3CollectTreatmentFeeInput(BaseModel):
     # UPI
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
-    # Card — only the last 4 digits of the account number are ever persisted; the
-    # full number is never stored.
+    # Card -- the transaction id the terminal printed, and nothing else. This used to
+    # collect the same four bank fields as an Account Transfer, which no desk can fill in
+    # honestly: the swipe hands back one reference and the card itself carries no IFSC.
+    card_transaction_id: Optional[str] = None
+    # Account Transfer — the account the money moved from. Only the last 4 digits of the
+    # account number are ever persisted; the full number is never stored.
     account_number: Optional[str] = None
     account_holder_name: Optional[str] = None
-    # Cheque (bank_name is shared with Card)
+    # Cheque (bank_name is shared with Account Transfer)
     bank_name: Optional[str] = None
     cheque_number: Optional[str] = None
     ifsc_code: Optional[str] = None
@@ -780,6 +789,10 @@ class V3MarkInstallmentPaidInput(BaseModel):
     payment_lines: Optional[List[V3PaymentLineInput]] = None
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
+    # Card -- the transaction id the terminal printed, and nothing else. This used to
+    # collect the same four bank fields as an Account Transfer, which no desk can fill in
+    # honestly: the swipe hands back one reference and the card itself carries no IFSC.
+    card_transaction_id: Optional[str] = None
     account_number: Optional[str] = None
     account_holder_name: Optional[str] = None
     bank_name: Optional[str] = None
