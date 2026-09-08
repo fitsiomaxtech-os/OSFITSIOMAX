@@ -1228,6 +1228,10 @@ async def revenue_overview(
     lead_branch_map = {l["id"]: l.get("branch_id") for l in leads}
     lead_name_map = {l["id"]: l.get("name", "Unknown") for l in leads}
     lead_phone_map = {l["id"]: l.get("phone", "") for l in leads}
+    # On the row so a receipt reissued from Accountant Manage can print it. The leads
+    # are already loaded whole above, so this is a pass over a list in memory rather
+    # than a query — and without it the one field a bill is filed under came out blank.
+    lead_patient_no_map = {l["id"]: l.get("patient_number", "") for l in leads}
     lead_balance_map = {l["id"]: _lead_outstanding_balance(l) for l in leads}
     lead_progress_map = {l["id"]: _lead_payment_progress(l) for l in leads}
     lead_session_map = {l["id"]: _lead_session_summary(l) for l in leads}
@@ -1331,6 +1335,7 @@ async def revenue_overview(
             "lead_id": act.get("lead_id", ""),
             "client_name": lead_name_map.get(act.get("lead_id"), "Unknown"),
             "phone": lead_phone_map.get(act.get("lead_id"), ""),
+            "patient_number": lead_patient_no_map.get(act.get("lead_id"), ""),
             "payment_mode": mode,
             "client_balance": lead_balance_map.get(act.get("lead_id"), 0.0),
             "payment_paid_amount": progress["paid_amount"] if progress else None,

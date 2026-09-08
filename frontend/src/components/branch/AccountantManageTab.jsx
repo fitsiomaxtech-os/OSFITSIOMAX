@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight } from "lucide-react";
+import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -7,6 +7,8 @@ import { BranchExpensesPanel } from "@/components/branch/BranchExpensesPanel";
 import { maskDayMonthYear, manualToIso, isoToManual } from "@/components/DateFilterPopover";
 import { getBranches, getRevenueOverview, getFinanceExpenses } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
+import { ReceiptDialog } from "@/components/ReceiptDialog";
+import { receiptFromTransaction } from "@/lib/receipt";
 import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
 
 // Three tabs, not the ten this page used to carry: Consultation/Session/Diet/Store
@@ -75,6 +77,30 @@ const REVENUE_VIEWS = [
   // taking money that never appeared on the page an accountant reads.
   { key: "fitness", label: "Fitness Revenue", short: "Fitness", color: "#65a30d", icon: Dumbbell },
 ];
+
+const titleCase = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+
+// What a receipt calls each of the ledger's sources. The table's own column shows the
+// bare category, which is the right length for a column and the wrong words for a
+// document: a patient handed a sheet reading "Paid For: session" cannot match it against
+// anything they were told at the desk.
+const RECEIPT_PAID_FOR = {
+  consultation: "Consultation Fee",
+  session: "Treatment Fee",
+  treatment: "Treatment Fee",
+  rehab: "Rehab Fee",
+  diet: "Diet Fee",
+  store: "Store Purchase",
+  zumba: "Zumba Registration",
+  fitness: "Fitness Membership",
+};
+
+/** One ledger row as a receipt. Named here rather than inside receiptFromTransaction
+ *  because the source vocabulary is this desk's, not the receipt's. */
+const receiptForTxn = (tx) => receiptFromTransaction({
+  ...tx,
+  paidFor: RECEIPT_PAID_FOR[tx.source] || titleCase(tx.source || ""),
+});
 
 // What the server calls money it cannot put under a branch -- see _branch_label in
 // v3_finance.py. One is a client who was never given a branch, the other a branch id
@@ -157,6 +183,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [viewingLeadId, setViewingLeadId] = useState(null);
+  // The receipt for one collection on the ledger, reissued from the desk that keeps it.
+  // The eye beside it opens the client; this opens the piece of paper.
+  const [receipt, setReceipt] = useState(null);
 
   useEffect(() => {
     if (fixedBranchId) return;
@@ -539,6 +568,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             title={REVENUE_VIEWS.find((v) => v.key === revenueView)?.label}
             rows={revenueView === "collected" ? filteredTxns : filteredTxns.filter((t) => t.source === revenueView)}
             onView={setViewingLeadId}
+            onReceipt={(tx) => setReceipt(receiptForTxn(tx))}
           />
           </>
           )}
@@ -546,7 +576,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
       ) : tab === "schedule" ? (
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
       ) : (
-        <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} />
+        <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} onReceipt={(tx) => setReceipt(receiptForTxn(tx))} />
       )}
 
       {showCustom && (
@@ -616,6 +646,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
       )}
 
       {viewingLeadId && <ClientHistoryModal leadId={viewingLeadId} onClose={() => setViewingLeadId(null)} onChanged={load} />}
+      <ReceiptDialog receipt={receipt} onClose={() => setReceipt(null)} testid="accountant-receipt" />
     </div>
   );
 };
@@ -647,7 +678,7 @@ const DISCOUNT_VIEWS = [
  * decision taken at that moment — rolling a client's two visits together would average
  * away the one that was actually negotiated.
  */
-const DiscountAppliedBoard = ({ rows, onView }) => {
+const DiscountAppliedBoard = ({ rows, onView, onReceipt }) => {
   const [view, setView] = useState("all");
 
   // Falls back to listed = collected + discount when original_amount is missing, which is
@@ -775,14 +806,39 @@ const DiscountAppliedBoard = ({ rows, onView }) => {
                     <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{(tx.date || "").slice(0, 10)}</td>
                     <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.branch_name || "—"}</td>
                     <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
-                      <button
-                        type="button"
-                        onClick={() => onView && onView(tx.lead_id)}
-                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
-                        data-testid={`discount-detail-view-${tx.id}`}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
+                      {/* Two things a row can be opened for, and they are not the same
+                          thing: the eye opens the client behind the money, the receipt
+                          opens the money itself. This column carried only the first, so
+                          a desk asked for a copy of a bill had to open the client, find
+                          the fee and reissue it from there — or, before the fee cards
+                          could reissue at all, could not produce one. */}
+                      <div className="flex items-center justify-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => onView && onView(tx.lead_id)}
+                          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+                          title="Open this client"
+                          aria-label="Open this client"
+                          data-testid={`discount-detail-view-${tx.id}`}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        {/* Only where the collection has a transaction id. Rows taken
+                            before ids existed are real money and still list, but a
+                            receipt with no number on it proves nothing. */}
+                        {onReceipt && tx.transaction_id && (
+                          <button
+                            type="button"
+                            onClick={() => onReceipt(tx)}
+                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600"
+                            title="Receipt — print, send or download it again"
+                            aria-label="Receipt"
+                            data-testid={`discount-detail-receipt-${tx.id}`}
+                          >
+                            <Receipt className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -845,12 +901,11 @@ const groupPaymentsByClient = (rows) => {
 };
 
 const dayOf = (d) => (d || "").slice(0, 10);
-const titleCase = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 // Two of anything is what these columns hold; the rest are one click away with a row each,
 // so the collapsed cell counts them rather than wrapping to four lines.
 const firstTwo = (list) => ({ shown: list.slice(0, 2), extra: Math.max(0, list.length - 2) });
 
-const RevenueDetailTable = ({ title, rows, onView }) => {
+const RevenueDetailTable = ({ title, rows, onView, onReceipt }) => {
   const groups = useMemo(() => groupPaymentsByClient(rows), [rows]);
   // Keyed by group, so narrowing the list above leaves stale keys behind harmlessly
   // rather than opening the wrong client.
@@ -1032,14 +1087,36 @@ const RevenueDetailTable = ({ title, rows, onView }) => {
                       {g.branches.length > 1 && <span className="text-slate-400"> +{g.branches.length - 1}</span>}
                     </td>
                     <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); if (onView) onView(g.lead_id); }}
-                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
-                        data-testid={`revenue-detail-view-${g.key}`}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center justify-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); if (onView) onView(g.lead_id); }}
+                          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+                          title="Open this client"
+                          aria-label="Open this client"
+                          data-testid={`revenue-detail-view-${g.key}`}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        {/* A receipt is one collection's, and this row is a client's. So
+                            it appears here only where the client made exactly one payment
+                            and the two are the same thing; a client with three gets a
+                            receipt button on each of the three rows underneath instead,
+                            because "the receipt" for that row would have to pick one of
+                            them and there is no right answer. */}
+                        {onReceipt && !many && g.payments[0]?.transaction_id && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onReceipt(g.payments[0]); }}
+                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600"
+                            title="Receipt — print, send or download it again"
+                            aria-label="Receipt"
+                            data-testid={`revenue-detail-receipt-${g.key}`}
+                          >
+                            <Receipt className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>,
                   // Each collection exactly as it listed before, minus the client identity
@@ -1059,7 +1136,24 @@ const RevenueDetailTable = ({ title, rows, onView }) => {
                       <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center"><PaymentModeBadge mode={p.payment_mode} /></td>
                       <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center text-slate-600">{dayOf(p.date)}</td>
                       <td className="border-y border-slate-100 bg-slate-50 px-3 py-1.5 text-center text-slate-600">{p.branch_name || "—"}</td>
-                      <td className="rounded-r-[5px] border-y border-r border-slate-100 bg-slate-50 px-3 py-1.5" />
+                      {/* The one cell on these sub-rows that is not blank. Each of them
+                          is a collection in its own right, so each has its own receipt —
+                          which is the whole reason the group row above declines to show
+                          one. No client button here: the row above is that client. */}
+                      <td className="rounded-r-[5px] border-y border-r border-slate-100 bg-slate-50 px-3 py-1.5 text-center">
+                        {onReceipt && p.transaction_id && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onReceipt(p); }}
+                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600"
+                            title="Receipt — print, send or download it again"
+                            aria-label="Receipt"
+                            data-testid={`revenue-detail-receipt-${p.id}`}
+                          >
+                            <Receipt className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   )) : []),
                 ];

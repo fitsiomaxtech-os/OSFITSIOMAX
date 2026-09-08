@@ -190,6 +190,10 @@ export const scheduleBranchAppointment = async (leadId, payload) => (await api.p
 // chat apps fetch a shared link with a crawler that doesn't run JavaScript, and only
 // real HTML gets them to draw the preview card above the message.
 export const publicAppointmentUrl = (token) => `${BACKEND_URL}/api/v3/public/appointment/${token}`;
+// The same confirmation the booking raised, read back off the record so it can be handed
+// over again. 404s when the patient has no live consultation booked — the caller says so
+// rather than opening an empty card.
+export const getLeadAppointmentCard = async (leadId) => (await api.get(`/leads/${leadId}/appointment-card`)).data;
 export const getConsultationsBoard = async (branchId, pipeline) => (await api.get(`/branch-admin/consultations/${branchId}/board`, { params: pipeline ? { pipeline } : {} })).data;
 // Consultation Appointment Scheduling (Branch Admin > Calendar > Schedule)
 export const listConsultAppointments = async (branchId) => (await api.get(`/branch-admin/${branchId}/consult-appointments`)).data;

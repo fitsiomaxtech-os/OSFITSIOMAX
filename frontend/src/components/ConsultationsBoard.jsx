@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Salad, HeartPulse, Music2, Video } from "lucide-react";
+import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Share2, Eye, Salad, HeartPulse, Music2, Video } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,7 @@ import {
   listDietStoreItems,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getAvailableExperts, getAvailableDates,
-  getLeadRemarks, getLeadActivity, leadDocuments,
+  getLeadRemarks, getLeadActivity, getLeadAppointmentCard, leadDocuments,
   saveConsultationDecision, markConsultationCompleted, getBranches,
   listTextPresets, addTextPreset, deleteTextPreset,
   getTreatmentTypes, bulkHardDeleteLeads,
@@ -29,7 +29,9 @@ import {
 import { waNumber } from "@/lib/phone";
 import { loadSession } from "@/lib/session";
 import { endTime12h, slotTo12h, to12h } from "@/lib/time";
-import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, openPrintable, downloadPrintable, sharePrintable } from "@/lib/printable";
+import { ALL_PAYMENT_MODE_LABELS, isHandheld, paymentReference } from "@/lib/receipt";
+import { ReceiptDialog } from "@/components/ReceiptDialog";
+import { AppointmentConfirmCard } from "@/components/AppointmentConfirmCard";
 import { isCourseComplete } from "@/lib/leadStage";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { SeatDots } from "@/components/ui/seat-dots";
@@ -92,109 +94,6 @@ const BLANK_TREATMENT_TENDER = {
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
 
-// ---- Payment receipt ----------------------------------------------------------------
-// The receipt is built as a standalone HTML document rather than printed from the page:
-// window.print() here would send the whole board — modals, sidebar and all — to the
-// printer, and the same document is what gets downloaded, so paper and file always match.
-const ALL_PAYMENT_MODE_LABELS = { cash: "Cash", upi: "UPI", card: "Card", account_transfer: "Account Transfer", cheque: "Cheque", partial: "Partial Payment" };
-
-/** Whatever identifies this payment with the bank — the thing a dispute is traced by. */
-const paymentReference = (p) => p.transfer_reference
-  || p.upi_utr || p.upi_transaction_id
-  || (p.cheque_number ? `Cheque ${p.cheque_number}${p.bank_name ? ` · ${p.bank_name}` : ""}` : "")
-  || (p.account_number ? `Card ****${String(p.account_number).replace(/\D/g, "").slice(-4)}` : "");
-
-// `kind: "schedule"` is a Partial Payment plan — the installments are agreed but no money
-// has come in yet, so it must never print "Amount Paid" or "PAYMENT RECEIVED".
-const isSchedule = (r) => r.kind === "schedule";
-
-// The receipt's own document content. The branding, styles and the open/print/download/
-// share mechanics are shared with every other printable in lib/printable.js.
-const receiptRows = (r) => [
-  [isSchedule(r) ? "Reference No." : "Transaction ID", r.receiptNo],
-  ["Date", r.dateLabel],
-  ["Patient", r.patient],
-  ["Patient No.", r.patientNo],
-  ["Phone", r.phone],
-  r.branch ? ["Branch", r.branch] : null,
-  [isSchedule(r) ? "Scheduled For" : "Paid For", r.paidFor],
-  r.packageName ? ["Package", r.packageName] : null,
-  r.sessionsCovered ? ["Sessions Covered", r.sessionsCovered] : null,
-  ["Payment Mode", r.modeLabel],
-  r.reference ? ["Reference", r.reference] : null,
-  // Printed because the count is the half of a cash payment that can be checked against
-  // a till later; the figure on its own cannot be.
-  r.cashCounted ? ["Cash Counted", r.cashCounted] : null,
-  r.originalAmount != null && r.originalAmount !== r.amount ? ["Original Price", `Rs.${r.originalAmount}`] : null,
-  // The percentage alongside the rupees, so the receipt says how big the discount was and
-  // not just how much came off. Omitted when there's no original price to measure against.
-  r.discount
-    ? ["Discount", r.originalAmount > 0
-        ? `- Rs.${r.discount} (${Number(((r.discount / r.originalAmount) * 100).toFixed(2))}%)`
-        : `- Rs.${r.discount}`]
-    : null,
-  [isSchedule(r) ? "Total Payable" : "Amount Paid", `Rs.${r.amount}`],
-  r.balanceDue ? ["Balance Due", r.balanceDue] : null,
-  [isSchedule(r) ? "Prepared By" : "Collected By", r.collectedBy],
-].filter(Boolean);
-
-/**
- * The shorter list the on-screen receipt shows. Deliberately not receiptRows.
- *
- * The printed bill and the shared text are records — they carry the branch, the package,
- * the mode, the original price and who collected it, because that is what a receipt has to
- * prove months later. The popup is an acknowledgement seen for a few seconds while the
- * patient is still standing there, and thirteen rows to confirm one payment is a wall to
- * read past rather than a confirmation.
- *
- * Everything dropped here is still on the bill, in the share text and in the download.
- * Money is not among it: the three figures sit in the block above this, larger.
- */
-const receiptPopupRows = (r) => [
-  [isSchedule(r) ? "Reference No." : "Transaction ID", r.receiptNo],
-  ["Date and Time", r.dateLabel],
-  ["Patient Name", r.patient],
-  ["Phone Number", r.phone],
-  [isSchedule(r) ? "Scheduled For" : "Paid For", r.paidFor],
-].filter(([, v]) => v);
-
-const receiptHtml = (r) => `<!doctype html><html><head><meta charset="utf-8">
-<title>Receipt ${escapeHtml(r.receiptNo)}</title><style>${PRINTABLE_STYLES}</style></head>
-<body><div class="wrap">
-  <div class="head">
-    <img class="logo" src="${LOGO_URL}" alt="FITSIOMAX">
-    <div>
-      <div class="brand">FITSIOMAX</div>
-      <div class="sub">${escapeHtml(r.branch || "Physiotherapy & Rehabilitation")}</div>
-    </div>
-  </div>
-  <div class="tag${isSchedule(r) ? " tag-sch" : ""}">${isSchedule(r) ? "PAYMENT SCHEDULE" : "PAYMENT RECEIVED"}</div>
-  <hr>
-  <div class="amt-label">${isSchedule(r) ? "Total Payable" : "Amount Paid"}</div>
-  <div class="amt${isSchedule(r) ? " amt-sch" : ""}">Rs.${escapeHtml(r.amount)}</div>
-  <hr>
-  <table>${receiptRows(r).map(([k, v]) => `<tr><td class="k">${escapeHtml(k)}</td><td class="v">${escapeHtml(v)}</td></tr>`).join("")}</table>
-  ${(r.installments || []).length ? `<hr><div class="amt-label">Installments</div>
-  <table>${r.installments.map((i, n) => `<tr><td class="k">#${n + 1}${i.sessions ? ` · ${escapeHtml(i.sessions)} sessions` : ""} · due ${escapeHtml(i.due_date || "—")}</td><td class="v">Rs.${escapeHtml(i.amount)}${i.paid ? " · PAID" : ""}</td></tr>`).join("")}</table>` : ""}
-  <hr>
-  <div class="foot">${isSchedule(r)
-    ? "This is a payment schedule, not a receipt — no amount has been collected yet.<br>A receipt is issued for each installment when it is paid."
-    : "This is a computer-generated receipt and needs no signature.<br>Thank you for choosing FITSIOMAX."}</div>
-</div></body></html>`;
-
-const receiptText = (r) => [
-  `FITSIOMAX — Payment Receipt`,
-  ...receiptRows(r).map(([k, v]) => `${k}: ${v}`),
-].join("\n");
-
-const printReceipt = (r) => openPrintable(receiptHtml(r), { print: true });
-const downloadReceipt = (r) => downloadPrintable(receiptHtml(r), `receipt-${r.receiptNo}.html`);
-const shareReceipt = (r) => sharePrintable(receiptText(r), `FITSIOMAX Receipt ${r.receiptNo}`);
-
-/** A phone rather than a desk: the two need opposite handoffs, below. */
-const isHandheld = () => (typeof window !== "undefined"
-  && (window.matchMedia?.("(pointer: coarse)").matches || navigator.maxTouchPoints > 0));
-
 /**
  * Whether the viewport is below Tailwind's `sm`, watched rather than read once.
  *
@@ -224,30 +123,6 @@ const useBelowSm = () => {
     return () => mql.removeEventListener("change", sync);
   }, []);
   return below;
-};
-
-/**
- * Straight to the patient's own number with the receipt already typed.
- *
- * Share hands the text to whatever the OS offers and asks who it is going to; this skips
- * that, which is the whole point — the receipt is nearly always going to the person whose
- * number is already on it.
- */
-const whatsappReceipt = (r) => {
-  const num = waNumber(r.phone);
-  if (!num) { toast.error("This patient has no phone number on file"); return; }
-  const url = `https://wa.me/${num}?text=${encodeURIComponent(receiptText(r))}`;
-  if (isHandheld()) {
-    // Same-tab on a phone. window.open with _blank hands mobile browsers an ambiguous
-    // new-tab context and often leaves the app on a blank white screen once WhatsApp
-    // gives control back — the same fix the appointment card needed (caf18a6).
-    window.location.href = url;
-    return;
-  }
-  // Desk: its own tab, so the board stays where it was. noopener isn't passed because it
-  // makes window.open return null; the opener is cleared by hand for the same protection.
-  const tab = window.open(url, "_blank");
-  if (tab) tab.opener = null;
 };
 
 // Month-grid helpers for the treatment-session slot picker — the same shape the PHYSIO
@@ -596,6 +471,98 @@ const balanceDueLabel = (installments) => {
   const total = round2(unpaid.reduce((sum, i) => sum + (i.amount || 0), 0));
   return `Rs.${total}${unpaid[0]?.due_date ? ` · due ${unpaid[0].due_date}` : ""}`;
 };
+
+/**
+ * What each fee kept about itself, for building its receipt again from the record alone.
+ *
+ * A receipt used to exist only in the moment it was issued: the collect popup handed
+ * makeReceipt everything it knew — the payload it had just posted, the price it had just
+ * quoted — and once that popup closed there was no second copy. A patient who lost theirs
+ * had to be told to check their WhatsApp.
+ *
+ * They can be rebuilt because the server stores the whole collection rather than just its
+ * total: `<fee>_payment_details` carries the transaction id, the mode's own reference
+ * fields, the cash denominations, the agreed discount and any schedule left behind (see
+ * build_payment_details and settle_fee_money in v3_packages.py). This table is the map
+ * from a fee card's key to the four or five lead fields that describe it, so the reissue
+ * says the same thing as the original rather than approximately the same thing.
+ *
+ * Keyed to match feeSteps' own keys, which is what the button on a paid card passes.
+ */
+const REISSUE_FEES = {
+  consultation: {
+    prefix: "CF",
+    paidFor: "Consultation Fee",
+    details: "package_payment_details",
+    paid: (l) => l.package_paid,
+    mode: (l) => l.package_payment_mode,
+    price: (l) => l.package_price,
+    packageName: (l) => l.package_name || "",
+  },
+  treatment: {
+    prefix: "TF",
+    paidFor: "Treatment Fee",
+    details: "treatment_fee_payment_details",
+    paid: (l) => l.treatment_fee_paid,
+    mode: (l) => l.treatment_fee_payment_mode,
+    price: (l) => l.session_package_price,
+    // The sessions belong on the receipt's Package line, the way the original printed it:
+    // "Rs.4,800" against a package name alone leaves the patient no way to check what
+    // the money bought.
+    packageName: (l) => (l.session_package_name
+      ? `${l.session_package_name}${l.session_package_sessions ? ` · ${l.session_package_sessions} sessions` : ""}`
+      : ""),
+  },
+  rehab: {
+    prefix: "RF",
+    paidFor: "Rehab Fee",
+    details: "rehab_fee_payment_details",
+    paid: (l) => l.rehab_fee_paid,
+    mode: (l) => l.rehab_fee_payment_mode,
+    price: (l) => l.rehab_package_price,
+    packageName: (l) => l.rehab_package_name || "",
+  },
+  diet: {
+    prefix: "DIET",
+    paidFor: "Diet Consultation Fee",
+    details: "diet_fee_payment_details",
+    paid: (l) => l.diet_fee_paid,
+    mode: (l) => l.diet_fee_payment_mode,
+    price: (l) => l.diet_package_price,
+    packageName: (l) => l.diet_package_name || "",
+  },
+  diet_chart: {
+    prefix: "DIETCHART",
+    paidFor: "Diet Chart Fee",
+    details: "diet_chart_fee_payment_details",
+    paid: (l) => l.diet_chart_fee_paid,
+    mode: (l) => l.diet_chart_fee_payment_mode,
+    price: (l) => l.diet_chart_package_price,
+    packageName: (l) => l.diet_chart_package_name || "",
+  },
+};
+
+/**
+ * The stored payment read back in the shape makeReceipt's `payload` argument has.
+ *
+ * makeReceipt takes what was *sent* to the server; a reissue only has what the server
+ * *kept*, and the two differ in one place that matters. A card payment posts the full
+ * account number and the record keeps `account_last4` — so the last four are handed back
+ * through `account_number`, which is what paymentReference slices anyway. Everything else
+ * is stored under the name it was sent under.
+ */
+const storedPaymentPayload = (details, mode, amount) => ({
+  amount,
+  payment_mode: mode,
+  payment_lines: details.payment_lines || null,
+  denominations: details.denominations,
+  upi_transaction_id: details.upi_transaction_id,
+  upi_utr: details.upi_utr,
+  transfer_reference: details.transfer_reference,
+  cheque_number: details.cheque_number,
+  bank_name: details.bank_name,
+  account_number: details.account_last4,
+});
 
 // A discount above this reads as a mistyped amount (120 for 1200) more often than a real
 // decision, so it's called out — but never blocked. Talking a price down is the Branch
@@ -2222,6 +2189,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       // so it keeps a local reference built from the patient number instead.
       receiptNo: transactionId
         || `${prefix}-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+      // Now, because every caller here is collecting money now. A reissue is the one
+      // caller that is not, and it corrects both this and collectedBy off the lead's
+      // activity trail once that answers — see openFeeReceipt. A receipt reprinted in
+      // December for a fee taken in September has to say September, or it is not a
+      // record of that payment at all.
       dateLabel: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
       patient: lead.name || "—",
       patientNo: lead.patient_number || "—",
@@ -2245,6 +2217,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       reference: splitLines
         ? splitLines.map((l) => (l.reference || "").trim()).filter(Boolean).join(", ")
         : paymentReference(payload),
+      // The desk, not the person. The collect popups have never known their own user's
+      // name; a reissue does, off the activity row, and overwrites this.
       collectedBy: "Branch Admin",
       isCash: splitLines ? splitLines.every((l) => l.mode === "cash") : payload.payment_mode === "cash",
       // "2x500 + 1x200" — what was handed over, not just what it added up to. Blank
@@ -2269,6 +2243,86 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     } catch {
       toast.message("Payment saved — the receipt couldn't be produced. Find it under Accountant Manage.");
     }
+  };
+
+  /**
+   * The receipt for a fee that is already in, built again off the record.
+   *
+   * Opens straight away on what the lead itself carries, then refines the two fields the
+   * lead does not keep — the day the money came in and who took it — from the activity
+   * trail. That order rather than fetching first: the branch pressed a button on a card
+   * that already shows the amount and the mode, so a spinner between the press and the
+   * receipt would be paid on every reissue to correct a date most of them will not look
+   * twice at. A failed or slow fetch simply leaves the card as the lead described it.
+   *
+   * The refinement is keyed on the transaction id so a slow answer for one fee cannot
+   * land on a different receipt the branch has opened in the meantime.
+   */
+  const openFeeReceipt = async (feeKey) => {
+    const cfg = REISSUE_FEES[feeKey];
+    const lead = selectedLead;
+    if (!cfg || !lead) return;
+    const details = lead[cfg.details] || {};
+    const amount = cfg.paid(lead);
+    if (amount == null) { toast.message(`No ${cfg.paidFor.toLowerCase()} has been collected yet`); return; }
+
+    const txnId = details.transaction_id || "";
+    let opened = false;
+    showReceipt(() => {
+      const built = makeReceipt({
+        lead,
+        payload: storedPaymentPayload(details, cfg.mode(lead), amount),
+        prefix: cfg.prefix,
+        paidFor: cfg.paidFor,
+        packageName: cfg.packageName(lead),
+        assignedPrice: cfg.price(lead) ?? null,
+        // What was actually agreed, never inferred. makeReceipt's fallback reads any gap
+        // between price and amount as a discount, and on a reissue that gap is just as
+        // likely to be a balance still owed — which would print a settled bill for a
+        // patient who owes money.
+        discount: Number(details.discount_amount) || 0,
+        balanceDue: balanceDueLabel(details.installments),
+        installments: details.installments || [],
+        transactionId: txnId,
+      });
+      opened = true;
+      return built;
+    });
+    if (!opened || !txnId) return;
+
+    try {
+      const rows = await getLeadActivity(lead.id);
+      const row = (rows || []).find((a) => a.transaction_id === txnId);
+      if (!row) return;
+      setReceipt((r) => (r && r.receiptNo === txnId
+        ? {
+          ...r,
+          dateLabel: row.created_at
+            ? new Date(row.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+            : r.dateLabel,
+          collectedBy: row.created_by || r.collectedBy,
+        }
+        : r));
+    } catch {
+      // The receipt is already on screen and correct in every field but its date. Saying
+      // so would be a toast over a document the branch is about to hand over.
+    }
+  };
+
+  // The appointment confirmation, reopened off the booking rather than off a dialog that
+  // has long since closed. Held here beside the receipt for the same reason: both are
+  // things a patient walks away with, and neither should vanish with the lead popup.
+  const [apptCard, setApptCard] = useState(null);
+  const [loadingApptCard, setLoadingApptCard] = useState(false);
+  const openApptCard = async () => {
+    if (!selectedLead?.id || loadingApptCard) return;
+    setLoadingApptCard(true);
+    try {
+      setApptCard(await getLeadAppointmentCard(selectedLead.id));
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Couldn't load this patient's appointment");
+    }
+    setLoadingApptCard(false);
   };
 
   // Collect Treatment Fee popup (Branch Admin only) — at the Treatment Fee stage, any payment method
@@ -3042,6 +3096,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     setAddonPicker(null);
     setPhysioProgress(null);
     setRehabDays(null);
+    // The appointment card belongs to the patient it was fetched for. The receipt beside
+    // it deliberately does not reset here: it outlives the lead dialog on purpose, so a
+    // fee that closes the dialog on collection still leaves the receipt on screen.
+    setApptCard(null);
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -5732,6 +5790,29 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   {selectedLead.appointment_date && (
                     <span className="flex items-center gap-1.5"><Calendar className="h-3 w-3 shrink-0" /> {selectedLead.appointment_date} {to12h(selectedLead.appointment_time)}</span>
                   )}
+                  {/* The confirmation the patient was sent, handed back. On the slot
+                      itself rather than out among the tabs, because that is the fact it
+                      is about — a branch looking for "the appointment card" is already
+                      reading this line to check the day.
+
+                      A button rather than a link, and it loads on press: the booking's
+                      reference, room and notes live on the appointment row and not on
+                      the lead, so nothing can be drawn without asking. Fetching for
+                      every patient opened, against a card almost nobody asks for, would
+                      be a request per open to save a click on the rare one. */}
+                  {selectedLead.appointment_date && (
+                    <button
+                      type="button"
+                      onClick={openApptCard}
+                      disabled={loadingApptCard}
+                      className="flex items-center gap-1 rounded-[5px] border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700 transition hover:bg-teal-100 disabled:opacity-60"
+                      title="Open the appointment confirmation — print, send or download it again"
+                      data-testid="cons-open-appt-card"
+                    >
+                      <Eye className="h-3 w-3 shrink-0" />
+                      {loadingApptCard ? "Opening..." : "Appointment Card"}
+                    </button>
+                  )}
                 </p>
               </div>
               {/* self-stretch runs the rule the full height of the identity block beside
@@ -7323,9 +7404,41 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         {f.amount != null ? `Rs.${Number(f.amount).toLocaleString("en-IN")}` : "—"}
                       </p>
                       {f.paid ? (
-                        <span className="text-[11px] font-medium capitalize text-emerald-700">
-                          {f.note ? `Paid · ${f.note}` : "Paid"}
-                        </span>
+                        <>
+                          <span className="text-[11px] font-medium capitalize text-emerald-700">
+                            {f.note ? `Paid · ${f.note}` : "Paid"}
+                          </span>
+                          {/* The way back to the receipt for money already in. A settled
+                              card used to end at "Paid · Cash": the document the patient
+                              was handed existed for as long as the popup that raised it,
+                              so a patient who lost theirs could only be pointed at their
+                              own WhatsApp history. This reopens the same card — print,
+                              WhatsApp, share and download — rebuilt off the record.
+
+                              Sits where the Collect button sits on an unpaid card rather
+                              than beside the tick, so the fee grid keeps one shape: the
+                              bottom of every card is what to do about that fee, and for
+                              a fee that is in, that is hand it over again.
+
+                              Shown only where the record can actually produce one. A fee
+                              settled before payment_details were stored has no
+                              transaction id and no mode fields behind it, and a button
+                              that opened a receipt with a blank transaction number on it
+                              would be worse than no button. */}
+                          {REISSUE_FEES[f.key] && (selectedLead[REISSUE_FEES[f.key].details]?.transaction_id) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className={`w-full border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 ${ACT_BTN}`}
+                              onClick={() => openFeeReceipt(f.key)}
+                              title="Open the receipt for this payment — print, send or download it again"
+                              data-testid={`cons-fee-receipt-${f.key}`}
+                            >
+                              <Eye className="mr-1 h-3.5 w-3.5" />
+                              <Lbl full="View Receipt" short="Receipt" />
+                            </Button>
+                          )}
+                        </>
                       ) : (
                         <>
                           {f.pending ? <span className={`text-[11px] font-medium ${f.pendingTone}`}>{f.pending}</span> : null}
@@ -10800,191 +10913,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
         </div>
       )}
 
-      {receipt && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" data-testid="cons-receipt-modal">
-          {/* 88%, this dialog only. zoom rather than transform: scale — zoom shrinks the
-              layout box itself, so the flex centring above and the max-h below still work
-              on the size actually drawn. scale would leave the box at full size, centring
-              the card off its own bounds and reserving space nothing occupies. */}
-          <div
-            className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-            style={{ zoom: 0.88 }}
-          >
-            {/* items-center, not items-start: the title block is shorter than the logo, so
-                aligning to the top left a band of empty green under the transaction line.
-                Padding and logo come down with it. */}
-            <div className={`flex items-center justify-between gap-3 px-4 py-3 text-white ${isSchedule(receipt) ? "bg-amber-600" : "bg-emerald-600"}`}>
-              <div className="flex min-w-0 items-center gap-2.5">
-                {/* A status mark rather than the logo: the logo already opens the body
-                    two lines below, and the header's job is to say what happened. */}
-                {isSchedule(receipt)
-                  ? <Calendar className="h-7 w-7 shrink-0" />
-                  : <CheckCircle2 className="h-7 w-7 shrink-0" />}
-                <div className="min-w-0">
-                  <p className="text-base font-bold leading-tight">{isSchedule(receipt) ? "Payment Schedule Created" : "Payment Received"}</p>
-                  <p className="truncate text-xs text-white/80">{isSchedule(receipt) ? "Reference" : "Txn"} {receipt.receiptNo}</p>
-                </div>
-              </div>
-              <button onClick={() => setReceipt(null)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-receipt-close">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+      {/* Both cards a patient can be handed, held here rather than inside the lead
+          dialog so they survive it closing on the last fee. */}
+      <ReceiptDialog receipt={receipt} onClose={() => setReceipt(null)} />
 
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="mb-4 flex items-center justify-center gap-2 text-center">
-                <img src={LOGO_URL} alt="" className="h-7 w-7 object-contain" />
-                <div className="text-left">
-                  <p className="text-base font-extrabold tracking-wide text-slate-800">FITSIOMAX</p>
-                  <p className="text-[10px] text-slate-400">{receipt.branch || "Physiotherapy & Rehabilitation"}</p>
-                </div>
-              </div>
-
-              {/* With a discount, the hero shows what it was worth as well as what came
-                  in — billed, off, collected. Rs.780 on its own is unarguable but says
-                  nothing about the Rs.1,200 it started from, and that is the number a
-                  patient queries. Both figures were already on the receipt, several rows
-                  further down, which is not where anyone looks first.
-                  No discount, or a schedule where nothing has been collected: the single
-                  figure stays: a "discount Rs.0" column is noise on most receipts. */}
-              {(() => {
-                const billed = receipt.originalAmount;
-                const off = Number(receipt.discount) || 0;
-                const showSplit = !isSchedule(receipt) && off > 0 && billed > 0;
-                if (!showSplit) {
-                  return (
-                    <div className={`rounded-xl border-2 px-4 py-5 text-center ${isSchedule(receipt) ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
-                      <p className={`text-xs font-bold uppercase tracking-widest ${isSchedule(receipt) ? "text-amber-600" : "text-emerald-600"}`}>
-                        {isSchedule(receipt) ? "Total Payable" : "Amount Paid"}
-                      </p>
-                      <p className={`mt-1 text-4xl font-extrabold ${isSchedule(receipt) ? "text-amber-700" : "text-emerald-700"}`} data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
-                      <p className={`mt-1 text-sm font-semibold ${isSchedule(receipt) ? "text-amber-600" : "text-emerald-600"}`}>{receipt.modeLabel}</p>
-                      {isSchedule(receipt) && (
-                        <p className="mt-2 text-xs font-medium text-amber-700">Nothing collected yet — each installment gets its own receipt.</p>
-                      )}
-                    </div>
-                  );
-                }
-                // round2, the same helper the collect form's own discount readout uses, so
-                // the percentage on the receipt cannot disagree with the one shown while
-                // the amount was being entered. 35% off, not 35.00%; 12.5% stays 12.5%.
-                const pct = round2((off / billed) * 100);
-                return (
-                  <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-4" data-testid="cons-receipt-amount-split">
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div>
-                        <p className="text-[11px] font-medium text-slate-500">Total Amount</p>
-                        <p className="mt-1 text-xl font-extrabold text-slate-700">Rs.{billed}</p>
-                      </div>
-                      <div>
-                        {/* The percentage sits in the heading rather than on a third line —
-                            "32% Discount" is one fact, and splitting it made the middle
-                            column a line taller than the two either side of it. */}
-                        <p className="text-[11px] font-medium text-amber-600">{pct}% Discount</p>
-                        <p className="mt-1 text-xl font-extrabold text-amber-700" data-testid="cons-receipt-discount">−Rs.{off}</p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-medium text-emerald-600">Paid Amount</p>
-                        <p className="mt-1 text-xl font-extrabold text-emerald-700" data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
-                        <p className="text-[10px] font-semibold text-emerald-600">{receipt.modeLabel}</p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <dl className="mt-5 space-y-2 text-sm">
-                {receiptPopupRows(receipt).map(([k, v]) => (
-                  <div key={k} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
-                    <dt className="text-slate-500">{k}</dt>
-                    <dd className={`text-right font-semibold ${
-                      k === "Amount Paid" ? "text-emerald-700"
-                      : k === "Total Payable" ? "text-amber-700"
-                      : k === "Discount" ? "text-rose-600"
-                      : k === "Balance Due" ? "text-rose-600"
-                      : "text-slate-700"}`}>{v}</dd>
-                  </div>
-                ))}
-              </dl>
-
-              {receipt.installments.length > 0 && (
-                <div className="mt-5">
-                  <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">Installments</p>
-                  <div className="space-y-1.5">
-                    {receipt.installments.map((i, n) => (
-                      <div key={n} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-xs">
-                        <span className="text-slate-600">
-                          #{n + 1}{i.sessions ? ` · ${i.sessions} sessions` : ""} · due {i.due_date || "—"}
-                        </span>
-                        <span className={`font-bold ${i.paid ? "text-emerald-600" : "text-amber-600"}`}>
-                          Rs.{i.amount}{i.paid ? " · PAID" : ""}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Icons only. With four on one row, "Download" was arriving as "Dow…", and a
-                truncated word is worse than no word — the glyph at least survives. Every
-                label moves to title and aria-label, so a hover still says what each does
-                and a screen reader still announces it.
-                Square and centred rather than four stretched quarters: an icon adrift in
-                the middle of a wide button reads as a mis-render. */}
-            {/* Three actions. Done went with the tick — the header X already closes this,
-                and a fourth button that only dismisses was the one control here that did
-                nothing to the receipt. */}
-            {/* All plain but WhatsApp. Print and Share used to swap an emerald fill
-                between them depending on whether the payment was cash — with WhatsApp's
-                own brand green in the row, a second green next to it would have read as
-                two competing defaults rather than one branded button. The green here now
-                belongs to WhatsApp and means WhatsApp, nothing else. */}
-            <div className="flex items-center justify-center gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:gap-3 sm:px-6">
-              <Button
-                variant="outline"
-                className="h-10 w-10 shrink-0 p-0"
-                onClick={() => printReceipt(receipt)}
-                title={isSchedule(receipt) ? "Print Schedule" : "Print Bill"}
-                aria-label={isSchedule(receipt) ? "Print Schedule" : "Print Bill"}
-                data-testid="cons-receipt-print"
-              >
-                <Printer className="h-4 w-4" />
-              </Button>
-              {/* The one the branch actually reaches for: the receipt is nearly always
-                  going to the number already printed on it. */}
-              <Button
-                className="h-10 w-10 shrink-0 bg-[#25D366] p-0 text-white hover:bg-[#1da851]"
-                onClick={() => whatsappReceipt(receipt)}
-                title="Send on WhatsApp"
-                aria-label="Send on WhatsApp"
-                data-testid="cons-receipt-whatsapp"
-              >
-                <WhatsAppIcon className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                className="h-10 w-10 shrink-0 p-0"
-                onClick={() => shareReceipt(receipt)}
-                title="Share"
-                aria-label="Share"
-                data-testid="cons-receipt-share"
-              >
-                <Share2 className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                className="h-10 w-10 shrink-0 p-0"
-                onClick={() => downloadReceipt(receipt)}
-                title={isSchedule(receipt) ? "Download Schedule" : "Download Receipt"}
-                aria-label={isSchedule(receipt) ? "Download Schedule" : "Download Receipt"}
-                data-testid="cons-receipt-download"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The confirmation the patient was given when the slot was booked, handed back.
+          The same card the Branch Admin board raises off the booking itself, because a
+          patient asking for their appointment again should get the sheet they already
+          have rather than a second one saying the same thing differently. */}
+      <AppointmentConfirmCard appt={apptCard} onClose={() => setApptCard(null)} testid="cons-appt-confirm" />
     </div>
   );
 };

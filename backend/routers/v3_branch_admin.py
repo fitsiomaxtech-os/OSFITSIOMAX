@@ -1772,6 +1772,69 @@ def _transfer_block_reason(lead: dict) -> Optional[str]:
     )
 
 
+@router.get("/leads/{lead_id}/appointment-card")
+async def v3_lead_appointment_card(lead_id: str, _: V3UserOut = Depends(v3_current_user)):
+    """The appointment confirmation for this lead, in the shape the card is drawn from.
+
+    The confirmation used to exist for exactly as long as the dialog that raised it: the
+    branch booked a slot, the card appeared, and dismissing it was the end of it. A patient
+    who lost the WhatsApp message had nothing that could be sent again, and the branch's
+    only recourse was to reschedule the appointment onto itself to make a new one.
+
+    So the record answers for it instead. Every field the card prints is already on the
+    appointment row -- it was written there at booking precisely so the share link could
+    render it server-side (see _appt_card_html) -- and this returns the same set in the
+    keys the React card reads.
+
+    The live consultation booking only. A cancelled row keeps its share link working, and
+    deliberately does not answer here: the branch reissuing a confirmation is handing a
+    patient the sheet for an appointment that is still happening, and there is no such
+    sheet for one that was called off.
+    """
+    lead = await v3_col("leads").find_one(
+        {"id": lead_id}, {"_id": 0, "id": 1, "branch_id": 1, "name": 1, "patient_number": 1, "phone": 1},
+    )
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    appt = await v3_col("appointments").find_one(
+        {"lead_id": lead_id, "appt_kind": "consultation", "status": "new_appointment"},
+        {"_id": 0},
+        sort=[("updated_at", -1)],
+    )
+    if not appt:
+        raise HTTPException(status_code=404, detail="No appointment is booked for this patient")
+
+    branch = await v3_col("branches").find_one(
+        {"id": appt.get("branch_id") or lead.get("branch_id")},
+        {"_id": 0, "branch_name": 1, "address": 1, "map_location": 1},
+    ) or {}
+
+    return {
+        # Bookings taken before ref_no existed carry none. The card prints "Ref —" rather
+        # than refusing to open: the appointment is real and the reference is the one
+        # thing on the sheet that is only ever quoted back to the branch itself.
+        "refNo": appt.get("ref_no") or "—",
+        "shareToken": appt.get("share_token") or "",
+        # Off the lead, not off the appointment: the appointment's copy of the name was
+        # frozen at booking, and a patient whose name was corrected since should be
+        # handed a sheet with the corrected one on it.
+        "patient": lead.get("name") or appt.get("patient_name") or "—",
+        "patientNo": lead.get("patient_number") or "—",
+        "phone": lead.get("phone") or "—",
+        "branch": branch.get("branch_name") or "",
+        "branchAddress": branch.get("address") or "",
+        "mapLocation": branch.get("map_location") or "",
+        "date": appt.get("appointment_date") or "",
+        "time": appt.get("appointment_time") or "",
+        "duration": appt.get("duration") or 30,
+        "headPhysio": appt.get("doctor_name") or "—",
+        "meetLink": (appt.get("meet_link") or "").strip(),
+        "notes": appt.get("notes") or "",
+        "bookedBy": appt.get("created_by") or "Branch Admin",
+    }
+
+
 class V3BranchTransferInput(BaseModel):
     to_branch_id: str
     reason: Optional[str] = ""
