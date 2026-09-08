@@ -22,9 +22,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlarmClock, ArrowLeft, Ban, CalendarCheck, CalendarOff, Check, ChevronLeft, ChevronRight, Coffee,
+  AlarmClock, ArrowLeft, Ban, CalendarOff, Check, ChevronLeft, ChevronRight, Coffee,
   Clock3, Download, Eye, Filter, IndianRupee, LayoutGrid, List, Lock, Palmtree, Pencil,
-  Pin, PinOff, Plus, Quote, RefreshCw, Trash2, TriangleAlert, Undo2, UserRound, Wallet, X,
+  Pin, PinOff, Plus, Quote, RefreshCw, Trash2, Undo2, UserRound, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1118,12 +1118,6 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
               <Stat label="Bonus" value={money(slip.bonus)} tone="text-emerald-600" testid="hr-pay-emp-bonus" />
               <Stat label="Net payable" value={money(slip.net_payable)} tone="text-sky-700" testid="hr-pay-emp-net" />
             </div>
-            {slip.unmarked_days > 0 && (
-              <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                {slip.unmarked_days} days this month have no attendance mark and are being paid in full.
-              </p>
-            )}
           </div>
 
           {loading ? <p className="py-10 text-center text-sm text-slate-400">Loading…</p> : (
@@ -1440,22 +1434,6 @@ export const PayrollTab = () => {
           </div>
         </CardContent>
       </Card>
-
-      {/* Says plainly which of the two things is on screen. A preview computed from a
-          register still being filled in is useful; mistaking it for the month's record is
-          not, so it is labelled rather than left to be inferred from a missing badge. */}
-      {data?.preview && (
-        <p className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="hr-pay-preview-note">
-          <CalendarCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Nothing has been generated for {prettyMonth(month)} yet. This is what payroll comes to against the register as it stands right now — generate a run to freeze it and start adding bonuses and deductions.
-        </p>
-      )}
-      {totals.unmarked_days > 0 && (
-        <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="hr-pay-unmarked-note">
-          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {totals.unmarked_days} employee-days this month have no attendance mark and are being paid in full. Fill them in on Attendance, then regenerate.
-        </p>
-      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <Stat label="Employees" value={totals.employees ?? 0} testid="hr-pay-t-emp" />
