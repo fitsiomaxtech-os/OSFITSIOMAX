@@ -550,6 +550,11 @@ export const hrDeleteApproval = async (id) => (await api.delete(`/hr/approvals/$
 
 export const hrPayroll = async (month) => (await api.get("/hr/payroll", { params: month ? { month } : {} })).data;
 export const hrGeneratePayroll = async (month) => (await api.post("/hr/payroll/generate", { month })).data;
+// What one employee is paid, every change that got them there, and the reasons the
+// dropdown may offer. One door for both a raise and a corrected figure -- see
+// change_employee_salary, which refuses a change with no reason on it.
+export const hrEmployeeSalary = async (empId) => (await api.get(`/hr/employees/${empId}/salary`)).data;
+export const hrChangeEmployeeSalary = async (empId, payload) => (await api.post(`/hr/employees/${empId}/salary`, payload)).data;
 export const hrAdjustPayslip = async (month, employeeId, payload) => (await api.patch(`/hr/payroll/${month}/slips/${employeeId}`, payload)).data;
 export const hrPayrollStatus = async (month, status) => (await api.post(`/hr/payroll/${month}/status`, { status })).data;
 

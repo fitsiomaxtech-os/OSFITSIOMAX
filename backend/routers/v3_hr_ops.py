@@ -1523,3 +1523,160 @@ async def delete_quote(quote_id: str, _: V3UserOut = Depends(require_hr)):
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Quote not found")
     return {"deleted": True}
+
+
+# ---------- what somebody is paid, and why it changed ----------
+
+# The reasons a salary moves, as slugs. A dropdown rather than a free-text box because the
+# whole point of recording it is being able to read it back a year later: "increment",
+# "incr", "annual hike" and "yearly" are four spellings of one thing, and a history written
+# in four spellings cannot answer how many promotions a department gave out.
+#
+# `other` keeps the free-text escape open for the case none of these is honest, and that
+# note is required when it is picked -- an "other" with nothing after it is worse than no
+# reason at all, because it looks like one.
+SALARY_REASONS = {
+    "annual_increment": "Annual increment",
+    "promotion": "Promotion",
+    "performance": "Performance",
+    # A wrong figure being fixed is not a raise, and a history that cannot tell the two
+    # apart reports a pay rise every time somebody corrects a typo.
+    "correction": "Correction",
+    "other": "Other",
+}
+
+MAX_SALARY_NOTE = 300
+
+
+def _salary_field(emp: dict) -> str:
+    """Which of the two figures to write, so that payroll reads back what was typed.
+
+    _monthly_base prefers gross and falls back to net, so writing gross is what makes a
+    number take effect -- except where the record carries only a net figure, which is how
+    most of them were entered. Overwriting gross there would leave two salaries on one
+    employee and the net one silently ignored, so the field that already means something
+    is the field that gets edited.
+    """
+    if float(emp.get("gross_salary") or 0) > 0:
+        return "gross_salary"
+    if float(emp.get("net_salary") or 0) > 0:
+        return "net_salary"
+    # Nothing set at all -- the No pay set lane. Gross, because that is what payroll reads
+    # first and a figure typed here should be the figure that pays.
+    return "gross_salary"
+
+
+class SalaryChangeIn(BaseModel):
+    amount: float
+    reason: str
+    note: Optional[str] = ""
+
+
+@router.get("/employees/{emp_id}/salary")
+async def employee_salary(emp_id: str, _: V3UserOut = Depends(require_hr)):
+    """What this person is paid, and every change that got them there.
+
+    The history is its own collection rather than a list on the employee: it only grows,
+    it is read on one screen, and an employee document that carries every raise since
+    hiring is one that gets longer every year in every query that never wanted it.
+
+    Newest first. This is read to answer "what happened recently", and a list that opens
+    on a raise from four years ago answers a question nobody asked.
+    """
+    emp = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="No such employee")
+    rows = await v3_col("salary_history").find(
+        {"employee_id": emp_id}, {"_id": 0},
+    ).sort("changed_at", -1).to_list(200)
+    return {
+        "employee_id": emp_id,
+        "employee_name": emp.get("full_name") or "",
+        "employee_code": emp.get("employee_code") or "",
+        "department": emp.get("department") or "",
+        "designation": emp.get("designation") or "",
+        "amount": _monthly_base(emp),
+        "field": _salary_field(emp),
+        "reasons": [{"key": k, "label": v} for k, v in SALARY_REASONS.items()],
+        "history": rows,
+    }
+
+
+@router.post("/employees/{emp_id}/salary")
+async def change_employee_salary(
+    emp_id: str,
+    payload: SalaryChangeIn,
+    user: V3UserOut = Depends(require_hr),
+):
+    """Set what this person is paid, and say why.
+
+    One door for every change, whether it is a raise or a wrong figure being fixed. Two
+    doors -- one that asks and one that does not -- would put the unexplained changes in
+    the history beside the explained ones with nothing to say which was which, and the
+    correction is the entry somebody most wants a note against a year later.
+
+    Held to the roles that run payroll rather than to Super Admin alone, which is what
+    PATCH /employees is held to. The No pay set lane is HR's job to empty and they already
+    read every salary in the company on the screen this is reached from; making them ask
+    somebody else to type the figure they are looking at would not protect anything.
+
+    Does NOT touch a payroll run that already exists. A generated run froze its figures on
+    purpose -- that is what generating one is -- so a raise typed today changes what the
+    next Regenerate produces and leaves a finalised month alone. Any other rule would let
+    a salary edit quietly rewrite a month somebody has already been paid for.
+    """
+    reason = str(payload.reason or "").strip().lower()
+    if reason not in SALARY_REASONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reason must be one of: {', '.join(SALARY_REASONS)}",
+        )
+    note = (payload.note or "").strip()[:MAX_SALARY_NOTE]
+    # An "other" with nothing after it looks like a reason and is not one.
+    if reason == "other" and not note:
+        raise HTTPException(status_code=400, detail="Say what the reason is")
+
+    amount = float(payload.amount or 0)
+    if amount < 0:
+        raise HTTPException(status_code=400, detail="A salary cannot be negative")
+    # Ten million a month is not a salary anybody at this clinic is on, and it is what a
+    # mistyped figure looks like. Refused rather than clamped: quietly paying somebody a
+    # different number from the one on screen is the worse failure.
+    if amount > 10_000_000:
+        raise HTTPException(status_code=400, detail="That figure looks wrong — check it")
+
+    emp = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
+    if not emp:
+        raise HTTPException(status_code=404, detail="No such employee")
+
+    field = _salary_field(emp)
+    before = _monthly_base(emp)
+    if round(before, 2) == round(amount, 2):
+        raise HTTPException(status_code=400, detail="That is what they are paid already")
+
+    now = now_iso()
+    entry = {
+        "id": str(uuid.uuid4()),
+        "employee_id": emp_id,
+        # Copied, not looked up on read. This is a thing somebody did on a day, and it
+        # should still name who it was about after the employee record is gone.
+        "employee_name": emp.get("full_name") or "",
+        "employee_code": emp.get("employee_code") or "",
+        "field": field,
+        "from_amount": round(before, 2),
+        "to_amount": round(amount, 2),
+        "change": round(amount - before, 2),
+        # Stored beside the amounts rather than worked out on read: a raise from nothing is
+        # a division by zero, and every reader would have to know that.
+        "percent": round((amount - before) / before * 100, 2) if before > 0 else None,
+        "reason": reason,
+        "reason_label": SALARY_REASONS[reason],
+        "note": note,
+        "changed_by": user.full_name or user.email,
+        "changed_at": now,
+    }
+    await v3_col("employees").update_one(
+        {"id": emp_id}, {"$set": {field: round(amount, 2), "updated_at": now}},
+    )
+    await v3_col("salary_history").insert_one(dict(entry))
+    return {"amount": round(amount, 2), "field": field, "entry": entry}
