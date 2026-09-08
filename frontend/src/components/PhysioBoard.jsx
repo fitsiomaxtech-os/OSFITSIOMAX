@@ -2276,6 +2276,9 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
         {completeTarget && (
           <CompleteSessionModal
             session={completeTarget}
+            // The whole course, so the tick-list can say how often each treatment has
+            // been given already.
+            sessions={sessions}
             onClose={() => setCompleteTarget(null)}
             onDone={() => { setCompleteTarget(null); loadSessions(); }}
           />
@@ -2946,6 +2949,7 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
       {viewSession && (
         <CompleteSessionModal
           session={viewSession}
+          sessions={sessions}
           onClose={() => setViewSession(null)}
           onDone={() => { setViewSession(null); load(); onRefresh?.(); }}
         />
@@ -2973,8 +2977,13 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
  * no wider than a phone, so a measured dropdown would have to be pinned to the viewport
  * to escape it for no gain; the popup body scrolls, which is what makes a panel opening
  * below the search bar reachable on a short screen.
+ *
+ * Each name carries how many days of this patient's course it has already been given on,
+ * because that is the question actually being asked over the tick-list — what has this
+ * patient been having — and the only other way to answer it is to open every past day one
+ * at a time. Counted by the caller, which is the only thing holding the rest of the days.
  */
-function PhysioTreatmentPicker({ options, value, onChange, testPrefix }) {
+function PhysioTreatmentPicker({ options, value, onChange, testPrefix, usage }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -3004,6 +3013,11 @@ function PhysioTreatmentPicker({ options, value, onChange, testPrefix }) {
   const q = query.trim().toLowerCase();
   const shown = q ? numbered.filter((o) => (o.name || "").toLowerCase().includes(q)) : numbered;
   const numberOf = (name) => (numbered.find((o) => o.name === name)?.n) || "";
+
+  // Nothing is printed at zero: a treatment never yet given is the ordinary case on the
+  // first day of a course, and a column of "0" against every line says nothing while
+  // costing the width the names are using.
+  const timesGiven = (name) => usage?.get?.(name) || 0;
 
   // Operates on what is on screen: with no search that is the whole catalogue, with one
   // it is the matches, which is what "select all" means while a filter is showing.
@@ -3100,6 +3114,17 @@ function PhysioTreatmentPicker({ options, value, onChange, testPrefix }) {
                       className="h-3.5 w-3.5 shrink-0 accent-sky-600"
                     />
                     <span className="min-w-0 flex-1 truncate">{o.n}. {o.name}</span>
+                    {/* At the end of the line, out of the name's way, so a long name still
+                        truncates against the edge of the row rather than against this. */}
+                    {timesGiven(o.name) > 0 && (
+                      <span
+                        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${on ? "bg-sky-200 text-sky-800" : "bg-slate-100 text-slate-500"}`}
+                        title={`Already given on ${timesGiven(o.name)} completed day${timesGiven(o.name) === 1 ? "" : "s"}`}
+                        data-testid={`${testPrefix}-used-${o.id}`}
+                      >
+                        ×{timesGiven(o.name)}
+                      </span>
+                    )}
                   </label>
                 );
               })
@@ -3116,6 +3141,17 @@ function PhysioTreatmentPicker({ options, value, onChange, testPrefix }) {
           {picked.map((n) => (
             <div key={n} className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5">
               <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-sky-800">{numberOf(n)}. {n}</span>
+              {/* Repeated here so closing the list does not take the history with it —
+                  this strip is what is read while the day is being signed off. */}
+              {timesGiven(n) > 0 && (
+                <span
+                  className="shrink-0 rounded-full bg-sky-200 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-sky-800"
+                  title={`Already given on ${timesGiven(n)} completed day${timesGiven(n) === 1 ? "" : "s"}`}
+                  data-testid={`${testPrefix}-used-selected-${n}`}
+                >
+                  ×{timesGiven(n)}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => toggle(n)}
@@ -3138,7 +3174,7 @@ function PhysioTreatmentPicker({ options, value, onChange, testPrefix }) {
 // Doubles as a read-only "view summary" for an already-completed session — any
 // session, in any stage, can be opened here; only an upcoming one gets an editable
 // textarea and a submit button.
-function CompleteSessionModal({ session, onClose, onDone }) {
+function CompleteSessionModal({ session, onClose, onDone, sessions }) {
   const [remarks, setRemarks] = useState(session.jr_physio_remarks || "");
   const [rehabRemarks, setRehabRemarks] = useState(session.rehab_remarks || "");
   // What was given on the day, off Super Admin's catalogue. A day already signed off
@@ -3159,6 +3195,29 @@ function CompleteSessionModal({ session, onClose, onDone }) {
   const isRehab = session.track === "rehab";
   const [submitting, setSubmitting] = useState(false);
   const isDone = session.status === "completed";
+
+  // How often this patient has already had each treatment, off the days already signed
+  // off. It is what the picker prints beside every name.
+  //
+  // Both courses count. Someone running rehab and treatment at once is still one patient,
+  // and "manual therapy, four times" is the true answer about them either way.
+  //
+  // The day being written up is left out of its own tally, as is every day still pending:
+  // the number answers how many times before now, and one that climbed as the box was
+  // ticked would be answering a different question in the same place.
+  //
+  // Empty when the caller passes no days — the count then simply does not appear, which is
+  // the same thing the first day of a course shows.
+  const treatmentUsage = useMemo(() => {
+    const counts = new Map();
+    (sessions || []).forEach((s) => {
+      if (s.id === session.id || s.status !== "completed") return;
+      // Per day, not per tick: a name stored twice on one old record is still the one day
+      // it was given on.
+      new Set(s.physio_treatments || []).forEach((n) => counts.set(n, (counts.get(n) || 0) + 1));
+    });
+    return counts;
+  }, [sessions, session.id]);
 
   // Silent on failure, and only for a day still to be signed off: the tick-list is not
   // what this popup is for, and a toast about a picklist over a physio trying to write up
@@ -3251,6 +3310,7 @@ function CompleteSessionModal({ session, onClose, onDone }) {
                   options={physioTypes}
                   value={treatments}
                   onChange={setTreatments}
+                  usage={treatmentUsage}
                   testPrefix="session-physio-treatment"
                 />
               </div>
