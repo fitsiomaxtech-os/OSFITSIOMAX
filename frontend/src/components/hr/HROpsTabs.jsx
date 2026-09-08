@@ -41,7 +41,7 @@ import {
   hrApprovals, hrCreateApproval, hrDecideApproval, hrDeleteApproval,
   hrPayroll, hrGeneratePayroll, hrAdjustPayslip, hrPayrollStatus,
   hrQuotes, hrAddQuote, hrUpdateQuote, hrDeleteQuote,
-  hrEmployeeSalary, hrChangeEmployeeSalary,
+  hrEmployeeSalary, hrAddSalaryRecord, hrDeleteSalaryRecord, hrAddSalaryReason,
 } from "@/lib/api";
 
 // ---------- shared ----------
@@ -1020,36 +1020,182 @@ const PayrollBoard = ({ slips, editable, onAdjust, onOpen }) => {
   );
 };
 
+// The colours a reason chip comes in, written out. The server sends a colour NAME because
+// Tailwind builds its stylesheet from what it can see in this source tree: a class string
+// assembled on the server reaches a browser that has never heard of it, and the chip
+// arrives unstyled. So the names are the contract and the literals live here.
+const REASON_TONES = {
+  slate: "bg-slate-100 text-slate-700",
+  emerald: "bg-emerald-100 text-emerald-700",
+  violet: "bg-violet-100 text-violet-700",
+  amber: "bg-amber-100 text-amber-700",
+  purple: "bg-purple-100 text-purple-700",
+  pink: "bg-pink-100 text-pink-700",
+  teal: "bg-teal-100 text-teal-700",
+  sky: "bg-sky-100 text-sky-700",
+  indigo: "bg-indigo-100 text-indigo-700",
+  lime: "bg-lime-100 text-lime-700",
+  rose: "bg-rose-100 text-rose-700",
+  cyan: "bg-cyan-100 text-cyan-700",
+  orange: "bg-orange-100 text-orange-700",
+};
+const toneOf = (reason) => REASON_TONES[reason?.tone] || REASON_TONES.slate;
+
+/** "2026-07" -> "Jul 2026". A record stands from a month, not from a day: nobody is put on
+ *  a new salary from the 14th, and a date picker asking for one invites a precision the
+ *  payroll does not have. */
+const prettyRecordMonth = (month) => (month
+  ? new Date(`${month}-01T00:00:00`).toLocaleDateString("en-GB", { month: "short", year: "numeric" })
+  : "—");
+
+const monthsLabel = (n, current) => {
+  const word = n === 1 ? "1 month" : `${n} months`;
+  return current ? `${word} (current)` : word;
+};
+
+/** Putting somebody on a figure, from a month, for a reason.
+ *
+ *  The reason list is the clinic's own and grows from here: "+ Add new reason" writes a
+ *  ninth beside the eight rather than sending whoever needed it to a settings screen they
+ *  would have to find.
+ */
+const AddRecordModal = ({ employeeId, reasons, onClose, onSaved, onReasonAdded }) => {
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState(reasons[0]?.key || "");
+  const [month, setMonth] = useState(todayIso().slice(0, 7));
+  const [note, setNote] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [newReason, setNewReason] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!amount) { toast.error("What are they on?"); return; }
+    if (!reason) { toast.error("Pick a reason"); return; }
+    setSaving(true);
+    try {
+      await hrAddSalaryRecord(employeeId, {
+        amount: Number(amount), reason, effective_from: month, note: note.trim(),
+      });
+      toast.success("Record added.");
+      onSaved();
+    } catch (e) { fail(e); } finally { setSaving(false); }
+  };
+
+  const addReason = async () => {
+    const label = newReason.trim();
+    if (!label) { toast.error("Give the reason a name"); return; }
+    setSaving(true);
+    try {
+      const res = await hrAddSalaryReason({ label, description: newDesc.trim() });
+      await onReasonAdded();
+      setReason(res.reason.key);
+      setNewReason(""); setNewDesc(""); setAdding(false);
+    } catch (e) { fail(e); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="hr-pay-add-record">
+        <div className="flex items-start justify-between gap-3">
+          <p className="font-bold text-slate-800">Add salary record</p>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700" data-testid="hr-pay-add-record-close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="hr-pay-rec-month">Effective from</label>
+            <input
+              id="hr-pay-rec-month"
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
+              data-testid="hr-pay-rec-month"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="hr-pay-rec-amount">Amount</label>
+            <div className="mt-1 flex items-center gap-1 rounded-lg border border-slate-200 px-2 focus-within:border-sky-400 focus-within:ring-1 focus-within:ring-sky-300">
+              <span className="text-sm text-slate-400">₹</span>
+              <input
+                id="hr-pay-rec-amount"
+                value={amount}
+                inputMode="numeric"
+                onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))}
+                className="h-9 w-full bg-transparent text-sm font-semibold text-slate-800 outline-none"
+                data-testid="hr-pay-rec-amount"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="hr-pay-rec-reason">Reason</label>
+          {adding ? (
+            <div className="mt-1 space-y-2 rounded-lg border border-sky-200 bg-sky-50/60 p-2">
+              <Input value={newReason} onChange={(e) => setNewReason(e.target.value.slice(0, 40))} placeholder="Name, e.g. Retention" data-testid="hr-pay-new-reason" />
+              <Input value={newDesc} onChange={(e) => setNewDesc(e.target.value.slice(0, 120))} placeholder="What it means (optional)" data-testid="hr-pay-new-reason-desc" />
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setAdding(false)}>Cancel</Button>
+                <Button size="sm" disabled={saving} onClick={addReason} data-testid="hr-pay-new-reason-save">Add reason</Button>
+              </div>
+            </div>
+          ) : (
+            <select
+              id="hr-pay-rec-reason"
+              value={reason}
+              onChange={(e) => {
+                if (e.target.value === "__add__") { setAdding(true); return; }
+                setReason(e.target.value);
+              }}
+              className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
+              data-testid="hr-pay-rec-reason"
+            >
+              {reasons.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+              <option value="__add__">+ Add new reason…</option>
+            </select>
+          )}
+        </div>
+
+        <div className="mt-3">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="hr-pay-rec-note">Note</label>
+          <Input id="hr-pay-rec-note" className="mt-1" value={note} onChange={(e) => setNote(e.target.value.slice(0, 300))} placeholder="Optional" data-testid="hr-pay-rec-note" />
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" disabled={saving || adding} onClick={save} data-testid="hr-pay-rec-save">
+            <Check className="h-4 w-4" />{saving ? "Saving…" : "Add record"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /** One employee's pay, as a page of its own.
  *
- *  This was a dialog, and a dialog was the wrong shape for it: everything worth knowing
- *  about what somebody is paid — the month being run, every raise they have had, every
- *  month they have been paid — was competing for a 512px box with the board still showing
- *  through behind it. A history is a thing you read across, and it was being read down a
- *  column narrower than the table it came from.
+ *  Two tabs, because there are two questions: what this month comes to, and what this
+ *  person has been on. The second is a timeline — every figure they have been put on, from
+ *  when, and what each one changed — rather than a log of edits, so "what were they paid
+ *  in March" has an answer that does not depend on replaying anything.
  *
- *  Full-bleed over the board, like the Physio board's own patient page, rather than a
- *  route: the payroll month behind it is state somebody spent clicks getting to — a
- *  filter, a lane, a scroll position — and coming back to the top of an empty board is
- *  the cost of making this a URL.
+ *  Full-bleed over the board rather than a route: the payroll month behind it is state
+ *  somebody spent clicks getting to, and coming back to the top of an empty board is what
+ *  making this a URL would cost.
  */
 const EmployeePayPage = ({ slip, onClose, onSaved }) => {
   const [data, setData] = useState(null);
-  const [amount, setAmount] = useState("");
-  const [reason, setReason] = useState("annual_increment");
-  const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  // Two different histories answering two different questions: what this person is
-  // contracted at and why that moved, against what each month actually came to.
-  const [tab, setTab] = useState("salary");
+  const [tab, setTab] = useState("history");
+  const [adding, setAdding] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
-    return hrEmployeeSalary(slip.employee_id)
-      .then((res) => { setData(res); setAmount(String(Math.round(res.amount || 0))); })
-      .catch(fail)
-      .finally(() => setLoading(false));
+    return hrEmployeeSalary(slip.employee_id).then(setData).catch(fail).finally(() => setLoading(false));
   }, [slip.employee_id]);
   useEffect(() => { load(); }, [load]);
 
@@ -1060,31 +1206,20 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const current = Number(data?.amount || 0);
-  const next = Number(amount || 0);
-  const delta = next - current;
-  // A raise from nothing has no percentage — the first salary somebody is put on is not
-  // an increase on zero, it is the figure they are paid.
-  const percent = current > 0 ? (delta / current) * 100 : null;
-  const changed = Boolean(amount !== "" && Math.round(next) !== Math.round(current));
-  const needsNote = reason === "other";
-
-  const save = async () => {
-    if (!changed) { toast.error("That is what they are paid already"); return; }
-    if (needsNote && !note.trim()) { toast.error("Say what the reason is"); return; }
-    setSaving(true);
-    try {
-      await hrChangeEmployeeSalary(slip.employee_id, { amount: next, reason, note: note.trim() });
-      toast.success(`${slip.employee_name} is now on ${money(next)} a month.`);
-      setNote("");
-      await load();
-      // The lane a slip sits in is read off the salary that just changed.
-      onSaved?.();
-    } catch (e) { fail(e); } finally { setSaving(false); }
-  };
-
-  const history = data?.history || [];
+  const records = data?.records || [];
   const income = data?.income || [];
+  const reasons = data?.reasons || [];
+  const totals = data?.totals || {};
+  const reasonBy = Object.fromEntries(reasons.map((r) => [r.key, r]));
+
+  const removeRecord = async (id) => {
+    try {
+      await hrDeleteSalaryRecord(slip.employee_id, id);
+      toast.success("Record removed.");
+      await load();
+      onSaved?.();
+    } catch (e) { fail(e); }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50" data-testid="hr-pay-employee-page">
@@ -1093,130 +1228,61 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
           <button type="button" onClick={onClose} className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Back to payroll" data-testid="hr-pay-employee-back">
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <EmployeeAvatar employee={{ full_name: slip.employee_name }} size={40} />
+          <EmployeeAvatar employee={{ full_name: slip.employee_name }} size={44} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-slate-800">{slip.employee_name}</h2>
-            <p className="truncate text-xs text-slate-400">
-              {[slip.employee_code, slip.designation, slip.department].filter(Boolean).join(" · ")}
-            </p>
+            <p className="truncate text-xs text-slate-500">{slip.designation || slip.department || ""}</p>
+            {data?.email && <p className="truncate text-xs text-slate-400">{data.email}</p>}
           </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Current salary</p>
+            <p className="text-lg font-extrabold text-emerald-600" data-testid="hr-pay-current-salary">{money(totals.current ?? slip.base)}</p>
+          </div>
+        </div>
+        <div className="mx-auto flex w-full max-w-5xl gap-1.5 px-4 pb-2 sm:px-6" data-testid="hr-pay-emp-tabs">
+          {[
+            { key: "payslip", label: "Salary / Payslip", icon: Wallet },
+            { key: "history", label: "Salary History", icon: Clock3 },
+          ].map((t) => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                aria-pressed={tab === t.key}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  tab === t.key ? "bg-indigo-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100"
+                }`}
+                data-testid={`hr-pay-emp-tab-${t.key}`}
+              >
+                <Icon className="h-3.5 w-3.5" />{t.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl space-y-4 px-4 py-5 sm:px-6">
-          {/* The month that is open on the board behind, spelled out. It was the one thing
-              the dialog could not show without pushing the history off the bottom, and it
-              is the reason somebody clicked this person in the first place. */}
-          <div>
-            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">This month</p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Base" value={money(slip.base)} testid="hr-pay-emp-base" />
-              <Stat label="Payable days" value={`${slip.payable_days}/${slip.days_in_month}`} testid="hr-pay-emp-days" />
-              <Stat label="LOP days" value={slip.lop_days} tone={slip.lop_days > 0 ? "text-rose-600" : "text-slate-800"} testid="hr-pay-emp-lop" />
-              <Stat label="Earned" value={money(slip.earned)} testid="hr-pay-emp-earned" />
-              <Stat label="Bonus" value={money(slip.bonus)} tone="text-emerald-600" testid="hr-pay-emp-bonus" />
-              <Stat label="Net payable" value={money(slip.net_payable)} tone="text-sky-700" testid="hr-pay-emp-net" />
-            </div>
-          </div>
-
-          {loading ? <p className="py-10 text-center text-sm text-slate-400">Loading…</p> : (
+          {loading ? <p className="py-10 text-center text-sm text-slate-400">Loading…</p> : tab === "payslip" ? (
             <>
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Monthly salary</CardTitle>
-                  <p className="text-xs text-slate-500">
-                    Takes effect on the next run you generate. A month already generated keeps the figures it froze.
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xl font-bold text-slate-400 line-through decoration-slate-300">{money(current)}</span>
-                    <span className="text-slate-300">→</span>
-                    <div className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 focus-within:border-sky-400 focus-within:ring-1 focus-within:ring-sky-300">
-                      <span className="text-sm text-slate-400">₹</span>
-                      <input
-                        value={amount}
-                        inputMode="numeric"
-                        onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))}
-                        className="h-10 w-36 bg-transparent text-xl font-bold text-slate-800 outline-none"
-                        data-testid="hr-pay-salary-amount"
-                      />
-                    </div>
-                    {/* What the figure typed actually does, in the two forms a raise gets
-                        talked about in. Shown as it is typed, because "is 40,000 the right
-                        number" is the question being answered at that moment. */}
-                    {changed && (
-                      <span className={`text-sm font-bold ${delta > 0 ? "text-emerald-600" : "text-rose-600"}`} data-testid="hr-pay-salary-delta">
-                        {delta > 0 ? "+" : "−"}{money(Math.abs(delta))}
-                        {percent === null ? " · first salary set" : ` · ${delta > 0 ? "+" : "−"}${Math.abs(percent).toFixed(1)}%`}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div>
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="hr-pay-salary-reason">Reason</label>
-                      <select
-                        id="hr-pay-salary-reason"
-                        value={reason}
-                        onChange={(e) => setReason(e.target.value)}
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
-                        data-testid="hr-pay-salary-reason"
-                      >
-                        {(data?.reasons || []).map((r) => (
-                          <option key={r.key} value={r.key}>{r.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="hr-pay-salary-note">Note</label>
-                      <Input
-                        id="hr-pay-salary-note"
-                        className="mt-1"
-                        value={note}
-                        onChange={(e) => setNote(e.target.value.slice(0, 300))}
-                        placeholder={needsNote ? "Say what the reason is" : "Optional"}
-                        data-testid="hr-pay-salary-note"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button size="sm" disabled={saving || !changed} onClick={save} data-testid="hr-pay-salary-save">
-                      <Check className="h-4 w-4" />{saving ? "Saving…" : "Save salary"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <div>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">This month</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  <Stat label="Base" value={money(slip.base)} testid="hr-pay-emp-base" />
+                  <Stat label="Payable days" value={`${slip.payable_days}/${slip.days_in_month}`} testid="hr-pay-emp-days" />
+                  <Stat label="LOP days" value={slip.lop_days} tone={slip.lop_days > 0 ? "text-rose-600" : "text-slate-800"} testid="hr-pay-emp-lop" />
+                  <Stat label="Earned" value={money(slip.earned)} testid="hr-pay-emp-earned" />
+                  <Stat label="Bonus" value={money(slip.bonus)} tone="text-emerald-600" testid="hr-pay-emp-bonus" />
+                  <Stat label="Net payable" value={money(slip.net_payable)} tone="text-sky-700" testid="hr-pay-emp-net" />
+                </div>
+              </div>
 
               <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-base">Every month paid</CardTitle></CardHeader>
                 <CardContent className="p-0">
-                  <div className="flex gap-1.5 border-b border-slate-200 px-3 py-2" data-testid="hr-pay-history-tabs">
-                    {[
-                      { key: "salary", label: "Salary", count: history.length },
-                      { key: "income", label: "Income", count: income.length },
-                    ].map((t) => (
-                      <button
-                        key={t.key}
-                        type="button"
-                        onClick={() => setTab(t.key)}
-                        aria-pressed={tab === t.key}
-                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-                          tab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
-                        }`}
-                        data-testid={`hr-pay-history-tab-${t.key}`}
-                      >
-                        {t.label}
-                        <span className={`rounded-full px-1.5 text-[10px] font-bold ${tab === t.key ? "bg-white/80 text-sky-700" : "bg-slate-100 text-slate-500"}`}>{t.count}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* A table now it has the width for one. In the dialog these were stacked
-                      cards because nothing else fitted, which meant comparing two months
-                      was scrolling between two paragraphs. */}
-                  {tab === "income" && (income.length === 0 ? (
+                  {income.length === 0 ? (
                     <p className="py-10 text-center text-xs text-slate-400" data-testid="hr-pay-income-empty">
                       No month has been generated for them yet.
                     </p>
@@ -1248,8 +1314,6 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
                               <td className={`px-3 py-2 text-right ${Number(m.deduction) > 0 ? "text-rose-600" : "text-slate-400"}`}>{money(m.deduction)}</td>
                               <td className="px-3 py-2 text-right font-bold text-sky-700">{money(m.net_payable)}</td>
                               <td className="px-3 py-2">
-                                {/* A draft is a figure somebody is still editing; a paid
-                                    month has left the building. */}
                                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${RUN_TONE[m.status] || "bg-slate-100 text-slate-500"}`}>
                                   {m.status || "—"}
                                 </span>
@@ -1259,56 +1323,128 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
                         </tbody>
                       </table>
                     </div>
-                  ))}
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <Stat label="Current salary" value={money(totals.current)} tone="text-emerald-600" testid="hr-pay-t-current" />
+                {/* The raises, not the records: the figure somebody joined on is not a hike. */}
+                <Stat label="Total hikes" value={totals.hikes ?? 0} tone="text-indigo-600" testid="hr-pay-t-hikes" />
+                <Stat label="Initial salary" value={money(totals.initial)} tone="text-amber-600" testid="hr-pay-t-initial" />
+                <Stat
+                  label="Total growth"
+                  value={totals.growth === null || totals.growth === undefined ? "—" : `${totals.growth > 0 ? "+" : ""}${totals.growth}%`}
+                  tone="text-violet-600"
+                  testid="hr-pay-t-growth"
+                />
+              </div>
 
-                  {tab === "salary" && (history.length === 0 ? (
-                    <p className="py-10 text-center text-xs text-slate-400" data-testid="hr-pay-salary-history-empty">
-                      Nothing recorded yet. Every change from here on is kept.
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+                  <CardTitle className="text-base">Salary history</CardTitle>
+                  <Button size="sm" onClick={() => setAdding(true)} data-testid="hr-pay-add-record-open">
+                    <Plus className="h-4 w-4" />Add record
+                  </Button>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {records.length === 0 ? (
+                    <p className="py-10 text-center text-xs text-slate-400" data-testid="hr-pay-records-empty">
+                      Nothing on record. Add what they joined on to start the timeline.
                     </p>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="min-w-full text-sm" data-testid="hr-pay-salary-history">
+                      <table className="min-w-full text-sm" data-testid="hr-pay-records">
                         <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                           <tr>
-                            <th className="px-3 py-2">When</th>
-                            <th className="px-3 py-2 text-right">From</th>
-                            <th className="px-3 py-2 text-right">To</th>
-                            <th className="px-3 py-2 text-right">Change</th>
+                            <th className="px-3 py-2">#</th>
+                            <th className="px-3 py-2">Effective from</th>
+                            <th className="px-3 py-2 text-right">Amount</th>
+                            <th className="px-3 py-2">Duration</th>
                             <th className="px-3 py-2">Reason</th>
-                            <th className="px-3 py-2">By</th>
+                            <th className="px-3 py-2 text-right">Hike</th>
+                            <th className="px-3 py-2"></th>
                           </tr>
                         </thead>
+                        {/* Newest first to read, numbered oldest first to count: #1 is the
+                            figure they joined on however far down the page it sits. */}
                         <tbody>
-                          {history.map((h) => (
-                            <tr key={h.id} className="border-t border-slate-100 align-top">
-                              <td className="whitespace-nowrap px-3 py-2 text-slate-600">{prettyDate((h.changed_at || "").slice(0, 10))}</td>
-                              <td className="px-3 py-2 text-right text-slate-500">{money(h.from_amount)}</td>
-                              <td className="px-3 py-2 text-right font-semibold text-slate-800">{money(h.to_amount)}</td>
-                              <td className={`whitespace-nowrap px-3 py-2 text-right font-bold ${Number(h.change) > 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                                {Number(h.change) > 0 ? "+" : "−"}{money(Math.abs(Number(h.change)))}
-                                {h.percent === null || h.percent === undefined ? "" : (
-                                  <span className="block text-[10px] font-semibold">
-                                    {Number(h.percent) > 0 ? "+" : "−"}{Math.abs(Number(h.percent)).toFixed(1)}%
+                          {[...records].reverse().map((r) => (
+                            <tr key={r.id} className="border-t border-slate-100" data-testid={`hr-pay-record-${r.id}`}>
+                              <td className="px-3 py-2 text-slate-400">{r.number}</td>
+                              <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-700">{prettyRecordMonth(r.effective_from)}</td>
+                              <td className="px-3 py-2 text-right font-bold text-emerald-600">{money(r.amount)}</td>
+                              <td className="whitespace-nowrap px-3 py-2 text-slate-500">{monthsLabel(r.months, r.current)}</td>
+                              <td className="px-3 py-2">
+                                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${toneOf(reasonBy[r.reason])}`}>
+                                  {reasonBy[r.reason]?.label || r.reason}
+                                </span>
+                                {r.note ? <span className="block text-[11px] text-slate-400">{r.note}</span> : null}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 text-right">
+                                {r.change === null || r.change === 0 ? (
+                                  <span className="text-slate-300">–</span>
+                                ) : (
+                                  <span className={`font-bold ${r.change > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                                    {r.change > 0 ? "+" : "−"}{money(Math.abs(r.change))}
+                                    {r.percent === null || r.percent === undefined ? "" : ` (${Math.abs(r.percent).toFixed(1)}%)`}
                                   </span>
                                 )}
                               </td>
-                              <td className="px-3 py-2 text-slate-700">
-                                {h.reason_label || h.reason}
-                                {h.note ? <span className="block text-[11px] text-slate-400">{h.note}</span> : null}
+                              <td className="px-3 py-2 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => removeRecord(r.id)}
+                                  className="rounded p-1 text-rose-400 transition hover:bg-rose-50 hover:text-rose-600"
+                                  aria-label={`Remove the record from ${prettyRecordMonth(r.effective_from)}`}
+                                  data-testid={`hr-pay-record-delete-${r.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
                               </td>
-                              <td className="px-3 py-2 text-slate-500">{h.changed_by}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                  ))}
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* What the eight words on the chips above actually mean. "3 Month Review"
+                  says when, not why, and a vocabulary of abbreviations is one somebody has
+                  to be taught rather than one they can read. */}
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-base">Hike conditions</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {reasons.map((r) => (
+                      <div key={r.key} data-testid={`hr-pay-reason-${r.key}`}>
+                        <span className={`block truncate rounded-full px-2.5 py-1 text-center text-[11px] font-semibold ${toneOf(r)}`}>
+                          {r.label}
+                        </span>
+                        <p className="mt-1 text-[11px] leading-snug text-slate-500">{r.description || "—"}</p>
+                      </div>
+                    ))}
+                  </div>
                 </CardContent>
               </Card>
             </>
           )}
         </div>
       </div>
+
+      {adding && (
+        <AddRecordModal
+          employeeId={slip.employee_id}
+          reasons={reasons}
+          onClose={() => setAdding(false)}
+          onReasonAdded={load}
+          onSaved={async () => { setAdding(false); await load(); onSaved?.(); }}
+        />
+      )}
     </div>
   );
 };

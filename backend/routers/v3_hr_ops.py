@@ -1524,28 +1524,148 @@ async def delete_quote(quote_id: str, _: V3UserOut = Depends(require_hr)):
         raise HTTPException(status_code=404, detail="Quote not found")
     return {"deleted": True}
 
+# ---------- what somebody is paid, and every figure they have been on ----------
 
-# ---------- what somebody is paid, and why it changed ----------
-
-# The reasons a salary moves, as slugs. A dropdown rather than a free-text box because the
-# whole point of recording it is being able to read it back a year later: "increment",
-# "incr", "annual hike" and "yearly" are four spellings of one thing, and a history written
-# in four spellings cannot answer how many promotions a department gave out.
+# A salary is a timeline, not a number with an edit history. Each record says what somebody
+# was put on and from when, so "what were they paid in March" has an answer that does not
+# depend on replaying a log -- and the raise between two records is read off the pair
+# rather than stored, which means it cannot disagree with the amounts either side of it.
 #
-# `other` keeps the free-text escape open for the case none of these is honest, and that
-# note is required when it is picked -- an "other" with nothing after it is worse than no
-# reason at all, because it looks like one.
-SALARY_REASONS = {
-    "annual_increment": "Annual increment",
-    "promotion": "Promotion",
-    "performance": "Performance",
-    # A wrong figure being fixed is not a raise, and a history that cannot tell the two
-    # apart reports a pay rise every time somebody corrects a typo.
+# Held in the collection the change log already used. A row written before this carries
+# `to_amount` and `changed_at` instead of `amount` and `effective_from`, and is read as the
+# record it always was -- see _as_record. Cheaper than a migration and it cannot miss a row.
+SALARY_RECORDS = "salary_history"
+
+# The reasons a salary is set or moved. Seeded rather than hardcoded, because HR adds to
+# these: the eight below are what the clinic runs on today and "+ Add new reason" writes a
+# ninth beside them. A slug rather than the words, so renaming a label later does not
+# orphan every record that used it.
+DEFAULT_SALARY_REASONS = [
+    {"key": "initial_salary", "label": "Initial Salary", "description": "Salary at joining", "tone": "slate"},
+    {"key": "performance", "label": "Performance", "description": "Based on performance review", "tone": "emerald"},
+    {"key": "job_confirmation", "label": "Job Confirmation", "description": "After probation completion", "tone": "violet"},
+    {"key": "annual_increase", "label": "Annual Increase", "description": "Yearly increment", "tone": "amber"},
+    {"key": "six_month_review", "label": "6 Month Review", "description": "6 month performance review", "tone": "purple"},
+    {"key": "three_month_review", "label": "3 Month Review", "description": "3 month probation review", "tone": "pink"},
+    {"key": "promotion", "label": "Promotion", "description": "Role promotion", "tone": "teal"},
+    {"key": "market_adjustment", "label": "Market Adjustment", "description": "Salary market correction", "tone": "sky"},
+]
+# What a reason somebody adds is coloured. Cycled rather than chosen, so a new one looks
+# like it belongs beside the eight without asking whoever typed it to pick a colour.
+#
+# A colour NAME, not the classes. Tailwind builds its stylesheet from what it can see in
+# the source, and a class string assembled here would arrive at a browser that has never
+# heard of it -- see REASON_TONES in HROpsTabs.jsx, which is where the literals live.
+ADDED_REASON_TONES = ["indigo", "lime", "rose", "cyan", "orange"]
+
+MAX_SALARY_NOTE = 300
+# The reasons this clinic renamed away from, kept resolvable so a record written against
+# one still reads as words rather than as a slug. Nothing offers them.
+RETIRED_REASONS = {
+    "annual_increment": "Annual Increase",
     "correction": "Correction",
     "other": "Other",
 }
 
-MAX_SALARY_NOTE = 300
+
+def _slugify_reason(label: str) -> str:
+    slug = "".join(c if c.isalnum() else "_" for c in str(label or "").strip().lower())
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_")[:40]
+
+
+async def _salary_reasons() -> List[dict]:
+    """Every reason the dropdown may offer, the eight defaults included.
+
+    Seeded on read rather than by a migration: the list is small, it is read whenever
+    somebody opens a salary, and an install that has never opened one does not need rows
+    sitting in it. insert_many with ordered=False would race two callers into a duplicate,
+    so each is upserted on its key.
+    """
+    existing = {r["key"] for r in await v3_col("salary_reasons").find({}, {"_id": 0, "key": 1}).to_list(200)}
+    missing = [r for r in DEFAULT_SALARY_REASONS if r["key"] not in existing]
+    for order, row in enumerate(DEFAULT_SALARY_REASONS):
+        if row["key"] in existing:
+            continue
+        await v3_col("salary_reasons").update_one(
+            {"key": row["key"]},
+            {"$setOnInsert": {**row, "id": str(uuid.uuid4()), "order": order, "built_in": True}},
+            upsert=True,
+        )
+    rows = await v3_col("salary_reasons").find({}, {"_id": 0}).to_list(200)
+    rows.sort(key=lambda r: (r.get("order", 999), str(r.get("label") or "")))
+    return rows
+
+
+def _month_key(value: Any) -> str:
+    """A record's month, from whatever shape it was written in.
+
+    Records carry `effective_from` as YYYY-MM. Rows written before they were a timeline
+    carry a full `changed_at` timestamp, and the month it happened in is the month it took
+    effect from -- there was no way to say otherwise at the time.
+    """
+    text = str(value or "").strip()
+    return text[:7] if len(text) >= 7 else ""
+
+
+def _as_record(row: dict) -> dict:
+    """One stored row as a salary record, whichever shape it was written in."""
+    amount = row.get("amount")
+    if amount is None:
+        amount = row.get("to_amount") or 0
+    return {
+        "id": row.get("id") or "",
+        "effective_from": _month_key(row.get("effective_from") or row.get("changed_at")),
+        "amount": round(float(amount or 0), 2),
+        "reason": row.get("reason") or "",
+        "note": row.get("note") or "",
+        "created_by": row.get("created_by") or row.get("changed_by") or "",
+        "created_at": row.get("created_at") or row.get("changed_at") or "",
+    }
+
+
+def _months_between(a: str, b: str) -> int:
+    """Whole months from one YYYY-MM to another, never negative."""
+    try:
+        ay, am = int(a[:4]), int(a[5:7])
+        by, bm = int(b[:4]), int(b[5:7])
+    except (ValueError, IndexError):
+        return 0
+    return max((by - ay) * 12 + (bm - am), 0)
+
+
+def _timeline(rows: List[dict], today_month: str) -> List[dict]:
+    """The records oldest first, each carrying what it changed and how long it stood.
+
+    The raise and the duration are worked out here rather than stored, so they cannot
+    disagree with the amounts on either side of them -- deleting a record in the middle
+    re-reads the two it sat between instead of leaving a hike nobody can account for.
+    """
+    records = sorted(
+        (_as_record(r) for r in rows),
+        key=lambda r: (r["effective_from"], r["created_at"]),
+    )
+    out = []
+    for i, rec in enumerate(records):
+        previous = records[i - 1]["amount"] if i else None
+        nxt = records[i + 1]["effective_from"] if i + 1 < len(records) else ""
+        change = None if previous is None else round(rec["amount"] - previous, 2)
+        out.append({
+            **rec,
+            "number": i + 1,
+            "from_amount": previous,
+            "change": change,
+            # A raise on nothing is not a percentage, it is the first figure somebody was
+            # put on. Left null rather than shown as infinite.
+            "percent": (
+                round(change / previous * 100, 2)
+                if previous not in (None, 0) and change is not None else None
+            ),
+            "months": _months_between(rec["effective_from"], nxt or today_month),
+            "current": i + 1 == len(records),
+        })
+    return out
 
 
 def _salary_field(emp: dict) -> str:
@@ -1561,45 +1681,88 @@ def _salary_field(emp: dict) -> str:
         return "gross_salary"
     if float(emp.get("net_salary") or 0) > 0:
         return "net_salary"
-    # Nothing set at all -- the No pay set lane. Gross, because that is what payroll reads
-    # first and a figure typed here should be the figure that pays.
+    # Nothing set at all. Gross, because that is what payroll reads first and a figure
+    # typed here should be the figure that pays.
     return "gross_salary"
 
 
-class SalaryChangeIn(BaseModel):
+class SalaryRecordIn(BaseModel):
     amount: float
     reason: str
+    # YYYY-MM. Left out means the month now, which is what somebody typing a raise today
+    # almost always means.
+    effective_from: Optional[str] = ""
     note: Optional[str] = ""
+
+
+class SalaryReasonIn(BaseModel):
+    label: str
+    description: Optional[str] = ""
+
+
+@router.get("/salary-reasons")
+async def salary_reasons(_: V3UserOut = Depends(require_hr)):
+    """Every reason a salary record may be filed under, and what each one means.
+
+    The descriptions come back with them because the screen shows the list as a legend --
+    "3 Month Review" says when, not why, and a dropdown of eight abbreviations is a
+    vocabulary somebody has to be taught rather than one they can read.
+    """
+    return {"reasons": await _salary_reasons()}
+
+
+@router.post("/salary-reasons")
+async def add_salary_reason(payload: SalaryReasonIn, _: V3UserOut = Depends(require_hr)):
+    """Add a ninth reason beside the eight.
+
+    HR knows what this clinic gives raises for better than a hardcoded list does. Refused
+    where the slug already exists rather than quietly making a second "Performance": two
+    reasons of one name is a history that cannot be counted.
+    """
+    label = str(payload.label or "").strip()[:40]
+    if not label:
+        raise HTTPException(status_code=400, detail="Give the reason a name")
+    key = _slugify_reason(label)
+    if not key:
+        raise HTTPException(status_code=400, detail="Give the reason a name")
+    rows = await _salary_reasons()
+    if any(r["key"] == key for r in rows):
+        raise HTTPException(status_code=400, detail=f"{label} is already on the list")
+    row = {
+        "id": str(uuid.uuid4()),
+        "key": key,
+        "label": label,
+        "description": str(payload.description or "").strip()[:120],
+        "tone": ADDED_REASON_TONES[len(rows) % len(ADDED_REASON_TONES)],
+        "order": 100 + len(rows),
+        "built_in": False,
+    }
+    await v3_col("salary_reasons").insert_one(dict(row))
+    return {"reason": row}
 
 
 @router.get("/employees/{emp_id}/salary")
 async def employee_salary(emp_id: str, _: V3UserOut = Depends(require_hr)):
-    """What this person is paid, and every change that got them there.
+    """What this person is paid, every figure they have been on, and every month they
+    have been paid.
 
-    The history is its own collection rather than a list on the employee: it only grows,
-    it is read on one screen, and an employee document that carries every raise since
-    hiring is one that gets longer every year in every query that never wanted it.
-
-    Newest first. This is read to answer "what happened recently", and a list that opens
-    on a raise from four years ago answers a question nobody asked.
+    Three answers to three different questions. The timeline is what somebody decided and
+    when; the income is what each month actually came to once the register had its say;
+    the totals across the top are the timeline read at a glance -- what they started on,
+    what they are on, and how far that has moved.
     """
     emp = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
     if not emp:
         raise HTTPException(status_code=404, detail="No such employee")
-    rows = await v3_col("salary_history").find(
-        {"employee_id": emp_id}, {"_id": 0},
-    ).sort("changed_at", -1).to_list(200)
+
+    today_month = clinic_today()[:7]
+    rows = await v3_col(SALARY_RECORDS).find({"employee_id": emp_id}, {"_id": 0}).to_list(400)
+    timeline = _timeline(rows, today_month)
 
     # What they were actually paid, month by month, which is a different question from
     # what they are contracted at. A raise is a decision somebody made; a month short by
-    # five days of loss of pay is the register doing arithmetic, and reading the two in
-    # one list would put them side by side as though they were the same kind of event.
-    slips = await v3_col("payslips").find(
-        {"employee_id": emp_id}, {"_id": 0},
-    ).sort("month", -1).to_list(60)
-    # Whether each of those months was actually paid or is still a draft somebody is
-    # editing. The status lives on the run, not the slip, so it is read once for the
-    # months in hand rather than per row.
+    # five days of loss of pay is the register doing arithmetic.
+    slips = await v3_col("payslips").find({"employee_id": emp_id}, {"_id": 0}).sort("month", -1).to_list(60)
     statuses = {}
     if slips:
         statuses = {
@@ -1620,95 +1783,131 @@ async def employee_salary(emp_id: str, _: V3UserOut = Depends(require_hr)):
         "payable_days": s.get("payable_days") or 0,
         "days_in_month": s.get("days_in_month") or 0,
     } for s in slips]
+
+    initial = timeline[0]["amount"] if timeline else 0
+    current = _monthly_base(emp)
     return {
         "employee_id": emp_id,
         "employee_name": emp.get("full_name") or "",
         "employee_code": emp.get("employee_code") or "",
+        "email": emp.get("email") or "",
         "department": emp.get("department") or "",
         "designation": emp.get("designation") or "",
-        "amount": _monthly_base(emp),
+        "amount": current,
         "field": _salary_field(emp),
-        "reasons": [{"key": k, "label": v} for k, v in SALARY_REASONS.items()],
-        "history": rows,
+        "reasons": await _salary_reasons(),
+        "records": timeline,
         "income": income,
+        "totals": {
+            "current": current,
+            "initial": initial,
+            # The raises, not the records: the figure somebody joined on is not a hike.
+            "hikes": sum(1 for r in timeline if r["change"] not in (None, 0)),
+            "growth": round((current - initial) / initial * 100, 2) if initial else None,
+        },
     }
 
 
 @router.post("/employees/{emp_id}/salary")
-async def change_employee_salary(
+async def add_salary_record(
     emp_id: str,
-    payload: SalaryChangeIn,
+    payload: SalaryRecordIn,
     user: V3UserOut = Depends(require_hr),
 ):
-    """Set what this person is paid, and say why.
+    """Put somebody on a figure from a month, and say why.
 
-    One door for every change, whether it is a raise or a wrong figure being fixed. Two
-    doors -- one that asks and one that does not -- would put the unexplained changes in
-    the history beside the explained ones with nothing to say which was which, and the
-    correction is the entry somebody most wants a note against a year later.
-
-    Held to the roles that run payroll rather than to Super Admin alone, which is what
-    PATCH /employees is held to. The No pay set lane is HR's job to empty and they already
-    read every salary in the company on the screen this is reached from; making them ask
-    somebody else to type the figure they are looking at would not protect anything.
+    One door for the first salary and every raise after it, because they are the same
+    thing: a record saying what somebody is on from when. The first one is not a hike and
+    is not counted as one -- that falls out of it being first rather than out of a flag.
 
     Does NOT touch a payroll run that already exists. A generated run froze its figures on
-    purpose -- that is what generating one is -- so a raise typed today changes what the
-    next Regenerate produces and leaves a finalised month alone. Any other rule would let
-    a salary edit quietly rewrite a month somebody has already been paid for.
+    purpose, so a record added today changes what the next Regenerate produces and leaves a
+    finalised month alone.
     """
+    reasons = {r["key"] for r in await _salary_reasons()}
     reason = str(payload.reason or "").strip().lower()
-    if reason not in SALARY_REASONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Reason must be one of: {', '.join(SALARY_REASONS)}",
-        )
-    note = (payload.note or "").strip()[:MAX_SALARY_NOTE]
-    # An "other" with nothing after it looks like a reason and is not one.
-    if reason == "other" and not note:
-        raise HTTPException(status_code=400, detail="Say what the reason is")
+    if reason not in reasons:
+        raise HTTPException(status_code=400, detail="Pick a reason from the list")
 
     amount = float(payload.amount or 0)
     if amount < 0:
         raise HTTPException(status_code=400, detail="A salary cannot be negative")
-    # Ten million a month is not a salary anybody at this clinic is on, and it is what a
-    # mistyped figure looks like. Refused rather than clamped: quietly paying somebody a
-    # different number from the one on screen is the worse failure.
+    # Ten million a month is not a salary anybody here is on, and it is what a mistyped
+    # figure looks like. Refused rather than clamped: quietly paying somebody a different
+    # number from the one on screen is the worse failure.
     if amount > 10_000_000:
         raise HTTPException(status_code=400, detail="That figure looks wrong — check it")
+
+    effective = _month_key(payload.effective_from) or clinic_today()[:7]
+    if len(effective) != 7 or effective[4] != "-":
+        raise HTTPException(status_code=400, detail="Effective from must be a month")
 
     emp = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
     if not emp:
         raise HTTPException(status_code=404, detail="No such employee")
 
-    field = _salary_field(emp)
-    before = _monthly_base(emp)
-    if round(before, 2) == round(amount, 2):
-        raise HTTPException(status_code=400, detail="That is what they are paid already")
+    existing = await v3_col(SALARY_RECORDS).find({"employee_id": emp_id}, {"_id": 0}).to_list(400)
+    if any(_as_record(r)["effective_from"] == effective for r in existing):
+        raise HTTPException(
+            status_code=400,
+            detail="There is already a record from that month — delete it or pick another",
+        )
 
     now = now_iso()
-    entry = {
+    record = {
         "id": str(uuid.uuid4()),
         "employee_id": emp_id,
         # Copied, not looked up on read. This is a thing somebody did on a day, and it
         # should still name who it was about after the employee record is gone.
         "employee_name": emp.get("full_name") or "",
         "employee_code": emp.get("employee_code") or "",
-        "field": field,
-        "from_amount": round(before, 2),
-        "to_amount": round(amount, 2),
-        "change": round(amount - before, 2),
-        # Stored beside the amounts rather than worked out on read: a raise from nothing is
-        # a division by zero, and every reader would have to know that.
-        "percent": round((amount - before) / before * 100, 2) if before > 0 else None,
+        "effective_from": effective,
+        "amount": round(amount, 2),
         "reason": reason,
-        "reason_label": SALARY_REASONS[reason],
-        "note": note,
-        "changed_by": user.full_name or user.email,
-        "changed_at": now,
+        "note": str(payload.note or "").strip()[:MAX_SALARY_NOTE],
+        "created_by": user.full_name or user.email,
+        "created_at": now,
     }
+    await v3_col(SALARY_RECORDS).insert_one(dict(record))
+    await _apply_current_salary(emp_id)
+    return {"record": record}
+
+
+@router.delete("/employees/{emp_id}/salary/{record_id}")
+async def delete_salary_record(
+    emp_id: str,
+    record_id: str,
+    _: V3UserOut = Depends(require_hr),
+):
+    """Take a record off the timeline.
+
+    Deleted rather than voided, because the reason to reach for this is a record that
+    should never have been written -- a wrong month, a typo, somebody else's raise. The
+    hike and duration either side are read off the neighbours, so the two records it sat
+    between close up rather than leaving a gap nobody can account for.
+    """
+    result = await v3_col(SALARY_RECORDS).delete_one({"id": record_id, "employee_id": emp_id})
+    if not result.deleted_count:
+        raise HTTPException(status_code=404, detail="No such record")
+    await _apply_current_salary(emp_id)
+    return {"deleted": record_id}
+
+
+async def _apply_current_salary(emp_id: str) -> None:
+    """Write the newest record's figure onto the employee, which is what payroll reads.
+
+    The timeline is the truth and the field on the employee is a copy of its last line,
+    kept because forty other reads want a salary without knowing what a record is. Applied
+    after every write and every delete, so removing the newest record puts the one before
+    it back rather than leaving payroll on a figure that no longer exists anywhere.
+    """
+    emp = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
+    if not emp:
+        return
+    rows = await v3_col(SALARY_RECORDS).find({"employee_id": emp_id}, {"_id": 0}).to_list(400)
+    timeline = _timeline(rows, clinic_today()[:7])
+    amount = timeline[-1]["amount"] if timeline else 0
     await v3_col("employees").update_one(
-        {"id": emp_id}, {"$set": {field: round(amount, 2), "updated_at": now}},
+        {"id": emp_id},
+        {"$set": {_salary_field(emp): round(amount, 2), "updated_at": now_iso()}},
     )
-    await v3_col("salary_history").insert_one(dict(entry))
-    return {"amount": round(amount, 2), "field": field, "entry": entry}

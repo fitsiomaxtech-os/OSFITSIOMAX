@@ -554,11 +554,15 @@ export const hrDeleteApproval = async (id) => (await api.delete(`/hr/approvals/$
 
 export const hrPayroll = async (month) => (await api.get("/hr/payroll", { params: month ? { month } : {} })).data;
 export const hrGeneratePayroll = async (month) => (await api.post("/hr/payroll/generate", { month })).data;
-// What one employee is paid, every change that got them there, and the reasons the
-// dropdown may offer. One door for both a raise and a corrected figure -- see
-// change_employee_salary, which refuses a change with no reason on it.
+// One employee's salary as a timeline: every figure they have been put on and from when,
+// what each month actually paid, and the reasons a record may be filed under. The hike
+// and the duration are worked out on the server from the records either side -- see
+// _timeline -- so nothing here has to agree with anything separately.
 export const hrEmployeeSalary = async (empId) => (await api.get(`/hr/employees/${empId}/salary`)).data;
-export const hrChangeEmployeeSalary = async (empId, payload) => (await api.post(`/hr/employees/${empId}/salary`, payload)).data;
+export const hrAddSalaryRecord = async (empId, payload) => (await api.post(`/hr/employees/${empId}/salary`, payload)).data;
+export const hrDeleteSalaryRecord = async (empId, recordId) => (await api.delete(`/hr/employees/${empId}/salary/${recordId}`)).data;
+export const hrSalaryReasons = async () => (await api.get("/hr/salary-reasons")).data;
+export const hrAddSalaryReason = async (payload) => (await api.post("/hr/salary-reasons", payload)).data;
 export const hrAdjustPayslip = async (month, employeeId, payload) => (await api.patch(`/hr/payroll/${month}/slips/${employeeId}`, payload)).data;
 export const hrPayrollStatus = async (month, status) => (await api.post(`/hr/payroll/${month}/status`, { status })).data;
 
