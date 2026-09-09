@@ -6359,11 +6359,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 </h3>
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
                   <span className="flex items-center gap-1.5"><Phone className="h-3 w-3 shrink-0" /> {selectedLead.phone || "—"}</span>
+                  {/* The same wording the row this was opened from now uses. The list
+                      says "Wed, 9 Sept" and the header it opens said "2026-09-10", so one
+                      appointment read two ways depending on which half of the screen
+                      somebody was looking at. */}
                   {selectedLead.appointment_date && (
-                    {/* The same wording the row this was opened from now uses. The list
-                        says "Wed, 9 Sept" and the header it opens said "2026-09-10", so
-                        one appointment read two ways depending on which half of the screen
-                        somebody was looking at. */}
                     <span className="flex items-center gap-1.5">
                       <Calendar className="h-3 w-3 shrink-0" />
                       {apptDayLabel(selectedLead.appointment_date)}
