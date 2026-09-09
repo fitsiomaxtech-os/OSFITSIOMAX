@@ -5250,19 +5250,43 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
         payload.partial_installments = rows.map((i) => ({ amount: round2(parseFloat(i.amount)), due_date: i.due_date }));
       }
       setCollectingRehabFee(true);
+      // Only the call is guarded, the way every other fee guards its own: a fault while
+      // building the receipt below must never be reported as a failure to collect. That
+      // reads as "try again", and the branch takes the money a second time.
+      let res;
       try {
-        const res = await collectRehabFee(selectedLead.id, payload);
-        toast.success(mode === "cheque" ? "Rehab Fee recorded against the cheque" : "Rehab Fee payment schedule saved");
-        setRehabFeeDraft(null);
-        if (res?.lead) {
-          setSelectedLead(res.lead);
-          setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === res.lead.id ? res.lead : l)) }));
-        }
-        load();
+        res = await collectRehabFee(selectedLead.id, payload);
       } catch (err) {
         toast.error(err?.response?.data?.detail || "Failed to collect the Rehab Fee");
+        setCollectingRehabFee(false);
+        return;
       }
       setCollectingRehabFee(false);
+      toast.success(mode === "cheque" ? "Rehab Fee recorded against the cheque" : "Rehab Fee payment schedule saved");
+      setRehabFeeDraft(null);
+      if (res?.lead) {
+        setSelectedLead(res.lead);
+        setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === res.lead.id ? res.lead : l)) }));
+      }
+      load();
+      // The patient leaves with a sheet here too. A schedule moves no money, so it prints
+      // as the plan that was agreed rather than a receipt for it -- `kind` is what keeps
+      // "PAYMENT RECEIVED" off a fee nobody has paid yet, the same distinction the
+      // Consultation and Diet fees draw at this point.
+      const rehabSchedInst = res?.lead?.rehab_fee_payment_details?.installments || [];
+      showReceipt(() => makeReceipt({
+        lead: res?.lead || selectedLead,
+        payload,
+        prefix: mode === "partial" ? "RS" : "RF",
+        kind: mode === "partial" ? "schedule" : "paid",
+        paidFor: "Rehab Fee",
+        packageName: (res?.lead || selectedLead).rehab_package_name || "",
+        assignedPrice: mode === "partial" ? null : rehabPrice,
+        discount: 0,
+        balanceDue: balanceDueLabel(rehabSchedInst),
+        installments: mode === "partial" ? rehabSchedInst : [],
+        transactionId: res?.transaction_id,
+      }));
       return;
     }
 
@@ -5300,21 +5324,46 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       if (!attachBankDetails(payload, rehabFeeDraft)) return;
     }
     setCollectingRehabFee(true);
+    // Guarded around the call alone -- see the cheque branch above for why the receipt
+    // must not be able to report a collection that succeeded as one that failed.
+    let res;
     try {
-      const res = await collectRehabFee(selectedLead.id, payload);
-      toast.success(`Rehab Fee collected · Rs.${amount}`);
-      setRehabFeeDraft(null);
-      // Patch the row and the open card off the server's answer, the way the other fees
-      // do, so the button flips to Update without waiting for a reload.
-      if (res?.lead) {
-        setSelectedLead(res.lead);
-        setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === res.lead.id ? res.lead : l)) }));
-      }
-      load();
+      res = await collectRehabFee(selectedLead.id, payload);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect the Rehab Fee");
+      setCollectingRehabFee(false);
+      return;
     }
     setCollectingRehabFee(false);
+    toast.success(`Rehab Fee collected · Rs.${amount}`);
+    setRehabFeeDraft(null);
+    // Patch the row and the open card off the server's answer, the way the other fees
+    // do, so the button flips to Update without waiting for a reload.
+    if (res?.lead) {
+      setSelectedLead(res.lead);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === res.lead.id ? res.lead : l)) }));
+    }
+    load();
+    // The receipt the desk hands over, printed off what was actually collected -- the
+    // Rehab Fee was the one fee that took the money and showed nothing, so a branch had
+    // to go to Accountant Manage to prove the payment had happened at all. Same call,
+    // same prefix and same package line the reprint under Fee Collected uses, so the
+    // sheet handed over now and the one printed later are the same document.
+    showReceipt(() => makeReceipt({
+      lead: res?.lead || selectedLead,
+      payload,
+      prefix: "RF",
+      kind: "paid",
+      paidFor: "Rehab Fee",
+      packageName: (res?.lead || selectedLead).rehab_package_name || "",
+      assignedPrice: rehabPrice,
+      discount: payload.discount_amount || 0,
+      // A part payment leaves the rest owed on a date the popup already insisted on;
+      // the receipt says so rather than reading as a bill settled in full.
+      balanceDue: balanceDueLabel(res?.lead?.rehab_fee_payment_details?.installments || []),
+      installments: [],
+      transactionId: res?.transaction_id,
+    }));
   };
 
   async function openDietFeeDraft(kind = "consultation") {
