@@ -15,7 +15,7 @@ from utils import generate_transaction_id
 # the rules the fee itself is -- imported rather than copied. v3_fitness.py and
 # v3_zumba.py already each carry their own copy of this counter; a fourth would be a
 # fourth place for the note list and the must-agree rule to drift apart.
-from routers.v3_packages import _notes_label, _settle_cash_count
+from routers.v3_packages import _notes_label, _settle_cash_count, _denomination_total
 
 
 def _now():
@@ -2117,3 +2117,196 @@ async def mark_installment_paid(
 
     updated_details = {**details, "installments": installments}
     return {"message": "Installment marked as paid", "transaction_id": transaction_id, "balance": _lead_outstanding_balance({**lead, cfg["details"]: updated_details})}
+
+
+# ---------------------------------------------------------------------------
+# Closing Balance -- the day-end count, per branch per day.
+# ---------------------------------------------------------------------------
+#
+# What the desk actually holds when it shuts, set against what the system says it took.
+# Three modes are counted because three are what a branch settles in: cash sits in a
+# drawer, UPI lands in an account, a card terminal batches out. Each is evidenced by the
+# one thing a dispute is traced by, which is why they are not interchangeable fields:
+# cash by the notes themselves, UPI by the id the money arrived on, card by the
+# terminal's batch/transaction number.
+#
+# Only what was *counted* is stored. The day's income and expense are not copied in
+# beside it: they are already computed, to the rupee, by revenue-overview and
+# list_expenses, and a second stored copy is a second total to disagree with the first
+# the moment a payment is back-dated. The screen sets the count against those live
+# figures and shows the variance; this collection answers "what did the branch count",
+# and nothing else.
+#
+# One record per branch per day, upserted. The count is a soft record by design -- a
+# denomination miscounted at closing time is corrected by counting again, not by an
+# unlock request to head office.
+
+
+class ClosingBalanceInput(BaseModel):
+    # The day being closed. Defaults to today; a branch counting up after midnight is
+    # closing yesterday and says so rather than being told what day it is.
+    on: Optional[str] = None
+    # Ignored for a Branch Admin, who can only ever close their own branch -- the same
+    # rule list_expenses and revenue_overview apply to every figure this sits against.
+    branch_id: Optional[str] = None
+    # Cash: the notes, counted. Keyed by the note's face value; anything not a note this
+    # desk holds is dropped by _denomination_total rather than guessed at.
+    cash_denominations: Optional[dict] = None
+    # Coins and anything below the smallest note. Its own field because the note ladder
+    # stops at ten and a drawer does not: without it a count ending in Rs.7 of change
+    # could never be made to balance, and the difference would read as a shortfall.
+    cash_coins: Optional[float] = 0
+    upi_amount: Optional[float] = 0
+    # The id the money arrived on. Required once there is UPI money to account for --
+    # an amount with nothing to trace it to is a figure, not a reconciliation.
+    upi_id: Optional[str] = ""
+    card_amount: Optional[float] = 0
+    # The terminal's batch or transaction number, on the same rule as upi_id above.
+    card_transaction_id: Optional[str] = ""
+    note: Optional[str] = ""
+
+
+def _closing_balance_public(row: Optional[dict]) -> Optional[dict]:
+    """One stored count, with its totals worked out rather than stored.
+
+    cash_total and total are derived every time they are read. Storing them would be
+    storing an answer that can fall out of step with the notes it was added up from --
+    and the notes are the record here, not the sum.
+    """
+    if not row:
+        return None
+    counted_cash, notes = _denomination_total(row.get("cash_denominations"))
+    coins = round(float(row.get("cash_coins") or 0), 2)
+    cash_total = round(counted_cash + coins, 2)
+    upi = round(float(row.get("upi_amount") or 0), 2)
+    card = round(float(row.get("card_amount") or 0), 2)
+    return {
+        "on": row.get("on", ""),
+        "branch_id": row.get("branch_id"),
+        "cash_denominations": notes,
+        "cash_notes_total": round(counted_cash, 2),
+        "cash_coins": coins,
+        "cash_total": cash_total,
+        "upi_amount": upi,
+        "upi_id": row.get("upi_id") or "",
+        "card_amount": card,
+        "card_transaction_id": row.get("card_transaction_id") or "",
+        "total": round(cash_total + upi + card, 2),
+        "note": row.get("note") or "",
+        "counted_by": row.get("counted_by") or "",
+        "counted_at": row.get("counted_at") or "",
+        "updated_by": row.get("updated_by") or "",
+        "updated_at": row.get("updated_at") or "",
+    }
+
+
+def _previous_day(on: str) -> str:
+    return (datetime.fromisoformat(on).date() - timedelta(days=1)).isoformat()
+
+
+@router.get("/finance/closing-balance")
+async def get_closing_balance(
+    on: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """The day being closed, and the day before it.
+
+    Yesterday comes back beside today because a closing balance is only meaningful next
+    to the one before it -- a drawer that held Rs.12,400 last night and Rs.400 tonight is
+    either a day of banking or a day of something wrong, and the count alone cannot say
+    which. It is returned here rather than fetched separately so the two can never be
+    read from different branches, or different days, by a screen that got its arguments
+    wrong.
+    """
+    if is_branch_admin_role(user.role):
+        branch_id = user.branch_id
+    day = on or datetime.now(timezone.utc).date().isoformat()
+    try:
+        prev = _previous_day(day)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+    # An explicit None matches the org-wide row rather than every branch's: a query with
+    # the key left out would hand one branch's count back for another's screen.
+    query = {"branch_id": branch_id if branch_id else None}
+    today_row = await v3_col("closing_balances").find_one({**query, "on": day}, {"_id": 0})
+    prev_row = await v3_col("closing_balances").find_one({**query, "on": prev}, {"_id": 0})
+    return {
+        "on": day,
+        "branch_id": branch_id,
+        "today": _closing_balance_public(today_row),
+        "yesterday": _closing_balance_public(prev_row),
+    }
+
+
+@router.post("/finance/closing-balance")
+async def save_closing_balance(
+    payload: ClosingBalanceInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """Record what the desk holds at the end of one day.
+
+    An upsert on (branch, day) rather than an insert: counting again is how a miscount is
+    fixed, and a second row for the same evening would leave two answers to a question
+    that has one. Who first counted it is kept apart from who last touched it, so a
+    correction is visible as a correction rather than overwriting the fact that one
+    happened.
+    """
+    if is_branch_admin_role(user.role):
+        if not user.branch_id:
+            raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
+        branch_id = user.branch_id
+    else:
+        branch_id = payload.branch_id or None
+
+    day = payload.on or datetime.now(timezone.utc).date().isoformat()
+    try:
+        datetime.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+
+    counted_cash, notes = _denomination_total(payload.cash_denominations)
+    coins = round(float(payload.cash_coins or 0), 2)
+    upi = round(float(payload.upi_amount or 0), 2)
+    card = round(float(payload.card_amount or 0), 2)
+    if coins < 0 or upi < 0 or card < 0:
+        raise HTTPException(status_code=400, detail="A counted amount cannot be negative")
+    # The reference is what makes the figure checkable, so it is required exactly when
+    # there is money to check -- and not before. A branch that took nothing by card is
+    # not made to invent a batch number to close its day.
+    upi_id = (payload.upi_id or "").strip()
+    card_ref = (payload.card_transaction_id or "").strip()
+    if upi > 0 and not upi_id:
+        raise HTTPException(status_code=400, detail="UPI ID is required for the UPI amount counted")
+    if card > 0 and not card_ref:
+        raise HTTPException(status_code=400, detail="Card Transaction ID is required for the card amount counted")
+
+    now = _now()
+    query = {"branch_id": branch_id, "on": day}
+    existing = await v3_col("closing_balances").find_one(query, {"_id": 0})
+    doc = {
+        "branch_id": branch_id,
+        "on": day,
+        "cash_denominations": notes,
+        "cash_coins": coins,
+        "upi_amount": upi,
+        "upi_id": upi_id,
+        "card_amount": card,
+        "card_transaction_id": card_ref,
+        "note": (payload.note or "").strip(),
+        "updated_by": user.full_name,
+        "updated_at": now,
+    }
+    if existing:
+        await v3_col("closing_balances").update_one(query, {"$set": doc})
+    else:
+        doc["id"] = str(uuid.uuid4())
+        doc["counted_by"] = user.full_name
+        doc["counted_at"] = now
+        await v3_col("closing_balances").insert_one(doc.copy())
+
+    saved = await v3_col("closing_balances").find_one(query, {"_id": 0})
+    return {
+        "message": "Closing balance updated" if existing else "Closing balance recorded",
+        "closing_balance": _closing_balance_public(saved),
+    }

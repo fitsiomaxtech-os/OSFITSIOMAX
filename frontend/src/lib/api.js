@@ -390,6 +390,12 @@ export const approveFinanceExpense = async (expenseId) => (await api.post(`/fina
 export const rejectFinanceExpense = async (expenseId, reason) => (await api.post(`/finance/expenses/${expenseId}/reject`, { reason })).data;
 export const getFinanceProfit = async (params = {}) => (await api.get("/finance/profit", { params })).data;
 
+// The day-end count: what the desk actually holds, against what the system says it took.
+// The GET answers with the day asked for *and* the one before it, because a closing
+// balance only means something beside the previous night's — see get_closing_balance.
+export const getClosingBalance = async (params = {}) => (await api.get("/finance/closing-balance", { params })).data;
+export const saveClosingBalance = async (payload) => (await api.post("/finance/closing-balance", payload)).data;
+
 export const getRevenueOverview = async (params = {}) => (await api.get("/finance/revenue-overview", { params })).data;
 
 export const getClientTransactionHistory = async (leadId) => (await api.get(`/finance/client/${leadId}`)).data;

@@ -10,6 +10,7 @@ import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { receiptFromTransaction } from "@/lib/receipt";
 import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
+import { ClosingBalancePanel } from "@/components/branch/ClosingBalancePanel";
 
 // Three tabs, not the ten this page used to carry: Consultation/Session/Diet/Store
 // Collections were each a copy of Summary's own card-click-to-filter table scoped to one
@@ -22,11 +23,18 @@ const MAIN_TABS = [
   { key: "summary", label: "Summary" },
   { key: "schedule", label: "Payment Schedule" },
   { key: "discount", label: "Discount Applied", tone: "discount" },
+  // The day-end count. Last of the four because it is the one thing here that is not a
+  // reading of what the system already knows -- it is the desk telling the system what it
+  // actually holds, which is only worth asking once the day it closes has been read.
+  { key: "closing", label: "Closing Balance", tone: "closing" },
 ];
 
 const mainTabClasses = (tab, active) => {
   if (tab.tone === "discount") {
     return active ? "bg-amber-600 text-white shadow-sm" : "text-amber-700 hover:bg-amber-50";
+  }
+  if (tab.tone === "closing") {
+    return active ? "bg-emerald-600 text-white shadow-sm" : "text-emerald-700 hover:bg-emerald-50";
   }
   return active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50";
 };
@@ -429,7 +437,13 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
           ))}
         </div>
         {/* ml-auto so the range sits at the far end on a desk and simply wraps to the next
-            line on a phone, where there is no far end to sit at. */}
+            line on a phone, where there is no far end to sit at.
+
+            Hidden on Closing Balance, which closes one named evening and carries its own
+            date. Two date controls over one set of figures is a question about which of
+            them is in force, and the answer -- that the range governs everything except
+            the panel below it -- is not one a toolbar can say. */}
+        {tab !== "closing" && (
         <div className="ml-auto flex flex-wrap items-center gap-3" data-testid="accountant-manage-date-filter">
           <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
             {DATE_PRESETS.map((p) => (
@@ -468,6 +482,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </div>
+        )}
       </div>
 
       {loading && !data ? (
@@ -635,6 +650,10 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         </div>
       ) : tab === "schedule" ? (
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
+      ) : tab === "closing" ? (
+        // Counts one day rather than the tab's range, and reads its own figures for that
+        // day -- see the panel. The branch is the only thing it takes from up here.
+        <ClosingBalancePanel branchId={branchId} />
       ) : (
         <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} onReceipt={(tx) => setReceipt(receiptForTxn(tx))} />
       )}
