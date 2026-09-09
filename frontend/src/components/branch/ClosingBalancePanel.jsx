@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Banknote, CalendarDays, CreditCard, Smartphone, RefreshCw, Save, TrendingDown, TrendingUp, Check, AlertTriangle, Wallet, X, CalendarClock } from "lucide-react";
+import { Banknote, BookCheck, BookLock, BookOpen, CalendarDays, CreditCard, Smartphone, RefreshCw, Save, TrendingDown, TrendingUp, Check, AlertTriangle, Wallet, X, CalendarClock, Lock, Unlock } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { maskDayMonthYear, manualToIso, isoToManual } from "@/components/DateFilterPopover";
-import { getClosingBalance, getClosingBalanceHistory, saveClosingBalance, getRevenueOverview, getFinanceExpenses } from "@/lib/api";
+import { getClosingBalance, getClosingBalanceHistory, saveClosingBalance, closeBook, reopenBook, getRevenueOverview, getFinanceExpenses } from "@/lib/api";
+import { loadSession } from "@/lib/session";
 import { DENOMINATIONS, noteTotal, countedNotes, noteBreakdown } from "@/lib/denominations";
-import { totalsByMode } from "@/lib/payments";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -110,25 +110,15 @@ const Variance = ({ counted, expected, testid }) => {
 };
 
 /**
- * A day's collections and spending, split by the mode each arrived or left in.
+ * A day's spending, split by the mode it left in.
  *
- * The two are read differently because they are stored differently: a collection carries
- * its date on a timestamp and can be a split across two tenders, an expense carries a
- * plain date and one mode. totalsByMode owns the first rule so the day form and the
- * history can never disagree about what a half-cash fee did to the drawer.
+ * Income has no matching helper on purpose: it comes back already split per day, from
+ * revenue-overview's own by_day_modes. Grouping it here meant reading `transactions`,
+ * which that endpoint cuts to the most recent 500 -- fine for one evening, and quietly
+ * wrong across a busy month, where the earliest days would come back looking quiet
+ * because their collections fell off the end of the list. Expenses are not truncated
+ * that way, and carry a plain date and one mode each.
  */
-const incomeByDayFrom = (transactions) => {
-  const grouped = {};
-  for (const tx of transactions) {
-    const day = (tx?.date || "").slice(0, 10);
-    if (!day) continue;
-    (grouped[day] = grouped[day] || []).push(tx);
-  }
-  const out = {};
-  for (const [day, rows] of Object.entries(grouped)) out[day] = totalsByMode(rows);
-  return out;
-};
-
 const expenseByDayFrom = (expenses) => {
   const out = {};
   for (const row of expenses) {
@@ -163,6 +153,55 @@ const expectedFor = (carriedCash, income = {}, expense = {}) => ({
 const sumModes = (m) => round2((m.cash || 0) + (m.upi || 0) + (m.card || 0));
 const sumAll = (m = {}) => round2(Object.values(m).reduce((a, b) => a + (Number(b) || 0), 0));
 
+/** Who may take a signature back. Not the Branch Admin who gave it: signing a day off is a
+ *  statement to somebody else, and one you can withdraw alone is not a statement. Refused
+ *  on the server too — this only decides whether the button is worth showing. */
+const canReopenBooks = () => ["super_admin", "accountant"].includes(
+  String(loadSession()?.user?.role || "").trim().toLowerCase(),
+);
+
+const stampedAt = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+};
+
+/**
+ * Where one evening's book stands, in a word.
+ *
+ * Three states rather than two. A day nobody has signed off is not the same as one that was
+ * signed off and opened again, and a screen that showed both as "open" would lose the one
+ * fact an auditor is looking for.
+ */
+const BookChip = ({ book, testid }) => {
+  if (!book) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500" data-testid={testid}>
+        <BookOpen className="h-3 w-3" /> Open
+      </span>
+    );
+  }
+  if (!book.closed) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700" data-testid={testid}>
+        <Unlock className="h-3 w-3" /> Reopened
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold ${
+        book.matched ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+      }`}
+      data-testid={testid}
+    >
+      <BookCheck className="h-3 w-3" /> {book.matched ? "Closed · matched" : "Closed · differed"}
+    </span>
+  );
+};
+
 /**
  * One evening counted — the form, and the three figures the count is judged against.
  *
@@ -175,6 +214,11 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
   const [saving, setSaving] = useState(false);
   const [yesterday, setYesterday] = useState(null);
   const [saved, setSaved] = useState(null);
+  // The day's book, if it has one. Held beside the count rather than derived from it: a
+  // counted day and a signed-off day are two different states, and most evenings sit in
+  // the first for a while.
+  const [book, setBook] = useState(null);
+  const [closingBook, setClosingBook] = useState(false);
   const [income, setIncome] = useState({});
   const [expense, setExpense] = useState({});
   // The form: the notes counted, the coins under them, and each cashless mode's amount
@@ -213,8 +257,12 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
       ]);
       setYesterday(cb?.yesterday || null);
       setSaved(cb?.today || null);
+      setBook(cb?.book || null);
       fillFrom(cb?.today);
-      setIncome(totalsByMode(rev?.transactions || []));
+      // Both sides read off the server's own split rather than re-derived here. It is the
+      // same figure close_book signs the day against, so what the branch is looking at
+      // when it presses Close is what gets written into the book.
+      setIncome(rev?.payment_modes || {});
       setExpense(exp?.payment_modes || {});
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Could not load the closing balance");
@@ -251,6 +299,47 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
   const dayExpense = useMemo(() => sumAll(expense), [expense]);
 
   const setNote_ = (d, v) => setNotes((n) => ({ ...n, [d]: v }));
+
+  // A closed book locks the count under it. The fields stay on screen because they are the
+  // record of what was counted, but they stop taking edits -- an editable box over a
+  // signed-off day is a trap that ends in a refusal from the server.
+  const locked = !!book?.closed;
+
+  // The book is signed against what is *stored*, not against what is on screen. Somebody
+  // who types a correction and presses Close without saving would otherwise sign off a
+  // figure nobody recorded, and the book would disagree with the count under it from the
+  // moment it was written.
+  const unsavedCount = !!saved && Math.abs(totalCounted - (saved.total || 0)) >= 0.01;
+
+  const signOff = async () => {
+    if (unsavedCount) {
+      toast.error("Update the count first — the figures on screen are not the ones saved");
+      return;
+    }
+    setClosingBook(true);
+    try {
+      const res = await closeBook({ on: day, branch_id: branchId });
+      setBook(res?.book || null);
+      toast.success(res?.message || "Book closed");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not close the book");
+    }
+    setClosingBook(false);
+  };
+
+  const reopen = async () => {
+    const reason = window.prompt(`Why is the book for ${day} being reopened?`) || "";
+    if (!reason.trim()) return;
+    setClosingBook(true);
+    try {
+      const res = await reopenBook({ on: day, branch_id: branchId, reason: reason.trim() });
+      setBook(res?.book || null);
+      toast.success(res?.message || "Book reopened");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not reopen the book");
+    }
+    setClosingBook(false);
+  };
 
   // Refused here as well as on the server, so the desk is told before the request goes out
   // rather than after it comes back — the same rule the fee popups follow.
@@ -368,7 +457,8 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
                           min="0"
                           value={notes[d] ?? ""}
                           onChange={(e) => setNote_(d, e.target.value)}
-                          className="h-9 text-sm tabular-nums"
+                          disabled={locked}
+                          className="h-9 text-sm tabular-nums disabled:bg-slate-50 disabled:text-slate-500"
                           data-testid={`closing-balance-note-${d}`}
                         />
                       </label>
@@ -383,7 +473,8 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
                       min="0"
                       value={coins}
                       onChange={(e) => setCoins(e.target.value)}
-                      className="h-9 text-sm tabular-nums"
+                      disabled={locked}
+                      className="h-9 text-sm tabular-nums disabled:bg-slate-50 disabled:text-slate-500"
                       data-testid="closing-balance-coins"
                     />
                   </label>
@@ -401,7 +492,8 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
                       min="0"
                       value={m.key === "upi" ? upiAmount : cardAmount}
                       onChange={(e) => (m.key === "upi" ? setUpiAmount : setCardAmount)(e.target.value)}
-                      className="h-9 text-sm tabular-nums"
+                      disabled={locked}
+                      className="h-9 text-sm tabular-nums disabled:bg-slate-50 disabled:text-slate-500"
                       data-testid={`closing-balance-amount-${m.key}`}
                     />
                   </label>
@@ -413,7 +505,8 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
                       value={m.key === "upi" ? upiId : cardRef}
                       onChange={(e) => (m.key === "upi" ? setUpiId : setCardRef)(e.target.value)}
                       placeholder={m.key === "upi" ? "name@bank" : "Terminal batch / txn no."}
-                      className="h-9 text-sm"
+                      disabled={locked}
+                      className="h-9 text-sm disabled:bg-slate-50 disabled:text-slate-500"
                       data-testid={`closing-balance-ref-${m.key}`}
                     />
                     {((m.key === "upi" && missingUpiId) || (m.key === "card" && missingCardRef)) && (
@@ -447,13 +540,14 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Banked Rs.10,000 at 6pm"
-              className="h-9 text-sm"
+              disabled={locked}
+              className="h-9 text-sm disabled:bg-slate-50 disabled:text-slate-500"
               data-testid="closing-balance-note"
             />
           </label>
           <Button
             onClick={submit}
-            disabled={saving || loading}
+            disabled={saving || loading || locked}
             className="h-9 shrink-0 bg-emerald-600 text-xs hover:bg-emerald-700"
             data-testid="closing-balance-save"
           >
@@ -462,10 +556,109 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
           </Button>
         </div>
         {/* Said plainly rather than left for a branch to find out by trying: this is a
-            record that can be corrected, not a door that locks behind them. */}
+            record that can be corrected right up until the book on it is closed. */}
         <p className="mt-3 border-t border-slate-100 pt-2 text-[11px] text-slate-400">
-          A count can be corrected by counting again — saving this day a second time replaces it and keeps who first counted it.
+          {locked
+            ? "This day's book is closed, so the count is fixed. An accountant reopens it before it can be counted again."
+            : "A count can be corrected by counting again — saving this day a second time replaces it and keeps who first counted it."}
         </p>
+      </div>
+
+      {/* Close Book — the day signed off, immediately under the count it is signed on.
+          Its own card rather than a second button in the row above, because it is a
+          different act: that button records what was in the drawer, this one puts a name
+          to the day and says whether the money was there. */}
+      <div
+        className={`rounded-xl border p-4 shadow-sm ${
+          book?.closed
+            ? book.matched ? "border-emerald-200 bg-emerald-50/40" : "border-rose-200 bg-rose-50/40"
+            : "border-slate-200 bg-white"
+        }`}
+        data-testid="closing-balance-book"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+            {book?.closed ? <BookLock className="h-4 w-4 text-slate-500" /> : <BookOpen className="h-4 w-4 text-slate-400" />}
+            Close book
+          </span>
+          <BookChip book={book} testid="closing-balance-book-chip" />
+
+          <div className="ml-auto flex items-center gap-2">
+            {book?.closed ? (
+              canReopenBooks() && (
+                <Button
+                  onClick={reopen}
+                  disabled={closingBook}
+                  variant="outline"
+                  className="h-9 border-slate-300 text-xs text-slate-600 hover:bg-slate-50"
+                  data-testid="closing-balance-book-reopen"
+                >
+                  <Unlock className="mr-1.5 h-4 w-4" />
+                  {closingBook ? "Reopening..." : "Reopen book"}
+                </Button>
+              )
+            ) : (
+              <Button
+                onClick={signOff}
+                disabled={closingBook || loading || !saved || unsavedCount}
+                className="h-9 bg-slate-800 text-xs text-white hover:bg-slate-900 disabled:bg-slate-300"
+                data-testid="closing-balance-book-close"
+              >
+                <Lock className="mr-1.5 h-4 w-4" />
+                {closingBook ? "Closing..." : book ? "Close the book again" : "Close the book"}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {book?.closed ? (
+          <div className="mt-2 space-y-0.5">
+            {/* The figures as they were signed, not as they read now. That is the whole
+                reason a book stores its own totals -- see the note above CloseBookInput in
+                v3_finance.py -- and showing today's figures under yesterday's signature
+                would quietly undo it. */}
+            <p className="text-sm font-semibold text-slate-800" data-testid="closing-balance-book-verdict">
+              {book.matched
+                ? "The money matched."
+                : `${book.difference > 0 ? "Over" : "Short"} by ${fmt(Math.abs(book.difference))}.`}
+              <span className="ml-1.5 font-normal text-slate-500">
+                Counted {fmt(book.counted?.total)} against {fmt(book.expected?.total)} expected.
+              </span>
+            </p>
+            <p className="text-[11px] text-slate-500" data-testid="closing-balance-book-signature">
+              Closed by {book.closed_by || "—"}{book.closed_at ? ` · ${stampedAt(book.closed_at)}` : ""}
+              {book.counted_by ? ` · counted by ${book.counted_by}` : ""}
+            </p>
+            {book.note ? <p className="text-[11px] italic text-slate-500">“{book.note}”</p> : null}
+          </div>
+        ) : (
+          <div className="mt-2 space-y-0.5">
+            {/* Said before it is pressed, because it is the one action on this screen that
+                cannot be undone by the person taking it. */}
+            <p className="text-[11px] text-slate-500" data-testid="closing-balance-book-hint">
+              {!saved
+                ? "Count this day first — a book cannot be signed off over a drawer nobody counted."
+                : unsavedCount
+                  ? "The count on screen has changed and not been saved. Update it, then close the book on what was recorded."
+                  : "Signing off records what was counted against what the day says it took, with your name and the time on it, and fixes the count until an accountant reopens it."}
+            </p>
+            {/* A book is closed on a difference as readily as on a match. A branch that
+                cannot sign off a short evening either stops closing its books or makes the
+                drawer say what the system wants, and the second is the worse failure. */}
+            {saved && !book && Math.abs(totalCounted - totalExpected) >= 0.01 && (
+              <p className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700" data-testid="closing-balance-book-differs">
+                <AlertTriangle className="h-3 w-3" />
+                This day does not balance. It can still be closed — the difference is recorded with it.
+              </p>
+            )}
+            {book && !book.closed && (
+              <p className="text-[11px] text-amber-700" data-testid="closing-balance-book-reopened">
+                Reopened by {book.reopened_by || "—"}{book.reopened_at ? ` · ${stampedAt(book.reopened_at)}` : ""}
+                {book.reopen_reason ? ` — “${book.reopen_reason}”` : ""}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -485,7 +678,7 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
  */
 const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpenDay }) => {
   const [history, setHistory] = useState(null);
-  const [transactions, setTransactions] = useState([]);
+  const [incomeByDay, setIncomeByDay] = useState({});
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -503,12 +696,12 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
         getFinanceExpenses({ branch_id: branchId, start_date: start, end_date: end }),
       ]);
       setHistory(hist);
-      setTransactions(rev?.transactions || []);
+      setIncomeByDay(rev?.by_day_modes || {});
       setExpenses(exp?.expenses || []);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Could not load the closing balances");
       setHistory(null);
-      setTransactions([]);
+      setIncomeByDay({});
       setExpenses([]);
     }
     setLoading(false);
@@ -523,12 +716,20 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
   // for and the button disabled for the rest of the session.
   useEffect(() => () => onBusy?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const incomeByDay = useMemo(() => incomeByDayFrom(transactions), [transactions]);
   const expenseByDay = useMemo(() => expenseByDayFrom(expenses), [expenses]);
 
   // The counts, keyed by their evening. `opening` joins them under its own date so the
   // first day of the window carries in from the night before it exactly as every other day
   // does — a window opening on the 1st should not report the branch as starting empty.
+  // The books, by the day each belongs to. Their own map rather than folded into the
+  // counts: a day can be counted and not yet signed off, which is the state most evenings
+  // are in, and one lookup that answered both questions could not say so.
+  const bookByDay = useMemo(() => {
+    const out = {};
+    for (const b of history?.books || []) out[b.on] = b;
+    return out;
+  }, [history]);
+
   const countByDay = useMemo(() => {
     const out = {};
     if (history?.opening) out[history.opening.on] = history.opening;
@@ -543,28 +744,39 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
     const last = end > todayIso() ? todayIso() : end;
     return daysBetween(start, last).map((on) => {
       const record = countByDay[on] || null;
+      const book = bookByDay[on] || null;
       const income = incomeByDay[on] || {};
       const expense = expenseByDay[on] || {};
       const expected = expectedFor(countByDay[shiftDays(on, -1)]?.cash_total || 0, income, expense);
+      const liveExpected = sumModes(expected);
+      // A closed day is reported as it was signed, not as it reads today. The live figure
+      // is still worked out beside it so the row can say when the two have parted company
+      // -- a day signed off as balanced whose income has since been back-dated is worth
+      // knowing about, and it is invisible if the signature is quietly recomputed.
+      const signedExpected = book?.closed ? round2(book.expected?.total || 0) : null;
       return {
         on,
         record,
+        book,
         income,
         expense,
         expected,
-        totalExpected: sumModes(expected),
+        liveExpected,
+        totalExpected: signedExpected == null ? liveExpected : signedExpected,
+        drifted: signedExpected != null && Math.abs(signedExpected - liveExpected) >= 0.01,
         counted: record?.total || 0,
         dayIncome: sumAll(income),
         dayExpense: sumAll(expense),
       };
     }).reverse(); // newest first: the evening somebody is chasing is the most recent one
-  }, [start, end, countByDay, incomeByDay, expenseByDay]);
+  }, [start, end, countByDay, bookByDay, incomeByDay, expenseByDay]);
 
   const summary = useMemo(() => {
     const done = rows.filter((r) => r.record);
     return {
       days: rows.length,
       counted: done.length,
+      closed: rows.filter((r) => r.book?.closed).length,
       income: round2(rows.reduce((n, r) => n + r.dayIncome, 0)),
       expense: round2(rows.reduce((n, r) => n + r.dayExpense, 0)),
       // Summed only over the evenings actually counted. A night nobody counted has no
@@ -585,9 +797,11 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
         <Figure
           label="Evenings counted"
           value={`${summary.counted} of ${summary.days}`}
-          sub={summary.counted === summary.days
-            ? "Every evening in this range was counted"
-            : `${summary.days - summary.counted} not counted — listed below`}
+          sub={`${summary.closed} book${summary.closed === 1 ? "" : "s"} closed${
+            summary.counted === summary.days
+              ? ""
+              : ` · ${summary.days - summary.counted} evening${summary.days - summary.counted === 1 ? "" : "s"} not counted`
+          }`}
           icon={CalendarClock}
           color={summary.counted === summary.days ? "#059669" : "#d97706"}
           testid="closing-balance-history-counted-days"
@@ -624,16 +838,17 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
         {/* Fixed proportions rather than auto widths, the same reason the expenses table
             pins its own: left to itself the browser hands a wide screen's slack to
             whichever row holds the longest note, and the dates stop lining up. */}
-        <table className="w-full min-w-[980px] table-fixed text-xs">
+        <table className="w-full min-w-[1120px] table-fixed text-xs">
           <colgroup>
+            <col className="w-[12%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
             <col className="w-[13%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[11%]" />
-            <col className="w-[11%]" />
-            <col className="w-[14%]" />
-            <col className="w-[21%]" />
+            <col className="w-[13%]" />
+            <col className="w-[15%]" />
           </colgroup>
           <thead className="bg-slate-50 text-slate-500">
             <tr>
@@ -645,12 +860,15 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
               <th className="px-3 py-2 text-right font-semibold uppercase tracking-wider">Expected</th>
               <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Difference</th>
               <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Counted by</th>
+              {/* The book, last: a day is counted before it is signed off, and the row
+                  reads in the order the evening actually happens. */}
+              <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Book</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-10 text-center text-slate-400" data-testid="closing-balance-history-empty">
+                <td colSpan={9} className="px-3 py-10 text-center text-slate-400" data-testid="closing-balance-history-empty">
                   No days in this range yet.
                 </td>
               </tr>
@@ -682,7 +900,16 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{fmt(r.record.upi_amount)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{fmt(r.record.card_amount)}</td>
                     <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-slate-800">{fmt(r.counted)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">{fmt(r.totalExpected)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">
+                      {fmt(r.totalExpected)}
+                      {/* Only ever shown on a signed day: the figure above is what the book
+                          says, and this is the day telling a different story since. */}
+                      {r.drifted ? (
+                        <span className="block text-[10px] text-amber-600" data-testid={`closing-balance-history-drift-${r.on}`}>
+                          now {fmt(r.liveExpected)}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2.5">
                       <Variance counted={r.counted} expected={r.totalExpected} testid={`closing-balance-history-variance-${r.on}`} />
                     </td>
@@ -690,6 +917,16 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
                       {r.record.counted_by || "—"}
                       {r.record.updated_by && r.record.updated_by !== r.record.counted_by ? (
                         <span className="block text-[10px] text-slate-400">corrected by {r.record.updated_by}</span>
+                      ) : null}
+                    </td>
+                    <td className="break-words px-3 py-2.5">
+                      <BookChip book={r.book} testid={`closing-balance-history-book-${r.on}`} />
+                      {r.book ? (
+                        <span className="mt-0.5 block text-[10px] text-slate-400">
+                          {r.book.closed
+                            ? `${r.book.closed_by || "—"}${r.book.closed_at ? ` · ${stampedAt(r.book.closed_at)}` : ""}`
+                            : `by ${r.book.reopened_by || "—"}${r.book.reopen_reason ? ` — ${r.book.reopen_reason}` : ""}`}
+                        </span>
                       ) : null}
                     </td>
                   </>
@@ -710,7 +947,7 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
                       ) : null}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">{fmt(r.totalExpected)}</td>
-                    <td className="px-3 py-2.5" colSpan={2}>
+                    <td className="px-3 py-2.5" colSpan={3}>
                       <button
                         type="button"
                         onClick={() => onOpenDay(r.on)}

@@ -406,6 +406,15 @@ export const saveClosingBalance = async (payload) => (await api.post("/finance/c
 // before the window, which is the night its first day's cash opens on.
 export const getClosingBalanceHistory = async (params = {}) => (await api.get("/finance/closing-balance/history", { params })).data;
 
+// Signing a day off, and taking a signature back. A closed book is a snapshot — what was
+// counted, what was expected and whether they matched, frozen at the moment somebody put
+// their name to it — and it locks that day's count until an accountant reopens it. The
+// server decides whether the money matched; a caller that sent its own verdict could sign
+// off a short day as balanced. Reopening is not open to the Branch Admin who closed it,
+// and takes the reason, which is kept on the book.
+export const closeBook = async (payload) => (await api.post("/finance/closing-balance/close-book", payload)).data;
+export const reopenBook = async (payload) => (await api.post("/finance/closing-balance/reopen-book", payload)).data;
+
 // The petty cash tin. `balance` is every movement ever made on it — what is physically in
 // it today — while the movements listed are only the window asked for. A top-up moves
 // notes from the drawer into the tin and spends nothing, which is why it is not an expense.

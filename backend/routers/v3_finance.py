@@ -1525,21 +1525,39 @@ async def revenue_overview(
     by_day = {}
     by_branch_acc = {}
     payment_modes = {}
+    # The same split, kept per day. Closing Balance needs a day's takings by mode to say
+    # what the drawer should hold that evening, and it reads a month at a time -- summing
+    # `transactions` for that cannot work, because that list is cut to the most recent 500
+    # below and a busy month would silently report its earliest days as quiet ones. This is
+    # tallied off every collection, in the same pass, so it stays whole however long the
+    # window is.
+    by_day_modes = {}
     transactions = []
 
-    def _tally_modes(mode: str, amount: float, split: list) -> None:
+    def _tally_modes(mode: str, amount: float, split: list, day: str = "") -> None:
         """Add one collection to the Cash/UPI/Card/Transfer figures this payload reports.
 
         A split lands on each mode it was actually paid in, for its own share. Counted
         under "split" instead, these figures answered a question nobody asks -- how much
         came in awkwardly -- while the Cash figure quietly left out the cash half of every
         one of them. The sum over all modes is the same either way, which is the test.
+
+        The per-day copy is written here rather than beside each call site, so a collection
+        can never land in one of the two and not the other.
         """
+        def add(bucket: dict, key: str, value: float) -> None:
+            bucket[key] = bucket.get(key, 0.0) + value
+
+        daily = by_day_modes.setdefault(day, {}) if day else None
         if split:
             for line in split:
-                payment_modes[line["mode"]] = payment_modes.get(line["mode"], 0.0) + line["amount"]
+                add(payment_modes, line["mode"], line["amount"])
+                if daily is not None:
+                    add(daily, line["mode"], line["amount"])
             return
-        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+        add(payment_modes, mode, amount)
+        if daily is not None:
+            add(daily, mode, amount)
 
     for act in activities:
         details = act.get("details", "")
@@ -1578,7 +1596,7 @@ async def revenue_overview(
         b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b[f"{category}_total"] += amount
 
-        _tally_modes(mode, amount, split)
+        _tally_modes(mode, amount, split, day)
 
         progress = lead_progress_map.get(act.get("lead_id"))
         session = lead_session_map.get(act.get("lead_id")) or {}
@@ -1657,7 +1675,7 @@ async def revenue_overview(
         b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b["store_total"] = b.get("store_total", 0.0) + amount
 
-        _tally_modes(mode, amount, [])
+        _tally_modes(mode, amount, [], day)
 
         transactions.append({
             "id": sale.get("id", ""),
@@ -1746,7 +1764,7 @@ async def revenue_overview(
         b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b["zumba_total"] = b.get("zumba_total", 0.0) + amount
 
-        _tally_modes(mode, amount, zumba_split)
+        _tally_modes(mode, amount, zumba_split, day)
 
         transactions.append({
             "id": reg.get("id", ""),
@@ -1816,7 +1834,7 @@ async def revenue_overview(
         b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b["fitness_total"] = b.get("fitness_total", 0.0) + amount
 
-        _tally_modes(mode, amount, fitness_split)
+        _tally_modes(mode, amount, fitness_split, day)
 
         transactions.append({
             "id": reg.get("id", ""),
@@ -1958,6 +1976,12 @@ async def revenue_overview(
         "trend": trend,
         "by_branch": by_branch,
         "payment_modes": payment_modes,
+        # Rounded on the way out: these are summed floats, and a drawer told it should hold
+        # Rs.39,000.000000004 is a drawer that can never be made to balance.
+        "by_day_modes": {
+            day: {mode: round(amount, 2) for mode, amount in modes.items()}
+            for day, modes in by_day_modes.items()
+        },
         "transactions": sorted(transactions, key=lambda t: t["date"], reverse=True)[:500],
         "outstanding_clients": outstanding_clients,
         "payment_schedule": payment_schedule,
@@ -2398,6 +2422,119 @@ def _previous_day(on: str) -> str:
     return (datetime.fromisoformat(on).date() - timedelta(days=1)).isoformat()
 
 
+# ---------------------------------------------------------------------------
+# Closed Books -- the day signed off, and whether the money matched.
+# ---------------------------------------------------------------------------
+#
+# A count and a closed book are two different statements, which is why they are two
+# collections. The count says "this is what was in the drawer". The book says "I have
+# looked at that against what the day says it took, and I am signing the day off" -- and
+# it is that second statement, with a name and a time on it, that somebody is answerable
+# for later.
+#
+# So this is the one place in this file that DOES store its totals. Everywhere else the
+# figures are derived on read, because a stored copy can fall out of step with what it was
+# copied from. Here that is exactly the point: a book is what was true at the moment it was
+# signed. A payment back-dated into a closed day would otherwise turn a book that was
+# closed as matched into one that reads short a week later, and nobody could tell whether
+# the person who closed it was wrong or the ground moved under them. The count stays live
+# and the book stays frozen, and the difference between them is the audit.
+#
+# Closing locks the count for that day -- see save_closing_balance, which refuses once a
+# book is closed. Without that a close is a label rather than a close. Reopening is an
+# accountant's to do, not the branch's, and it keeps the original signature: a book that
+# was closed and reopened is a fact about the day, not something to be tidied away.
+
+
+class CloseBookInput(BaseModel):
+    on: Optional[str] = None
+    # Ignored for a Branch Admin, who closes their own branch's book and nobody else's.
+    branch_id: Optional[str] = None
+
+
+class ReopenBookInput(BaseModel):
+    on: Optional[str] = None
+    branch_id: Optional[str] = None
+    # Why it is being opened again. Required -- a book that was signed off and then
+    # unsigned with no reason attached is the one row in a month an auditor will ask about.
+    reason: Optional[str] = ""
+
+
+def _closed_book_public(row: Optional[dict]) -> Optional[dict]:
+    """One book as a screen reads it.
+
+    `closed` is derived from the status rather than stored twice: a reopened book keeps
+    everything it was closed with, and only the status says it is open again.
+    """
+    if not row:
+        return None
+    status = row.get("status") or "closed"
+    return {
+        "on": row.get("on", ""),
+        "branch_id": row.get("branch_id"),
+        "status": status,
+        "closed": status == "closed",
+        "matched": bool(row.get("matched")),
+        "counted": row.get("counted") or {},
+        "expected": row.get("expected") or {},
+        "difference": round(float(row.get("difference") or 0), 2),
+        # The explanation that stood at the moment of signing, snapshotted off the count.
+        # Not a second note to type: whoever closes a short day has already said why on the
+        # count itself, and asking twice gets the second one left blank.
+        "note": row.get("note") or "",
+        # Who counted the drawer, snapshotted beside who signed it off. Usually two
+        # different people, and on a day that turns out to be short, which of the two is
+        # being asked about matters.
+        "counted_by": row.get("counted_by") or "",
+        "closed_by": row.get("closed_by") or "",
+        "closed_by_role": row.get("closed_by_role") or "",
+        "closed_at": row.get("closed_at") or "",
+        "reopened_by": row.get("reopened_by") or "",
+        "reopened_at": row.get("reopened_at") or "",
+        "reopen_reason": row.get("reopen_reason") or "",
+    }
+
+
+async def _day_figures(branch_id: Optional[str], day: str, user: V3UserOut) -> dict:
+    """What one day should have left in the drawer, worked out the way the screen does.
+
+    Read back through revenue-overview and list_expenses rather than re-summed here, so
+    the book is signed against the same figures the branch was looking at when it signed.
+    Both are called as plain functions -- their Depends defaults are only defaults -- and
+    both re-apply their own branch scoping to `user`, so a Branch Admin cannot close
+    somebody else's day by naming their branch.
+
+    Cash is the only mode that carries: it is the only one that physically stays in the
+    building overnight. UPI and a card batch settle to a bank and open each morning at
+    nothing.
+    """
+    rev = await revenue_overview(start_date=day, end_date=day, branch_id=branch_id, user=user)
+    exp = await list_expenses(start_date=day, end_date=day, branch_id=branch_id, user=user)
+    income = rev.get("payment_modes") or {}
+    spent = exp.get("payment_modes") or {}
+    prev = _closing_balance_public(
+        await v3_col("closing_balances").find_one(
+            {"branch_id": branch_id, "on": _previous_day(day)}, {"_id": 0},
+        )
+    )
+    carried = prev["cash_total"] if prev else 0.0
+
+    def mode(book: dict, key: str) -> float:
+        return round(float(book.get(key) or 0), 2)
+
+    expected = {
+        "cash": round(carried + mode(income, "cash") - mode(spent, "cash"), 2),
+        "upi": round(mode(income, "upi") - mode(spent, "upi"), 2),
+        "card": round(mode(income, "card") - mode(spent, "card"), 2),
+    }
+    expected["total"] = round(expected["cash"] + expected["upi"] + expected["card"], 2)
+    return {"carried_cash": carried, "income": income, "expense": spent, "expected": expected}
+
+
+async def _book_for(branch_id: Optional[str], day: str) -> Optional[dict]:
+    return await v3_col("closed_books").find_one({"branch_id": branch_id, "on": day}, {"_id": 0})
+
+
 @router.get("/finance/closing-balance")
 async def get_closing_balance(
     on: Optional[str] = None,
@@ -2430,6 +2567,11 @@ async def get_closing_balance(
         "branch_id": branch_id,
         "today": _closing_balance_public(today_row),
         "yesterday": _closing_balance_public(prev_row),
+        # Whether this day has been signed off, beside the count it was signed off on. Here
+        # rather than behind its own request because the two are read together every time:
+        # a screen that fetched the count first would offer a Close button on a day that is
+        # already closed, for as long as the second request took.
+        "book": _closed_book_public(await _book_for(branch_id, day)),
     }
 
 
@@ -2474,6 +2616,18 @@ async def save_closing_balance(
         raise HTTPException(status_code=400, detail="UPI ID is required for the UPI amount counted")
     if card > 0 and not card_ref:
         raise HTTPException(status_code=400, detail="Card Transaction ID is required for the card amount counted")
+
+    # A closed book is closed. Counting again is how a miscount is fixed, but only up to
+    # the moment somebody signs the day off -- after that the figure has been reported as
+    # final, and changing what sits underneath a signature without touching the signature
+    # is how two people end up holding different answers about the same evening. Reopening
+    # is an accountant's call and leaves a mark; see reopen_book.
+    book = await _book_for(branch_id, day)
+    if book and (book.get("status") or "closed") == "closed":
+        raise HTTPException(
+            status_code=409,
+            detail="The book for this day is closed — an accountant reopens it before the count can change",
+        )
 
     now = _now()
     query = {"branch_id": branch_id, "on": day}
@@ -2561,6 +2715,11 @@ async def closing_balance_history(
             {"_id": 0},
             sort=[("on", -1)],
         )
+    # The books over the same window, as their own list rather than folded onto the counts.
+    # A book belongs to a day, not to a count -- keeping them apart is what lets a day be
+    # counted and not yet signed off, which is the state most evenings are in.
+    book_rows = await v3_col("closed_books").find(query, {"_id": 0}).sort("on", 1).to_list(2000)
+    books = [_closed_book_public(b) for b in book_rows]
     return {
         "branch_id": branch_id,
         "start_date": start_date or "",
@@ -2568,6 +2727,147 @@ async def closing_balance_history(
         "opening": _closing_balance_public(opening_row),
         "records": [_closing_balance_public(r) for r in rows],
         "counted_days": len(rows),
+        "books": books,
+        "closed_days": sum(1 for b in books if b["closed"]),
+    }
+
+
+@router.post("/finance/closing-balance/close-book")
+async def close_book(
+    payload: CloseBookInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """Sign one day off: what was counted, what was expected, and whether they matched.
+
+    The count has to exist first. A book closed over an uncounted evening would be a
+    signature on an empty drawer -- it would record that the day matched, because nothing
+    counted against nothing always does.
+
+    Whether it matched is decided here rather than taken from the caller, and the figures
+    are read back through the same endpoints the screen reads: a client that sent its own
+    verdict could sign off a day as balanced by sending the same number twice. The branch
+    sees the server's figures once the book comes back, so what is on screen after closing
+    is what was actually written down.
+
+    A book is closed on a difference as readily as on a match. A branch that cannot sign
+    off a short evening either stops closing its books or makes the drawer say what the
+    system wants -- and the second is the failure that matters. The shortfall is recorded,
+    with the explanation that stood against the count, and it stays visible.
+    """
+    if is_branch_admin_role(user.role):
+        if not user.branch_id:
+            raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
+        branch_id = user.branch_id
+    else:
+        branch_id = payload.branch_id or None
+
+    day = payload.on or datetime.now(timezone.utc).date().isoformat()
+    try:
+        datetime.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+
+    count_row = await v3_col("closing_balances").find_one({"branch_id": branch_id, "on": day}, {"_id": 0})
+    if not count_row:
+        raise HTTPException(status_code=400, detail="Count this day before closing its book")
+    counted = _closing_balance_public(count_row)
+
+    existing = await _book_for(branch_id, day)
+    if existing and (existing.get("status") or "closed") == "closed":
+        raise HTTPException(status_code=409, detail="This day's book is already closed")
+
+    figures = await _day_figures(branch_id, day, user)
+    expected = figures["expected"]
+    difference = round(counted["total"] - expected["total"], 2)
+
+    now = _now()
+    doc = {
+        "branch_id": branch_id,
+        "on": day,
+        "status": "closed",
+        # A rupee either side is a match. The comparison is between two figures each
+        # rounded to the paisa, and refusing to call Rs.0.004 a match would report a
+        # difference nobody can find in a drawer that only holds coins.
+        "matched": abs(difference) < 0.01,
+        "counted": {
+            "cash": counted["cash_total"],
+            "upi": counted["upi_amount"],
+            "card": counted["card_amount"],
+            "total": counted["total"],
+        },
+        "expected": expected,
+        "difference": difference,
+        "carried_cash": figures["carried_cash"],
+        "note": counted["note"],
+        "counted_by": counted["counted_by"],
+        "closed_by": user.full_name,
+        "closed_by_role": user.role,
+        "closed_at": now,
+        # Cleared rather than left standing: this row may be a book that was reopened and
+        # is now being closed again, and a live book carrying the last reopening's reason
+        # reads as one that is open.
+        "reopened_by": "",
+        "reopened_at": "",
+        "reopen_reason": "",
+    }
+    if existing:
+        await v3_col("closed_books").update_one({"branch_id": branch_id, "on": day}, {"$set": doc})
+    else:
+        doc["id"] = str(uuid.uuid4())
+        # Who signed it the first time, kept apart from who signed it last -- the same rule
+        # the count itself follows for counted_by and updated_by.
+        doc["first_closed_by"] = user.full_name
+        doc["first_closed_at"] = now
+        await v3_col("closed_books").insert_one(doc.copy())
+
+    saved = await _book_for(branch_id, day)
+    return {
+        "message": "Book closed — the day matched" if doc["matched"] else "Book closed with a difference",
+        "book": _closed_book_public(saved),
+    }
+
+
+@router.post("/finance/closing-balance/reopen-book")
+async def reopen_book(
+    payload: ReopenBookInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+):
+    """Open a signed-off day again, with the reason on the record.
+
+    Not open to the Branch Admin who closed it, for the reason approve_expense gives:
+    signing a day off is a statement to somebody else, and a statement you can withdraw
+    unilaterally is not one. The book keeps everything it was closed with -- who signed
+    it, when, and what it said at the time -- so a day that was closed and reopened reads
+    as exactly that rather than as a day that was never closed.
+    """
+    branch_id = payload.branch_id or None
+    day = payload.on or datetime.now(timezone.utc).date().isoformat()
+    try:
+        datetime.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Say why the book is being reopened")
+
+    existing = await _book_for(branch_id, day)
+    if not existing:
+        raise HTTPException(status_code=404, detail="No book has been closed for this day")
+    if (existing.get("status") or "closed") != "closed":
+        raise HTTPException(status_code=409, detail="This day's book is already open")
+
+    await v3_col("closed_books").update_one(
+        {"branch_id": branch_id, "on": day},
+        {"$set": {
+            "status": "reopened",
+            "reopened_by": user.full_name,
+            "reopened_at": _now(),
+            "reopen_reason": reason,
+        }},
+    )
+    return {
+        "message": "Book reopened",
+        "book": _closed_book_public(await _book_for(branch_id, day)),
     }
 
 
