@@ -133,6 +133,16 @@ const TodaySheet = ({ day, live, onClose, onHistory }) => (
       <Figure label="On breaks" value={duration(day.break_minutes + live.onBreak)} tone="text-amber-600" testid="clock-today-breaks" />
     </div>
 
+    {(day.reopens || []).length > 0 && (
+      <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500" data-testid="clock-today-reopened">
+        {day.reopens.map((r, i) => (
+          <span key={i} className="block">
+            Clocked out {prettyTime(r.closed)}{r.reopened ? `, back on at ${prettyTime(r.reopened)}` : ""}.
+          </span>
+        ))}
+      </p>
+    )}
+
     <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Breaks</p>
     {day.breaks.length === 0 ? (
       <p className="mt-1 rounded-lg border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400">No breaks today.</p>
@@ -341,8 +351,8 @@ export const ClockWidget = () => {
       )}
 
       {can("clock_in") && (
-        <Button size="sm" disabled={busy} onClick={() => act(clockIn, "Clocked in — have a good day")} className="shrink-0 bg-emerald-600 px-2 hover:bg-emerald-700 sm:px-3" data-testid="clock-in-button">
-          <LogIn className="h-4 w-4" /><span className="hidden sm:inline">Clock In</span>
+        <Button size="sm" disabled={busy} onClick={() => act(clockIn, day.state === "done" ? "Back on the clock — your clock-out was undone" : "Clocked in — have a good day")} className="shrink-0 bg-emerald-600 px-2 hover:bg-emerald-700 sm:px-3" data-testid="clock-in-button">
+          <LogIn className="h-4 w-4" /><span className="hidden sm:inline">{day.state === "done" ? "Clock In again" : "Clock In"}</span>
         </Button>
       )}
 
