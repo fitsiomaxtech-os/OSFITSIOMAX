@@ -165,10 +165,14 @@ const countLabel = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
  * things competing to be read first.
  *
  * So the colour moves off the number and onto one chip holding the icon: the category is
- * still told apart at a glance, and the money is told in one weight across the whole row.
- * The picked card is the only one wearing its colour — a tinted ground, a matching ring
- * and a rule across its top — so which card the table below belongs to is legible
- * without reading any of the labels.
+ * told apart at a glance, and every figure on the row is told in one weight and one
+ * colour, whichever card is picked. A number that changes colour when its card is
+ * pressed reads as a different number.
+ *
+ * Which card is picked is then said three quiet ways rather than one loud one: the chip
+ * fills in solid, a hairline accent sits on the card's bottom edge, and the card lifts on
+ * a neutral ring. A coloured ring drawn all the way round turns the card into a box with
+ * a border, and eight cards with one of them boxed is a form control, not a dashboard.
  *
  * Colours are inline styles off one hex per card for the same reason StatTile's are:
  * Tailwind reads class names out of the source, so a class name assembled at runtime
@@ -180,38 +184,37 @@ const RevenueTile = ({ label, value, sub, icon: Icon, color, active, onClick, te
     onClick={onClick}
     aria-pressed={active}
     data-testid={testid}
-    className={`group relative flex h-full w-full flex-col overflow-hidden rounded-2xl border bg-white p-3 text-left transition-all duration-150 sm:p-4 ${
+    className={`group relative flex h-full w-full flex-col overflow-hidden rounded-xl border bg-white p-3 text-left transition-all duration-150 sm:p-3.5 ${
       active
-        ? "border-transparent"
-        : "border-slate-200/80 shadow-[0_1px_2px_rgba(16,24,40,0.05)] hover:-translate-y-px hover:border-slate-300 hover:shadow-[0_6px_16px_-6px_rgba(16,24,40,0.18)]"
+        ? "border-slate-300 shadow-[0_4px_14px_-4px_rgba(16,24,40,0.16)]"
+        : "border-slate-200 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:border-slate-300 hover:bg-slate-50/60"
     }`}
-    style={active ? { boxShadow: `0 0 0 1.5px ${color}`, background: `${color}0A` } : undefined}
   >
-    {/* The rule across the top is the picked card's loudest signal and costs no height:
-        it reads along the row, where a ring alone has to be looked for card by card. */}
+    {/* On the bottom edge rather than the top: it sits under the figure it belongs to,
+        and it is the one part of the card allowed to carry the category's colour at full
+        strength, so the row can be read along without reading a label. */}
     <span
       aria-hidden
-      className={`absolute inset-x-0 top-0 h-[3px] transition-opacity ${active ? "opacity-100" : "opacity-0"}`}
+      className={`absolute inset-x-0 bottom-0 h-0.5 transition-opacity duration-150 ${active ? "opacity-100" : "opacity-0"}`}
       style={{ background: color }}
     />
+    {/* Tinted while it waits, solid once picked. The chip is the only thing on the card
+        that changes colour, which is what keeps the change quiet enough to sit in a row
+        of eight. */}
     <span
       aria-hidden
-      className="mb-2.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-transform group-hover:scale-105 sm:h-8 sm:w-8"
-      style={{ background: `${color}1A`, color }}
+      className="mb-2.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-150"
+      style={active ? { background: color, color: "#fff" } : { background: `${color}14`, color }}
     >
-      {Icon && <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+      {Icon && <Icon className="h-3.5 w-3.5" />}
     </span>
     {/* Sentence case at a normal weight rather than bold small caps: eight headings
-        shouting is the thing that made the old row hard to read past. */}
-    <p className="truncate text-[11px] font-medium text-slate-500 sm:text-xs">{label}</p>
+        shouting is what made the old row hard to read past. The picked one darkens
+        instead of changing colour. */}
+    <p className={`truncate text-[11px] transition-colors sm:text-xs ${active ? "font-semibold text-slate-900" : "font-medium text-slate-500"}`}>{label}</p>
     {/* tabular-nums so eight figures standing side by side line up on their digits
         instead of jittering with whatever numerals each one happens to hold. */}
-    <p
-      className="mt-0.5 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-[22px] sm:leading-7"
-      style={active ? { color } : undefined}
-    >
-      {value}
-    </p>
+    <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-[21px] sm:leading-7">{value}</p>
     <p className="mt-0.5 truncate text-[10px] leading-tight text-slate-400 sm:text-[11px]">{sub}</p>
   </button>
 );
@@ -597,10 +600,12 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         {/* ml-auto so the range sits at the far end on a desk and simply wraps to the next
             line on a phone, where there is no far end to sit at.
 
-            Hidden on Closing Balance, which closes one named evening and carries its own
-            date. Two date controls over one set of figures is a question about which of
-            them is in force, and the answer -- that the range governs everything except
-            the panel below it -- is not one a toolbar can say. */}
+            Hidden on Closing Balance, which carries its own Daily/Weekly/Monthly/Custom
+            control because it narrows a different thing: this range narrows a ledger, that
+            one picks which evenings are being counted or read back. Two date controls over
+            one set of figures is a question about which of them is in force, and the answer
+            -- that the range governs everything except the panel below it -- is not one a
+            toolbar can say. */}
         {tab !== "closing" && (
         <div className="ml-auto flex flex-wrap items-center gap-3" data-testid="accountant-manage-date-filter">
           <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
@@ -867,8 +872,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
       ) : tab === "schedule" ? (
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
       ) : tab === "closing" ? (
-        // Counts one day rather than the tab's range, and reads its own figures for that
-        // day -- see the panel. The branch is the only thing it takes from up here.
+        // Counts one evening at a time and reads a week or a month of them back, on its
+        // own period control rather than the tab's range -- see the panel. The branch is
+        // the only thing it takes from up here.
         <ClosingBalancePanel branchId={branchId} />
       ) : (
         <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} onReceipt={(tx) => setReceipt(receiptForTxn(tx))} />
