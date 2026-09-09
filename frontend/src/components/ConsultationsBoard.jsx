@@ -8547,26 +8547,29 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             </PanelChip>
                           )
                         }
-                        /* Keyed to the PILL rather than to the view on screen. The pill decides
-                           which programme is home — the one OwnTab returns to, since OwnTab
-                           sets "own" and "own" means home here — and switching programmes must
-                           not rewrite the tab row underneath the reader. Read off the view, the
-                           row relabelled itself on every switch: a reader on the Diet pill who
-                           opened Rehab was handed a tab reading "Rehab Details", lit as nothing,
-                           which took them to Diet when pressed. */
+                        /* One fixed order wherever these three sit together, and the same one
+                           the Physio Assign panel uses: Physio Assign, then Diet Details, then
+                           Rehab Details. Moving between the programmes must not shuffle the row
+                           — a reader who opened Rehab and found the tabs re-sorted under their
+                           cursor has to re-find the one they wanted every time.
+
+                           The pill still decides which programme is home: that one is the lit
+                           OwnTab (keyed to the pill, not the view, so it never relabels on a
+                           switch), but it now sits in its own fixed slot rather than jumping to
+                           the front. */
                         tabs={
                           onRehabPill ? (
                             <>
-                              <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" due={rehabDue} dueTitle="Rehab fee still to collect" />
-                              {DietDetailButton}
                               {PhysioDetailButton}
+                              {DietDetailButton}
+                              <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" due={rehabDue} dueTitle="Rehab fee still to collect" />
                               {CancelButton}
                             </>
                           ) : (
                             <>
+                              {PhysioDetailButton}
                               <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" due={dietDue} dueTitle="Diet fee still to collect" />
                               {RehabDetailButton}
-                              {PhysioDetailButton}
                               {CancelButton}
                             </>
                           )
