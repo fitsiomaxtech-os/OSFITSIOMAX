@@ -7662,76 +7662,71 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 };
 
                 // How far through the course the patient is, who has delivered which part of
-                // it, and the days themselves.
-                //
-                // Built once and shown by both ways into rehab — the Rehab pill's own panel
-                // and the Rehab Details view the other panels open — because a course must
-                // not read as two different courses depending on which door was used.
+                // it, and the days themselves — in three pieces rather than one block,
+                // because they no longer sit in one column. The course facts and their
+                // progress bar are what was sold and belong on the left; who has delivered it
+                // belongs on the right beside the act of assigning; the day list is a table
+                // and takes the full width under both.
                 //
                 // Nothing until the days arrive. A skeleton would be a bar at 0% over a
                 // course that is half delivered, which is worse than a panel that fills in a
                 // moment later.
-                const RehabCourseStatus = rehabProgress ? (
-                  <div data-testid="cons-rehab-course-status">
-                    {/* The two numbers as one length, so how far in the patient is reads at a
-                        glance instead of by subtraction — the same bar the Physio Assign
-                        panel draws for the treatment course. */}
-                    {rehabProgress.packageDays > 0 && (
-                      <div className="mt-3" data-testid="cons-rehab-progress">
-                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                          <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${rehabProgress.pct}%` }} />
-                        </div>
-                        <p className="mt-1 text-[10px] font-medium text-slate-500">
-                          {rehabProgress.pct}% of the course delivered
-                          {rehabProgress.remaining > 0 ? ` · ${rehabProgress.remaining} day${rehabProgress.remaining === 1 ? "" : "s"} to go` : ""}
-                        </p>
-                      </div>
-                    )}
 
-                    {/* Who is delivering the course, drawn the way the treatment panel draws
-                        it — on a course one physio has held throughout as much as on one that
-                        has changed hands. The name two rows above says who holds the course;
-                        this card says what they have done with it: days completed, which day
-                        numbers are theirs, how many are still booked, and since when. That is
-                        the question the desk opens rehab to answer, and gating it on a
-                        reassignment meant the ordinary course — one physio, mid-delivery —
-                        was the one that showed nothing. A handover only adds the physios
-                        before them, oldest first, and renames the heading to say how many. */}
-                    {(rehabProgress.previous.length > 0 || rehabProgress.current) && (
-                      <div className="mt-3 space-y-1.5" data-testid="cons-rehab-journey">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                          {rehabProgress.reassigned
-                            ? `Physio History · ${rehabProgress.previous.length + (rehabProgress.current ? 1 : 0)} physios`
-                            : "Delivered By"}
-                        </p>
-                        {rehabProgress.previous.map((spell, i) => (
-                          <PhysioSpell
-                            key={`${spell.physio_id}-${i}`}
-                            spell={spell}
-                            packageSessions={rehabProgress.packageDays}
-                            tone="cyan"
-                            dayNoun="days"
-                            testid={`cons-rehab-spell-previous-${i}`}
-                          />
-                        ))}
-                        {rehabProgress.current && (
-                          <PhysioSpell
-                            spell={rehabProgress.current}
-                            packageSessions={rehabProgress.packageDays}
-                            tone="cyan"
-                            dayNoun="days"
-                            testid="cons-rehab-spell-current"
-                          />
-                        )}
-                      </div>
-                    )}
-
-                    <RehabDayList
-                      days={rehabProgress.days}
-                      showPhysio={rehabProgress.reassigned}
-                      testid="cons-rehab-day-list"
-                    />
+                // The two numbers as one length, so how far in the patient is reads at a
+                // glance instead of by subtraction — the same bar the treatment column draws.
+                const RehabProgressBar = rehabProgress && rehabProgress.packageDays > 0 ? (
+                  <div data-testid="cons-rehab-progress">
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                      <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${rehabProgress.pct}%` }} />
+                    </div>
+                    <p className="mt-1 text-[10px] font-medium text-slate-500">
+                      {rehabProgress.pct}% of the course delivered
+                      {rehabProgress.remaining > 0 ? ` · ${rehabProgress.remaining} day${rehabProgress.remaining === 1 ? "" : "s"} to go` : ""}
+                    </p>
                   </div>
+                ) : null;
+
+                // Who is delivering the course, drawn the way the treatment column draws it —
+                // on a course one physio has held throughout as much as on one that has
+                // changed hands. The name in the rows says who holds the course; this says
+                // what they have done with it: days completed, which day numbers are theirs,
+                // how many are still booked, and since when. That is the question the desk
+                // opens rehab to answer, and gating it on a reassignment meant the ordinary
+                // course — one physio, mid-delivery — was the one that showed nothing. A
+                // handover only adds the physios before them, oldest first, and renames the
+                // heading to say how many.
+                const rehabHasJourney = !!rehabProgress
+                  && (rehabProgress.previous.length > 0 || !!rehabProgress.current);
+                const RehabJourney = rehabHasJourney ? (
+                  <div className="space-y-1.5" data-testid="cons-rehab-journey">
+                    {rehabProgress.previous.map((spell, i) => (
+                      <PhysioSpell
+                        key={`${spell.physio_id}-${i}`}
+                        spell={spell}
+                        packageSessions={rehabProgress.packageDays}
+                        tone="cyan"
+                        dayNoun="days"
+                        testid={`cons-rehab-spell-previous-${i}`}
+                      />
+                    ))}
+                    {rehabProgress.current && (
+                      <PhysioSpell
+                        spell={rehabProgress.current}
+                        packageSessions={rehabProgress.packageDays}
+                        tone="cyan"
+                        dayNoun="days"
+                        testid="cons-rehab-spell-current"
+                      />
+                    )}
+                  </div>
+                ) : null;
+
+                const RehabDays = rehabProgress ? (
+                  <RehabDayList
+                    days={rehabProgress.days}
+                    showPhysio={rehabProgress.reassigned}
+                    testid="cons-rehab-day-list"
+                  />
                 ) : null;
 
                 const DietDetailBody = (
@@ -7851,94 +7846,141 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   </>
                 );
 
+                const rehabAssigned = !!selectedLead.rehab_physio_name;
+                /* Two columns, the way the treatment view reads: what was sold on the left —
+                   the course, its length, the fee, how far in — and who is delivering it on
+                   the right, with the act of assigning under the people it concerns rather
+                   than under the package. This was one column of stacked cards, which put the
+                   step to take a scroll below the facts it was to be taken on.
+
+                   The day list stays full width beneath both. It is a table of every day of
+                   the course, and half a panel is not enough to read a date, a time and a
+                   physio on one line. */
                 const RehabDetailBody = (
                   <>
-                    <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-rehab-detail">
-                      <dl className="divide-y divide-slate-100">
-                        <DetailRow label="Rehab Course" value={selectedLead.rehab_package_name || "Not chosen yet"} />
-                        <DetailRow
-                          label="Sessions"
-                          value={selectedLead.rehab_package_sessions
-                            ? `${selectedLead.rehab_package_sessions} day${selectedLead.rehab_package_sessions > 1 ? "s" : ""}`
-                            : "Not stated on the course"}
-                          tone={selectedLead.rehab_package_sessions ? "" : "text-slate-400"}
-                        />
-                        <DetailRow
-                          label="Rehab Fee"
-                          value={rehabFeePaid
-                            ? `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}${selectedLead.rehab_fee_payment_mode ? ` (${selectedLead.rehab_fee_payment_mode})` : ""}`
-                            : (selectedLead.rehab_package_price != null ? `Rs.${Number(selectedLead.rehab_package_price).toLocaleString("en-IN")} — not collected` : "Not collected")}
-                          tone={rehabFeePaid ? "text-emerald-700" : "text-amber-700"}
-                        />
-                        <DetailRow label="Rehab Physio" value={selectedLead.rehab_physio_name || "Not assigned"} tone={selectedLead.rehab_physio_name ? "" : "text-amber-700"} />
-                        {rehabProgress && (
-                          <DetailRow
-                            label="Days Completed"
-                            value={`${rehabProgress.completed} of ${rehabProgress.packageDays || "—"}${rehabProgress.done ? "" : ` · ${rehabProgress.remaining} left`}`}
-                            tone={rehabProgress.completed > 0 ? "text-emerald-700" : ""}
-                          />
+                    <div className="grid grid-cols-1 gap-x-4 gap-y-3 lg:grid-cols-2">
+                      <div className="min-w-0 space-y-2" data-testid="cons-rehab-detail">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Course Details</p>
+                        <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm">
+                          <dl className="divide-y divide-slate-100">
+                            <DetailRow label="Rehab Course" value={selectedLead.rehab_package_name || "Not chosen yet"} />
+                            <DetailRow
+                              label="Sessions"
+                              value={selectedLead.rehab_package_sessions
+                                ? `${selectedLead.rehab_package_sessions} day${selectedLead.rehab_package_sessions > 1 ? "s" : ""}`
+                                : "Not stated on the course"}
+                              tone={selectedLead.rehab_package_sessions ? "" : "text-slate-400"}
+                            />
+                            <DetailRow
+                              label="Rehab Fee"
+                              value={rehabFeePaid
+                                ? `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}${selectedLead.rehab_fee_payment_mode ? ` (${selectedLead.rehab_fee_payment_mode})` : ""}`
+                                : (selectedLead.rehab_package_price != null ? `Rs.${Number(selectedLead.rehab_package_price).toLocaleString("en-IN")} — not collected` : "Not collected")}
+                              tone={rehabFeePaid ? "text-emerald-700" : "text-amber-700"}
+                            />
+                            <DetailRow label="Rehab Physio" value={selectedLead.rehab_physio_name || "Not assigned"} tone={rehabAssigned ? "" : "text-amber-700"} />
+                            {rehabProgress && (
+                              <DetailRow
+                                label="Days Completed"
+                                value={`${rehabProgress.completed} of ${rehabProgress.packageDays || "—"}${rehabProgress.done ? "" : ` · ${rehabProgress.remaining} left`}`}
+                                tone={rehabProgress.completed > 0 ? "text-emerald-700" : ""}
+                              />
+                            )}
+                          </dl>
+                        </div>
+                        {RehabProgressBar}
+                      </div>
+
+                      <div className="min-w-0 space-y-2">
+                        {/* Named for what the column holds once the course is running, and for
+                            what it asks for while it is not — the same two states the
+                            treatment column names itself for. */}
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                          {rehabHasJourney && rehabProgress.reassigned
+                            ? `Physio History · ${rehabProgress.previous.length + (rehabProgress.current ? 1 : 0)} physios`
+                            : rehabAssigned ? "Delivered By" : "Next Step"}
+                        </p>
+                        {RehabJourney}
+
+                        <p className="text-xs leading-relaxed text-slate-600">
+                          {!rehabFeePaid
+                            ? "The course is not paid for yet — collect the Rehab Fee before booking any of its days."
+                            : !rehabAssigned
+                              ? "Choose the physio who will deliver the course and fix a date and time for every day."
+                              : rehabProgress?.done
+                                ? "Every day of this course has been delivered."
+                                : "The course is booked — every day sits on this physio's calendar and on their board."}
+                        </p>
+                        {/* Said before the picker is opened rather than found inside it.
+                            Reassigning re-dates only what is left — assign-rehab keeps the
+                            completed days with the physio who ran them and replaces the
+                            upcoming ones — and the branch is about to be asked for exactly
+                            that many dates. */}
+                        {rehabAssigned && rehabProgress && !rehabProgress.done && rehabProgress.completed > 0 && (
+                          <p className="text-xs leading-relaxed text-cyan-700" data-testid="cons-rehab-reassign-note">
+                            Reassigning keeps the {rehabProgress.completed} day{rehabProgress.completed === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {rehabProgress.remaining} get new dates.
+                          </p>
                         )}
-                      </dl>
+
+                        {/* Same order and the same gate as diet: the days cannot be booked
+                            until the course is paid for, which is the rule assign-rehab itself
+                            holds. */}
+                        <div className="flex flex-wrap items-center gap-2 pt-0.5 [&>*]:shrink-0">
+                          {/* Only while the course is unpaid. The Rehab Fee is taken in one go
+                              — anything short of the listed price is recorded as a discount,
+                              not a balance — so once it is in there is no rehab money left to
+                              collect, and a button offering to take it again beside a line
+                              reading "Rs.20,800 (cash)" only invites someone to overwrite the
+                              record. */}
+                          {!rehabFeePaid && (
+                            <Button
+                              size="sm"
+                              /* Dead until the Consultant has priced a course, because there is
+                                 nothing to collect against and collect-rehab-fee refuses for the
+                                 same reason. Drawn and disabled rather than left out: this view is
+                                 now reachable for a referral with no course on it, and a card whose
+                                 only action has silently vanished reads as a card with nothing left
+                                 to do. The title says which desk the next move belongs to. */
+                              disabled={!selectedLead.rehab_package_id}
+                              title={selectedLead.rehab_package_id ? undefined : "The Consultant has not chosen a Rehab course yet — there is no price to collect against"}
+                              className={`${selectedLead.rehab_package_id ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
+                              onClick={openRehabFeeDraft}
+                              data-testid="cons-rehab-detail-fee"
+                            >
+                              <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                              Collect Rehab Fee
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            disabled={!rehabFeePaid}
+                            title={rehabFeePaid ? undefined : "Collect the Rehab Fee first"}
+                            className={`${rehabFeePaid ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
+                            onClick={() => openPhysioModal("rehab")}
+                            data-testid="cons-rehab-detail-assign"
+                          >
+                            <Activity className="mr-1 h-3.5 w-3.5" />
+                            {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
+                          </Button>
+                        </div>
+                        {/* Two different reasons the row can be dead, and they want different
+                            desks: with no course there is nothing to price, so the Consultant is
+                            the next move and even Collect is out; with a course unpaid the money
+                            is. The first is the one that blocks the other, so it wins. */}
+                        {!selectedLead.rehab_package_id ? (
+                          <GateNote testId="cons-rehab-detail-gate">
+                            The Consultant has not chosen a Rehab course yet, so there is no price to
+                            collect against and no course to put a physio on.
+                          </GateNote>
+                        ) : !rehabFeePaid ? (
+                          <GateNote testId="cons-rehab-detail-gate">
+                            Assign Physio opens once the Rehab Fee is collected — the course cannot go
+                            onto a physio's calendar until it is paid for.
+                          </GateNote>
+                        ) : null}
+                      </div>
                     </div>
-                    {/* The same course status the Rehab panel shows, because it is the same
-                        course. This view is the only way into rehab from Fee Collected and
-                        from the diet panel, and a patient opened through those doors used to
-                        get four rows and no sign of whether a single day had been run. */}
-                    {RehabCourseStatus}
-                    {/* Same order and the same gate as diet: the days cannot be booked until
-                        the course is paid for, which is the rule assign-rehab itself holds. */}
-                    <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
-                      {/* Only while the course is unpaid. The Rehab Fee is taken in one go —
-                          anything short of the listed price is recorded as a discount, not a
-                          balance — so once it is in there is no rehab money left to collect,
-                          and a button offering to take it again beside a line reading
-                          "Rs.20,800 (cash)" only invites someone to overwrite the record. */}
-                      {!rehabFeePaid && (
-                        <Button
-                          size="sm"
-                          /* Dead until the Consultant has priced a course, because there is
-                             nothing to collect against and collect-rehab-fee refuses for the
-                             same reason. Drawn and disabled rather than left out: this view is
-                             now reachable for a referral with no course on it, and a card whose
-                             only action has silently vanished reads as a card with nothing left
-                             to do. The title says which desk the next move belongs to. */
-                          disabled={!selectedLead.rehab_package_id}
-                          title={selectedLead.rehab_package_id ? undefined : "The Consultant has not chosen a Rehab course yet — there is no price to collect against"}
-                          className={`${selectedLead.rehab_package_id ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
-                          onClick={openRehabFeeDraft}
-                          data-testid="cons-rehab-detail-fee"
-                        >
-                          <IndianRupee className="mr-1 h-3.5 w-3.5" />
-                          Collect Rehab Fee
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        disabled={!rehabFeePaid}
-                        title={rehabFeePaid ? undefined : "Collect the Rehab Fee first"}
-                        className={`${rehabFeePaid ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
-                        onClick={() => openPhysioModal("rehab")}
-                        data-testid="cons-rehab-detail-assign"
-                      >
-                        <Activity className="mr-1 h-3.5 w-3.5" />
-                        {selectedLead.rehab_physio_name ? "Reassign Rehab Physio" : "Assign Physio"}
-                      </Button>
-                    </div>
-                    {/* Two different reasons the row can be dead, and they want different
-                        desks: with no course there is nothing to price, so the Consultant is
-                        the next move and even Collect is out; with a course unpaid the money
-                        is. The first is the one that blocks the other, so it wins. */}
-                    {!selectedLead.rehab_package_id ? (
-                      <GateNote testId="cons-rehab-detail-gate">
-                        The Consultant has not chosen a Rehab course yet, so there is no price to
-                        collect against and no course to put a physio on.
-                      </GateNote>
-                    ) : !rehabFeePaid ? (
-                      <GateNote testId="cons-rehab-detail-gate">
-                        Assign Physio opens once the Rehab Fee is collected — the course cannot go
-                        onto a physio's calendar until it is paid for.
-                      </GateNote>
-                    ) : null}
+                    {RehabDays}
                   </>
                 );
 
@@ -8527,138 +8569,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 const FeeSteps = renderFeeSteps(numberedFeeSteps);
 
                 const panel = (() => {
-                  // FIRST in this chain, deliberately. The Rehab tab is a cross-cutting view
-                  // rather than a position in the pipeline: a patient is on it because their
-                  // Rehab Fee is in, while their consultation_stage still says where they
-                  // actually are — which for almost all of them is Fee Collected. Placed any
-                  // lower, that branch returns first and the Rehab tab opens a patient onto
-                  // the fee panel with no way to reach Assign Physio.
-                  if (stageFilter === "Rehab" && selectedLead.rehab_fee_paid != null) {
-                    // Named for the course rather than the collection: `rehabDays` up in the
-                    // component is the days themselves, and one word for the two of them in
-                    // a block that reads both is how a count gets mapped over.
-                    const rehabCourseDays = selectedLead.rehab_package_sessions || 0;
-                    const rehabAssigned = !!selectedLead.rehab_physio_name;
-                    // Label/value pairs built once, so the rows below are a list rather than
-                    // four hand-repeated flex divs — and so a row that has nothing to say is
-                    // dropped instead of printing "0 days" or an empty physio.
-                    const rehabRows = [
-                      { label: "Course", value: selectedLead.rehab_package_name || "Rehab course" },
-                      rehabCourseDays > 0 ? { label: "Duration", value: `${rehabCourseDays} day${rehabCourseDays > 1 ? "s" : ""}` } : null,
-                      {
-                        label: "Rehab Fee",
-                        value: `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}`,
-                        note: selectedLead.rehab_fee_payment_mode || "",
-                        strong: true,
-                      },
-                      rehabAssigned ? { label: "Rehab Physio", value: selectedLead.rehab_physio_name } : null,
-                      // No count row here. What the course was sold as is what these rows are
-                      // for; how much of it has been delivered is the bar directly below them,
-                      // which says the same two numbers as a length and then lists the days
-                      // themselves. Saying it twice, three lines apart, only invited the reader
-                      // to check whether the two agreed.
-                    ].filter(Boolean);
-                    return (
-                      <div
-                        className="overflow-hidden rounded-xl border border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white shadow-sm ring-1 ring-inset ring-white/60"
-                        data-testid="cons-stage-panel-rehab"
-                      >
-                        {/* Header band: the icon gets a tile of its own and the state sits at
-                            the far end, so the panel says what it is and where it stands on
-                            one line before any figure is read. */}
-                        <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-2.5">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-600/10 text-cyan-700">
-                              <Activity className="h-4 w-4" />
-                            </span>
-                            <span className="truncate text-xs font-semibold uppercase tracking-wider text-cyan-800">Rehab</span>
-                          </div>
-                          {/* Who is delivering it, on the header line rather than only in the
-                              rows below. Assigning a physio is the one act this panel exists
-                              for, and until it says so on the line that says what the panel
-                              is, the answer to "did that go through" is four rows down. */}
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            {rehabAssigned && (
-                              <span
-                                className="flex max-w-[10rem] items-center gap-1 rounded-full bg-cyan-600 px-2 py-0.5 text-[10px] font-semibold text-white"
-                                title={`Rehab Physio: ${selectedLead.rehab_physio_name}`}
-                                data-testid="cons-rehab-physio-chip"
-                              >
-                                <Users className="h-3 w-3 shrink-0" />
-                                <span className="truncate">{selectedLead.rehab_physio_name}</span>
-                              </span>
-                            )}
-                            <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                              <CheckCircle2 className="h-3 w-3" /> Fee Collected
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="p-4">
-                          {/* Hairline-divided rows rather than four bordered boxes: one card,
-                              one column of values, nothing for the eye to step over. */}
-                          <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-rehab-summary">
-                            <dl className="divide-y divide-slate-100">
-                              {rehabRows.map((row) => (
-                                <div key={row.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
-                                  <dt className="shrink-0 text-xs text-slate-500">{row.label}</dt>
-                                  <dd className={`min-w-0 truncate text-right font-semibold text-slate-800 ${row.strong ? "text-[15px]" : "text-sm"}`} title={String(row.value)}>
-                                    {row.value}
-                                    {/* Capitalised: the only note these rows carry is a payment
-                                        mode — "(Cash)" — which is written lowercase upstream. */}
-                                    {row.note && <span className="ml-1 text-xs font-medium capitalize text-emerald-600">({row.note})</span>}
-                                  </dd>
-                                </div>
-                              ))}
-                            </dl>
-                          </div>
-
-                          {RehabCourseStatus}
-
-                          <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                            {!rehabAssigned
-                              ? "Choose the physio who will deliver the course and fix a date and time for every day."
-                              : rehabProgress?.done
-                                ? "Every day of this course has been delivered."
-                                : "The course is booked — every day sits on this physio's calendar and on their board."}
-                          </p>
-                          {/* Said before the picker is opened rather than found inside it.
-                              Reassigning re-dates only what is left — assign-rehab keeps the
-                              completed days with the physio who ran them and replaces the
-                              upcoming ones — and the branch is about to be asked for exactly
-                              that many dates. */}
-                          {rehabAssigned && rehabProgress && !rehabProgress.done && rehabProgress.completed > 0 && (
-                            <p className="mt-1 text-xs leading-relaxed text-cyan-700" data-testid="cons-rehab-reassign-note">
-                              Reassigning keeps the {rehabProgress.completed} day{rehabProgress.completed === 1 ? "" : "s"} already delivered with the physio who ran them — only the remaining {rehabProgress.remaining} get new dates.
-                            </p>
-                          )}
-
-                          {/* One solid action on the same left edge as everything above it,
-                              with Cancel beside it as a quiet outline rather than a second
-                              filled colour competing with the step to take. No Diet Details
-                              here: this tab is the rehab course, and a patient reached
-                              through it is being looked at for the days of that course --
-                              the diet programme is opened from the panel that owns it. */}
-                          <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
-                            <Button
-                              size="sm"
-                              className="bg-cyan-600 text-xs text-white shadow-sm transition hover:bg-cyan-700 hover:shadow"
-                              onClick={() => openPhysioModal("rehab")}
-                              data-testid="cons-open-rehab-assign"
-                            >
-                              <Activity className="mr-1.5 h-3.5 w-3.5" />
-                              {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
-                            </Button>
-                            {CancelButton}
-                          </div>
-                          {/* Opened from the row above, and shown under it for the same reason
-                              the Fee Collected panel does: the control that opened a
-                              programme has to stay on screen to close it again. */}
-                          {detailBody && <div className="mt-3 border-t border-cyan-100 pt-3">{detailBody}</div>}
-                        </div>
-                      </div>
-                    );
-                  }
 
                   // Diet Consultation and Diet Chart are the same kind of pill as Rehab —
                   // nothing writes either, a patient is under one because they are on a diet
@@ -8666,13 +8576,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   // lead happens to sit at. One panel because they are one programme with two
                   // fee lines, not two — see DietDetailBody below.
                   //
-                  // The Rehab pill lands here too, but only for a course whose fee has not been
-                  // taken yet. Its own panel above is a record of a paid course — it prints the
-                  // collected amount and offers to book the days — so a referred patient with
-                  // nothing collected fell past it onto whatever stage they happened to sit at,
-                  // which is the treatment stage that knows nothing about rehab. The pill now
-                  // lists them (see matchesStage), so it has to open them somewhere that can
-                  // take the fee, and RehabDetailBody is that place.
+                  // The Rehab pill lands here for a paid course as much as an unpaid one. A
+                  // paid course used to be answered above this, by a hand-built card of its
+                  // own with the course, the fee and the Assign button on it and no tab row at
+                  // all — so collecting the Rehab Fee took the three programme tabs away. The
+                  // patient was on treatment, rehab and a diet plan a moment before the money
+                  // went in and on rehab alone the moment after, with no way back to either of
+                  // the others without leaving them and finding another pill.
+                  //
+                  // RehabDetailBody says everything that card said — the fee with its mode,
+                  // the physio, the progress bar, who delivered which days, the warning about
+                  // what a reassignment re-dates, and the day list — and this panel carries
+                  // the tabs, so the paid course simply reads here now.
                   const onRehabPill = stageFilter === "Rehab";
                   // Which of the two programmes this panel is showing. The tabs switch it, and
                   // the pill that was clicked chooses which one it starts on: a patient opened
