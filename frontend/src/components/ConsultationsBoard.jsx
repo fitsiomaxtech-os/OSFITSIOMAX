@@ -7917,6 +7917,29 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           label="Treatment Package"
                           value={`${selectedLead.session_package_name || "—"}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`}
                         />
+                        {/* What this course costs, and where the money stands on it — the
+                            same question the Rehab Fee row answers on its own panel. A
+                            Partial Payment plan leaves treatment_fee_paid set to the full
+                            price the moment it is agreed (see the note on feeBalances
+                            above), so "paid" alone cannot be read off that field; the note
+                            is the live balance while one is still owed, not the mode. */}
+                        <PanelRow
+                          label="Treatment Fee"
+                          value={treatmentFeeTotal ? `Rs.${Number(treatmentFeeTotal).toLocaleString("en-IN")}` : "Not priced yet"}
+                          note={
+                            feeBalances.treatment
+                              ? `Rs.${Number(feeBalances.treatment.balance).toLocaleString("en-IN")} due`
+                              : treatmentFeePaid
+                                ? (selectedLead.treatment_fee_payment_mode || "paid")
+                                : treatmentFeeTotal ? "not collected" : null
+                          }
+                          tone={feeBalances.treatment ? "text-amber-700" : treatmentFeePaid ? "text-emerald-700" : "text-amber-700"}
+                          noteTone={
+                            feeBalances.treatment
+                              ? (feeBalances.treatment.overdue ? "text-rose-600" : "text-amber-600")
+                              : treatmentFeePaid ? "text-emerald-600" : "text-amber-600"
+                          }
+                        />
                         <PanelRow
                           label="Assigned Physio"
                           value={selectedLead.assigned_physio_name || "Not assigned"}
@@ -7940,6 +7963,39 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           />
                         )}
                       </PanelCard>
+
+                      {/* The balance still owed on the Treatment Fee, with the one button
+                          that collects it — drawn only while a balance is actually open, the
+                          same gate the row above's note reads. */}
+                      {feeBalances.treatment && (
+                        <div
+                          className={`rounded-lg border px-3 py-2 ${feeBalances.treatment.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`}
+                          data-testid="cons-physio-assign-balance"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-[11px] font-semibold ${feeBalances.treatment.overdue ? "text-rose-700" : "text-amber-700"}`}>
+                              {feeBalances.treatment.overdue ? "Overdue" : installmentLabelFor(feeBalances.treatment.nextIdx)}
+                            </span>
+                            <span className={`text-sm font-bold ${feeBalances.treatment.overdue ? "text-rose-700" : "text-amber-700"}`}>
+                              Rs.{Number(feeBalances.treatment.balance).toLocaleString("en-IN")}
+                            </span>
+                          </div>
+                          {feeBalances.treatment.next?.due_date && (
+                            <p className={`mt-0.5 text-[10px] ${feeBalances.treatment.overdue ? "text-rose-600" : "text-amber-600"}`}>
+                              due {feeBalances.treatment.next.due_date}
+                            </p>
+                          )}
+                          <Button
+                            size="sm"
+                            className={`mt-2 w-full ${feeBalances.treatment.overdue ? "bg-rose-600 hover:bg-rose-700" : "bg-amber-600 hover:bg-amber-700"} text-white shadow-sm ${ACT_BTN}`}
+                            onClick={() => openTreatmentFeeFor(selectedLead)}
+                            data-testid="cons-physio-assign-collect-balance"
+                          >
+                            <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                            Collect Balance
+                          </Button>
+                        </div>
+                      )}
 
                       {/* The same two numbers as one length, so how far in the patient is
                           reads at a glance instead of by subtraction. */}
@@ -7991,13 +8047,19 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         </div>
                       )}
 
-                      <p className="text-xs leading-relaxed text-slate-600">
-                        {!treatmentAssigned
-                          ? "Treatment Fee collected. Choose the physiotherapist who will deliver the sessions."
-                          : courseDone
-                            ? "Every session of this course has been delivered."
-                            : "Treatment sessions are in progress — every day is on this physio's calendar and on their board."}
-                      </p>
+                      {/* Said only for the two states that need saying: before a physio is on
+                          the course, and once every session of it is delivered. A course
+                          still running mid-way needs no line of its own — the physio card
+                          and the progress bar above already say exactly that, and repeating
+                          it back as a sentence was the one line this column showed nothing
+                          new in. */}
+                      {(!treatmentAssigned || courseDone) && (
+                        <p className="text-xs leading-relaxed text-slate-600">
+                          {!treatmentAssigned
+                            ? "Treatment Fee collected. Choose the physiotherapist who will deliver the sessions."
+                            : "Every session of this course has been delivered."}
+                        </p>
+                      )}
                       {/* Said before the picker is opened rather than discovered inside it:
                           reassigning mid-course re-dates only what is left, and the branch is
                           about to be asked for exactly that many dates. */}
