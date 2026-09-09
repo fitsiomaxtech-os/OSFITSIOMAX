@@ -2777,6 +2777,12 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
       leadName: s.lead_name || "This patient",
       physioId: apptSelectedExpert?.id || "",
       physioName: apptSelectedExpert?.full_name || "",
+      // The pencil is only ever pressed from the grid this card's own patient is being
+      // booked on, so the time this move empties has an obvious taker. Offered rather
+      // than assumed — tidying a calendar and leaving the slot open is the other reason
+      // to be here — and not offered when the booking in the way is already theirs.
+      canTake: s.lead_id !== lead.id,
+      takeSlot: s.lead_id !== lead.id,
       mode: "consultant",
       options: [],
       pickedPhysioId: "",
@@ -2809,10 +2815,56 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
       const res = await getAvailableExperts(branchId, dateStr, undefined, leadId);
       const doc = (res.experts || []).find((d) => d.id === physioId);
       const slots = [...(doc?.free_slots || [])].sort((a, b) => (a.slot_time || "").localeCompare(b.slot_time || ""));
-      setSlotEdit((p) => (p ? { ...p, daySlots: slots, dayLoading: false } : p));
+      // Their own booking is excluded from the clash check by lead_id, so the time they
+      // already hold comes back as free. Moving onto it frees nothing, and with the swap
+      // armed it would hand this card's patient a slot that is still taken.
+      setSlotEdit((p) => (p ? {
+        ...p,
+        daySlots: slots.filter((sl) => !(dateStr === p.date && sl.time === p.time)),
+        dayLoading: false,
+      } : p));
     } catch {
       setSlotEdit((p) => (p ? { ...p, daySlots: [], dayLoading: false } : p));
     }
+  };
+
+  /** Book this card's own patient into a slot and raise the confirmation slip. Lifted out
+   *  of the Confirm button because the reschedule below finishes the same way: whichever
+   *  door the booking comes through, it needs the one ref number, the one share token and
+   *  the same printable slip. */
+  const bookLeadInto = async (draft) => {
+    // Minted here so the confirmation, its share link and the stored booking all carry
+    // the same pair — no second round trip to learn what the server called it.
+    const refNo = `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`;
+    const shareToken = randomToken();
+    await scheduleBranchAppointment(lead.id, { ...draft, ref_no: refNo, share_token: shareToken });
+    toast.success(`Appointment ${draft.appointment_date} ${to12h(draft.appointment_time)} → ${draft.final_stage}`);
+    setApptDraft(null);
+    // The confirmation shows first and only tells the parent to close once it's
+    // dismissed — onMoved unmounts this whole card, and the confirmation has to survive
+    // long enough to be shared or printed.
+    const hp = (apptExperts.experts || []).find((d) => d.id === draft.physio_id);
+    setApptConfirm({
+      finalStage: draft.final_stage,
+      refNo,
+      shareToken,
+      patient: lead.name || "—",
+      patientNo: lead.patient_number || "—",
+      phone: lead.phone || "—",
+      branch: branchInfo?.branch_name || lead.branch_name || "",
+      branchAddress: branchInfo?.address || "",
+      mapLocation: branchInfo?.map_location || "",
+      date: draft.appointment_date,
+      time: draft.appointment_time,
+      duration: draft.duration || 30,
+      headPhysio: hp?.full_name || lead.assigned_physio_name || "—",
+      // The room this was booked into. The server writes the same value onto the
+      // appointment off the expert's own record, so what is shared here is what the
+      // booking holds.
+      meetLink: (hp?.meet_link || "").trim(),
+      notes: (draft.notes || "").trim(),
+      bookedBy: "Branch Admin",
+    });
   };
 
   /** Apply whichever tab is open. One POST either way — CONSULTANT changes who holds the
@@ -2830,6 +2882,14 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
     const duration = swappingConsultant ? slotEdit.duration : slotEdit.moveDuration;
     if (swappingConsultant && !physioId) { toast.error("Pick the consultant to move it to"); return; }
     if (!swappingConsultant && !time) { toast.error("Pick the time to move it to"); return; }
+    // Belt and braces on the slot the PATIENT tab already leaves out: a move onto the
+    // time it is on now empties nothing, and the swap below would then book this card's
+    // patient into a slot that is still taken.
+    if (!swappingConsultant && date === slotEdit.date && time === slotEdit.time) {
+      toast.error("That is the time it is on now — pick a different one");
+      return;
+    }
+    const taking = slotEdit.canTake && slotEdit.takeSlot;
     setSlotEdit((p) => ({ ...p, saving: true }));
     try {
       await scheduleBranchAppointment(slotEdit.leadId, {
@@ -2844,6 +2904,30 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
         : `${weekdayLabel(date)} ${to12h(time)}`;
       toast.success(`${slotEdit.leadName} moved to ${movedTo}`);
       setSlotEdit(null);
+      if (taking) {
+        // The half of the swap this dialog was opened for. Either tab empties the same
+        // slot — CONSULTANT hands the time to somebody else, PATIENT takes the booking
+        // off it — so the time now going to this card's patient is the one the pencil was
+        // pressed on, not the one the booking moved to. Two calls, because the two
+        // bookings belong to two different leads.
+        try {
+          await bookLeadInto({
+            ...apptDraft,
+            appointment_date: slotEdit.date,
+            appointment_time: slotEdit.time,
+            physio_id: slotEdit.physioId,
+            ...(slotEdit.duration ? { duration: slotEdit.duration } : {}),
+          });
+        } catch (e2) {
+          // The move already went through, so this cannot report as a failed reschedule.
+          // Says which half stands and leaves the grid on the freed slot to be taken by
+          // hand.
+          toast.error(e2?.response?.data?.detail || `${slotEdit.leadName} was moved, but ${lead.name || "this patient"} could not be booked into ${to12h(slotEdit.time)} — it is free on the grid now`);
+          await fetchAvailableExperts(branchId, apptDraft?.appointment_date, lead.id);
+          await onUpdate?.();
+        }
+        return;
+      }
       // The grid behind this dialog is a snapshot of the day taken before the move, so it
       // still shows the slot as taken and the new one as free. Re-ask rather than patch:
       // the same call feeds the CONSULTANT column's availability too.
@@ -3879,19 +3963,43 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               )}
             </div>
 
-            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-100 px-4 py-2.5">
-              <Button variant="outline" size="sm" disabled={slotEdit.saving} onClick={() => setSlotEdit(null)} data-testid="branch-slot-edit-cancel">
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="bg-teal-600 text-white hover:bg-teal-700"
-                disabled={slotEdit.saving || (slotEdit.mode === "consultant" ? !slotEdit.pickedPhysioId : !slotEdit.moveTime)}
-                onClick={submitSlotEdit}
-                data-testid="branch-slot-edit-save"
-              >
-                {slotEdit.saving ? "Moving…" : "Reschedule"}
-              </Button>
+            {/* Both halves of the swap, on the row that performs it. The freed time is
+                the same one either tab empties, so the offer reads the same on both. */}
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-4 py-2.5">
+              {slotEdit.canTake ? (
+                <label className="flex min-w-0 cursor-pointer items-center gap-2 text-xs text-slate-600" title={`Book ${lead.name || "this patient"} into ${to12h(slotEdit.time)} as soon as it is free`}>
+                  <input
+                    type="checkbox"
+                    checked={!!slotEdit.takeSlot}
+                    disabled={slotEdit.saving}
+                    onChange={(e) => setSlotEdit((p) => (p ? { ...p, takeSlot: e.target.checked } : p))}
+                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-teal-600 accent-teal-600 focus:ring-teal-500"
+                    data-testid="branch-slot-edit-take"
+                  />
+                  <span className="truncate">
+                    Then give {to12h(slotEdit.time)} to <b className="font-semibold text-slate-700">{lead.name || "this patient"}</b>
+                  </span>
+                </label>
+              ) : (
+                // Nothing to swap with — the booking in the way is this card's own.
+                <span />
+              )}
+              <div className="flex shrink-0 items-center gap-2">
+                <Button variant="outline" size="sm" disabled={slotEdit.saving} onClick={() => setSlotEdit(null)} data-testid="branch-slot-edit-cancel">
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-teal-600 text-white hover:bg-teal-700"
+                  disabled={slotEdit.saving || (slotEdit.mode === "consultant" ? !slotEdit.pickedPhysioId : !slotEdit.moveTime)}
+                  onClick={submitSlotEdit}
+                  data-testid="branch-slot-edit-save"
+                >
+                  {slotEdit.saving
+                    ? (slotEdit.canTake && slotEdit.takeSlot ? "Swapping…" : "Moving…")
+                    : (slotEdit.canTake && slotEdit.takeSlot ? "Reschedule & book" : "Reschedule")}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -4221,40 +4329,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
                   if (!apptDraft.appointment_time) { toast.error("Pick a time slot"); return; }
                   try {
-                    // Minted here so the confirmation, its share link and the stored
-                    // booking all carry the same pair — no second round trip to learn
-                    // what the server called it.
-                    const refNo = `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`;
-                    const shareToken = randomToken();
-                    await scheduleBranchAppointment(lead.id, { ...apptDraft, ref_no: refNo, share_token: shareToken });
-                    toast.success(`Appointment ${apptDraft.appointment_date} ${to12h(apptDraft.appointment_time)} → ${apptDraft.final_stage}`);
-                    const stage = apptDraft.final_stage;
-                    setApptDraft(null);
-                    // The confirmation shows first and only tells the parent to close once
-                    // it's dismissed — onMoved unmounts this whole card, and the
-                    // confirmation has to survive long enough to be shared or printed.
-                    const hp = apptExperts.experts.find((d) => d.id === apptDraft.physio_id);
-                    setApptConfirm({
-                      finalStage: stage,
-                      refNo,
-                      shareToken,
-                      patient: lead.name || "—",
-                      patientNo: lead.patient_number || "—",
-                      phone: lead.phone || "—",
-                      branch: branchInfo?.branch_name || lead.branch_name || "",
-                      branchAddress: branchInfo?.address || "",
-                      mapLocation: branchInfo?.map_location || "",
-                      date: apptDraft.appointment_date,
-                      time: apptDraft.appointment_time,
-                      duration: apptDraft.duration || 30,
-                      headPhysio: hp?.full_name || lead.assigned_physio_name || "—",
-                      // The room this was booked into. The server writes the same value
-                      // onto the appointment off the expert's own record, so what is
-                      // shared here is what the booking holds.
-                      meetLink: (hp?.meet_link || "").trim(),
-                      notes: (apptDraft.notes || "").trim(),
-                      bookedBy: "Branch Admin",
-                    });
+                    await bookLeadInto(apptDraft);
                   } catch (e) {
                     // Names the failure rather than reporting every one as a scheduling
                     // failure: the booking above is only the first of several statements
