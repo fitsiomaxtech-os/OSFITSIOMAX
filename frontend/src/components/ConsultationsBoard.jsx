@@ -154,6 +154,26 @@ const dayLabel = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { 
 /** "2026-08-03" -> "Mon, 3 Aug" — the same day on a plan card, which only has a third
  *  of a phone's width to say it in. */
 const shortDayLabel = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" });
+/** "2026-09-09" -> "Wed, 9 Sept" for the appointment chip, with the year added only when
+ *  it is not the current one.
+ *
+ *  en-IN, so the day comes before the month. This clinic writes 9 Sept, and en-US would
+ *  render the same options as "Sep 9" — a date somebody has to stop and re-read.
+ *
+ *  The chip was printing the stored value, and "2026-09-09" is a database field rather
+ *  than a date somebody reads — nobody checks a diary in ISO. The year is dropped because
+ *  it is the same on nearly every row and the chip is two lines in a narrow column; it
+ *  comes back on the rows where it actually distinguishes something, so a list filtered
+ *  to All cannot show two Septembers a year apart reading identically. */
+const apptDayLabel = (d) => {
+  const dt = new Date(`${d}T00:00:00`);
+  if (Number.isNaN(dt.getTime())) return d || "—";
+  return dt.toLocaleDateString("en-IN", {
+    weekday: "short", day: "numeric", month: "short",
+    ...(dt.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }),
+  });
+};
+
 /** Same week rule the backend stamps on each session: whole weeks from the first day. */
 const weekOf = (d, firstDay) => Math.floor((new Date(`${d}T00:00:00`) - new Date(`${firstDay}T00:00:00`)) / 604800000) + 1;
 // The treatment slot length is the one FITSIO STORE publishes for session packages —
@@ -6024,7 +6044,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                               sized for. */}
                           <span className="flex items-center gap-1">
                             <Calendar className="h-3 w-3 shrink-0" />
-                            {l.appointment_date}
+                            {apptDayLabel(l.appointment_date)}
                           </span>
                           {l.appointment_time && (
                             <span className="pl-4 text-[11px] font-bold opacity-90">{to12h(l.appointment_time)}</span>
@@ -6240,21 +6260,25 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                               </Button>
                               {/* The figure the button is about, under it. A part-paid fee
                                   is the one case where "Collect" alone is a question rather
-                                  than an instruction — how much, and by when. While the
-                                  prescription is outstanding it says so instead: the figure
-                                  is not the thing standing in the way. */}
-                              <span
-                                className={`mt-1 block truncate text-[10px] font-medium ${rxMissing || gate ? "text-amber-600" : c.kind === "balance" && c.overdue ? "text-rose-600" : c.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
-                                title={rxMissing ? "Upload the prescription before collecting the Consultation Fee" : gate ? gate.hint : c.kind === "balance" && c.due ? `Due ${c.due}` : undefined}
-                              >
-                                {rxMissing
-                                  ? "Required first"
-                                  : gate
-                                  ? gate.note
-                                  : c.kind === "balance"
-                                  ? `${rupees(c.balance)} due${c.overdue ? " · overdue" : ""}`
-                                  : c.amount != null ? rupees(c.amount) : "—"}
-                              </span>
+                                  than an instruction — how much, and by when.
+
+                                  Nothing under the prescription button, though. It reads
+                                  "Prescription" in amber with a document on it and carries
+                                  the whole sentence on hover; "Required first" beneath was
+                                  a second label saying what the first already said, on the
+                                  one row that is two lines tall anyway. */}
+                              {!rxMissing && (
+                                <span
+                                  className={`mt-1 block truncate text-[10px] font-medium ${gate ? "text-amber-600" : c.kind === "balance" && c.overdue ? "text-rose-600" : c.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
+                                  title={gate ? gate.hint : c.kind === "balance" && c.due ? `Due ${c.due}` : undefined}
+                                >
+                                  {gate
+                                    ? gate.note
+                                    : c.kind === "balance"
+                                    ? `${rupees(c.balance)} due${c.overdue ? " · overdue" : ""}`
+                                    : c.amount != null ? rupees(c.amount) : "—"}
+                                </span>
+                              )}
                             </>
                           )}
                         </td>
