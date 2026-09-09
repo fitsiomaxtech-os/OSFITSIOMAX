@@ -12,6 +12,7 @@ import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { receiptFromTransaction } from "@/lib/receipt";
 import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
 import { ClosingBalancePanel } from "@/components/branch/ClosingBalancePanel";
+import { CloseBookHistoryPanel } from "@/components/branch/CloseBookHistoryPanel";
 
 // Three tabs, not the ten this page used to carry: Consultation/Session/Diet/Store
 // Collections were each a copy of Summary's own card-click-to-filter table scoped to one
@@ -28,6 +29,12 @@ const MAIN_TABS = [
   // reading of what the system already knows -- it is the desk telling the system what it
   // actually holds, which is only worth asking once the day it closes has been read.
   { key: "closing", label: "Closing Balance", tone: "closing" },
+  // Directly after it, because it is the same thing read back: Closing Balance counts an
+  // evening and signs it off, this is the month of evenings already signed. Separated
+  // rather than folded into that panel's own Weekly/Monthly view, which answers a
+  // different question -- that one lists every evening including the ones nobody counted,
+  // and this one lists only the days somebody put their name to.
+  { key: "closebooks", label: "Close Books", tone: "closing" },
 ];
 
 const mainTabClasses = (tab, active) => {
@@ -536,6 +543,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
       : "All branches",
     tab === "closing"
       ? "day-end count"
+      : tab === "closebooks"
+      ? "closed books"
       : preset === "custom" && customFrom && customTo
       ? `${isoToManual(customFrom)} to ${isoToManual(customTo)}`
       : (DATE_PRESETS.find((d) => d.key === preset)?.label || "All") + " to date",
@@ -606,7 +615,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             one set of figures is a question about which of them is in force, and the answer
             -- that the range governs everything except the panel below it -- is not one a
             toolbar can say. */}
-        {tab !== "closing" && (
+        {tab !== "closing" && tab !== "closebooks" && (
         <div className="ml-auto flex flex-wrap items-center gap-3" data-testid="accountant-manage-date-filter">
           <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
             {DATE_PRESETS.map((p) => (
@@ -871,6 +880,10 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         </div>
       ) : tab === "schedule" ? (
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
+      ) : tab === "closebooks" ? (
+        // Reads a month of signed-off days and nothing else, so it takes the branch from
+        // up here and picks its own month -- see the panel.
+        <CloseBookHistoryPanel branchId={branchId} />
       ) : tab === "closing" ? (
         // Counts one evening at a time and reads a week or a month of them back, on its
         // own period control rather than the tab's range -- see the panel. The branch is
