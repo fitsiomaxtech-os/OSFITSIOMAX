@@ -395,6 +395,11 @@ export const getFinanceProfit = async (params = {}) => (await api.get("/finance/
 // balance only means something beside the previous night's — see get_closing_balance.
 export const getClosingBalance = async (params = {}) => (await api.get("/finance/closing-balance", { params })).data;
 export const saveClosingBalance = async (payload) => (await api.post("/finance/closing-balance", payload)).data;
+// The counts already recorded across a window — a week, a month, or two typed dates.
+// Only the evenings actually counted come back, so a caller walking the days of the range
+// can tell a night that balanced from one nobody counted; `opening` is the last count
+// before the window, which is the night its first day's cash opens on.
+export const getClosingBalanceHistory = async (params = {}) => (await api.get("/finance/closing-balance/history", { params })).data;
 
 // The petty cash tin. `balance` is every movement ever made on it — what is physically in
 // it today — while the movements listed are only the window asked for. A top-up moves

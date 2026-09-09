@@ -2422,6 +2422,71 @@ async def save_closing_balance(
     }
 
 
+@router.get("/finance/closing-balance/history")
+async def closing_balance_history(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """Every evening this branch counted inside a window, oldest first.
+
+    The endpoint above answers the question a desk closing up asks -- what was counted
+    tonight, and what was counted last night. This one answers the different question
+    anybody reading back over a week or a month asks: which evenings were counted at all,
+    and how each of them came out. They are two endpoints rather than one with a wider
+    range because the day view has to reach outside its window for the previous night,
+    and a history that quietly did the same would report a day nobody asked for.
+
+    Only what was counted is returned, on the same rule as everything else here: the
+    income and expense each day is judged against are live figures owned by
+    revenue-overview and list_expenses, and a month of stored copies is a month of totals
+    that can drift from them.
+
+    `opening` is the last count made before the window -- the night its first day opens
+    on. Without it, the first day of every month would read as a shortfall the size of
+    whatever the branch was already holding when the month began.
+    """
+    if is_branch_admin_role(user.role):
+        branch_id = user.branch_id
+    for label, value in (("start_date", start_date), ("end_date", end_date)):
+        if value:
+            try:
+                datetime.fromisoformat(value)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"{label} must be YYYY-MM-DD")
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=400, detail="The start date is after the end date")
+
+    # An explicit None matches the org-wide row rather than every branch's -- the same
+    # reason get_closing_balance spells out above.
+    query = {"branch_id": branch_id if branch_id else None}
+    window = {}
+    if start_date:
+        window["$gte"] = start_date
+    if end_date:
+        window["$lte"] = end_date
+    if window:
+        query["on"] = window
+    rows = await v3_col("closing_balances").find(query, {"_id": 0}).sort("on", 1).to_list(2000)
+
+    opening_row = None
+    if start_date:
+        opening_row = await v3_col("closing_balances").find_one(
+            {"branch_id": branch_id if branch_id else None, "on": {"$lt": start_date}},
+            {"_id": 0},
+            sort=[("on", -1)],
+        )
+    return {
+        "branch_id": branch_id,
+        "start_date": start_date or "",
+        "end_date": end_date or "",
+        "opening": _closing_balance_public(opening_row),
+        "records": [_closing_balance_public(r) for r in rows],
+        "counted_days": len(rows),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Petty Cash -- the tin, and what is left in it.
 # ---------------------------------------------------------------------------
