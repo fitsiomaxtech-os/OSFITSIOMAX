@@ -186,6 +186,34 @@ export const DietBoard = ({ coachId } = {}) => {
   );
 };
 
+// The same five the other boards offer, in the same order and wording, so a coach who
+// has used Consultations does not have to learn a second set of words for one idea.
+//
+// Compared as "YYYY-MM-DD" text rather than as Dates: appointment_date is stored that way,
+// zero-padded, so string order is date order and no timezone gets a chance to move a
+// booking a day either side of a boundary.
+//
+// Last 90 Days counts today as one of the ninety, the same reckoning DashboardBoard uses.
+const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const shiftDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+const DATE_PRESETS = [
+  { key: "all", label: "All", range: () => null },
+  { key: "today", label: "Today", range: () => { const t = isoOf(new Date()); return { from: t, to: t }; } },
+  // Monday to Sunday, the week a clinic works to. getDay() calls Sunday 0, so it is pulled
+  // back six days rather than one.
+  { key: "this_week", label: "This Week", range: () => {
+    const now = new Date();
+    const mon = shiftDays(now, now.getDay() === 0 ? -6 : 1 - now.getDay());
+    return { from: isoOf(mon), to: isoOf(shiftDays(mon, 6)) };
+  } },
+  { key: "this_month", label: "This Month", range: () => {
+    const t = new Date();
+    return { from: isoOf(new Date(t.getFullYear(), t.getMonth(), 1)), to: isoOf(new Date(t.getFullYear(), t.getMonth() + 1, 0)) };
+  } },
+  { key: "last_90", label: "Last 90 Days", range: () => ({ from: isoOf(shiftDays(new Date(), -89)), to: isoOf(new Date()) }) },
+];
+
 /**
  * Diet Consultations — who is coming in, and who has already been seen.
  *
@@ -202,6 +230,10 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("pending");
+  // Opens on All. A board that opened on Today would hide every patient waiting to be
+  // booked — they have no date to fall inside one — and the count on the card above would
+  // stop matching the list under it.
+  const [datePreset, setDatePreset] = useState("all");
   const [reportFor, setReportFor] = useState(null); // the patient whose report is open
 
   // A callback rather than an inline effect, so the toolbar's Refresh has something to
@@ -241,7 +273,19 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
   // rather than holding at the referral total.
   useEffect(() => { onCountChange?.(pending.length); }, [pending.length, onCountChange]);
 
+  // The diet consultation's own date, which is the one this board is about — not the
+  // physio appointment the patient may also have.
+  //
+  // A patient with no date booked drops out of every range but All. That is what the
+  // filter asks: "seen this week" cannot include somebody who is not booked at all, and
+  // keeping them in would make Today mean "today, plus everyone with no day yet".
+  const dateRange = DATE_PRESETS.find((d) => d.key === datePreset)?.range() || null;
   const visible = (filter === "done" ? done : filter === "all" ? rows : pending)
+    .filter((r) => {
+      if (!dateRange) return true;
+      const on = r.appointment_date || "";
+      return on >= dateRange.from && on <= dateRange.to;
+    })
     .filter((r) => {
       if (!search) return true;
       const q = search.toLowerCase();
@@ -253,7 +297,25 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
   // the button instead. min-w-0 so it can actually shrink — a flex item defaults to its
   // content's width and would push the button off the edge.
   const toolbar = (
-    <div className="flex w-full items-center gap-2 sm:w-auto" data-testid="diet-consult-toolbar">
+    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto" data-testid="diet-consult-toolbar">
+      {/* Before the search, because it is the coarser cut: which days, then which patient
+          within them. Wraps to its own line on a phone rather than squeezing the search
+          box, which is the control that needs the room. */}
+      <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="diet-consult-date-filter">
+        {DATE_PRESETS.map((d) => (
+          <button
+            key={d.key}
+            type="button"
+            onClick={() => setDatePreset(d.key)}
+            className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
+              datePreset === d.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
+            }`}
+            data-testid={`diet-consult-date-${d.key}`}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
       <div className="relative min-w-0 flex-1 sm:w-[260px] sm:flex-none">
         <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient..." className="h-10 pl-9" data-testid="diet-consult-search" />
@@ -724,6 +786,7 @@ const ConsultationList = ({ rows, onOpen }) => (
         <table className="w-full min-w-[720px] text-sm">
           <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
             <tr>
+              <th className="px-4 py-2.5 font-semibold">S.No</th>
               <th className="px-4 py-2.5 font-semibold">Patient</th>
               <th className="px-4 py-2.5 font-semibold">Contact</th>
               <th className="px-4 py-2.5 font-semibold">Plan</th>
@@ -735,8 +798,11 @@ const ConsultationList = ({ rows, onOpen }) => (
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {rows.map((p) => (
+            {rows.map((p, i) => (
               <tr key={p.lead_id} onClick={() => onOpen(p)} className="cursor-pointer hover:bg-slate-50" data-testid={`diet-consult-${p.lead_id}`}>
+                {/* Numbered off the list as it stands, not off anything on the record —
+                    so it still counts 1, 2, 3 down whatever the filters have left. */}
+                <td className="px-4 py-3 text-slate-400">{i + 1}</td>
                 <td className="px-4 py-3">
                   <p className="font-medium text-slate-800">{p.lead_name}<LeadMarks lead={p} className="ml-1.5" /></p>
                   {p.patient_number && <p className="font-mono text-[11px] text-slate-400">{p.patient_number}</p>}
