@@ -818,15 +818,19 @@ const RevenueLanes = ({ lanes, lane, onPick }) => (
  *  Slot first, not master first, because that is the shape of the fact and because asking
  *  it this way round cannot express two masters answering to the same class.
  */
-const ClassMasters = ({ masters, onSet, busy }) => (
-  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2" data-testid="zumba-class-masters">
-    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Who takes each class</span>
-    {masters.length === 0 ? (
-      <span className="text-[11px] text-slate-500" data-testid="zumba-class-masters-empty">
-        No Zumba accounts at this branch yet — add one in HR Admin, then customers are filed to a class automatically.
-      </span>
-    ) : (
-      TIME_SLOTS.map((slot) => {
+const ClassMasters = ({ masters, onSet, busy }) => {
+  // A branch with no Zumba accounts gets no row at all. The strip exists to report a
+  // pairing and let it be corrected; with nobody to pair it reported nothing and asked for
+  // nothing, and a full-width bar saying so sat between the cards and the list on every
+  // load. Where to add a master belongs in HR Admin, which is where somebody goes to add
+  // one — not on a band of this board that a branch already running its classes never
+  // sees. The pickers come back on their own the moment an account exists.
+  if (masters.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2" data-testid="zumba-class-masters">
+      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Who takes each class</span>
+      {TIME_SLOTS.map((slot) => {
         const holder = masters.find((m) => m.time_slot === slot);
         return (
           <label key={slot} className="flex items-center gap-1.5 text-[11px] text-slate-600">
@@ -843,10 +847,10 @@ const ClassMasters = ({ masters, onSet, busy }) => (
             </select>
           </label>
         );
-      })
-    )}
-  </div>
-);
+      })}
+    </div>
+  );
+};
 
 /**
  * The Payment Done card, opened rather than filtered.
