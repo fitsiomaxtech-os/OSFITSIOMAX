@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Receipt } from "lucide-react";
+import { Check, Coins, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { getBranches, getFinanceExpenses, approveFinanceExpense, rejectFinanceExpense } from "@/lib/api";
@@ -138,14 +138,31 @@ export const ExpenseApprovalsPanel = () => {
               data-testid={`finance-expense-approvals-row-${exp.id}`}
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-800">
-                  {exp.category}
-                  {exp.paid_to ? <span className="font-normal text-slate-500"> · to {exp.paid_to}</span> : null}
+                <p className="flex items-center gap-2 truncate text-sm font-medium text-slate-800">
+                  <span className="truncate">
+                    {exp.category}
+                    {exp.paid_to ? <span className="font-normal text-slate-500"> · to {exp.paid_to}</span> : null}
+                  </span>
+                  {/* Which of these came out of a tin. Marked because it changes what there
+                      is to approve against: rent arrives with an invoice and a transfer to
+                      check, petty cash arrives with a sentence the branch typed and nothing
+                      else -- so that sentence gets a line of its own below rather than
+                      being run in with the date and the reference. */}
+                  {exp.petty_cash ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700" data-testid={`finance-expense-approvals-petty-${exp.id}`}>
+                      <Coins className="h-2.5 w-2.5" /> Petty cash
+                    </span>
+                  ) : null}
                 </p>
                 <p className="truncate text-xs text-slate-500">
                   {[exp.branch_name, exp.expense_date, MODE_LABELS[exp.payment_mode] || exp.payment_mode,
-                    exp.reference, exp.note].filter(Boolean).join(" · ")}
+                    exp.reference, ...(exp.petty_cash ? [] : [exp.note])].filter(Boolean).join(" · ")}
                 </p>
+                {exp.petty_cash && exp.note ? (
+                  <p className="break-words text-xs font-medium text-slate-700" data-testid={`finance-expense-approvals-reason-${exp.id}`}>
+                    “{exp.note}”
+                  </p>
+                ) : null}
                 {/* Whose spending this is. Approving a figure without knowing who raised
                     it is initialling a number. */}
                 {exp.created_by ? (

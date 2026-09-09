@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Plus, Trash2, Receipt, X } from "lucide-react";
+import { Check, Coins, Plus, Trash2, Receipt, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -9,11 +9,17 @@ import {
   approveFinanceExpense, rejectFinanceExpense,
 } from "@/lib/api";
 import { EXPENSE_PAYMENT_MODE_OPTIONS, PAYMENT_MODE_LABELS, PAYMENT_MODE_COLORS, orderedPaymentModeEntries } from "@/lib/paymentModes";
+import { PETTY_CASH_LIMIT, PETTY_CASH_REASON_REQUIRED, isPettyCash } from "@/lib/pettyCash";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const blankExpense = { category: "", amount: "", branch_id: "", note: "", expense_date: todayIso(), payment_mode: "cash" };
+
+// The Accountant can log a branch's spending from here too, and a small cash one comes out
+// of that branch's tin exactly as the branch's own would. So the same reason is asked for
+// in the same words -- without it this form would send an expense the server refuses, and
+// the accountant would be told about a rule this dialog never mentioned.
 
 /**
  * Accountant > Expense — what went out, logged by hand (rent, salaries, supplies —
@@ -61,15 +67,19 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
 
   useEffect(() => { load(); }, [load]);
 
+  const expenseBranchId = (controlled ? effectiveBranchId : form.branch_id) || null;
+  const petty = isPettyCash(form.amount, form.payment_mode, expenseBranchId);
+
   const submit = async () => {
     if (!form.category.trim()) { toast.error("Expense name is required"); return; }
     if (!(Number(form.amount) > 0)) { toast.error("Enter an amount"); return; }
+    if (petty && !form.note.trim()) { toast.error(PETTY_CASH_REASON_REQUIRED); return; }
     setSaving(true);
     try {
       await createFinanceExpense({
         ...form,
         amount: Number(form.amount),
-        branch_id: (controlled ? effectiveBranchId : form.branch_id) || null,
+        branch_id: expenseBranchId,
       });
       toast.success("Expense logged");
       setForm(blankExpense);
@@ -286,7 +296,22 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
                   })}
                 </div>
               </div>
-              <Input placeholder="Remarks (optional)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} data-testid="finance-expense-note" />
+              <Input
+                placeholder={petty ? "Reason — what the petty cash was spent on" : "Remarks (optional)"}
+                value={form.note}
+                onChange={(e) => setForm({ ...form, note: e.target.value })}
+                className={petty && !form.note.trim() ? "border-amber-300" : ""}
+                data-testid="finance-expense-note"
+              />
+              {petty && (
+                <p className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800" data-testid="finance-expense-petty-hint">
+                  <Coins className="mt-0.5 h-3 w-3 shrink-0" />
+                  <span>
+                    <b>Petty cash.</b> Rs.{PETTY_CASH_LIMIT.toLocaleString("en-IN")} or less in cash comes out of this branch&apos;s tin,
+                    and the reason above is the only record of what it bought.
+                  </span>
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
               <Button variant="outline" onClick={() => setShowAdd(false)} data-testid="finance-expense-cancel">Cancel</Button>

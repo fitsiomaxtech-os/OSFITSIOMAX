@@ -774,6 +774,14 @@ async def list_expenses(
         r["branch_name"] = branch_name_map.get(r.get("branch_id"), "") if r.get("branch_id") else "All Branches"
         r["approved"] = _expense_approved(r)
         r["rejected"] = bool(r.get("rejected"))
+        # Worked out from the row rather than read off it, so one written before the tin
+        # existed is described the same way as one written after it -- and so the flag can
+        # never claim petty cash for an expense the tin holds no movement for. The
+        # accountant reading the queue is told which of these came out of the tin, where
+        # the reason typed by the branch is the only paper there is.
+        r["petty_cash"] = _is_petty_cash_expense(
+            r.get("amount") or 0, r.get("payment_mode") or "", r.get("branch_id"),
+        )
     approved_rows = [r for r in rows if r["approved"]]
     pending_rows = [r for r in rows if not r["approved"] and not r["rejected"]]
     # Same Cash/Cheque/Bank/UPI split Income's own summary carries (see get_branch_finance),
@@ -822,12 +830,26 @@ async def create_expense(
     if raised_by_branch and not user.branch_id:
         raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
 
+    branch_id = user.branch_id if raised_by_branch else (payload.branch_id or None)
+    reason = (payload.note or "").strip()
+    # Petty cash is the one kind of spending with no paper behind it. Rent has an invoice,
+    # a transfer has a reference, a card payment has a batch -- notes out of a tin have
+    # only whoever took them and whatever they say it was for, so that sentence is the
+    # whole of what the accountant has to sign off on and it is required here rather than
+    # invited. Left optional for everything else, which arrives carrying a payee and a
+    # bill number somebody can check the claim against.
+    if _is_petty_cash_expense(payload.amount, payload.payment_mode or "", branch_id) and not reason:
+        raise HTTPException(
+            status_code=400,
+            detail="Say what the petty cash was spent on — it is what the accountant approves it on",
+        )
+
     doc = {
         "id": str(uuid.uuid4()),
         "category": payload.category.strip(),
         "amount": payload.amount,
-        "branch_id": user.branch_id if raised_by_branch else (payload.branch_id or None),
-        "note": (payload.note or "").strip(),
+        "branch_id": branch_id,
+        "note": reason,
         "paid_to": (payload.paid_to or "").strip(),
         "payment_mode": (payload.payment_mode or "").strip(),
         "reference": (payload.reference or "").strip(),
@@ -853,8 +875,13 @@ async def create_expense(
     # branch can see is wrong by looking into it.
     if _is_petty_cash_expense(doc["amount"], doc["payment_mode"], doc["branch_id"]):
         await _record_petty_cash_movement(
+            # The reason, not the category. A tin's book reading "Travel, Travel, Travel"
+            # down a month says nothing anyone can check; "Auto to the courier office" is
+            # the line the branch wrote and the line the accountant approved it on, and it
+            # is the same sentence in both places because it is the same claim.
             branch_id=doc["branch_id"], delta=-doc["amount"], kind="expense",
-            on=doc["expense_date"], note=doc["category"], user=user, expense_id=doc["id"],
+            on=doc["expense_date"], note=reason or doc["category"], user=user,
+            expense_id=doc["id"],
         )
         doc["petty_cash"] = True
         doc["petty_cash_balance"] = await _petty_cash_balance(doc["branch_id"])

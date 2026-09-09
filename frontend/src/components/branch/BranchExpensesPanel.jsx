@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, Coins, Plus, Receipt, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Clock, Coins, Plus, Receipt, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { getFinanceExpenses, createFinanceExpense, getPettyCash, topUpPettyCash } from "@/lib/api";
+import { PETTY_CASH_LIMIT, PETTY_CASH_REASON_REQUIRED, isPettyCash } from "@/lib/pettyCash";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
@@ -21,15 +22,6 @@ const MODES = [
   ["cash", "Cash"], ["upi", "UPI"], ["card", "Card"],
   ["account_transfer", "Bank Transfer"], ["cheque", "Cheque"],
 ];
-
-// What is small enough to come out of the tin, in step with PETTY_CASH_LIMIT in
-// backend/routers/v3_finance.py -- which is what actually decides it. Repeated here only
-// so the form can say so before the branch presses Send, never to make the call itself.
-const PETTY_CASH_LIMIT = 1000;
-
-/** Whether one expense, as typed, will come out of the tin. The same three tests
- *  _is_petty_cash_expense applies on the server: small enough, paid in cash, at a branch. */
-const isPettyCash = (amount, mode) => Number(amount) > 0 && Number(amount) <= PETTY_CASH_LIMIT && mode === "cash";
 
 const todayIso = () => {
   const d = new Date();
@@ -75,14 +67,27 @@ const AddExpenseDialog = ({ onClose, onSaved, pettyBalance }) => {
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
+  const petty = isPettyCash(form.amount, form.payment_mode);
+
   const submit = async () => {
     const amount = Number(form.amount);
     if (!(amount > 0)) { toast.error("Enter how much was spent"); return; }
     if (!form.paid_to.trim()) { toast.error("Say who it was paid to"); return; }
+    // Refused here as well as on the server, so the branch is told at the field rather
+    // than by a request coming back. Petty cash is the one kind of spending with no paper
+    // behind it -- no invoice, no reference, just notes out of a tin -- so the reason is
+    // the whole of what the accountant has to approve it on, and an empty one sends them
+    // a figure to initial.
+    if (petty && !form.note.trim()) {
+      toast.error(PETTY_CASH_REASON_REQUIRED);
+      return;
+    }
     setSaving(true);
     try {
       await createFinanceExpense({ ...form, amount });
-      toast.success("Sent to the accountant for approval");
+      toast.success(petty
+        ? "Sent to the accountant — and taken out of the tin"
+        : "Sent to the accountant for approval");
       onSaved();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not send that");
@@ -176,7 +181,7 @@ const AddExpenseDialog = ({ onClose, onSaved, pettyBalance }) => {
               limit paid in cash comes out of the tin, and the branch is the one who has to
               have the notes -- so it is told what the tin holds and what will be left,
               before it presses Send rather than by a balance that has quietly moved. */}
-          {isPettyCash(form.amount, form.payment_mode) && (
+          {petty && (
             <div
               className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[11px] ${
                 pettyBalance != null && Number(form.amount) > pettyBalance
@@ -198,16 +203,32 @@ const AddExpenseDialog = ({ onClose, onSaved, pettyBalance }) => {
             </div>
           )}
 
+          {/* Asked of every expense and required of the petty cash ones. A Rs.40,000 rent
+              payment carries a payee, a bill number and a transfer behind it; Rs.120 out of
+              a tin carries this sentence and nothing else, and a month of them reading
+              "Travel" is a month no accountant can check. */}
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">What it was for</label>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              {petty ? "Reason — what the petty cash was spent on *" : "What it was for"}
+            </label>
             <textarea
               rows={3}
               value={form.note}
               onChange={(e) => set("note", e.target.value)}
-              placeholder="The accountant reads this before approving it"
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
+              placeholder={petty ? "Auto to the courier office, receipt kept in the tin" : "The accountant reads this before approving it"}
+              className={`w-full rounded-md border px-3 py-2 text-sm focus:outline-none ${
+                petty && !form.note.trim()
+                  ? "border-amber-300 focus:border-amber-400"
+                  : "border-slate-200 focus:border-sky-400"
+              }`}
               data-testid="branch-expense-note"
             />
+            {petty && !form.note.trim() && (
+              <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-amber-700" data-testid="branch-expense-reason-missing">
+                <AlertTriangle className="h-3 w-3" />
+                Required for petty cash — it is the only thing the accountant can approve it on
+              </span>
+            )}
           </div>
         </div>
 
@@ -238,6 +259,12 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   const [petty, setPetty] = useState(null);
   const [toppingUp, setToppingUp] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState("");
+  const [topUpNote, setTopUpNote] = useState("");
+  // The tin's book, folded away by default. What is in the tin is the figure a desk needs
+  // at a glance; what went through it is the thing somebody opens when the figure looks
+  // wrong, and eight lines of history above the expense table would push the table off the
+  // screen for everyone else.
+  const [showMovements, setShowMovements] = useState(false);
 
   // Held in a ref rather than named as a dependency of `load`: the caller passes an inline
   // arrow, which is a new function every render, and as a dependency it would rebuild
@@ -287,9 +314,12 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
     if (!(amount > 0)) { toast.error("Enter how much is going into the tin"); return; }
     setToppingUp(true);
     try {
-      await topUpPettyCash({ branch_id: branchId, amount });
+      // The note rides along so the tin's book reads as sentences rather than as a column
+      // of bare amounts -- the same reason a petty cash expense has to carry its reason.
+      await topUpPettyCash({ branch_id: branchId, amount, note: topUpNote.trim() });
       toast.success("Petty cash topped up");
       setTopUpAmount("");
+      setTopUpNote("");
       loadPetty();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not top up petty cash");
@@ -388,7 +418,7 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
 
           {/* Notes moving from the drawer into the tin. Not an expense: nothing has been
               spent, and the branch holds the same cash after it as before. */}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
             <Input
               type="number"
               min="0"
@@ -398,6 +428,14 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
               className="h-9 w-28 text-sm tabular-nums"
               data-testid="branch-petty-cash-topup-amount"
             />
+            <Input
+              value={topUpNote}
+              onChange={(e) => setTopUpNote(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submitTopUp(); }}
+              placeholder="What it is for"
+              className="h-9 w-44 text-sm"
+              data-testid="branch-petty-cash-topup-note"
+            />
             <Button
               onClick={submitTopUp}
               disabled={toppingUp}
@@ -406,6 +444,46 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
             >
               {toppingUp ? "Adding…" : "Add to tin"}
             </Button>
+          </div>
+
+          {/* The book behind the balance. Every line says what it was for, because that is
+              the only evidence a tin produces -- there is no invoice to go back to. */}
+          <div className="w-full border-t border-slate-100 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowMovements((v) => !v)}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-700"
+              data-testid="branch-petty-cash-movements-toggle"
+            >
+              {showMovements ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              Movements ({(petty.movements || []).length})
+              <span className="ml-1 font-normal text-slate-400">
+                In {fmt(petty.topped_up)} · Out {fmt(petty.spent)}
+              </span>
+            </button>
+            {showMovements && (
+              <div className="mt-2 space-y-1" data-testid="branch-petty-cash-movements">
+                {(petty.movements || []).length === 0 ? (
+                  <p className="py-3 text-center text-[11px] text-slate-400">Nothing has moved through the tin yet.</p>
+                ) : (petty.movements || []).slice(0, 12).map((m) => (
+                  <div key={m.id} className="flex items-baseline gap-2 rounded-md bg-slate-50/70 px-2.5 py-1.5 text-[11px]" data-testid={`branch-petty-cash-movement-${m.id}`}>
+                    <span className="w-20 shrink-0 tabular-nums text-slate-400">{m.on || "—"}</span>
+                    <span className="min-w-0 flex-1 break-words text-slate-600">
+                      {m.note || (m.kind === "topup" ? "Topped up" : "Spent")}
+                      {m.created_by ? <span className="text-slate-400"> · {m.created_by}</span> : null}
+                    </span>
+                    <span className={`shrink-0 font-semibold tabular-nums ${m.delta > 0 ? "text-emerald-700" : "text-rose-600"}`}>
+                      {m.delta > 0 ? "+" : "−"}{fmt(m.amount)}
+                    </span>
+                  </div>
+                ))}
+                {(petty.movements || []).length > 12 && (
+                  <p className="pt-1 text-[10px] text-slate-400">
+                    Showing the last 12 of {(petty.movements || []).length}.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -501,6 +579,14 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
                 <td className="break-words px-3 py-2.5 text-slate-600">{r.paid_to || "—"}</td>
                 <td className="px-3 py-2.5 text-slate-600">
                   {(MODES.find(([k]) => k === r.payment_mode) || [null, r.payment_mode || "—"])[1]}
+                  {/* Marked on the row rather than left to be worked out from the amount
+                      and the mode: this is the one the tin paid for, so it is the one whose
+                      reason above is the only record of what the money bought. */}
+                  {r.petty_cash ? (
+                    <span className="mt-0.5 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700" data-testid={`branch-expense-petty-${r.id}`}>
+                      <Coins className="h-2.5 w-2.5" /> Tin
+                    </span>
+                  ) : null}
                 </td>
                 <td className="break-words px-3 py-2.5 text-slate-500">{r.reference || "—"}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-slate-800">{fmt(r.amount)}</td>
