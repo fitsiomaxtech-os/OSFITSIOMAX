@@ -6141,14 +6141,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           ) : t.kind === "paid" ? (
                             // Says so and stops there, exactly as the popup's card does. A
                             // fee that is in is not a thing to press.
-                            <>
-                              <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-middle font-semibold text-emerald-700">
-                                <CheckCircle2 className="h-3 w-3" /> Paid
-                              </span>
-                              {t.mode && (
-                                <span className="mt-1 block text-[10px] uppercase tracking-wide text-slate-300">{t.mode}</span>
-                              )}
-                            </>
+                            //
+                            // And says only that. How it was paid is already under the
+                            // figure in the fee column beside this one, where it sits with
+                            // the amount and what it bought — printing UPI twice across one
+                            // row is two columns answering the same question, and it left
+                            // this cell two lines tall for no second fact.
+                            <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-middle font-semibold text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3" /> Paid
+                            </span>
                           ) : (
                             <>
                               <Button
@@ -6226,14 +6227,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             // Says so and stops there, exactly as the popup's card does. A
                             // fee that is in is not a thing to press; correcting one is done
                             // from the patient, where the figure it is correcting is on screen.
-                            <>
-                              <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-middle font-semibold text-emerald-700">
-                                <CheckCircle2 className="h-3 w-3" /> Paid
-                              </span>
-                              {c.mode && (
-                                <span className="mt-1 block text-[10px] uppercase tracking-wide text-slate-300">{c.mode}</span>
-                              )}
-                            </>
+                            // The mode is not repeated here — see the note on its twin above.
+                            <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-middle font-semibold text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3" /> Paid
+                            </span>
                           ) : (
                             <>
                               <Button
