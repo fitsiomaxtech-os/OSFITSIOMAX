@@ -467,23 +467,56 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
     [transactions],
   );
 
+  // What the figures below are actually scoped to, said in words. Read off the same state
+  // the controls set, so it cannot drift from them the way a hand-written caption would.
+  const scopeLabel = [
+    fixedBranchId || branchId
+      ? (branches.find((b) => b.id === (fixedBranchId || branchId))?.branch_name || "This branch")
+      : "All branches",
+    tab === "closing"
+      ? "day-end count"
+      : preset === "custom" && customFrom && customTo
+      ? `${isoToManual(customFrom)} to ${isoToManual(customTo)}`
+      : (DATE_PRESETS.find((d) => d.key === preset)?.label || "All") + " to date",
+  ].join(" \u00b7 ");
+
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
+      {/* The page says what it is before it says what the numbers are. */}
+      <div className="flex flex-wrap items-end justify-between gap-3" data-testid="accountant-manage-header">
+        <div>
+          <h2 className="font-heading text-2xl font-semibold tracking-tight text-slate-900">Accountant Manage</h2>
+          <p className="mt-0.5 text-sm text-slate-600">
+            Every rupee this branch took and spent, what has been signed off, and what it counted at close.
+          </p>
+        </div>
+        {/* The scope as a chip rather than a third row of controls: it is there to be read
+            back, not set -- the controls that set it are directly underneath. */}
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600"
+          data-testid="accountant-manage-scope"
+        >
+          <CalendarDays className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+          {scopeLabel}
+        </span>
+      </div>
+
       {/* One row, read left to right: which branch, then which view of it, then the range
           it is narrowed to. Branch and range each used to hold a band of their own — three
           rows of controls above the figures, with the tabs stranded between the two things
           that scope them. The branch select keeps its condition: the boards that pass a
           fixed branch have nothing to choose, and the row starts at the tabs for them. */}
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="accountant-manage-maintabs">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm" data-testid="accountant-manage-maintabs">
         {!fixedBranchId && (
           // The divider is desktop-only: once this wraps on a phone it is a line across
           // the middle of a row rather than between two of them.
           <div className="flex items-center gap-2 pl-1.5 sm:border-r sm:border-slate-200 sm:pr-3">
-            <label className="text-xs font-medium text-slate-600">Branch:</label>
+            <label htmlFor="accountant-manage-branch" className="text-xs font-medium text-slate-600">Branch:</label>
             <select
+              id="accountant-manage-branch"
               value={branchId}
               onChange={(e) => setBranchId(e.target.value)}
-              className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+              className="h-9 rounded-md border border-slate-200 px-2 text-sm text-slate-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1"
               data-testid="accountant-manage-branch-select"
             >
               <option value="">All Branches</option>
@@ -496,7 +529,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`min-w-0 rounded-md px-3.5 py-2 text-center text-sm font-medium transition ${mainTabClasses(t, tab === t.key)}`}
+              className={`min-w-0 rounded-md px-3.5 py-2 text-center text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${mainTabClasses(t, tab === t.key)}`}
               data-testid={`accountant-manage-maintab-${t.key}`}
             >
               {t.label}
@@ -517,7 +550,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
               <button
                 key={p.key}
                 onClick={() => (p.key === "custom" ? openCustom() : setPreset(p.key))}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${preset === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${preset === p.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
                 data-testid={`accountant-manage-preset-${p.key}`}
               >
                 {p.label}
