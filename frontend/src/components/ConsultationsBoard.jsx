@@ -10,7 +10,6 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { LeadDocuments } from "@/components/LeadDocuments";
 import { ProgressionTab } from "@/components/ProgressionTab";
 import { LeadMarks, RescheduledTag } from "@/components/ui/lead-marks";
-import { PhysioTreatmentChips } from "@/components/ui/physio-treatment-chips";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
@@ -29,7 +28,7 @@ import {
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
 import { loadSession } from "@/lib/session";
-import { endTime12h, slotRange12h, slotTo12h, to12h } from "@/lib/time";
+import { endTime12h, slotRange12h, to12h } from "@/lib/time";
 import { ALL_PAYMENT_MODE_LABELS, isHandheld, paymentReference } from "@/lib/receipt";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { AppointmentConfirmCard } from "@/components/AppointmentConfirmCard";
@@ -1854,91 +1853,6 @@ const buildRehabProgress = (rows, lead) => {
     current,
     reassigned: previous.length > 0,
   };
-};
-
-/**
- * The rehab course as it stands, day by day.
- *
- * The read-back half of the physio's own day list — nothing here is a control. A rehab day
- * is signed off on the physio's board and nowhere else, so what the desk needs from this
- * panel is the record: which days are done, which one is today, and which one an absence
- * has left without a date. That last state is the only row anybody has to act on, which is
- * why it is drawn in amber rather than folded in with the days still to come.
- */
-const RehabDayList = ({ days, showPhysio = false, testid }) => {
-  if (!days || days.length === 0) return null;
-  const today = localToday();
-  return (
-    <div className="mt-3" data-testid={testid}>
-      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Rehab Days</p>
-      <div className="max-h-72 space-y-1.5 overflow-y-auto pr-0.5">
-        {days.map((day) => {
-          const done = day.status === "completed";
-          const on = String(day.slot_time || "").slice(0, 10);
-          const undated = !on;
-          const isToday = !done && on === today;
-          return (
-            <div
-              key={day.id}
-              className={`flex items-start gap-2.5 rounded-lg border p-2.5 ${
-                done ? "border-emerald-200 bg-emerald-50/60"
-                : undated ? "border-amber-200 bg-amber-50/60"
-                : isToday ? "border-sky-200 bg-sky-50/50"
-                : "border-slate-200 bg-white"
-              }`}
-              data-testid={`cons-rehab-day-${day.day_number}`}
-            >
-              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-                done ? "bg-emerald-200 text-emerald-800"
-                : undated ? "bg-amber-200 text-amber-800"
-                : isToday ? "bg-sky-200 text-sky-800"
-                : "bg-slate-100 text-slate-500"
-              }`}>
-                {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : day.day_number}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-slate-700">
-                  Day {day.day_number}{day.total_days ? ` of ${day.total_days}` : ""}
-                </p>
-                <p className={`text-[10px] ${undated ? "font-semibold text-amber-700" : "text-slate-400"}`}>
-                  {on
-                    ? `${dayLabel(on)} at ${slotTo12h(day.slot_time)}`
-                    : "Missed — waiting on a new date from the Branch Admin"}
-                </p>
-                {/* Who ran the day, and only where it is not already obvious. On a course
-                    one physio has held throughout, their name is at the top of the panel
-                    and a copy of it on all twenty-six rows is noise. */}
-                {showPhysio && day.physio_name && (
-                  <p className="mt-0.5 text-[10px] font-medium text-slate-500" data-testid={`cons-rehab-day-physio-${day.day_number}`}>{day.physio_name}</p>
-                )}
-                {(day.physio_treatments || []).length > 0 && (
-                  <div className="mt-1">
-                    <PhysioTreatmentChips names={day.physio_treatments} testid={`cons-rehab-day-treatments-${day.day_number}`} />
-                  </div>
-                )}
-                {day.rehab_remarks && (
-                  <p className="mt-0.5 text-[10px] leading-relaxed text-emerald-700">
-                    <span className="font-semibold">Rehab: </span>{day.rehab_remarks}
-                  </p>
-                )}
-                {done && day.completed_by && (
-                  <p className="mt-0.5 text-[10px] text-slate-400">Signed off by {day.completed_by}</p>
-                )}
-              </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                done ? "bg-emerald-100 text-emerald-700"
-                : undated ? "bg-amber-100 text-amber-700"
-                : isToday ? "bg-sky-100 text-sky-700"
-                : "bg-slate-100 text-slate-500"
-              }`}>
-                {done ? "Complete" : undated ? "Needs a date" : isToday ? "Today" : "Booked"}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 };
 
 /** Pick a consultation slot the way the branch actually has to pick one: a date, then
@@ -7721,13 +7635,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   </div>
                 ) : null;
 
-                const RehabDays = rehabProgress ? (
-                  <RehabDayList
-                    days={rehabProgress.days}
-                    showPhysio={rehabProgress.reassigned}
-                    testid="cons-rehab-day-list"
-                  />
-                ) : null;
 
                 const DietDetailBody = (
                   <>
@@ -7853,9 +7760,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                    than under the package. This was one column of stacked cards, which put the
                    step to take a scroll below the facts it was to be taken on.
 
-                   The day list stays full width beneath both. It is a table of every day of
-                   the course, and half a panel is not enough to read a date, a time and a
-                   physio on one line. */
+                   Every day of the course used to be listed underneath, twenty-six rows of
+                   date, remark and sign-off. It is the physio's record and it is read on the
+                   physio's own board; here it buried the two columns above it under a scroll
+                   nobody came to this panel for. The counts that matter — days completed, how
+                   many are left, the bar — are in the left column, and who ran them is in the
+                   right. */
                 const RehabDetailBody = (
                   <>
                     <div className="grid grid-cols-1 gap-x-4 gap-y-3 lg:grid-cols-2">
@@ -7980,7 +7890,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         ) : null}
                       </div>
                     </div>
-                    {RehabDays}
                   </>
                 );
 
