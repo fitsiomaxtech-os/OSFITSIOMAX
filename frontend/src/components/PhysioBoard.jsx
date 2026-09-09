@@ -1924,6 +1924,14 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     // opened from the calendar on the morning it falls is workable on it.
     const dayIso = (s.slot_time || "").slice(0, 10);
     const canWork = isOpenDay && (dayIso <= todayIso || dayIso === activeDate);
+    // The dates this day was already booked for and the patient did not arrive. An
+    // absence does not cancel the day — it slides the day onto the next slot and pushes
+    // the rest of the course down one — so once the Branch Admin has re-dated it the row
+    // is indistinguishable from a day that was always on this date. The physio reads
+    // "Day 12, Thursday" with no way to know Thursday is this day's second date, and the
+    // patient in front of them is a patient who has already missed one. Written by the
+    // Absent button and never cleared, so it is a history rather than a status.
+    const missed = s.absences || [];
     // Says which date is holding this day up, so the block reads as somewhere
     // to go rather than a dead end.
     const blockedByRow = blockedBy
@@ -1982,6 +1990,17 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                 </span>
               )
             )}
+            {/* Sits with Opened and Held for review because it is read the same way —
+                at a glance, off the title line, while scanning the list for the day to
+                work. The dates themselves go underneath. */}
+            {missed.length > 0 && (
+              <span
+                className="rounded bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700"
+                data-testid={`physio-day-rescheduled-${s.id}`}
+              >
+                Rescheduled{missed.length > 1 ? ` ×${missed.length}` : ""}
+              </span>
+            )}
           </p>
           <p className={`text-[10px] ${awaiting ? "font-semibold text-amber-700" : "text-slate-400"}`}>
             {s.slot_time
@@ -1990,6 +2009,22 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                 ? "Missed class — Branch Admin to give this day a date"
                 : "—"}
           </p>
+          {missed.length > 0 && (
+            // Directly under the date this day now holds, because the two are one fact:
+            // the day is here because it was not attended there. Who marked each absence
+            // and whatever they wrote at the time hang off the tooltip — useful when it
+            // is read, but not what the row is for.
+            <p
+              className="mt-0.5 text-[10px] font-semibold text-amber-700"
+              title={missed
+                .map((a) => `Absent on ${fmtDate(a.date) || a.date || "an unrecorded date"}${a.marked_by ? ` — marked by ${a.marked_by}` : ""}${a.remarks ? `: ${a.remarks}` : ""}`)
+                .join("\n")}
+              data-testid={`physio-day-missed-${s.id}`}
+            >
+              Missed {missed.length > 1 ? `${missed.length} times` : "once"} — was{" "}
+              {missed.map((a) => fmtDate(a.date) || a.date).filter(Boolean).join(" · ") || "an unrecorded date"}
+            </p>
+          )}
           {(s.physio_treatments || []).length > 0 && (
             <div className="mt-1">
               <PhysioTreatmentChips names={s.physio_treatments} testid={`physio-day-treatments-${s.id}`} />
