@@ -6035,22 +6035,32 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     <td className="whitespace-nowrap px-3 py-3 align-middle text-xs">
                       {l.appointment_date ? (
                         <span
-                          className={`inline-flex max-w-full flex-col items-start rounded-md border px-2 py-0.5 align-middle font-semibold ${appointmentTone(l.appointment_date)}`}
+                          className={`flex w-full flex-col items-center rounded-md border px-2 py-1 align-middle font-semibold ${appointmentTone(l.appointment_date)}`}
                           data-testid={`cons-appt-${l.id}`}
                         >
                           {/* Stacked, because this column is a narrow slice of a
                               fixed-layout table and the two on one line ran the chip
                               past its edge. The width is what the stacked pair was
-                              sized for. */}
-                          <span className="flex items-center gap-1">
+                              sized for.
+
+                              Full width and centred rather than shrink-to-fit and
+                              left-aligned. Sized to its own text, every chip in the
+                              column was a different width — "Wed, 9 Sept" and
+                              "Thu, 20 Aug" do not measure the same — so a column of
+                              them had a ragged right edge and no two borders lined up.
+                              Centring also retires the hand-set indent that was holding
+                              the time under the date past the icon: a number kept in
+                              place by a padding that has to match an icon's width is one
+                              that slips the moment either changes. */}
+                          <span className="flex items-center gap-1 whitespace-nowrap">
                             <Calendar className="h-3 w-3 shrink-0" />
                             {apptDayLabel(l.appointment_date)}
                           </span>
                           {l.appointment_time && (
-                            <span className="pl-4 text-[11px] font-bold opacity-90">{to12h(l.appointment_time)}</span>
+                            <span className="whitespace-nowrap text-[11px] font-bold opacity-90">{to12h(l.appointment_time)}</span>
                           )}
                         </span>
-                      ) : <span className="text-slate-400">—</span>}
+                      ) : <span className="block text-center text-slate-400">—</span>}
                     </td>
                     <td className="truncate px-4 py-3 align-middle leading-5 text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
                     <td className="px-4 py-3 align-middle">
