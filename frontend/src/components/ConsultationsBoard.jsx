@@ -6155,8 +6155,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             // the amount and what it bought — printing UPI twice across one
                             // row is two columns answering the same question, and it left
                             // this cell two lines tall for no second fact.
-                            <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-middle font-semibold text-emerald-700">
-                              <CheckCircle2 className="h-3 w-3" /> Paid
+                            <span className={`flex h-8 w-full items-center justify-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 font-semibold text-emerald-700 ${ACT_BTN}`}>
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> Paid
                             </span>
                           ) : (
                             <>
@@ -6221,8 +6221,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             // fee that is in is not a thing to press; correcting one is done
                             // from the patient, where the figure it is correcting is on screen.
                             // The mode is not repeated here — see the note on its twin above.
-                            <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-middle font-semibold text-emerald-700">
-                              <CheckCircle2 className="h-3 w-3" /> Paid
+                            <span className={`flex h-8 w-full items-center justify-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 font-semibold text-emerald-700 ${ACT_BTN}`}>
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> Paid
                             </span>
                           ) : (
                             <>
