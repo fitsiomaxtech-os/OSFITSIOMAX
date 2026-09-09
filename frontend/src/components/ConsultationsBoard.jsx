@@ -11434,7 +11434,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                               <h4 className="text-base font-bold text-slate-800" data-testid="cons-slot-picker-date">{longDate(pickerDate)}</h4>
                               <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-semibold text-slate-400">
-                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-400" /> Open</span>
+                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-emerald-400 bg-white" /> Open</span>
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-600" /> Paid day</span>
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-rose-500" /> Unpaid day</span>
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" /> Booked</span>
@@ -11499,7 +11499,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                             ? pickedPaid
                                               ? "border-emerald-500 bg-emerald-100 shadow-md ring-2 ring-emerald-200"
                                               : "border-rose-400 bg-rose-100 shadow-md ring-2 ring-rose-200"
-                                            : "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:shadow-sm"
+                                            /* White until it is chosen. A pale green resting
+                                               state made picking one a change between two
+                                               greens a shade apart, which across twenty tiles
+                                               reads as no change at all. The fill now says
+                                               chosen or not; the border alone carries "this
+                                               hour is open". */
+                                            : "border-emerald-200 bg-white hover:border-emerald-400 hover:bg-emerald-50 hover:shadow-sm"
                                         }`}
                                         title={ownClash
                                           ? `${selectedLead.name} already has a ${ownClash} at ${to12h(time)} — move that first, or pick another time`
@@ -11537,7 +11543,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                             held.map((tag) => (
                                               <span
                                                 key={tag.key}
-                                                className={`rounded border border-current px-1.5 py-0.5 leading-tight ${tag.mine ? "bg-white" : "bg-white/60 font-medium"}`}
+                                                /* The tile under these is white now, so the two
+                                                   fills that separated "yours" from everyone
+                                                   else's against a green tile both read as no
+                                                   fill at all. A neutral tint carries it
+                                                   instead — it darkens whatever it sits on, so
+                                                   it reads the same over the white of an open
+                                                   hour and the amber of a full one. */
+                                                className={`rounded border border-current px-1.5 py-0.5 leading-tight ${tag.mine ? "bg-black/[0.06]" : "font-medium"}`}
                                                 data-testid={`cons-slot-tag-${time}-${tag.key}`}
                                               >
                                                 {tag.mine ? "your " : ""}{tag.label}{tag.count > 1 ? ` ×${tag.count}` : ""}
