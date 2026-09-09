@@ -6365,7 +6365,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
               {(selectedLead.assigned_physio_name || isConsultant) && (
                 <div className="flex shrink-0 flex-col items-start gap-1 self-stretch border-l border-slate-200 pl-3" data-testid="cons-detail-standing">
                   {selectedLead.assigned_physio_name && (
-                    <p className="text-xs font-medium text-emerald-600" data-testid="cons-detail-expert">Expert: {selectedLead.assigned_physio_name}</p>
+                    <p className="flex min-w-0 items-baseline gap-1.5 text-xs" data-testid="cons-detail-expert">
+                      {/* "Expert:" was part of the sentence and the whole of it was green.
+                          Green on a person's name reads as a state — the same green the
+                          board uses for a settled fee — when it is only a field name and
+                          its value. Labelled like a field now, and the name carries the
+                          weight instead of the colour. */}
+                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Expert</span>
+                      <span className="truncate font-semibold text-slate-800">{selectedLead.assigned_physio_name}</span>
+                    </p>
                   )}
                   {isConsultant && (
                     <span
@@ -6528,9 +6536,19 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                               {/* Two lines, then it stops — with the whole of it on the
                                   title and under Full record. A box that grows with
                                   whatever was typed into it is how four of these came to
-                                  fill the screen. */}
+                                  fill the screen.
+
+                                  What is written carries a shade more weight than the
+                                  label above it: the two were a step apart in size and the
+                                  same in colour, so a cell read as one grey block rather
+                                  than as a heading and an answer.
+
+                                  What is not written is said in italics. In upright grey it
+                                  sat in the same place, at the same size, as a diagnosis —
+                                  and "Not written yet" is the absence of a value, not a
+                                  short one. */}
                               <dd
-                                className={`mt-0.5 line-clamp-2 text-xs leading-5 ${c.value ? "text-slate-700" : "text-slate-400"}`}
+                                className={`mt-0.5 line-clamp-2 text-xs leading-5 ${c.value ? "font-medium text-slate-800" : "italic text-slate-400"}`}
                                 title={c.value || undefined}
                               >
                                 {c.value || "Not written yet"}
