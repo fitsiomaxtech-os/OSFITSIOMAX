@@ -466,6 +466,63 @@ async def approve_transaction(
     return {"message": "Approved"}
 
 
+class BulkApproveInput(BaseModel):
+    # The payments being signed off, by id. Separate from TransactionRequestInput despite
+    # the identical shape: that one raises a day, this one signs it off, and the two are
+    # deliberately different endpoints with different role lists -- see
+    # request_transactions. A model shared between them would be one edit away from
+    # sharing a role list too.
+    activity_ids: list = []
+
+
+@router.post("/finance/transactions/bulk-approve")
+async def bulk_approve_transactions(
+    payload: BulkApproveInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+):
+    """Sign off a whole selection at once, for a queue that arrives hundreds deep.
+
+    WHAT THIS GIVES UP, stated plainly because it is the point of the endpoint: the
+    one-at-a-time approve above asks the accountant to re-key something against the row's
+    own payment mode -- the amount for cash, the UTR for a transfer, the number on the
+    cheque -- and stores it as an independent second reading. Nothing here can ask that
+    two hundred times, so these rows are approved carrying who and when and nothing to
+    check against. It is a weaker signature than the popup's, and the caller should say so
+    before it is used. Rows needing that check should go through approve_transaction.
+
+    update_many per book rather than the per-id ladder request_transactions walks: that
+    one is fine for a day's forty, but four hundred ids times four collections is sixteen
+    hundred round trips for work Mongo will do in four.
+
+    Already-approved rows are passed over rather than re-stamped, so an approval keeps the
+    name and time of whoever actually gave it -- the same rule request_transactions
+    follows for rows already sent up.
+    """
+    ids = [i for i in (payload.activity_ids or []) if i]
+    if not ids:
+        raise HTTPException(status_code=400, detail="Pick at least one payment to approve")
+    # The ceiling /finance/approvals reads to, so nothing can be asked for here that the
+    # tab it is driven from could not have listed in the first place.
+    if len(ids) > 5000:
+        raise HTTPException(status_code=400, detail="Too many payments in one go")
+
+    update = {"$set": {"approved": True, "approved_by": user.full_name, "approved_at": _now()}}
+    approved = 0
+    for name in TRANSACTION_COLLECTIONS:
+        res = await v3_col(name).update_many({"id": {"$in": ids}, "approved": {"$ne": True}}, update)
+        approved += res.modified_count
+
+    # Not a 404 when nothing moved: with every picked row already approved -- two
+    # accountants on the same queue -- there is nothing wrong to report, only nothing
+    # left to do.
+    skipped = len(ids) - approved
+    return {
+        "message": f"{approved} payment{'' if approved == 1 else 's'} approved",
+        "approved": approved,
+        "skipped": skipped,
+    }
+
+
 @router.post("/finance/transactions/{activity_id}/unapprove")
 async def unapprove_transaction(
     activity_id: str,

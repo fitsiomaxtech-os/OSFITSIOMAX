@@ -380,6 +380,11 @@ export const getFinanceApprovals = async (params = {}) => (await api.get("/finan
 // { cheque_number } for Cheque — whichever the row's own payment mode calls for.
 export const approveTransaction = async (activityId, payload = {}) => (await api.post(`/finance/transactions/${activityId}/approve`, payload)).data;
 export const unapproveTransaction = async (activityId) => (await api.post(`/finance/transactions/${activityId}/unapprove`)).data;
+// Signing off a whole selection at once. Carries no confirmed amount, reference or
+// cheque number -- there is no way to ask for those two hundred times -- so these rows
+// are approved with who and when and nothing to check against. Weaker than the popup
+// above on purpose; the caller is expected to say so before using it.
+export const bulkApproveTransactions = async (activityIds) => (await api.post("/finance/transactions/bulk-approve", { activity_ids: activityIds })).data;
 export const getFinanceExpenses = async (params = {}) => (await api.get("/finance/expenses", { params })).data;
 export const createFinanceExpense = async (payload) => (await api.post("/finance/expenses", payload)).data;
 export const deleteFinanceExpense = async (expenseId) => (await api.delete(`/finance/expenses/${expenseId}`)).data;

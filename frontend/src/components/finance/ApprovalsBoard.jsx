@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, RotateCcw, X } from "lucide-react";
+import { Check, CheckCircle2, Minus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransaction } from "@/lib/api";
+import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransaction, bulkApproveTransactions } from "@/lib/api";
 import { ExpenseApprovalsPanel } from "@/components/finance/ExpenseApprovalsPanel";
 
 // The two things this desk signs off. Money coming in was all it ever held, because money
@@ -122,6 +122,67 @@ const ApproveModal = ({ tx, onClose, onApproved }) => {
 };
 
 /**
+ * One box, three states. Radix's Checkbox is the house control and is used everywhere a
+ * box is only on or off; this row needs a third — the header box when some of the list is
+ * picked and some is not — and that component draws a tick for it, which reads as "all of
+ * them" and is the one thing it must not say here.
+ */
+const TickBox = ({ state, onChange, label }) => (
+  <button
+    type="button"
+    role="checkbox"
+    aria-checked={state === "some" ? "mixed" : state === "on"}
+    aria-label={label}
+    onClick={onChange}
+    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
+      state === "off"
+        ? "border-slate-300 bg-white hover:border-emerald-500"
+        : "border-emerald-600 bg-emerald-600 text-white"
+    }`}
+  >
+    {state === "on" && <Check className="h-3 w-3" strokeWidth={3} />}
+    {state === "some" && <Minus className="h-3 w-3" strokeWidth={3} />}
+  </button>
+);
+
+/**
+ * The popup for signing off a selection at once.
+ *
+ * It exists to say the thing the one-at-a-time popup above collects and this one cannot:
+ * approving in bulk records who and when against every picked row and nothing to check
+ * them against — no re-keyed cash amount, no UTR, no cheque number. That is a real
+ * weakening of what an approval means here, so it is said in the popup rather than left
+ * for someone to work out from what they were never asked.
+ */
+const BulkApproveModal = ({ count, total, saving, onClose, onConfirm }) => (
+  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="finance-bulk-approve-modal">
+    <div className="w-full max-w-sm rounded-lg bg-white shadow-xl">
+      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+        <h3 className="text-base font-semibold">Approve {count} payment{count === 1 ? "" : "s"}</h3>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="finance-bulk-approve-close"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="space-y-3 p-5">
+        <p className="text-sm text-slate-600">
+          Signing off <span className="font-semibold text-slate-800">{count} payment{count === 1 ? "" : "s"}</span> worth{" "}
+          <span className="font-semibold text-emerald-700">{fmt(total)}</span>.
+        </p>
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+          Approved this way, none of them carries a confirmation: no re-entered cash amount,
+          no UPI or bank reference, no cheque number. Your name and the time are recorded
+          against each. Approve a row on its own if it needs checking against something.
+        </p>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+        <Button variant="outline" onClick={onClose} data-testid="finance-bulk-approve-cancel">Cancel</Button>
+        <Button onClick={onConfirm} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700" data-testid="finance-bulk-approve-confirm">
+          {saving ? "Approving…" : `Approve ${count}`}
+        </Button>
+      </div>
+    </div>
+  </div>
+);
+
+/**
  * Accountant > Approvals — "new income collected" waiting on sign-off, every kind of
  * revenue (consultation, treatment/session, diet, Fitsio Store) rather than just
  * consultation/package. Approving doesn't touch what counts as revenue anywhere else in
@@ -141,6 +202,11 @@ export const ApprovalsBoard = () => {
   const [loading, setLoading] = useState(false);
   const [approving, setApproving] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  // Ids, not rows: the rows are replaced wholesale on every reload, and a set of objects
+  // held across one would be comparing against rows that no longer exist.
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
 
@@ -153,6 +219,10 @@ export const ApprovalsBoard = () => {
       if (category !== "all") params.category = category;
       if (paymentMode !== "all") params.payment_mode = paymentMode;
       setData(await getFinanceApprovals(params));
+      // Every filter change comes through here, and a selection that outlived one would
+      // approve rows the accountant can no longer see. Cleared on the reload after an
+      // approve too, where the picked rows have just left the list.
+      setSelected(new Set());
     } catch { /* silent */ }
     setLoading(false);
   }, [branchId, mode, category, paymentMode, view]);
@@ -167,6 +237,37 @@ export const ApprovalsBoard = () => {
       await load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
     setBusyId(null);
+  };
+
+  // Only the pending list can be picked from: an approved row has an Undo instead, and
+  // that is one at a time on purpose — see unapprove_transaction.
+  const rows = data.transactions || [];
+  const selectable = view === "pending" ? rows : [];
+  // Plainly, not memoised: both inputs are rebuilt on every render, so a useMemo here
+  // never actually hit its cache -- it only told the linter it was trying to.
+  const picked = selectable.filter((t) => selected.has(t.id));
+  const pickedTotal = picked.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  const allOn = selectable.length > 0 && picked.length === selectable.length;
+
+  const toggleOne = (id) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  // Everything currently listed, which is everything the filters above have left:
+  // /finance/approvals returns the whole filtered set rather than a page of it, so "all"
+  // here means all of what is being looked at, with nothing hidden behind it.
+  const toggleAll = () => setSelected(allOn ? new Set() : new Set(selectable.map((t) => t.id)));
+
+  const bulkApprove = async () => {
+    setBulkSaving(true);
+    try {
+      const res = await bulkApproveTransactions(picked.map((t) => t.id));
+      toast.success(res?.message || "Approved");
+      setBulkOpen(false);
+      await load();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Approve failed"); }
+    setBulkSaving(false);
   };
 
   const s = data.summary || {};
@@ -284,19 +385,75 @@ export const ApprovalsBoard = () => {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-testid="finance-approvals-summary">
-        <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Payment Summary</p>
+        {/* One bar, two jobs. Idle it names the list and offers the tick that takes all of
+            it; with anything picked it becomes the bar that acts on the picking, carrying
+            the count and the money so neither has to be totted up by eye. Not a second bar
+            appearing above the first, which would push the whole list down a row on the
+            first click. */}
+        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
+          {selectable.length > 0 && (
+            <TickBox
+              state={allOn ? "on" : picked.length > 0 ? "some" : "off"}
+              onChange={toggleAll}
+              label={allOn ? "Clear the selection" : `Select all ${selectable.length} payments`}
+            />
+          )}
+          {picked.length > 0 ? (
+            <>
+              <p className="text-xs font-semibold text-slate-700" data-testid="finance-approvals-selection-count">
+                {picked.length} selected
+                <span className="ml-1.5 font-bold text-emerald-700">{fmt(pickedTotal)}</span>
+              </p>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="text-xs font-medium text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+                data-testid="finance-approvals-clear-selection"
+              >
+                Clear
+              </button>
+              <Button
+                size="sm"
+                onClick={() => setBulkOpen(true)}
+                className="ml-auto h-7 bg-emerald-600 text-xs hover:bg-emerald-700"
+                data-testid="finance-approvals-approve-selected"
+              >
+                <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                Approve {picked.length}
+              </Button>
+            </>
+          ) : (
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Payment Summary
+              {selectable.length > 0 && (
+                <span className="ml-2 font-medium normal-case tracking-normal text-slate-400">
+                  tick to approve several at once
+                </span>
+              )}
+            </p>
+          )}
         </div>
         <div className="divide-y divide-slate-50">
           {loading ? (
             <p className="px-4 py-8 text-center text-sm text-slate-400">Loading...</p>
-          ) : data.transactions.length === 0 ? (
+          ) : rows.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-slate-400">
               {view === "pending" ? "Nothing waiting on approval." : "Nothing approved yet."}
             </p>
-          ) : data.transactions.map((tx) => (
-            <div key={tx.id} className="flex items-center justify-between gap-3 px-4 py-3" data-testid={`finance-approval-row-${tx.id}`}>
-              <div className="min-w-0">
+          ) : rows.map((tx) => (
+            <div
+              key={tx.id}
+              className={`flex items-center justify-between gap-3 px-4 py-3 transition-colors ${selected.has(tx.id) ? "bg-emerald-50/50" : ""}`}
+              data-testid={`finance-approval-row-${tx.id}`}
+            >
+              {view === "pending" && (
+                <TickBox
+                  state={selected.has(tx.id) ? "on" : "off"}
+                  onChange={() => toggleOne(tx.id)}
+                  label={`Select ${tx.patient_name}'s payment`}
+                />
+              )}
+              <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-slate-800">{tx.patient_name}</p>
                 <p className="truncate text-xs text-slate-500">
                   {tx.branch_name || "—"} · <span className="capitalize">{tx.category}</span> · {modeLabel(tx.payment_mode)} · {(tx.collected_at || "").slice(0, 10)}
@@ -332,6 +489,16 @@ export const ApprovalsBoard = () => {
       </div>
 
       </>
+      )}
+
+      {bulkOpen && (
+        <BulkApproveModal
+          count={picked.length}
+          total={pickedTotal}
+          saving={bulkSaving}
+          onClose={() => setBulkOpen(false)}
+          onConfirm={bulkApprove}
+        />
       )}
 
       {approving && (
