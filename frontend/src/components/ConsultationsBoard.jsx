@@ -5840,14 +5840,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 ${selectMode && selectedIds.has(l.id) ? "bg-rose-50" : ""}`}
                     data-testid={`cons-row-${l.id}`}
                   >
-                    <td className="px-3 py-3 align-top leading-5 text-slate-400">
+                    <td className="px-3 py-3 align-middle leading-5 text-slate-400">
                       {selectMode ? (
                         <input type="checkbox" checked={selectedIds.has(l.id)} readOnly data-testid={`cons-row-select-${l.id}`} />
                       ) : (
                         i + 1
                       )}
                     </td>
-                    <td className="truncate px-4 py-3 align-top font-medium text-slate-800" title={l.name}>
+                    <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>
                       <span className="block truncate">{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" /><RescheduledTag lead={l} className="ml-1.5" /></span>
                       {/* What they are going away with, under the name. Reading it meant
                           opening every row: the Stage column says where the paperwork has
@@ -5856,14 +5856,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           of the table, and a plan can run to four services. */}
                       <PlanLine parts={leadPlanParts(l)} testId={`cons-plan-${l.id}`} />
                     </td>
-                    {/* Date and time each own a line rather than wrapping wherever the
+                    {/* Every cell sits on the row's middle, not its top. The patient
+                        column runs to two lines — the name and what was decided under
+                        it — and against that the one-line cells beside it hung level
+                        with the name with a blank line under each, which read as a row
+                        that had come apart rather than one row.
+
+                        Date and time each own a line rather than wrapping wherever the
                         column happens to run out — so the dates stack in a straight
                         edge down the column instead of breaking at a different word
                         on every row. */}
-                    <td className="whitespace-nowrap px-3 py-3 align-top text-xs">
+                    <td className="whitespace-nowrap px-3 py-3 align-middle text-xs">
                       {l.appointment_date ? (
                         <span
-                          className={`inline-flex max-w-full flex-col items-start rounded-md border px-2 py-0.5 align-top font-semibold ${appointmentTone(l.appointment_date)}`}
+                          className={`inline-flex max-w-full flex-col items-start rounded-md border px-2 py-0.5 align-middle font-semibold ${appointmentTone(l.appointment_date)}`}
                           data-testid={`cons-appt-${l.id}`}
                         >
                           {/* Stacked, because this column is a narrow slice of a
@@ -5880,23 +5886,23 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         </span>
                       ) : <span className="text-slate-400">—</span>}
                     </td>
-                    <td className="truncate px-4 py-3 align-top leading-5 text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
-                    <td className="px-4 py-3 align-top">
+                    <td className="truncate px-4 py-3 align-middle leading-5 text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
+                    <td className="px-4 py-3 align-middle">
                       <span
-                        className="inline-flex max-w-full items-center gap-1 truncate rounded-[5px] px-2 py-0.5 align-top text-xs font-semibold"
+                        className="inline-flex max-w-full items-center gap-1 truncate rounded-[5px] px-2 py-0.5 align-middle text-xs font-semibold"
                         style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}
                         title={rowStage || ""}
                       >
                         {rowStage || "—"}
                       </span>
                     </td>
-                    <td className="truncate px-4 py-3 align-top leading-5 text-slate-600" title={l.phone}>{l.phone || "—"}</td>
-                    <td className="truncate px-4 py-3 align-top font-mono text-xs leading-5 text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
+                    <td className="truncate px-4 py-3 align-middle leading-5 text-slate-600" title={l.phone}>{l.phone || "—"}</td>
+                    <td className="truncate px-4 py-3 align-middle font-mono text-xs leading-5 text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
                     {showDiscountColumn && (
                       // The amount this row contributes to the tab's total, with what it
                       // bought under it — a column of figures with no idea what was sold
                       // is a number nobody can check.
-                      <td className="whitespace-nowrap px-3 py-3 align-top text-xs" data-testid={`cons-fee-${activeFee.key}-${l.id}`}>
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-xs" data-testid={`cons-fee-${activeFee.key}-${l.id}`}>
                         {activeFee.paid(l) > 0 ? (
                           // A tick before the figure, because on the All list the two states
                           // of this column are a number and a phrase — and a column of mixed
@@ -5904,7 +5910,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           // read off the wording rather than seen. The mark carries it: the
                           // same tick the Collect column's Paid pill wears, so one glance
                           // down the row says paid whichever of the two columns it lands on.
-                          <span className="inline-flex items-center gap-1 align-top font-semibold leading-5" style={{ color: activeFee.tone }}>
+                          <span className="inline-flex items-center gap-1 align-middle font-semibold leading-5" style={{ color: activeFee.tone }}>
                             <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" />
                             {rupees(activeFee.paid(l))}
                           </span>
@@ -5913,7 +5919,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           // as a fee of nothing that was collected rather than as a fee
                           // still owed, and on the Fees Non Collected list every row would
                           // be a column of zeroes saying it.
-                          <span className="inline-flex items-center gap-1 align-top font-semibold leading-5 text-amber-600" data-testid={`cons-fee-pending-${l.id}`}>
+                          <span className="inline-flex items-center gap-1 align-middle font-semibold leading-5 text-amber-600" data-testid={`cons-fee-pending-${l.id}`}>
                             <AlertCircle className="h-3 w-3 shrink-0" />
                             Not collected
                           </span>
@@ -5931,10 +5937,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                     {showDiscountColumn && (() => {
                       const d = consultationDiscount(l);
                       return (
-                        <td className="whitespace-nowrap px-3 py-3 align-top text-xs">
+                        <td className="whitespace-nowrap px-3 py-3 align-middle text-xs">
                           {d ? (
                             <span
-                              className="inline-flex items-center rounded-[5px] border border-amber-200 bg-amber-50 px-2 py-0.5 align-top font-semibold text-amber-700"
+                              className="inline-flex items-center rounded-[5px] border border-amber-200 bg-amber-50 px-2 py-0.5 align-middle font-semibold text-amber-700"
                               title={`Listed Rs.${Number(l.package_price).toLocaleString("en-IN")}, collected Rs.${Number(l.package_paid).toLocaleString("en-IN")}`}
                             >
                               Rs.{d.off.toLocaleString("en-IN")} · {d.pct.toFixed(0)}%
@@ -5946,7 +5952,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       );
                     })()}
                     {showDiscountColumn && (
-                      <td className="whitespace-nowrap px-3 py-3 align-top text-xs font-semibold leading-5 text-slate-700" data-testid={`cons-total-${l.id}`}>
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-xs font-semibold leading-5 text-slate-700" data-testid={`cons-total-${l.id}`}>
                         {rupees(totalPaid(l))}
                       </td>
                     )}
@@ -5960,7 +5966,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         // button would otherwise open the popup this button is a shortcut
                         // past. Nothing in here wants the row's own click.
                         <td
-                          className="whitespace-nowrap px-3 py-3 align-top text-xs"
+                          className="whitespace-nowrap px-3 py-3 align-middle text-xs"
                           onClick={(e) => e.stopPropagation()}
                           data-testid={`cons-row-${rowFee}-${l.id}`}
                         >
@@ -5970,7 +5976,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             // Says so and stops there, exactly as the popup's card does. A
                             // fee that is in is not a thing to press.
                             <>
-                              <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-top font-semibold text-emerald-700">
+                              <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-middle font-semibold text-emerald-700">
                                 <CheckCircle2 className="h-3 w-3" /> Paid
                               </span>
                               {t.mode && (
@@ -6040,7 +6046,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         // button would otherwise open the popup this button is a shortcut
                         // past. Nothing in here wants the row's own click.
                         <td
-                          className="whitespace-nowrap px-3 py-3 align-top text-xs"
+                          className="whitespace-nowrap px-3 py-3 align-middle text-xs"
                           onClick={(e) => e.stopPropagation()}
                           data-testid={`cons-row-${stageRowFee}-${l.id}`}
                         >
@@ -6055,7 +6061,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                             // fee that is in is not a thing to press; correcting one is done
                             // from the patient, where the figure it is correcting is on screen.
                             <>
-                              <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-top font-semibold text-emerald-700">
+                              <span className="inline-flex items-center gap-1 rounded-[5px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 align-middle font-semibold text-emerald-700">
                                 <CheckCircle2 className="h-3 w-3" /> Paid
                               </span>
                               {c.mode && (
