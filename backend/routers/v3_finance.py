@@ -294,9 +294,7 @@ async def get_branch_finance(
             # Whether the Accountant has cleared this collection — set only via
             # POST /finance/transactions/{id}/approve, never at collection time, so a
             # branch's own book never reads as pre-approved before anyone reviewed it.
-            "approved": is_approved,
-            "approved_by": act.get("approved_by") or "",
-            "approved_at": act.get("approved_at") or "",
+            **_approval_state(act),
         })
 
     approved_total = sum(t["amount"] for t in transactions if t["approved"])
@@ -328,6 +326,118 @@ class ApproveTransactionInput(BaseModel):
     cheque_number: Optional[str] = None
 
 
+# The four books a collection can be written in. Store sales carry no lead, and Zumba and
+# Fitness keep their money on the registration -- so a payment has to be looked for in all
+# four, in this order, by anything that writes to one. Named once here because approve,
+# unapprove and the request step below each used to carry their own copy of the ladder,
+# and a fifth desk taking money would have had to be remembered in three places.
+TRANSACTION_COLLECTIONS = ("lead_activity", "inventory_movements", "zumba_registrations", "fitness_registrations")
+
+
+async def _update_transaction_row(activity_id: str, update: dict) -> bool:
+    """Apply one update to whichever book this payment is written in. False if none has it."""
+    for name in TRANSACTION_COLLECTIONS:
+        res = await v3_col(name).update_one({"id": activity_id}, update)
+        if res.matched_count:
+            return True
+    return False
+
+
+def _approval_state(row: dict) -> dict:
+    """Where one collection stands between the desk that took it and the books.
+
+    Three states, and the middle one is the point of this: a payment is *collected* the
+    moment the money is handed over, *requested* when the branch sends it up to be signed
+    off, and *approved* when the accountant signs it. Collected-but-not-sent used to be
+    indistinguishable from sent-and-waiting, so the accountant's queue held every payment
+    the moment it was taken and a branch had no way to say "this day is ready to check".
+
+    Read off the record itself, like `approved` always was -- see approve_transaction.
+    """
+    return {
+        "approved": bool(row.get("approved")),
+        "approved_by": row.get("approved_by") or "",
+        "approved_at": row.get("approved_at") or "",
+        "income_requested": bool(row.get("income_requested")),
+        "income_requested_by": row.get("income_requested_by") or "",
+        "income_requested_at": row.get("income_requested_at") or "",
+    }
+
+
+class TransactionRequestInput(BaseModel):
+    # The collections being sent up, by id. A list rather than one at a time because a
+    # branch closes a day, not a payment -- sending forty of them one request each is
+    # forty chances to send thirty-nine.
+    activity_ids: list = []
+
+
+@router.post("/finance/transactions/request")
+async def request_transactions(
+    payload: TransactionRequestInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """Send collections up for approval.
+
+    This is the step the branch owns. Approval is somebody else's -- see
+    approve_transaction -- so raising and signing off stay two different endpoints with two
+    different role lists, and a Branch Admin can reach only this one.
+
+    Already-approved rows are left alone rather than refused: sending a day up again after
+    adding one late payment to it should move the late payment, not fail on the thirty
+    beside it that have already been through.
+    """
+    ids = [i for i in (payload.activity_ids or []) if i]
+    if not ids:
+        raise HTTPException(status_code=400, detail="Pick at least one collection to send")
+    update = {"$set": {
+        "income_requested": True,
+        "income_requested_by": user.full_name,
+        "income_requested_at": _now(),
+    }}
+    sent, missing = 0, 0
+    for activity_id in ids:
+        if await _update_transaction_row(activity_id, update):
+            sent += 1
+        else:
+            missing += 1
+    if not sent:
+        raise HTTPException(status_code=404, detail="None of those collections could be found")
+    return {
+        "message": f"{sent} collection{'' if sent == 1 else 's'} sent to the accountant",
+        "sent": sent,
+        "not_found": missing,
+    }
+
+
+@router.post("/finance/transactions/unrequest")
+async def unrequest_transactions(
+    payload: TransactionRequestInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """Pull a collection back before it has been signed off.
+
+    Kept to the same role list as sending, because it is the same act undone -- a branch
+    that sent the wrong day up needs to be able to take it back without asking the person
+    it was sent to. Rows already approved are not pulled back: that is an approval to
+    undo, and unapprove_transaction is the endpoint that says so.
+    """
+    ids = [i for i in (payload.activity_ids or []) if i]
+    if not ids:
+        raise HTTPException(status_code=400, detail="Pick at least one collection to pull back")
+    update = {"$set": {"income_requested": False}, "$unset": {"income_requested_by": "", "income_requested_at": ""}}
+    pulled = 0
+    for activity_id in ids:
+        for name in TRANSACTION_COLLECTIONS:
+            res = await v3_col(name).update_one({"id": activity_id, "approved": {"$ne": True}}, update)
+            if res.matched_count:
+                pulled += 1
+                break
+    return {
+        "message": f"{pulled} collection{'' if pulled == 1 else 's'} pulled back",
+        "pulled": pulled,
+    }
+
+
 @router.post("/finance/transactions/{activity_id}/approve")
 async def approve_transaction(
     activity_id: str,
@@ -351,17 +461,7 @@ async def approve_transaction(
     if payload.cheque_number:
         update["approval_cheque_number"] = payload.cheque_number.strip()
 
-    res = await v3_col("lead_activity").update_one({"id": activity_id}, {"$set": update})
-    if res.matched_count == 0:
-        res = await v3_col("inventory_movements").update_one({"id": activity_id}, {"$set": update})
-    if res.matched_count == 0:
-        res = await v3_col("zumba_registrations").update_one({"id": activity_id}, {"$set": update})
-    if res.matched_count == 0:
-        # Fitness keeps its money on the registration exactly as Zumba does, so a gym fee
-        # reaches the approvals list from its own collection and has to be signed off in
-        # it. Without this line the row appears with a button that 404s.
-        res = await v3_col("fitness_registrations").update_one({"id": activity_id}, {"$set": update})
-    if res.matched_count == 0:
+    if not await _update_transaction_row(activity_id, {"$set": update}):
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"message": "Approved"}
 
@@ -376,14 +476,7 @@ async def unapprove_transaction(
     the same order."""
     unset = {"approved_by": "", "approved_at": "", "approval_confirmed_amount": "", "approval_transaction_ref": "", "approval_cheque_number": ""}
     update = {"$set": {"approved": False}, "$unset": unset}
-    res = await v3_col("lead_activity").update_one({"id": activity_id}, update)
-    if res.matched_count == 0:
-        res = await v3_col("inventory_movements").update_one({"id": activity_id}, update)
-    if res.matched_count == 0:
-        res = await v3_col("zumba_registrations").update_one({"id": activity_id}, update)
-    if res.matched_count == 0:
-        res = await v3_col("fitness_registrations").update_one({"id": activity_id}, update)
-    if res.matched_count == 0:
+    if not await _update_transaction_row(activity_id, update):
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"message": "Approval removed"}
 
@@ -1414,7 +1507,6 @@ async def revenue_overview(
         # than redefining it. discount_amount is negative when more than the listed fee was
         # collected; it is passed through as-is and left to the caller to read.
         discount_amount = act.get("discount_amount")
-        is_approved = bool(act.get("approved"))
         transactions.append({
             "id": act.get("id", ""),
             "transaction_id": act.get("transaction_id") or "",
@@ -1449,9 +1541,7 @@ async def revenue_overview(
             "session_status": session.get("status"),
             # Set only via POST /finance/transactions/{id}/approve — see get_branch_finance
             # for why this lives on the activity record itself rather than a second table.
-            "approved": is_approved,
-            "approved_by": act.get("approved_by") or "",
-            "approved_at": act.get("approved_at") or "",
+            **_approval_state(act),
         })
 
     # Fitsiomax Store counter sales — tablets, supplements and equipment handed over the
@@ -1525,6 +1615,9 @@ async def revenue_overview(
             "approved": False,
             "approved_by": "",
             "approved_at": "",
+            "income_requested": bool(sale.get("income_requested")),
+            "income_requested_by": sale.get("income_requested_by") or "",
+            "income_requested_at": sale.get("income_requested_at") or "",
         })
 
     # Zumba class fees. Like the store sales above, they come from their own collection
@@ -1598,9 +1691,7 @@ async def revenue_overview(
             # Hardcoded False was true while the Approvals tab could not see Zumba at
             # all; leaving it would have shown every signed-off class fee as still
             # pending on this page, for good.
-            "approved": bool(reg.get("approved")),
-            "approved_by": reg.get("approved_by") or "",
-            "approved_at": reg.get("approved_at") or "",
+            **_approval_state(reg),
         })
 
     # Gym memberships, on exactly the terms Zumba's are above: v3_fitness.py keeps the
@@ -1666,9 +1757,7 @@ async def revenue_overview(
             "payment_mode": mode,
             "payment_split": fitness_split,
             "client_balance": max(float(reg.get("fee_amount") or 0) - amount, 0.0),
-            "approved": bool(reg.get("approved")),
-            "approved_by": reg.get("approved_by") or "",
-            "approved_at": reg.get("approved_at") or "",
+            **_approval_state(reg),
         })
 
     total_collected = consultation_total + session_total + diet_total + store_total + zumba_total + rehab_total + fitness_total

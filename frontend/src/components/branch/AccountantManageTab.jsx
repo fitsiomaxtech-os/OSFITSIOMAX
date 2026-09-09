@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight } from "lucide-react";
+import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight, Send, Undo2, CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
+import { toast } from "@/components/ui/sonner";
 import { BranchExpensesPanel } from "@/components/branch/BranchExpensesPanel";
 import { maskDayMonthYear, manualToIso, isoToManual } from "@/components/DateFilterPopover";
-import { getBranches, getRevenueOverview, getFinanceExpenses } from "@/lib/api";
+import { getBranches, getRevenueOverview, getFinanceExpenses, requestTransactions, unrequestTransactions } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { receiptFromTransaction } from "@/lib/receipt";
@@ -48,6 +49,27 @@ const LEDGER_VIEWS = [
   { key: "income", label: "Income" },
   { key: "expenses", label: "Expenses" },
 ];
+
+/**
+ * Where a collection stands between the desk that took it and the books.
+ *
+ * Three, because two could not say the thing that matters: a payment sitting in a drawer
+ * that nobody has sent up is not the same as one the accountant has been asked to check,
+ * and the queue used to hold both. Collected is the branch's own pile, Request is what it
+ * has handed over, Approved is what came back signed.
+ *
+ * `all` is not one of them on purpose. Every row is in exactly one of these three, so a
+ * fourth pill showing all of them at once would be a total that no one is responsible for.
+ */
+const INCOME_STAGES = [
+  { key: "collected", label: "Collected", icon: Wallet, hint: "Taken at the desk, not sent up yet" },
+  { key: "requested", label: "Income Request", icon: Clock, hint: "Sent to the accountant, waiting to be signed off" },
+  { key: "approved", label: "Income Approved", icon: CheckCircle2, hint: "Signed off by the accountant" },
+];
+
+/** Which of the three one collection is in. Approved wins over requested: a row that has
+ *  been signed off is approved whatever it looked like on the way there. */
+const stageOf = (tx) => (tx?.approved ? "approved" : tx?.income_requested ? "requested" : "collected");
 
 // Same set a Branch Admin picks from when collecting a fee (V3MarkInstallmentPaidInput
 // and its siblings across v3_packages.py) — not a separate list invented for this filter,
@@ -216,6 +238,10 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const [branchId, setBranchId] = useState(fixedBranchId || "");
   const [tab, setTab] = useState("summary");
   const [ledger, setLedger] = useState("income");
+  // Which of the three piles the income side is showing. Opens on Collected because that
+  // is the one with something to do in it.
+  const [incomeStage, setIncomeStage] = useState("collected");
+  const [sending, setSending] = useState(false);
   const [expenseTotals, setExpenseTotals] = useState({ approved_total: 0, approved_count: 0, pending_count: 0 });
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
   const [revenueView, setRevenueView] = useState("collected");
@@ -325,9 +351,27 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   // How it was paid, which is the one cut left on this list. Whether a collection has
   // been signed off is the Accountant's own Approvals tab, and asking it here too gave a
   // branch two screens answering one question in two places.
+  // The stage comes first: every figure on the income side -- the eight tiles, the
+  // payment-mode row, the table -- describes one of the three piles, so narrowing to the
+  // pile before anything else is what keeps the cards and the rows under them the same
+  // money. Filtering afterwards would leave the tiles counting a pile the table is not
+  // showing.
+  const stagedTxns = useMemo(
+    () => transactions.filter((t) => stageOf(t) === incomeStage),
+    [transactions, incomeStage],
+  );
+
+  // How many are in each pile, for the count on each pill. Off the whole set rather than
+  // the staged one, which is the pile currently being looked at.
+  const stageCounts = useMemo(() => {
+    const out = { collected: 0, requested: 0, approved: 0 };
+    transactions.forEach((t) => { out[stageOf(t)] += 1; });
+    return out;
+  }, [transactions]);
+
   const filteredTxns = useMemo(() => {
-    if (paymentModeFilter === "all") return transactions;
-    return transactions
+    if (paymentModeFilter === "all") return stagedTxns;
+    return stagedTxns
       .filter((t) => modesOf(t).includes(paymentModeFilter))
       // A split belongs under both its modes, but only for the part that arrived that
       // way: Cash on a Rs.8,000 cash + Rs.4,000 UPI payment is Rs.8,000, and carrying the
@@ -345,7 +389,30 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
           payment_split: split.filter((l) => l.mode === paymentModeFilter),
         };
       });
-  }, [transactions, paymentModeFilter]);
+  }, [stagedTxns, paymentModeFilter]);
+
+  /**
+   * Send everything currently in view up to the accountant, or pull it back.
+   *
+   * Everything in view rather than a set of ticked boxes: what a branch actually does at
+   * the end of a day is hand the day over, and the filters above already say which day,
+   * which branch and which payment mode. A column of forty checkboxes is forty chances to
+   * miss one, and the row that gets missed is the one nobody notices is missing.
+   */
+  const sendStage = async (pull = false) => {
+    const ids = filteredTxns.map((t) => t.id).filter(Boolean);
+    if (!ids.length) { toast.message("There is nothing in view to send"); return; }
+    setSending(true);
+    try {
+      const res = pull ? await unrequestTransactions(ids) : await requestTransactions(ids);
+      toast.success(res?.message || (pull ? "Pulled back" : "Sent to the accountant"));
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || (pull ? "Could not pull those back" : "Could not send those"));
+    } finally {
+      setSending(false);
+    }
+  };
 
   // Every card's figure and the count under it, from one pass over whichever set the
   // filters above left standing.
@@ -542,6 +609,64 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
 
           {ledger === "income" && (
           <>
+          {/* The three piles, and the one thing to do with the pile being looked at. Above
+              the revenue tiles because it scopes them: the eight figures below are this
+              pile's, not the day's. */}
+          <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-income-stages">
+            <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
+              {INCOME_STAGES.map((st) => {
+                const Icon = st.icon;
+                const active = incomeStage === st.key;
+                return (
+                  <button
+                    key={st.key}
+                    type="button"
+                    title={st.hint}
+                    onClick={() => setIncomeStage(st.key)}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                      active ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                    }`}
+                    data-testid={`accountant-manage-income-stage-${st.key}`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {st.label}
+                    <span className={active ? "text-white/70" : "text-slate-400"}>({stageCounts[st.key]})</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Acts on what the filters above have left in view -- see sendStage. Absent
+                on Approved, where there is nothing left to do: taking an approval back is
+                the accountant's own undo, not the branch's. */}
+            {incomeStage === "collected" && (
+              <Button
+                onClick={() => sendStage(false)}
+                disabled={sending || filteredTxns.length === 0}
+                className="h-9 bg-emerald-600 text-xs text-white hover:bg-emerald-700"
+                data-testid="accountant-manage-send-for-approval"
+              >
+                <Send className="mr-1.5 h-3.5 w-3.5" />
+                {sending ? "Sending…" : `Send ${filteredTxns.length} to accountant`}
+              </Button>
+            )}
+            {incomeStage === "requested" && (
+              <Button
+                onClick={() => sendStage(true)}
+                disabled={sending || filteredTxns.length === 0}
+                variant="outline"
+                className="h-9 text-xs"
+                data-testid="accountant-manage-pull-back"
+              >
+                <Undo2 className="mr-1.5 h-3.5 w-3.5" />
+                {sending ? "Pulling back…" : `Pull ${filteredTxns.length} back`}
+              </Button>
+            )}
+            <p className="text-[11px] text-slate-400">
+              {INCOME_STAGES.find((st) => st.key === incomeStage)?.hint}
+            </p>
+          </div>
+
           {/* All eight on one line where there is room for eight, stepping down to four
               and then two rather than squeezing: at lg an eighth of the width is narrower
               than the card's own text column. */}

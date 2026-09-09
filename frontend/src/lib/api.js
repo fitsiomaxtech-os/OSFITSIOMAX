@@ -399,6 +399,12 @@ export const saveClosingBalance = async (payload) => (await api.post("/finance/c
 // The petty cash tin. `balance` is every movement ever made on it — what is physically in
 // it today — while the movements listed are only the window asked for. A top-up moves
 // notes from the drawer into the tin and spends nothing, which is why it is not an expense.
+// Sending a day's collections up to the accountant, and taking them back before they are
+// signed off. Both take a list: a branch closes a day rather than a payment, and forty
+// single requests is forty chances to send thirty-nine.
+export const requestTransactions = async (activityIds) => (await api.post("/finance/transactions/request", { activity_ids: activityIds })).data;
+export const unrequestTransactions = async (activityIds) => (await api.post("/finance/transactions/unrequest", { activity_ids: activityIds })).data;
+
 export const getPettyCash = async (params = {}) => (await api.get("/finance/petty-cash", { params })).data;
 export const topUpPettyCash = async (payload) => (await api.post("/finance/petty-cash/topup", payload)).data;
 
