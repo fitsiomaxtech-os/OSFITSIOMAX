@@ -158,6 +158,64 @@ const toIso = (d) => d.toISOString().slice(0, 10);
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const countLabel = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
+/**
+ * The revenue row's own card. StatTile is the house figure card and stays the house
+ * figure card everywhere else; this row is the one place eight of them stand side by
+ * side, and eight cards each carrying a coloured disc behind a coloured number is eight
+ * things competing to be read first.
+ *
+ * So the colour moves off the number and onto one chip holding the icon: the category is
+ * still told apart at a glance, and the money is told in one weight across the whole row.
+ * The picked card is the only one wearing its colour — a tinted ground, a matching ring
+ * and a rule across its top — so which card the table below belongs to is legible
+ * without reading any of the labels.
+ *
+ * Colours are inline styles off one hex per card for the same reason StatTile's are:
+ * Tailwind reads class names out of the source, so a class name assembled at runtime
+ * compiles to nothing.
+ */
+const RevenueTile = ({ label, value, sub, icon: Icon, color, active, onClick, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={active}
+    data-testid={testid}
+    className={`group relative flex h-full w-full flex-col overflow-hidden rounded-2xl border bg-white p-3 text-left transition-all duration-150 sm:p-4 ${
+      active
+        ? "border-transparent"
+        : "border-slate-200/80 shadow-[0_1px_2px_rgba(16,24,40,0.05)] hover:-translate-y-px hover:border-slate-300 hover:shadow-[0_6px_16px_-6px_rgba(16,24,40,0.18)]"
+    }`}
+    style={active ? { boxShadow: `0 0 0 1.5px ${color}`, background: `${color}0A` } : undefined}
+  >
+    {/* The rule across the top is the picked card's loudest signal and costs no height:
+        it reads along the row, where a ring alone has to be looked for card by card. */}
+    <span
+      aria-hidden
+      className={`absolute inset-x-0 top-0 h-[3px] transition-opacity ${active ? "opacity-100" : "opacity-0"}`}
+      style={{ background: color }}
+    />
+    <span
+      aria-hidden
+      className="mb-2.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-transform group-hover:scale-105 sm:h-8 sm:w-8"
+      style={{ background: `${color}1A`, color }}
+    >
+      {Icon && <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+    </span>
+    {/* Sentence case at a normal weight rather than bold small caps: eight headings
+        shouting is the thing that made the old row hard to read past. */}
+    <p className="truncate text-[11px] font-medium text-slate-500 sm:text-xs">{label}</p>
+    {/* tabular-nums so eight figures standing side by side line up on their digits
+        instead of jittering with whatever numerals each one happens to hold. */}
+    <p
+      className="mt-0.5 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-[22px] sm:leading-7"
+      style={active ? { color } : undefined}
+    >
+      {value}
+    </p>
+    <p className="mt-0.5 truncate text-[10px] leading-tight text-slate-400 sm:text-[11px]">{sub}</p>
+  </button>
+);
+
 const PAYMENT_MODE_STYLES = {
   cash: "bg-emerald-50 text-emerald-700 border-emerald-200",
   upi: "bg-sky-50 text-sky-700 border-sky-200",
@@ -703,9 +761,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
           {/* All eight on one line where there is room for eight, stepping down to four
               and then two rather than squeezing: at lg an eighth of the width is narrower
               than the card's own text column. */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3 xl:grid-cols-8">
             {REVENUE_VIEWS.map((v) => (
-              <StatTile
+              <RevenueTile
                 key={v.key}
                 label={v.short}
                 value={fmt(sums.totals[v.key])}
