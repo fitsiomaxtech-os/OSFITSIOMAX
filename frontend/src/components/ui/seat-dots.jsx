@@ -20,11 +20,11 @@ export const SeatDots = ({ taken, capacity }) => {
   if (cap < 1) return null;
   if (cap > DOT_MAX) return <span>{used}/{cap}</span>;
   return (
-    <span className="inline-flex shrink-0 items-center gap-0.5" aria-label={`${used} of ${cap} booked`}>
+    <span className="inline-flex shrink-0 items-center gap-1" aria-label={`${used} of ${cap} booked`}>
       {Array.from({ length: cap }, (_, i) => (
         <span
           key={i}
-          className={`h-1.5 w-1.5 rounded-full border border-current ${i < used ? "bg-current" : "bg-transparent opacity-45"}`}
+          className={`h-2.5 w-2.5 rounded-full border border-current ${i < used ? "bg-current" : "bg-transparent opacity-45"}`}
         />
       ))}
     </span>
