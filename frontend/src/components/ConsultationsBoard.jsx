@@ -11437,14 +11437,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                 Nothing published on this day — open it in MANAGEMENT → PHYSIO CALENDAR first.
                               </p>
                             ) : (
-                              /* Two to a row rather than three, and one on a phone. A tile now
-                                 names both ends of its hour, gauges how full it is and lists
-                                 what is standing in it — a third of this panel could hold the
-                                 start time and nothing else. No three-column step above it
-                                 either: the breakpoints read the viewport, not this panel, so a
-                                 wide screen would put three rich tiles into the same ~600px the
-                                 picker always gets and truncate the end of every time. */
-                              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-2" data-testid="cons-slot-picker-grid">
+                              /* One to a row on a phone, two once there is width for it, three
+                                 from lg — which is where the calendar and the times become
+                                 side-by-side columns and this panel is at its narrowest. Three
+                                 rich tiles across ~670px leaves each about 210px, and "10:30 AM
+                                 to 11:00 AM" plus its dots and the edit button need very nearly
+                                 all of it: that is why the time below holds at 12px instead of
+                                 stepping up, and why the tile keeps p-2 at every size. Grow
+                                 either and the end of the longest times truncates. */
+                              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-2 lg:grid-cols-3" data-testid="cons-slot-picker-grid">
                                 {(physioSlotsByDate[pickerDate] || []).map((time) => {
                                   const slot = `${pickerDate}T${time}`;
                                   const taken = slotFull(slot);
@@ -11467,7 +11468,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                         type="button"
                                         onClick={() => togglePickedSlot(slot)}
                                         disabled={taken}
-                                        className={`w-full overflow-hidden rounded-lg border-2 p-2 text-left transition-all sm:p-2.5 ${
+                                        className={`w-full overflow-hidden rounded-lg border-2 p-2 text-left transition-all ${
                                           taken
                                             ? "cursor-not-allowed border-amber-300 bg-amber-50 opacity-70"
                                             : picked
@@ -11488,10 +11489,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                             it is gone are the one question, and splitting
                                             them over two lines made the dots read as a
                                             separate warning rather than as part of the time.
-                                            pr-6 keeps the range clear of the edit button
-                                            floating over the corner. */}
-                                        <p className={`flex items-center gap-1.5 pr-6 text-[12px] font-bold sm:text-[13px] ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
-                                          <span className="min-w-0 truncate">{slotRange12h(time, sessionMinutes)}</span>
+                                            pr-6 clears the edit button floating over the corner,
+                                            which is 22px of icon and padding sitting 4px in. At
+                                            three to a row the range is the first thing with
+                                            nowhere left to go, so it truncates rather than
+                                            wrapping the tile to a third line. */}
+                                        <p className={`flex items-center gap-1.5 pr-6 text-[12px] font-bold ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
+                                          <span className="min-w-0 truncate whitespace-nowrap">{slotRange12h(time, sessionMinutes)}</span>
                                           <SeatDots taken={seats} capacity={slotCapacity} />
                                         </p>
                                         {/* Under the time: what the hour is already spoken
@@ -11502,7 +11506,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                             slot, which day it became and whether it is paid
                                             displace them — that is the tile's own state and
                                             it is not written anywhere else. */}
-                                        <div className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] font-semibold sm:text-[11px] ${taken ? "text-amber-700" : picked ? (pickedPaid ? "text-emerald-800" : "text-rose-800") : "text-emerald-700"}`}>
+                                        <div className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] font-semibold ${taken ? "text-amber-700" : picked ? (pickedPaid ? "text-emerald-800" : "text-rose-800") : "text-emerald-700"}`}>
                                           {picked ? (
                                             <span data-testid={`cons-slot-picked-day-${time}`}>Day {planByDate[pickerDate].day} · {pickedPaid ? "PAID" : "UNPAID"}</span>
                                           ) : held.length > 0 ? (
