@@ -22,7 +22,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CalendarDays, ChevronLeft, ChevronRight, Coffee, LogIn, LogOut, Play, X } from "lucide-react";
+import {
+  CalendarDays, ChevronLeft, ChevronRight, Clock, Coffee, DoorOpen, Hourglass,
+  LogIn, LogOut, Pencil, Play, Sparkles, User, Users, Utensils, X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { clockToday, clockIn, clockBreakOut, clockBreakIn, clockOut, clockHistory } from "@/lib/api";
@@ -68,6 +71,17 @@ const Sheet = ({ title, subtitle, onClose, children, wide, testid }) => createPo
   document.body,
 );
 
+// An icon per common reason, so the grid reads at a glance. Anything not in here — every
+// typed reason included — falls back to the cup. Shared with the day and history sheets.
+const BREAK_ICONS = {
+  Lunch: Utensils,
+  "Tea break": Coffee,
+  Personal: User,
+  Meeting: Users,
+  Prayer: Sparkles,
+  "Stepped out": DoorOpen,
+};
+
 /**
  * What the break is for, asked before it starts.
  *
@@ -75,50 +89,83 @@ const Sheet = ({ title, subtitle, onClose, children, wide, testid }) => createPo
  * one clinic's list is one list; the box is there because the interesting breaks are the
  * ones nobody thought to preset, and forcing those into "Personal" would lose exactly the
  * detail this question was asked for.
+ *
+ * The break is stamped by the server the instant Start Break is pressed -- the amber line
+ * at the top says so and shows that time -- and the minutes are counted from it until
+ * Break In closes the break. Nothing here is typed; the widget only reports what came back.
  */
-const BreakReasonSheet = ({ presets, busy, onStart, onClose }) => {
+const BreakReasonSheet = ({ presets, now, busy, onStart, onClose }) => {
   const [picked, setPicked] = useState("");
   const [typed, setTyped] = useState("");
+  const usingTyped = !!typed.trim();
   const reason = (typed.trim() || picked).trim();
   return (
-    <Sheet title="Going on a break" subtitle="Say what it is for — it goes on your record for the day." onClose={onClose} testid="clock-break-sheet">
-      <div className="flex flex-wrap gap-2" data-testid="clock-break-presets">
-        {(presets || []).map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => { setPicked(r); setTyped(""); }}
-            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-              picked === r && !typed.trim()
-                ? "border-amber-500 bg-amber-500 text-white"
-                : "border-slate-200 text-slate-600 hover:border-amber-300 hover:bg-amber-50"
-            }`}
-            data-testid={`clock-break-preset-${r}`}
-          >
-            {r}
-          </button>
-        ))}
+    <Sheet title="Going on a break" subtitle="Say what it's for — it goes on your record for the day." onClose={onClose} testid="clock-break-sheet">
+      {now && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700" data-testid="clock-break-startline">
+          <Clock className="h-3.5 w-3.5 shrink-0" />
+          Starts now — {prettyTime(now)}. The clock keeps the minutes until you're back.
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="clock-break-presets">
+        {(presets || []).map((r) => {
+          const Icon = BREAK_ICONS[r] || Coffee;
+          const active = picked === r && !usingTyped;
+          return (
+            <button
+              key={r}
+              type="button"
+              onClick={() => { setPicked(r); setTyped(""); }}
+              aria-pressed={active}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                active
+                  ? "border-amber-500 bg-amber-500 text-white shadow-sm"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50"
+              }`}
+              data-testid={`clock-break-preset-${r}`}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{r}</span>
+            </button>
+          );
+        })}
       </div>
-      <input
-        value={typed}
-        onChange={(e) => setTyped(e.target.value)}
-        maxLength={80}
-        placeholder="Or type another reason…"
-        className="mt-3 h-10 w-full rounded-md border border-slate-200 px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-amber-400 focus:ring-1 focus:ring-amber-300"
-        data-testid="clock-break-other"
-      />
+
+      <div className="relative mt-3">
+        <Pencil className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+        <input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && reason && !busy) onStart(reason); }}
+          maxLength={80}
+          placeholder="Or type another reason…"
+          className={`h-10 w-full rounded-lg border pl-9 pr-14 text-sm outline-none transition placeholder:text-slate-400 ${
+            usingTyped ? "border-amber-400 ring-1 ring-amber-300" : "border-slate-200 focus:border-amber-400 focus:ring-1 focus:ring-amber-300"
+          }`}
+          data-testid="clock-break-other"
+        />
+        {usingTyped && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold tabular-nums text-slate-400">
+            {typed.trim().length}/80
+          </span>
+        )}
+      </div>
+
       <div className="mt-4 flex gap-2">
         <Button variant="outline" onClick={onClose} className="flex-1" data-testid="clock-break-cancel">Cancel</Button>
         <Button
           onClick={() => onStart(reason)}
           disabled={!reason || busy}
-          className="flex-1 bg-amber-500 text-white hover:bg-amber-600"
+          className="flex-1 bg-amber-500 text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-40"
           data-testid="clock-break-start"
         >
           {busy ? "Starting…" : "Start Break"}
         </Button>
       </div>
-      {!reason && <p className="mt-2 text-center text-[11px] text-slate-400">Pick one or type your own to start the break.</p>}
+      <p className="mt-2 text-center text-[11px] text-slate-400" data-testid="clock-break-hint">
+        {reason ? <>Starting a break for <span className="font-semibold text-slate-500">{reason}</span></> : "Pick a reason or type your own to start."}
+      </p>
     </Sheet>
   );
 };
@@ -143,24 +190,45 @@ const TodaySheet = ({ day, live, onClose, onHistory }) => (
       </p>
     )}
 
-    <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Breaks</p>
+    {day.state === "on_break" && (
+      <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700" data-testid="clock-today-onbreak">
+        <Hourglass className="h-3.5 w-3.5 shrink-0" />
+        On a break{day.break_reason ? ` — ${day.break_reason}` : ""} since {prettyTime(day.on_break_since)} · {duration(live.onBreak)} so far
+      </div>
+    )}
+
+    <div className="mt-4 flex items-center justify-between">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Breaks</p>
+      {day.breaks.length > 0 && (
+        <span className="text-[11px] font-semibold text-amber-600" data-testid="clock-today-break-total">
+          {day.breaks.length} {day.breaks.length === 1 ? "break" : "breaks"} · {duration(day.break_minutes + live.onBreak)}
+        </span>
+      )}
+    </div>
     {day.breaks.length === 0 ? (
       <p className="mt-1 rounded-lg border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400">No breaks today.</p>
     ) : (
       <ul className="mt-1 divide-y divide-slate-100" data-testid="clock-today-break-list">
-        {day.breaks.map((b, i) => (
-          <li key={i} className="flex items-center justify-between gap-3 py-2" data-testid={`clock-today-break-${i}`}>
-            <span className="min-w-0">
-              <span className="block truncate text-sm text-slate-700">{b.reason}</span>
-              <span className="block text-[11px] text-slate-400">
-                {prettyTime(b.out)} → {b.running ? "still out" : prettyTime(b.in)}
+        {day.breaks.map((b, i) => {
+          const Icon = BREAK_ICONS[b.reason] || Coffee;
+          const mins = b.running ? live.onBreak : b.minutes;
+          return (
+            <li key={i} className="flex items-center justify-between gap-3 py-2" data-testid={`clock-today-break-${i}`}>
+              <span className="flex min-w-0 items-center gap-2">
+                <Icon className="h-4 w-4 shrink-0 text-slate-400" />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm text-slate-700">{b.reason}</span>
+                  <span className="block text-[11px] text-slate-400">
+                    {prettyTime(b.out)} <span className="text-slate-300">→</span> {b.running ? "still out" : prettyTime(b.in)}
+                  </span>
+                </span>
               </span>
-            </span>
-            <span className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-bold ${b.running ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
-              {duration(b.minutes)}
-            </span>
-          </li>
-        ))}
+              <span className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-bold tabular-nums ${b.running ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+                {duration(mins)}
+              </span>
+            </li>
+          );
+        })}
       </ul>
     )}
 
@@ -307,7 +375,9 @@ export const ClockWidget = () => {
       const d = await fn();
       setDay((prev) => ({ ...prev, ...d }));
       setFetchedAt(Date.now());
-      if (done) toast.success(done);
+      // `done` may be a line, or a function of the fresh day — so "Break In" can name how
+      // long the break actually ran once the server has closed it.
+      if (done) toast.success(typeof done === "function" ? done(d) : done);
       setSheet((s) => (s === "break" ? null : s));
     } catch (e) {
       fail(e);
@@ -331,7 +401,13 @@ export const ClockWidget = () => {
         <button
           type="button"
           onClick={() => setSheet("today")}
-          title="Your day so far"
+          title={
+            onBreak
+              ? `On a break${day.break_reason ? ` for ${day.break_reason}` : ""} since ${prettyTime(day.on_break_since)}`
+              : day.state === "done"
+                ? `Clocked out at ${prettyTime(day.clock_out)}`
+                : `Clocked in at ${prettyTime(day.clock_in)}`
+          }
           className={`hidden shrink-0 items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-semibold transition sm:inline-flex ${
             onBreak
               ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
@@ -343,7 +419,7 @@ export const ClockWidget = () => {
         >
           {onBreak ? <Coffee className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
           {onBreak
-            ? `On break · ${duration(live.onBreak)}`
+            ? `On break${day.break_reason ? ` · ${day.break_reason}` : ""} · ${duration(live.onBreak)}`
             : day.state === "done"
               ? `Out ${prettyTime(day.clock_out)} · ${duration(live.worked)}`
               : `In ${prettyTime(day.clock_in)} · ${duration(live.worked)}`}
@@ -357,13 +433,22 @@ export const ClockWidget = () => {
       )}
 
       {can("break_out") && (
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => setSheet("break")} className="shrink-0 border-amber-200 px-2 text-amber-700 hover:bg-amber-50 sm:px-3" data-testid="clock-break-out-button">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => { load(); setSheet("break"); }} className="shrink-0 border-amber-200 px-2 text-amber-700 hover:bg-amber-50 sm:px-3" data-testid="clock-break-out-button">
           <Coffee className="h-4 w-4" /><span className="hidden sm:inline">Break Out</span>
         </Button>
       )}
 
       {can("break_in") && (
-        <Button size="sm" disabled={busy} onClick={() => act(clockBreakIn, "Welcome back")} className="shrink-0 bg-amber-500 px-2 hover:bg-amber-600 sm:px-3" data-testid="clock-break-in-button">
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => act(clockBreakIn, (d) => {
+            const last = (d.breaks || [])[(d.breaks || []).length - 1];
+            return last?.minutes ? `Welcome back — that break was ${duration(last.minutes)}` : "Welcome back";
+          })}
+          className="shrink-0 bg-amber-500 px-2 hover:bg-amber-600 sm:px-3"
+          data-testid="clock-break-in-button"
+        >
           <Play className="h-4 w-4" /><span className="hidden sm:inline">Break In</span>
         </Button>
       )}
@@ -377,8 +462,12 @@ export const ClockWidget = () => {
       {sheet === "break" && (
         <BreakReasonSheet
           presets={day.break_reasons}
+          now={day.now}
           busy={busy}
-          onStart={(reason) => act(() => clockBreakOut(reason), "Break started")}
+          onStart={(reason) => act(() => clockBreakOut(reason), (d) => {
+            const open = (d.breaks || []).find((b) => b.running);
+            return open ? `Break started at ${prettyTime(open.out)} — ${open.reason}` : "Break started";
+          })}
           onClose={() => setSheet(null)}
         />
       )}
