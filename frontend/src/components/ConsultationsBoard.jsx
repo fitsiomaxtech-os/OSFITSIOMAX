@@ -5268,22 +5268,40 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
 
     const amount = parseFloat(rehabFeeDraft.amount);
     if (!(amount > 0)) { toast.error("Enter the amount collected"); return; }
-    // Named rather than carried across by the spread below: the draft calls it `discount`
-    // and the server calls it `discount_amount`, and a balance with no date is refused
-    // there — so it is caught here, with what was typed still on the screen.
-    if (rehabHasBalance && !rehabFeeDraft.balance_due_date) {
-      toast.error("Enter a Due Date for the balance amount");
-      return;
+    // Built field by field, the way every other fee builds its own — never spread off the
+    // draft. The draft carries the whole popup, including the blank Partial Payment rows
+    // it keeps ready in case that mode is picked, and `partial_installments: [{amount: ""}]`
+    // is not a schedule the server can parse: it refused the entire cash collection on a
+    // field the desk had never filled in. Only what this mode actually collected is sent.
+    const payload = { payment_mode: mode, amount, confirmed: true };
+    // The draft calls it `discount` and the server calls it `discount_amount`; a balance
+    // with no date is refused there, so it is caught here with what was typed still on
+    // the screen.
+    if (rehabDiscountRs > 0) payload.discount_amount = rehabDiscountRs;
+    if (rehabHasBalance) {
+      if (!rehabFeeDraft.balance_due_date) {
+        toast.error("Enter a Due Date for the balance amount");
+        return;
+      }
+      payload.balance_due_date = rehabFeeDraft.balance_due_date;
+    }
+    // Each mode's own reference — the one thing a disputed payment is traced by. The
+    // server checks these too and answers with the same words, so the desk gets told
+    // before the request goes out rather than after it comes back.
+    if (mode === "upi") {
+      if (!(rehabFeeDraft.upi_transaction_id || "").trim()) {
+        toast.error("UPI Transaction ID is required");
+        return;
+      }
+      payload.upi_transaction_id = rehabFeeDraft.upi_transaction_id.trim();
+    } else if (mode === "card") {
+      if (!attachCardDetails(payload, rehabFeeDraft)) return;
+    } else if (BANK_DETAIL_MODES.includes(mode)) {
+      if (!attachBankDetails(payload, rehabFeeDraft)) return;
     }
     setCollectingRehabFee(true);
     try {
-      const res = await collectRehabFee(selectedLead.id, {
-        ...rehabFeeDraft,
-        amount,
-        confirmed: true,
-        discount_amount: rehabDiscountRs > 0 ? rehabDiscountRs : undefined,
-        balance_due_date: rehabHasBalance ? rehabFeeDraft.balance_due_date : undefined,
-      });
+      const res = await collectRehabFee(selectedLead.id, payload);
       toast.success(`Rehab Fee collected · Rs.${amount}`);
       setRehabFeeDraft(null);
       // Patch the row and the open card off the server's answer, the way the other fees

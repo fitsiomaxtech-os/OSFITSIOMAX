@@ -15,12 +15,38 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// FastAPI answers a schema-level rejection (422) with `detail` as a list of error
+// objects, not the string every other refusal sends. Two hundred-odd call sites read
+// `err.response.data.detail` and hand it straight to a toast, and a toast handed an
+// object throws "Objects are not valid as a React child" -- the app dies on the one
+// error that was trying to explain itself. Flattened to a sentence here, once, so
+// every caller keeps reading a string no matter which kind of refusal came back.
+const detailToText = (detail) => {
+  if (Array.isArray(detail)) {
+    const lines = detail.map((d) => {
+      if (typeof d === "string") return d;
+      // `loc` is the path to the offending field, e.g. ["body", "partial_installments",
+      // 0, "amount"]. The field name is what the desk can act on; "body" is not.
+      const field = Array.isArray(d?.loc) ? d.loc.filter((x) => x !== "body").join(".") : "";
+      const msg = d?.msg || "Invalid value";
+      return field ? `${field}: ${msg}` : msg;
+    });
+    return lines.join("; ") || "The server rejected this request";
+  }
+  if (detail && typeof detail === "object") return detail.msg || JSON.stringify(detail);
+  return detail;
+};
+
 // Auto-logout on stale/invalid JWT so we don't show a runtime error overlay
 let _redirecting = false;
 api.interceptors.response.use(
   (resp) => resp,
   (error) => {
     const status = error?.response?.status;
+    if (error?.response?.data && typeof error.response.data === "object") {
+      const flat = detailToText(error.response.data.detail);
+      if (flat !== error.response.data.detail) error.response.data.detail = flat;
+    }
     const url = error?.config?.url || "";
     const isAuthCall = url.includes("/auth/login") || url.includes("/auth/logout");
     if (status === 401 && !isAuthCall && !_redirecting) {
