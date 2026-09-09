@@ -538,7 +538,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
               the revenue tiles, the source table, the payment-mode row — describes money
               going out, so the whole of the income side steps aside for it rather than
               being reused with different numbers in it. */}
-          {ledger === "expenses" && <BranchExpensesPanel onChanged={loadExpenseTotals} />}
+          {ledger === "expenses" && <BranchExpensesPanel onChanged={loadExpenseTotals} branchId={branchId} />}
 
           {ledger === "income" && (
           <>

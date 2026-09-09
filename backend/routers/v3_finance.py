@@ -749,6 +749,22 @@ async def create_expense(
         "rejection_reason": "",
     }
     await v3_col("expenses").insert_one(doc.copy())
+
+    # Small cash spending comes out of the tin, so the tin is drawn down here rather than
+    # by a second thing the branch has to remember to do. Written after the expense and
+    # keyed to its id, so the movement and the expense it paid for can never disagree
+    # about whether the money left -- and so deleting one takes the other with it.
+    #
+    # Deliberately not gated on approval. The notes are gone the moment they are handed
+    # over; a tin that only falls once an accountant signs off would report a balance the
+    # branch can see is wrong by looking into it.
+    if _is_petty_cash_expense(doc["amount"], doc["payment_mode"], doc["branch_id"]):
+        await _record_petty_cash_movement(
+            branch_id=doc["branch_id"], delta=-doc["amount"], kind="expense",
+            on=doc["expense_date"], note=doc["category"], user=user, expense_id=doc["id"],
+        )
+        doc["petty_cash"] = True
+        doc["petty_cash_balance"] = await _petty_cash_balance(doc["branch_id"])
     return doc
 
 
@@ -801,6 +817,11 @@ async def delete_expense(expense_id: str, _: V3UserOut = Depends(v3_require_role
     res = await v3_col("expenses").delete_one({"id": expense_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Expense not found")
+    # An expense that drew the tin down puts it back when it is deleted. Removing the
+    # movement rather than writing an opposite one: the expense is gone entirely, so a
+    # pair of cancelling lines in the tin's book would be two entries describing a payment
+    # the branch no longer says happened.
+    await v3_col("petty_cash_movements").delete_many({"expense_id": expense_id})
     return {"message": "Expense deleted"}
 
 
@@ -2309,4 +2330,156 @@ async def save_closing_balance(
     return {
         "message": "Closing balance updated" if existing else "Closing balance recorded",
         "closing_balance": _closing_balance_public(saved),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Petty Cash -- the tin, and what is left in it.
+# ---------------------------------------------------------------------------
+#
+# Small spending does not go through a bank, and pretending it does is how a branch ends
+# up with a month of Rs.60 auto fares nobody can account for. So the tin is a real float
+# with a real balance: it is topped up from the drawer, and every small cash expense draws
+# it down.
+#
+# A top-up is an *internal* move -- notes going from the drawer into the tin. The branch
+# holds exactly as much cash after it as before, which is why it is deliberately not a
+# figure the Closing Balance knows about: the tin is part of the branch's cash, and the
+# day-end count already counts every note in the building. Only the expense reduces cash,
+# and Closing Balance already subtracts it as an expense. Adding a top-up there as well
+# would take the same rupees out twice.
+#
+# Balance is summed from the movements rather than kept as a running field. A stored
+# balance is a number that can drift from the rows that produced it, and here the rows are
+# the record -- a tin that says Rs.2,000 with Rs.1,400 of movements behind it is a bug
+# nobody can unpick after the fact.
+
+# What counts as small enough to come out of the tin. An expense at or under this, paid in
+# cash, is petty cash by definition -- above it is a payment somebody signs for.
+PETTY_CASH_LIMIT = 1000.0
+
+
+def _is_petty_cash_expense(amount: float, payment_mode: str, branch_id) -> bool:
+    """Whether one expense comes out of the tin.
+
+    Three things have to be true, and the second is the one worth stating: the tin holds
+    notes, so an expense settled by UPI, card or transfer never came out of it however
+    small it was. A Rs.400 subscription paid by card is a small expense, not petty cash,
+    and drawing the float down for it would leave the tin's balance describing money that
+    is still sitting in it.
+
+    An org-wide expense has no tin to come out of -- petty cash belongs to a desk.
+    """
+    return bool(branch_id) and (payment_mode or "").strip().lower() == "cash" and 0 < amount <= PETTY_CASH_LIMIT
+
+
+async def _petty_cash_balance(branch_id: str) -> float:
+    """What the tin holds now: every movement ever made on it, added up.
+
+    `delta` is signed at the point it is written -- a top-up is positive, an expense
+    negative -- so the balance is one sum rather than a subtraction between two queries
+    that could each be filtered slightly differently.
+    """
+    rows = await v3_col("petty_cash_movements").find({"branch_id": branch_id}, {"_id": 0, "delta": 1}).to_list(20000)
+    return round(sum(float(r.get("delta") or 0) for r in rows), 2)
+
+
+async def _record_petty_cash_movement(*, branch_id, delta, kind, on, note, user, expense_id=None):
+    """One line in the tin's book. Written by the expense that caused it, so the two can
+    never disagree about whether the money left."""
+    doc = {
+        "id": str(uuid.uuid4()),
+        "branch_id": branch_id,
+        "on": on,
+        "kind": kind,
+        # The signed movement, and the plain amount beside it. Both, because the balance
+        # wants the sign and every screen showing a row wants the figure without it.
+        "delta": round(float(delta), 2),
+        "amount": round(abs(float(delta)), 2),
+        "expense_id": expense_id,
+        "note": (note or "").strip(),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    }
+    await v3_col("petty_cash_movements").insert_one(doc.copy())
+    return doc
+
+
+class PettyCashTopUp(BaseModel):
+    # Ignored for a Branch Admin, who tops up their own tin and nobody else's.
+    branch_id: Optional[str] = None
+    amount: float
+    on: Optional[str] = None
+    note: Optional[str] = ""
+
+
+@router.get("/finance/petty-cash")
+async def get_petty_cash(
+    branch_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """The tin: what is in it, and what moved through it.
+
+    `balance` is every movement ever, because that is what is physically in the tin today.
+    The listed movements are the window asked for, which is a different question -- a
+    branch looking at last month still needs to know what it holds now, or the page would
+    tell it to top up a tin that is full.
+    """
+    if is_branch_admin_role(user.role):
+        branch_id = user.branch_id
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="Petty cash belongs to a branch — pick one")
+
+    query = {"branch_id": branch_id}
+    date_query = {}
+    if start_date:
+        date_query["$gte"] = start_date
+    if end_date:
+        date_query["$lte"] = end_date
+    if date_query:
+        query["on"] = date_query
+    rows = await v3_col("petty_cash_movements").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return {
+        "branch_id": branch_id,
+        "limit": PETTY_CASH_LIMIT,
+        "balance": await _petty_cash_balance(branch_id),
+        "topped_up": round(sum(r["amount"] for r in rows if r.get("delta", 0) > 0), 2),
+        "spent": round(sum(r["amount"] for r in rows if r.get("delta", 0) < 0), 2),
+        "movements": rows,
+    }
+
+
+@router.post("/finance/petty-cash/topup")
+async def top_up_petty_cash(
+    payload: PettyCashTopUp,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """Move notes from the drawer into the tin.
+
+    Not an expense and never counted as one: nothing has been spent, and the branch holds
+    the same cash it did a moment ago. It is here so the tin's balance has somewhere to
+    come from other than an accountant editing a number.
+    """
+    if is_branch_admin_role(user.role):
+        if not user.branch_id:
+            raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
+        branch_id = user.branch_id
+    else:
+        branch_id = payload.branch_id
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="Petty cash belongs to a branch — pick one")
+    if payload.amount is None or payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    on = payload.on or _now()[:10]
+    await _record_petty_cash_movement(
+        branch_id=branch_id, delta=abs(float(payload.amount)), kind="topup",
+        on=on, note=payload.note, user=user,
+    )
+    return {
+        "message": "Petty cash topped up",
+        "balance": await _petty_cash_balance(branch_id),
     }

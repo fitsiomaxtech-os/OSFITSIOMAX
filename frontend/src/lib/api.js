@@ -396,6 +396,12 @@ export const getFinanceProfit = async (params = {}) => (await api.get("/finance/
 export const getClosingBalance = async (params = {}) => (await api.get("/finance/closing-balance", { params })).data;
 export const saveClosingBalance = async (payload) => (await api.post("/finance/closing-balance", payload)).data;
 
+// The petty cash tin. `balance` is every movement ever made on it — what is physically in
+// it today — while the movements listed are only the window asked for. A top-up moves
+// notes from the drawer into the tin and spends nothing, which is why it is not an expense.
+export const getPettyCash = async (params = {}) => (await api.get("/finance/petty-cash", { params })).data;
+export const topUpPettyCash = async (payload) => (await api.post("/finance/petty-cash/topup", payload)).data;
+
 export const getRevenueOverview = async (params = {}) => (await api.get("/finance/revenue-overview", { params })).data;
 
 export const getClientTransactionHistory = async (leadId) => (await api.get(`/finance/client/${leadId}`)).data;

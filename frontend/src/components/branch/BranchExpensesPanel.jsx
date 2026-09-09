@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Clock, Plus, Receipt, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Coins, Plus, Receipt, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { getFinanceExpenses, createFinanceExpense } from "@/lib/api";
+import { getFinanceExpenses, createFinanceExpense, getPettyCash, topUpPettyCash } from "@/lib/api";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
@@ -21,6 +21,15 @@ const MODES = [
   ["cash", "Cash"], ["upi", "UPI"], ["card", "Card"],
   ["account_transfer", "Bank Transfer"], ["cheque", "Cheque"],
 ];
+
+// What is small enough to come out of the tin, in step with PETTY_CASH_LIMIT in
+// backend/routers/v3_finance.py -- which is what actually decides it. Repeated here only
+// so the form can say so before the branch presses Send, never to make the call itself.
+const PETTY_CASH_LIMIT = 1000;
+
+/** Whether one expense, as typed, will come out of the tin. The same three tests
+ *  _is_petty_cash_expense applies on the server: small enough, paid in cash, at a branch. */
+const isPettyCash = (amount, mode) => Number(amount) > 0 && Number(amount) <= PETTY_CASH_LIMIT && mode === "cash";
 
 const todayIso = () => {
   const d = new Date();
@@ -58,7 +67,7 @@ const StatusChip = ({ row }) => {
   );
 };
 
-const AddExpenseDialog = ({ onClose, onSaved }) => {
+const AddExpenseDialog = ({ onClose, onSaved, pettyBalance }) => {
   const [form, setForm] = useState({
     category: CATEGORIES[0], amount: "", expense_date: todayIso(),
     paid_to: "", payment_mode: "cash", reference: "", note: "",
@@ -162,6 +171,33 @@ const AddExpenseDialog = ({ onClose, onSaved }) => {
               />
             </div>
           </div>
+
+          {/* Said while it is being typed, not after it is sent. An expense at or under the
+              limit paid in cash comes out of the tin, and the branch is the one who has to
+              have the notes -- so it is told what the tin holds and what will be left,
+              before it presses Send rather than by a balance that has quietly moved. */}
+          {isPettyCash(form.amount, form.payment_mode) && (
+            <div
+              className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[11px] ${
+                pettyBalance != null && Number(form.amount) > pettyBalance
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-sky-200 bg-sky-50 text-sky-800"
+              }`}
+              data-testid="branch-expense-petty-hint"
+            >
+              <Coins className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                <b>Petty cash.</b> Rs.{PETTY_CASH_LIMIT.toLocaleString("en-IN")} or less paid in cash comes out of the tin.
+                {pettyBalance != null && (
+                  <>
+                    {" "}It holds {fmt(pettyBalance)} — {fmt(pettyBalance - Number(form.amount))} after this.
+                    {Number(form.amount) > pettyBalance && " That is more than is in it; record it anyway if the money was spent, then top the tin up."}
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+
           <div>
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">What it was for</label>
             <textarea
@@ -186,12 +222,22 @@ const AddExpenseDialog = ({ onClose, onSaved }) => {
   );
 };
 
-export const BranchExpensesPanel = ({ onChanged }) => {
+/**
+ * @param branchId  Whose tin to show. Petty cash belongs to a desk, so with no branch in
+ *                  view there is nothing to show a balance for and the block is left out
+ *                  rather than adding four branches' tins into one figure that is not in
+ *                  any of them. Only the petty cash block is scoped by it -- the expense
+ *                  list below keeps whatever scope it always had.
+ */
+export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({ approved_total: 0, approved_count: 0, pending_total: 0, pending_count: 0 });
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("request"); // "request" | "approved"
   const [adding, setAdding] = useState(false);
+  const [petty, setPetty] = useState(null);
+  const [toppingUp, setToppingUp] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState("");
 
   // Held in a ref rather than named as a dependency of `load`: the caller passes an inline
   // arrow, which is a new function every render, and as a dependency it would rebuild
@@ -222,6 +268,35 @@ export const BranchExpensesPanel = ({ onChanged }) => {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // The tin, reloaded whenever the expenses are -- a small cash expense draws it down as
+  // it is raised, so a balance fetched once at mount would be wrong by the second one.
+  const loadPetty = useCallback(async () => {
+    if (!branchId) { setPetty(null); return; }
+    try {
+      setPetty(await getPettyCash({ branch_id: branchId }));
+    } catch {
+      setPetty(null);
+    }
+  }, [branchId]);
+
+  useEffect(() => { loadPetty(); }, [loadPetty]);
+
+  const submitTopUp = async () => {
+    const amount = Number(topUpAmount);
+    if (!(amount > 0)) { toast.error("Enter how much is going into the tin"); return; }
+    setToppingUp(true);
+    try {
+      await topUpPettyCash({ branch_id: branchId, amount });
+      toast.success("Petty cash topped up");
+      setTopUpAmount("");
+      loadPetty();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not top up petty cash");
+    } finally {
+      setToppingUp(false);
+    }
+  };
 
   // Requests holds anything still open and anything turned down: both are the branch's to
   // deal with, and a rejected row filed under Approved would be a lie in a column of
@@ -271,6 +346,69 @@ export const BranchExpensesPanel = ({ onChanged }) => {
           </span>
         </span>
       </div>
+
+      {/* The tin. Sits above the two tabs because it is not one of them: what a branch
+          holds in small notes is a fact about right now, not a queue of anything, and it
+          governs whether the next Rs.200 expense can actually be paid. */}
+      {petty && (
+        <div
+          className={`flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border p-3.5 ${
+            petty.balance < 0 ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"
+          }`}
+          data-testid="branch-petty-cash"
+        >
+          <div className="flex items-center gap-2.5">
+            <span className={`rounded-lg p-2 ${petty.balance < 0 ? "bg-rose-100" : "bg-amber-50"}`}>
+              <Coins className={`h-4 w-4 ${petty.balance < 0 ? "text-rose-600" : "text-amber-600"}`} />
+            </span>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Petty cash in hand</p>
+              <p
+                className={`text-xl font-bold tabular-nums ${petty.balance < 0 ? "text-rose-700" : "text-slate-800"}`}
+                data-testid="branch-petty-cash-balance"
+              >
+                {fmt(petty.balance)}
+              </p>
+            </div>
+          </div>
+
+          {/* Overdrawn is a real state and is shown as one rather than refused at the
+              door: the notes were handed over whatever the tin said, and an expense the
+              branch cannot record is an expense nobody can account for later. */}
+          {petty.balance < 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-100 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700" data-testid="branch-petty-cash-overdrawn">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              More has been spent than was put in — top the tin up
+            </span>
+          )}
+
+          <p className="text-[11px] text-slate-400">
+            Rs.{PETTY_CASH_LIMIT.toLocaleString("en-IN")} or less, paid in cash, comes out of here automatically.
+          </p>
+
+          {/* Notes moving from the drawer into the tin. Not an expense: nothing has been
+              spent, and the branch holds the same cash after it as before. */}
+          <div className="ml-auto flex items-center gap-2">
+            <Input
+              type="number"
+              min="0"
+              value={topUpAmount}
+              onChange={(e) => setTopUpAmount(e.target.value)}
+              placeholder="Top up"
+              className="h-9 w-28 text-sm tabular-nums"
+              data-testid="branch-petty-cash-topup-amount"
+            />
+            <Button
+              onClick={submitTopUp}
+              disabled={toppingUp}
+              className="h-9 bg-amber-600 text-xs text-white hover:bg-amber-700"
+              data-testid="branch-petty-cash-topup"
+            >
+              {toppingUp ? "Adding…" : "Add to tin"}
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="branch-expense-tabs">
@@ -383,7 +521,8 @@ export const BranchExpensesPanel = ({ onChanged }) => {
       {adding && (
         <AddExpenseDialog
           onClose={() => setAdding(false)}
-          onSaved={() => { setAdding(false); load(); }}
+          onSaved={() => { setAdding(false); load(); loadPetty(); }}
+          pettyBalance={petty ? petty.balance : null}
         />
       )}
     </div>
