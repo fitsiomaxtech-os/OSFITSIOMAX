@@ -7499,6 +7499,23 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                   </div>
                 );
 
+                // Why the greyed-out action under a programme is greyed out.
+                //
+                // Each of those buttons already carries the reason in a `title`, which never
+                // reaches anyone: the shared Button sets `disabled:pointer-events-none`, and a
+                // control that takes no pointer events is never hovered, so the browser has no
+                // tooltip to show. The desk got a dead button and nothing to explain it, which
+                // reads as the screen being broken rather than as a step being out of order.
+                //
+                // The gates themselves are right and are the server's — assign-rehab and
+                // assign-diet both refuse an unpaid course — so the fix is to say the rule out
+                // loud rather than to open the button.
+                const GateNote = ({ children, testId }) => (
+                  <p className="mt-2 text-[11px] font-medium leading-snug text-slate-500" data-testid={testId}>
+                    {children}
+                  </p>
+                );
+
                 // What the panel's header band says while a programme is open. Kept beside the
                 // body it belongs to so a view can never announce itself as one thing and then
                 // show another.
@@ -7701,6 +7718,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         {dietBooked ? "Reschedule Diet" : "Assign Nutritionist"}
                       </Button>
                     </div>
+                    {!dietFeePaid && (
+                      <GateNote testId="cons-diet-detail-gate">
+                        Assign Nutritionist opens once the Diet Fee is collected — a coach's day
+                        cannot be booked against a consultation nobody has paid for.
+                      </GateNote>
+                    )}
                   </>
                 );
 
@@ -7777,6 +7800,21 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         {selectedLead.rehab_physio_name ? "Reassign Rehab Physio" : "Assign Physio"}
                       </Button>
                     </div>
+                    {/* Two different reasons the row can be dead, and they want different
+                        desks: with no course there is nothing to price, so the Consultant is
+                        the next move and even Collect is out; with a course unpaid the money
+                        is. The first is the one that blocks the other, so it wins. */}
+                    {!selectedLead.rehab_package_id ? (
+                      <GateNote testId="cons-rehab-detail-gate">
+                        The Consultant has not chosen a Rehab course yet, so there is no price to
+                        collect against and no course to put a physio on.
+                      </GateNote>
+                    ) : !rehabFeePaid ? (
+                      <GateNote testId="cons-rehab-detail-gate">
+                        Assign Physio opens once the Rehab Fee is collected — the course cannot go
+                        onto a physio's calendar until it is paid for.
+                      </GateNote>
+                    ) : null}
                   </>
                 );
 
