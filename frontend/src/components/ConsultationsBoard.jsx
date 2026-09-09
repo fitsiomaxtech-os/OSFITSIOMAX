@@ -5366,6 +5366,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       upi_transaction_id: "",
       card_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "",
+      // Built fresh on every trip through this popup, so a count left behind by a mode
+      // that was picked and then changed cannot follow the next one in.
+      cash_notes: {},
     });
   };
 
@@ -5409,7 +5412,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
         }
         payload.balance_due_date = dietFeeDraft.balance_due_date;
       }
-      if (mode === "upi") {
+      if (mode === "cash") {
+        // The same bar the Consultation and Treatment fees set: a cash figure with no
+        // count behind it is the row that cannot be settled against a till at the end of
+        // the day, and the Diet Fee was the one fee still letting one through.
+        if (!notesSettled(dietFeeConfirmDraft.cash_notes, amount)) {
+          toast.error(noteTotal(dietFeeConfirmDraft.cash_notes) === 0
+            ? "Count the cash being taken before collecting it"
+            : "The cash counted does not match the amount being taken");
+          return;
+        }
+        payload.denominations = countedNotes(dietFeeConfirmDraft.cash_notes);
+      } else if (mode === "upi") {
         if (!dietFeeConfirmDraft.upi_transaction_id.trim()) {
           toast.error("UPI Transaction ID is required");
           return;
@@ -10697,6 +10711,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                       </>
                     )}
 
+                    {/* Under the amount, because that is the figure it has to account
+                        for -- and after the balance block, since a fee being part-paid
+                        counts out the part on the desk today, not the whole fee. Cheque
+                        and Partial never reach here: one clears at a bank and the other
+                        is a schedule, and neither is notes on a desk today. */}
+                    {mode === "cash" && (
+                      <CashDenominations
+                        amount={dietFeeDraft.amount}
+                        notes={dietFeeConfirmDraft.cash_notes}
+                        onChange={(cash_notes) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, cash_notes })}
+                        testPrefix="cons-diet-fee-confirm"
+                      />
+                    )}
+
                     {mode === "upi" && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
@@ -10756,6 +10784,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                (dietFeeDraft.partial_installments || []).some((i) => !(parseFloat(i.amount) > 0) || !i.due_date) ||
                                Math.abs(round2((dietFeeDraft.partial_installments || []).reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0)) - dietPrice) > 0.01)
                             : (!(parseFloat(dietFeeDraft.amount) > 0) ||
+                               (mode === "cash" && !notesSettled(dietFeeConfirmDraft.cash_notes, dietFeeDraft.amount)) ||
                                (mode === "card" && !(dietFeeConfirmDraft.card_transaction_id || "").trim()) ||
                                (dietHasBalance && !dietFeeDraft.balance_due_date) ||
                                dietDiscountRs > dietPrice))
