@@ -147,8 +147,8 @@ const Field = ({ label, value, testid }) => (
   </div>
 );
 
-const Panel = ({ title, icon: Icon, children, testid }) => (
-  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" data-testid={testid}>
+const Panel = ({ title, icon: Icon, children, className = "", testid }) => (
+  <section className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5 ${className}`} data-testid={testid}>
     <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800">
       {Icon && <Icon className="h-4 w-4 text-slate-400" />}
       {title}
@@ -511,7 +511,11 @@ const ProfileTab = ({ roleLabel }) => {
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* Top-aligned, so a shorter panel keeps its own height rather than stretching to
+          match the one beside it and trailing empty space under its last field. The two
+          full-width rows — the address, which runs long, and the two money/contact panels
+          that are short — keep the grid from ending on a ragged single cell. */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <Panel title="Personal information" icon={UserRound} testid="my-profile-personal">
           <div className="mb-4 flex items-center gap-3 border-b border-slate-100 pb-4">
             <EmployeeAvatar employee={data} size={64} className="text-2xl" />
@@ -561,7 +565,7 @@ const ProfileTab = ({ roleLabel }) => {
           </div>
         </Panel>
 
-        <Panel title="Address" icon={Home} testid="my-profile-address">
+        <Panel title="Address" icon={Home} className="lg:col-span-2" testid="my-profile-address">
           <p className="whitespace-pre-line break-words text-sm font-medium text-slate-700" data-testid="my-profile-address-value">
             {data.address || "—"}
           </p>
