@@ -31,6 +31,14 @@ export const endTime12h = (time, minutes) => {
   return to12h(`${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`);
 };
 
+/** "09:30" + 30 -> "9:30 AM to 10:00 AM" — a slot named by both of its ends.
+ *
+ * A slot tile that showed only where an hour starts made the reader do the arithmetic to
+ * find out where it ends, off a session length written somewhere else on the screen. Both
+ * ends spelled out is how the hour is said out loud to the patient booking it.
+ */
+export const slotRange12h = (time, minutes) => `${to12h(time)} to ${endTime12h(time, minutes)}`;
+
 // ---------- Call-attempt stamps — used by the pre-sales RNR stage only ----------
 // RNR attempt timestamps are stored in UTC, but the callers all sit in India, so the
 // part of the day a call belongs to is always judged in IST — never in whatever

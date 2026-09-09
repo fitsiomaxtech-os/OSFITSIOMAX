@@ -31,7 +31,7 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
     ).to_list(1000)
     session_rows = await v3_col("sessions").find(
         {"physio_id": doctor_id, "status": "upcoming"},
-        {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
+        {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1, "session_number": 1},
     ).to_list(1000)
     # And a Nutrition Coach from `diet_sessions` (coach_id) — a third collection, keyed on
     # a third field, for the same reason the diet vertical keeps its own: nothing else
@@ -47,7 +47,7 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
     # and let the picker double-book the hour.
     rehab_rows = await v3_col("rehab_sessions").find(
         {"physio_id": doctor_id, "status": "upcoming"},
-        {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
+        {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1, "day_number": 1},
     ).to_list(1000)
     # A treatment day waiting on a date from the Branch Admin carries no slot_time. Left in,
     # it books the empty string — which then reads back as an occupied slot and can make the
@@ -83,9 +83,19 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
         st = row["slot_time"]
         occupancy[st] = occupancy.get(st, 0) + 1
         occupants.setdefault(st, []).append({
+            # The booking's own id, alongside the course tag that says which collection it
+            # came from. A caller that can only see "somebody is in this hour" can do
+            # nothing about it; with these two together the branch can move that exact row
+            # onto another slot or take it off this one, which is what the calendar's
+            # per-slot edit does.
+            "id": row.get("id"),
             "lead_id": row.get("lead_id"),
             "lead_name": row.get("lead_name", ""),
             "course": row.get("course", ""),
+            # Which day of the course this is -- "day 3 of the treatment" is how the branch
+            # names it back to the patient on the phone. Absent on a consultation, which is
+            # one appointment and not a day of anything.
+            "day_number": row.get("session_number") or row.get("day_number"),
         })
 
     # The hours this expert is rostered on (MANAGEMENT → TIME MANAGEMENT). The calendar cuts

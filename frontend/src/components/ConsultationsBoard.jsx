@@ -25,10 +25,11 @@ import {
   saveConsultationDecision, markConsultationCompleted, getBranches,
   listTextPresets, addTextPreset, deleteTextPreset,
   getTreatmentTypes, bulkHardDeleteLeads,
+  rescheduleCalendarBooking, declineCalendarBooking,
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
 import { loadSession } from "@/lib/session";
-import { endTime12h, slotTo12h, to12h } from "@/lib/time";
+import { endTime12h, slotRange12h, slotTo12h, to12h } from "@/lib/time";
 import { ALL_PAYMENT_MODE_LABELS, isHandheld, paymentReference } from "@/lib/receipt";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { AppointmentConfirmCard } from "@/components/AppointmentConfirmCard";
@@ -76,6 +77,10 @@ const BANK_DETAIL_MODES = ["account_transfer"];
 // get_doctor_calendar puts on every occupant. Used to tell a patient why a slot they can
 // see is not one they can take.
 const COURSE_DAY_NOUN = { session: "treatment day", rehab: "rehab day", diet: "check-in", consult: "consultation" };
+// The same four courses as one word each, for the tags a slot tile wears. A tile has room
+// for what an hour was booked *for* and not for a sentence about it; the day noun above is
+// what the popups and the errors say once there is room to say it properly.
+const COURSE_TAG = { session: "treatment", rehab: "rehab", diet: "check-in", consult: "consultation" };
 // These two mirror SETTLED_NOW_MODES / PART_SESSION_MODES in the backend's
 // v3_packages.py and must be kept in step with them. The first is every mode where the
 // money lands in full right now, so the amount is editable and a confirmation is
@@ -2608,6 +2613,23 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   const [assigningPhysio, setAssigningPhysio] = useState(false);
   const [physioCalendarData, setPhysioCalendarData] = useState(null);
   const [loadingPhysioCalendar, setLoadingPhysioCalendar] = useState(false);
+  // The published hour whose bookings are open in the manage popup, and the one booking
+  // inside it being acted on. The picker could always show that an hour was spoken for and
+  // never do anything about it — moving a patient off a slot meant finding their card,
+  // reopening their whole course and re-placing every day of it. These carry the popup that
+  // moves or refuses a single booking where it stands.
+  const [manageSlot, setManageSlot] = useState(null);
+  // { booking, mode: "reschedule" | "decline" } — which booking, and which of the two
+  // answers is being given about it. Null while the popup is only listing them.
+  const [manageAction, setManageAction] = useState(null);
+  const [manageDate, setManageDate] = useState("");
+  const [manageTime, setManageTime] = useState("");
+  // The desk saying it has spoken to the patient. Deliberately a thing that has to be
+  // ticked every time rather than remembered: an hour moved without telling the person
+  // expected at it is the failure this whole popup exists to prevent.
+  const [manageConfirmed, setManageConfirmed] = useState(false);
+  const [manageReason, setManageReason] = useState("");
+  const [manageBusy, setManageBusy] = useState(false);
   // The physio being booked, and the video room they hold their sessions in.
   //
   // Read off the expert's own record, which is where the room lives — one link per
@@ -4722,6 +4744,130 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     .map((o) => o.lead_name)
     .filter(Boolean)
     .join(", "), [physioCalendarData, selectedLead]);
+
+  // How full a slot is with nobody discounted. `slotSeatsTaken` above answers "can this
+  // lead be put here", which means quietly not counting this lead's own days; the manage
+  // popup is asking the other question — how many of the physio's seats are gone, full
+  // stop — and moving a booking onto an hour this lead already holds must be refused, not
+  // waved through.
+  const slotSeatsRaw = useCallback(
+    (slot) => physioCalendarData?.occupancy?.[slot] || 0,
+    [physioCalendarData],
+  );
+
+  // Every booking standing in one hour, exactly as the calendar reported them — this
+  // lead's included, and each carrying the id and course the manage popup acts on.
+  const slotBookings = useCallback(
+    (slot) => physioCalendarData?.occupants?.[slot] || [],
+    [physioCalendarData],
+  );
+
+  // The same bookings as the tags a tile wears, one per course rather than one per person.
+  // Three treatment days filling a capacity-3 hour are one fact about that hour, not three,
+  // and three identical pills said nothing the seat dots hadn't already said. This lead's
+  // own bookings stay a group of their own so the tile can say "your treatment" — knowing
+  // the hour is taken by the patient in front of you is a different answer from knowing it
+  // is taken at all.
+  const slotBookingTags = useCallback((slot) => {
+    const groups = [];
+    for (const o of slotBookings(slot)) {
+      const course = o.course || "session";
+      const mine = o.lead_id === selectedLead?.id;
+      const key = `${course}${mine ? "-mine" : ""}`;
+      const hit = groups.find((g) => g.key === key);
+      if (hit) hit.count += 1;
+      else groups.push({ key, course, mine, count: 1, label: COURSE_TAG[course] || "booked" });
+    }
+    return groups;
+  }, [slotBookings, selectedLead]);
+
+  // A booking this very picker is about to rewrite: this lead's own days on the course
+  // being assigned. Submitting replaces that course outright, so moving one of them here
+  // would be undone the moment the picker is submitted — the grid below is where those
+  // days are moved, and the popup says so rather than offering an action that won't hold.
+  const bookingIsThisAssignment = useCallback(
+    (b) => b.lead_id === selectedLead?.id && (b.course || "session") === assignCourse,
+    [selectedLead, assignCourse],
+  );
+
+  // Re-read the physio's calendar after a booking has been moved or refused, so the grid,
+  // the month dots and the seat counts all show what the hour now actually holds.
+  const reloadPhysioCalendar = useCallback(async () => {
+    if (!physioPick) return;
+    try {
+      setPhysioCalendarData(await getDoctorCalendar(physioPick));
+    } catch {
+      toast.error("Saved, but this calendar could not be re-read — reopen the picker to see it");
+    }
+  }, [physioPick]);
+
+  const openSlotManager = (slot) => {
+    setManageSlot(slot);
+    setManageAction(null);
+    // A move usually stays on the same day, so the date starts where the booking already
+    // is. The time deliberately does not — the one time that cannot be picked is the one
+    // it is being moved off.
+    setManageDate((slot || "").split("T")[0] || "");
+    setManageTime("");
+    setManageConfirmed(false);
+    setManageReason("");
+  };
+
+  const closeSlotManager = () => {
+    setManageSlot(null);
+    setManageAction(null);
+  };
+
+  const beginManageAction = (booking, mode) => {
+    setManageAction({ booking, mode });
+    setManageDate((manageSlot || "").split("T")[0] || "");
+    setManageTime("");
+    setManageConfirmed(false);
+    setManageReason("");
+  };
+
+  const submitBookingReschedule = async () => {
+    const booking = manageAction?.booking;
+    if (!booking) return;
+    if (!manageDate || !manageTime) { toast.error("Pick the new date and time"); return; }
+    if (!manageConfirmed) { toast.error(`Confirm the new time with ${booking.lead_name || "the patient"} first`); return; }
+    setManageBusy(true);
+    try {
+      await rescheduleCalendarBooking(booking.course || "session", booking.id, {
+        slot_time: `${manageDate}T${manageTime}`,
+        patient_confirmed: true,
+        reason: manageReason.trim(),
+      });
+      toast.success(`${booking.lead_name || "Booking"} moved to ${dayLabel(manageDate)} · ${slotRange12h(manageTime, sessionMinutes)}`);
+      closeSlotManager();
+      await reloadPhysioCalendar();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not move that booking");
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const submitBookingDecline = async () => {
+    const booking = manageAction?.booking;
+    if (!booking) return;
+    if (!manageReason.trim()) { toast.error("Say why this booking is being declined"); return; }
+    setManageBusy(true);
+    try {
+      const res = await declineCalendarBooking(booking.course || "session", booking.id, manageReason.trim());
+      toast.success(res?.awaiting_new_date
+        ? `${booking.lead_name || "That day"} taken off this hour — the day is back in the queue waiting on a new date`
+        : `${booking.lead_name || "That booking"} declined and cancelled`);
+      closeSlotManager();
+      await reloadPhysioCalendar();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not decline that booking");
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+
 
   // Every published slot of the picked physio, grouped by date, so the picker's month grid
   // can flag which days actually have availability and the day panel can list its times.
@@ -11291,7 +11437,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                 Nothing published on this day — open it in MANAGEMENT → PHYSIO CALENDAR first.
                               </p>
                             ) : (
-                              <div className="grid grid-cols-3 gap-1.5 sm:gap-2" data-testid="cons-slot-picker-grid">
+                              /* Two to a row rather than three, and one on a phone. A tile now
+                                 names both ends of its hour, gauges how full it is and lists
+                                 what is standing in it — a third of this panel could hold the
+                                 start time and nothing else. No three-column step above it
+                                 either: the breakpoints read the viewport, not this panel, so a
+                                 wide screen would put three rich tiles into the same ~600px the
+                                 picker always gets and truncate the end of every time. */
+                              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-2" data-testid="cons-slot-picker-grid">
                                 {(physioSlotsByDate[pickerDate] || []).map((time) => {
                                   const slot = `${pickerDate}T${time}`;
                                   const taken = slotFull(slot);
@@ -11303,64 +11456,89 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                   const ownClash = slotOwnOtherCourse(slot);
                                   const picked = planByDate[pickerDate]?.slot === slot;
                                   const pickedPaid = picked && isPaidSession(planByDate[pickerDate].day);
+                                  // What is actually standing in this hour, grouped by the
+                                  // course each booking came off. Three treatment days in a
+                                  // capacity-3 slot are one fact about the hour, not three,
+                                  // so they read as one tag carrying a count.
+                                  const held = slotBookingTags(slot);
                                   return (
-                                    <button
-                                      key={time}
-                                      type="button"
-                                      onClick={() => togglePickedSlot(slot)}
-                                      disabled={taken}
-                                      className={`overflow-hidden rounded-lg border-2 p-2 text-left transition-all sm:p-2.5 ${
-                                        taken
-                                          ? "cursor-not-allowed border-amber-300 bg-amber-50 opacity-70"
-                                          : picked
-                                          ? pickedPaid
-                                            ? "border-emerald-500 bg-emerald-100 shadow-md ring-2 ring-emerald-200"
-                                            : "border-rose-400 bg-rose-100 shadow-md ring-2 ring-rose-200"
-                                          : "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:shadow-sm"
-                                      }`}
-                                      title={ownClash
-                                        ? `${selectedLead.name} already has a ${ownClash} at ${to12h(time)} — move that first, or pick another time`
-                                        : taken
-                                        ? `Full · ${seats}/${slotCapacity} · ${slotOccupantNames(slot) || "—"}`
-                                        : `${to12h(time)} – ${endTime12h(time, sessionMinutes)} · ${seats}/${slotCapacity} taken${seats ? ` · ${slotOccupantNames(slot)}` : ""}${picked ? ` · Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}` : ""}`}
-                                      data-testid={`cons-slot-pick-${time}`}
-                                    >
-                                      {/* Two lines, always. Both nowrap and sized to a third
-                                          of a phone, so "10:00 AM" can't break after the hour
-                                          and turn one box into four lines while "8:00 AM"
-                                          beside it stays at two. The first line carries only
-                                          the time — a Day badge sharing it was what tipped the
-                                          longest times over the width. */}
-                                      <p className={`truncate text-[13px] font-bold sm:text-sm ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
-                                        {to12h(time)}
-                                      </p>
-                                      {/* Once a slot is picked, which treatment day it became
-                                          and whether it's paid matter more than its end time,
-                                          which is fixed by the package and named in the header. */}
-                                      <p className={`mt-0.5 flex items-center gap-1 truncate text-[10px] font-medium sm:text-xs ${taken ? "text-amber-600" : picked ? (pickedPaid ? "text-emerald-700" : "text-rose-700") : "text-emerald-600"}`}>
-                                        {/* A slot says how full it is rather than who is in
-                                            it — the physio takes several at once, so the seat
-                                            count is what decides whether it's bookable. Names
-                                            stay in the tooltip.
+                                    <div key={time} className="relative">
+                                      <button
+                                        type="button"
+                                        onClick={() => togglePickedSlot(slot)}
+                                        disabled={taken}
+                                        className={`w-full overflow-hidden rounded-lg border-2 p-2 text-left transition-all sm:p-2.5 ${
+                                          taken
+                                            ? "cursor-not-allowed border-amber-300 bg-amber-50 opacity-70"
+                                            : picked
+                                            ? pickedPaid
+                                              ? "border-emerald-500 bg-emerald-100 shadow-md ring-2 ring-emerald-200"
+                                              : "border-rose-400 bg-rose-100 shadow-md ring-2 ring-rose-200"
+                                            : "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:shadow-sm"
+                                        }`}
+                                        title={ownClash
+                                          ? `${selectedLead.name} already has a ${ownClash} at ${to12h(time)} — move that first, or pick another time`
+                                          : taken
+                                          ? `Full · ${seats}/${slotCapacity} · ${slotOccupantNames(slot) || "—"}`
+                                          : `${slotRange12h(time, sessionMinutes)} · ${seats}/${slotCapacity} taken${seats ? ` · ${slotOccupantNames(slot)}` : ""}${picked ? ` · Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}` : ""}`}
+                                        data-testid={`cons-slot-pick-${time}`}
+                                      >
+                                        {/* Both ends of the hour, then the seat gauge on the
+                                            same line — how long the slot runs and how much of
+                                            it is gone are the one question, and splitting
+                                            them over two lines made the dots read as a
+                                            separate warning rather than as part of the time.
+                                            pr-6 keeps the range clear of the edit button
+                                            floating over the corner. */}
+                                        <p className={`flex items-center gap-1.5 pr-6 text-[12px] font-bold sm:text-[13px] ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
+                                          <span className="min-w-0 truncate">{slotRange12h(time, sessionMinutes)}</span>
+                                          <SeatDots taken={seats} capacity={slotCapacity} />
+                                        </p>
+                                        {/* Under the time: what the hour is already spoken
+                                            for. A seat count says how many are here; only the
+                                            tags say what they came in for, which is what
+                                            decides whether the hour can take one more of the
+                                            course being booked. Once this lead has picked the
+                                            slot, which day it became and whether it is paid
+                                            displace them — that is the tile's own state and
+                                            it is not written anywhere else. */}
+                                        <div className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] font-semibold sm:text-[11px] ${taken ? "text-amber-700" : picked ? (pickedPaid ? "text-emerald-800" : "text-rose-800") : "text-emerald-700"}`}>
+                                          {picked ? (
+                                            <span data-testid={`cons-slot-picked-day-${time}`}>Day {planByDate[pickerDate].day} · {pickedPaid ? "PAID" : "UNPAID"}</span>
+                                          ) : held.length > 0 ? (
+                                            held.map((tag) => (
+                                              <span
+                                                key={tag.key}
+                                                className={`rounded border border-current px-1.5 py-0.5 leading-tight ${tag.mine ? "bg-white" : "bg-white/60 font-medium"}`}
+                                                data-testid={`cons-slot-tag-${time}-${tag.key}`}
+                                              >
+                                                {tag.mine ? "your " : ""}{tag.label}{tag.count > 1 ? ` ×${tag.count}` : ""}
+                                              </span>
+                                            ))
+                                          ) : (
+                                            <span className="font-medium opacity-60">open</span>
+                                          )}
+                                        </div>
+                                      </button>
 
-                                            Dots on every unpicked slot, not only part-filled
-                                            ones: they are how many seats this slot has as much
-                                            as how many are gone, and an empty slot that showed
-                                            nothing made the row of dots look like a warning
-                                            rather than a gauge. A picked slot gives the space
-                                            to its day and paid state instead. */}
-                                        {picked ? (
-                                          `Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}`
-                                        ) : (
-                                          <>
-                                            <SeatDots taken={seats} capacity={slotCapacity} />
-                                            {ownClash
-                                              ? <span className="min-w-0 truncate">your {ownClash}</span>
-                                              : !taken && <span className="min-w-0 truncate">ends {endTime12h(time, sessionMinutes)}</span>}
-                                          </>
-                                        )}
-                                      </p>
-                                    </button>
+                                      {/* Sits over the tile rather than inside it: the tile is
+                                          a button, and a button inside a button is neither
+                                          valid nor clickable. Only drawn where there is
+                                          something to manage — an empty hour has no booking to
+                                          move or refuse. */}
+                                      {held.length > 0 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openSlotManager(slot)}
+                                          className={`absolute right-1 top-1 rounded p-1 transition hover:bg-white ${taken ? "text-amber-700" : picked ? (pickedPaid ? "text-emerald-800" : "text-rose-800") : "text-emerald-700"}`}
+                                          title={`Manage what is booked at ${slotRange12h(time, sessionMinutes)}`}
+                                          aria-label={`Manage bookings at ${slotRange12h(time, sessionMinutes)}`}
+                                          data-testid={`cons-slot-manage-${time}`}
+                                        >
+                                          <Pencil className="h-3.5 w-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
                                   );
                                 })}
                               </div>
@@ -11456,6 +11634,244 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         {assigningPhysio ? "Assigning..." : `Assign & Book ${openEndedRehab ? sortedPickedSlots.length : totalSessionsNeeded} ${isRehabAssign ? "Rehab Days" : "Sessions"}`}
                       </Button>
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+
+            {/* Step 2b — what is already standing in one published hour, and the two things
+                a desk can do about it. Reached from the pencil on a slot tile.
+
+                Over the picker rather than instead of it (z-80 to the picker's z-70): the
+                branch is here because of a slot it is trying to use, and closing the whole
+                picker to free that slot would lose the plan half-placed behind it. */}
+            {/* Guarded on the picker being open, not just on a slot being held: closing the
+                picker underneath would otherwise leave this floating over the lead card,
+                pointed at a calendar nothing on screen is showing any more. */}
+            {showPhysioModal && showSlotPicker && manageSlot && (
+              <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-3 sm:p-6" data-testid="cons-slot-manage-modal">
+                <div className="flex max-h-[86vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-slate-900 sm:text-[15px]" data-testid="cons-slot-manage-title">
+                        Booked at {slotRange12h(manageSlot.split("T")[1], sessionMinutes)}
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                        {longDate(manageSlot.split("T")[0])} · {physioCalendarData?.doctor_name || "this physio"}
+                        {" · "}{slotSeatsRaw(manageSlot)} of {slotCapacity} seats taken
+                      </p>
+                    </div>
+                    <button type="button" onClick={closeSlotManager} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" data-testid="cons-slot-manage-close">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {/* The list, until one booking is picked to act on. Then the popup is
+                        about that booking alone — a form asking for a new time and the
+                        patient's agreement is not something to answer three of at once. */}
+                    {!manageAction ? (
+                      <div className="space-y-2" data-testid="cons-slot-manage-list">
+                        {slotBookings(manageSlot).map((b, i) => {
+                          const ours = bookingIsThisAssignment(b);
+                          return (
+                            <div
+                              key={b.id || `${b.lead_id}-${b.course}-${i}`}
+                              className="rounded-lg border border-slate-200 p-3"
+                              data-testid={`cons-slot-manage-booking-${b.id || i}`}
+                            >
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <p className="min-w-0 truncate text-[13px] font-bold text-slate-800">{b.lead_name || "Unknown patient"}</p>
+                                <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                                  {COURSE_TAG[b.course] || "booked"}
+                                </span>
+                                {b.day_number ? <span className="text-[11px] font-semibold text-slate-400">Day {b.day_number}</span> : null}
+                              </div>
+
+                              {ours ? (
+                                /* Their own days on the course this picker is placing. The
+                                   assign endpoint replaces that course outright, so anything
+                                   done to one of these here is undone at submit — the grid
+                                   behind this popup is where they move. */
+                                <p className="mt-2 text-[11px] leading-snug text-slate-500" data-testid={`cons-slot-manage-own-${b.id || i}`}>
+                                  One of the {dayNoun}s you are placing right now. Move it on the grid behind this popup —
+                                  submitting rewrites this whole course anyway.
+                                </p>
+                              ) : (
+                                <div className="mt-2 flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => beginManageAction(b, "reschedule")}
+                                    className="flex-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-[12px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                                    data-testid={`cons-slot-manage-reschedule-${b.id || i}`}
+                                  >
+                                    Reschedule
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => beginManageAction(b, "decline")}
+                                    className="flex-1 rounded-md border border-rose-300 bg-rose-50 px-2 py-1.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100"
+                                    data-testid={`cons-slot-manage-decline-${b.id || i}`}
+                                  >
+                                    Decline
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {slotBookings(manageSlot).length === 0 && (
+                          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-400">
+                            Nothing is booked in this hour any more.
+                          </p>
+                        )}
+                      </div>
+                    ) : manageAction.mode === "reschedule" ? (
+                      <div className="space-y-3" data-testid="cons-slot-reschedule-form">
+                        <p className="text-[12px] leading-snug text-slate-600">
+                          Moving <b className="text-slate-800">{manageAction.booking.lead_name || "this patient"}</b>&apos;s{" "}
+                          {COURSE_TAG[manageAction.booking.course] || "booking"}
+                          {manageAction.booking.day_number ? ` (Day ${manageAction.booking.day_number})` : ""} off{" "}
+                          {slotRange12h(manageSlot.split("T")[1], sessionMinutes)} on {dayLabel(manageSlot.split("T")[0])}.
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="mb-1 block text-[11px] font-semibold text-slate-600">New date</label>
+                            {/* Only days this physio has actually published. A free date
+                                field would take any day of the year and the save would then
+                                refuse most of them. */}
+                            <select
+                              value={manageDate}
+                              onChange={(e) => { setManageDate(e.target.value); setManageTime(""); setManageConfirmed(false); }}
+                              className="h-9 w-full rounded-md border border-slate-200 px-2 text-[12px] focus:border-emerald-400 focus:outline-none"
+                              data-testid="cons-slot-reschedule-date"
+                            >
+                              <option value="">-- pick a date --</option>
+                              {Object.keys(physioSlotsByDate)
+                                .filter((d) => d >= localToday())
+                                .sort()
+                                .map((d) => <option key={d} value={d}>{dayLabel(d)}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[11px] font-semibold text-slate-600">New time</label>
+                            <select
+                              value={manageTime}
+                              onChange={(e) => { setManageTime(e.target.value); setManageConfirmed(false); }}
+                              disabled={!manageDate}
+                              className="h-9 w-full rounded-md border border-slate-200 px-2 text-[12px] focus:border-emerald-400 focus:outline-none disabled:bg-slate-50"
+                              data-testid="cons-slot-reschedule-time"
+                            >
+                              <option value="">-- pick a time --</option>
+                              {(physioSlotsByDate[manageDate] || []).map((t) => {
+                                const target = `${manageDate}T${t}`;
+                                const full = slotSeatsRaw(target) >= slotCapacity;
+                                const here = target === manageSlot;
+                                return (
+                                  <option key={t} value={t} disabled={full || here}>
+                                    {slotRange12h(t, sessionMinutes)}
+                                    {here ? " — where it is now" : full ? " — full" : ` — ${slotCapacity - slotSeatsRaw(target)} free`}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* The hour belongs to the person expected at it. Ticked every time
+                            rather than remembered, and the save refuses without it — the
+                            same rule the endpoint holds, said here so the desk reads it
+                            before it rings rather than after. */}
+                        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                          <input
+                            type="checkbox"
+                            checked={manageConfirmed}
+                            onChange={(e) => setManageConfirmed(e.target.checked)}
+                            disabled={!manageTime}
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-emerald-600"
+                            data-testid="cons-slot-reschedule-confirm"
+                          />
+                          <span className="text-[11px] leading-snug text-amber-800">
+                            I have spoken to <b>{manageAction.booking.lead_name || "the patient"}</b> and they have agreed to
+                            {manageTime && manageDate
+                              ? <> <b>{dayLabel(manageDate)} · {slotRange12h(manageTime, sessionMinutes)}</b>.</>
+                              : " the new time."}
+                          </span>
+                        </label>
+
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-600">Reason <span className="font-normal text-slate-400">(optional)</span></label>
+                          <Input
+                            value={manageReason}
+                            onChange={(e) => setManageReason(e.target.value)}
+                            placeholder="Why the hour is moving"
+                            className="h-9 text-[12px]"
+                            data-testid="cons-slot-reschedule-reason"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3" data-testid="cons-slot-decline-form">
+                        <p className="text-[12px] leading-snug text-slate-600">
+                          Declining <b className="text-slate-800">{manageAction.booking.lead_name || "this patient"}</b>&apos;s{" "}
+                          {COURSE_TAG[manageAction.booking.course] || "booking"}
+                          {manageAction.booking.day_number ? ` (Day ${manageAction.booking.day_number})` : ""} off{" "}
+                          {slotRange12h(manageSlot.split("T")[1], sessionMinutes)}.
+                        </p>
+                        {/* What declining actually costs, per course, before it is done. A
+                            paid-for day is refused this hour and keeps its place in the
+                            course; a consultation is the appointment itself and goes. */}
+                        <p className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-[11px] leading-snug text-rose-700" data-testid="cons-slot-decline-effect">
+                          {["session", "rehab"].includes(manageAction.booking.course || "session")
+                            ? <>The hour is freed and the {COURSE_DAY_NOUN[manageAction.booking.course] || "day"} goes back to the days waiting on a date — it is not taken off the package they paid for, and it needs a new date booking.</>
+                            : <>This {COURSE_DAY_NOUN[manageAction.booking.course] || "booking"} is cancelled outright and the hour is freed.</>}
+                        </p>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-semibold text-slate-600">Reason <span className="font-normal text-rose-500">(required)</span></label>
+                          <Input
+                            value={manageReason}
+                            onChange={(e) => setManageReason(e.target.value)}
+                            placeholder="Why this booking is being declined"
+                            className="h-9 text-[12px]"
+                            data-testid="cons-slot-decline-reason"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2.5">
+                    <Button
+                      variant="outline"
+                      className="h-8 px-3 text-[12px]"
+                      onClick={() => (manageAction ? setManageAction(null) : closeSlotManager())}
+                      disabled={manageBusy}
+                      data-testid="cons-slot-manage-back"
+                    >
+                      {manageAction ? "Back" : "Close"}
+                    </Button>
+                    {manageAction?.mode === "reschedule" && (
+                      <Button
+                        className="h-8 bg-emerald-600 px-3 text-[12px] hover:bg-emerald-700"
+                        onClick={submitBookingReschedule}
+                        disabled={manageBusy || !manageTime || !manageConfirmed}
+                        data-testid="cons-slot-reschedule-submit"
+                      >
+                        {manageBusy ? "Moving..." : "Move this booking"}
+                      </Button>
+                    )}
+                    {manageAction?.mode === "decline" && (
+                      <Button
+                        className="h-8 bg-rose-600 px-3 text-[12px] hover:bg-rose-700"
+                        onClick={submitBookingDecline}
+                        disabled={manageBusy || !manageReason.trim()}
+                        data-testid="cons-slot-decline-submit"
+                      >
+                        {manageBusy ? "Declining..." : "Decline this booking"}
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>

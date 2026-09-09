@@ -237,3 +237,249 @@ async def schedule_session(
 
     updated = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
     return {"session": updated}
+
+
+# ---------------------------------------------------------------------------
+# Managing one booking straight off the expert's calendar
+# ---------------------------------------------------------------------------
+# The slot picker draws every hour a physio has published and how full each one is. Until
+# now that was all it could do: a branch looking at a taken hour could see the patient
+# standing in it and had no way to act, so moving somebody off an hour meant finding their
+# lead card, reopening their whole course and re-placing every day of it. These two
+# endpoints give the calendar the two answers a desk actually needs about one booking —
+# move it, or take it off this hour — without touching the rest of the course.
+#
+# An expert's calendar is booked out of four different collections, one per course, each
+# keyed on its own expert field and each with its own word for "still to come". The course
+# tag `get_doctor_calendar` stamps on every occupant is what says which one a booking came
+# from, so that tag is what is passed back here rather than a collection name.
+CALENDAR_COURSES = {
+    "session": {
+        "collection": "sessions", "expert_field": "physio_id", "live_status": "upcoming",
+        "noun": "treatment day", "day_field": "session_number",
+    },
+    "rehab": {
+        "collection": "rehab_sessions", "expert_field": "physio_id", "live_status": "upcoming",
+        "noun": "rehab day", "day_field": "day_number",
+    },
+    "diet": {
+        "collection": "diet_sessions", "expert_field": "coach_id", "live_status": "upcoming",
+        "noun": "diet check-in", "day_field": "session_number",
+    },
+    "consult": {
+        "collection": "appointments", "expert_field": "doctor_id", "live_status": "new_appointment",
+        "noun": "consultation", "day_field": None,
+    },
+}
+
+# Every expert the OS books — physios, consultants and nutrition coaches alike — lives in
+# one collection, which is why a single lookup serves all four courses above.
+EXPERT_COLLECTION = "doctors"
+
+
+class RescheduleBookingInput(BaseModel):
+    slot_time: str
+    # An hour is not the branch's to move on its own: somebody is expected at it and has
+    # arranged their day around it. The desk rings them, and this flag is the desk saying
+    # it did. Refused when absent rather than defaulted to true — a move nobody told the
+    # patient about is exactly the failure this exists to prevent, and a default would let
+    # it through every time a caller simply left the field out.
+    patient_confirmed: bool = False
+    reason: str = ""
+
+
+class DeclineBookingInput(BaseModel):
+    reason: str = ""
+
+
+async def _load_booking(course: str, booking_id: str):
+    """One booking off a calendar, with the course rules that govern it."""
+    spec = CALENDAR_COURSES.get(course)
+    if not spec:
+        raise HTTPException(status_code=400, detail="Unknown course for a calendar booking")
+    booking = await v3_col(spec["collection"]).find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail=f"That {spec['noun']} is no longer on record")
+    if booking.get("status") != spec["live_status"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"That {spec['noun']} is {booking.get('status') or 'not upcoming'} — only an upcoming one can be changed",
+        )
+    return spec, booking
+
+
+def _booking_label(spec: dict, booking: dict) -> str:
+    """How the log and the errors name a booking: 'Day 3 treatment day', or 'consultation'."""
+    day = booking.get(spec["day_field"]) if spec["day_field"] else None
+    return f"Day {day} {spec['noun']}" if day else spec["noun"]
+
+
+@router.post("/branch/calendar-bookings/{course}/{booking_id}/reschedule")
+async def reschedule_calendar_booking(
+    course: str,
+    booking_id: str,
+    payload: RescheduleBookingInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Move one booking onto another hour the same expert has published."""
+    spec, booking = await _load_booking(course, booking_id)
+
+    if not payload.patient_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Confirm the new time with {booking.get('lead_name') or 'the patient'} before moving it",
+        )
+
+    slot = normalize_slot_time(payload.slot_time)
+    if not slot:
+        raise HTTPException(status_code=400, detail="Pick a date and time to move this to")
+
+    moved_from = booking.get("slot_time") or ""
+    if slot == moved_from:
+        raise HTTPException(status_code=400, detail="That is the time it already holds — pick another")
+
+    expert_id = booking.get(spec["expert_field"])
+    expert = await v3_col(EXPERT_COLLECTION).find_one({"id": expert_id}, {"_id": 0})
+    if not expert:
+        raise HTTPException(status_code=404, detail="This booking's expert is no longer on record")
+
+    # The same refusal `schedule_session` makes, for the same reason: an hour the expert
+    # never opened shows on nobody's calendar, and the patient who agreed to it on the
+    # phone is turned away at the door.
+    if slot not in (expert.get("slots") or []):
+        raise HTTPException(
+            status_code=400,
+            detail="That time isn't published by this expert — open it in MANAGEMENT → PHYSIO CALENDAR first",
+        )
+
+    # How full the destination already is, counted across every course the expert runs. One
+    # expert, one room, one hour: a treatment day and a rehab day sitting in it take the
+    # same two seats, so counting only the collection being moved would overfill the slot.
+    capacity = slot_capacity_of(expert)
+    taken = 0
+    for tag, other in CALENDAR_COURSES.items():
+        query = {
+            other["expert_field"]: expert_id,
+            "slot_time": slot,
+            "status": other["live_status"],
+        }
+        if tag == course:
+            query["id"] = {"$ne": booking_id}
+        taken += await v3_col(other["collection"]).count_documents(query)
+    if taken >= capacity:
+        raise HTTPException(status_code=409, detail=f"That slot is full — it already holds {taken} of {capacity}")
+
+    # And whether the patient is themselves already spoken for in that hour, on any course.
+    # They cannot be on the treatment floor and in rehab at once, and the seat count above
+    # cannot say so — the expert may well have a seat going spare.
+    for tag, other in CALENDAR_COURSES.items():
+        query = {
+            "lead_id": booking.get("lead_id"),
+            "slot_time": slot,
+            "status": other["live_status"],
+        }
+        if tag == course:
+            query["id"] = {"$ne": booking_id}
+        clash = await v3_col(other["collection"]).find_one(query, {"_id": 0, "id": 1})
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{booking.get('lead_name') or 'This patient'} already has a {other['noun']} at that time",
+            )
+
+    now = now_iso()
+    reason = (payload.reason or "").strip()
+    await v3_col(spec["collection"]).update_one(
+        {"id": booking_id},
+        {"$set": {
+            "slot_time": slot,
+            # A day left dateless by an absence or an earlier decline has just been given a
+            # time, so it is no longer one of the days waiting on one.
+            "needs_assignment": False,
+            "rescheduled": True,
+            "rescheduled_from": moved_from,
+            "rescheduled_at": now,
+            "reschedule_reason": reason,
+            "reschedule_confirmed_with_patient": True,
+            "updated_at": now,
+        }},
+    )
+
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": booking.get("lead_id"),
+        "action": "calendar_booking_rescheduled",
+        "details": (
+            f"{_booking_label(spec, booking)} with {expert.get('full_name', 'the expert')} moved from"
+            f" {(moved_from or 'no date').replace('T', ' at ')} to {slot.replace('T', ' at ')},"
+            f" confirmed with {booking.get('lead_name') or 'the patient'}."
+            + (f" Reason: {reason}" if reason else "")
+        ),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+
+    updated = await v3_col(spec["collection"]).find_one({"id": booking_id}, {"_id": 0})
+    return {"booking": updated, "course": course, "moved_from": moved_from, "slot_time": slot}
+
+
+@router.post("/branch/calendar-bookings/{course}/{booking_id}/decline")
+async def decline_calendar_booking(
+    course: str,
+    booking_id: str,
+    payload: DeclineBookingInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Take one booking off the hour it is holding.
+
+    What that means depends on what was bought. A treatment day and a rehab day were paid
+    for, so declining one refuses *this hour* and not the day itself: the row keeps its
+    place in the course and goes back to the days waiting on a date — the same state an
+    absence leaves behind, read by `/branch/sessions/unscheduled` and by the Physio board.
+    Cancelling it outright would quietly shorten a package the patient has already paid for.
+
+    A consultation and a diet check-in are the appointment rather than a day of a course,
+    so declining one cancels it — which is what every other screen that drops one does.
+    """
+    spec, booking = await _load_booking(course, booking_id)
+
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Say why this booking is being declined")
+
+    freed_from = booking.get("slot_time") or ""
+    frees_the_day = course in ("session", "rehab")
+    now = now_iso()
+
+    fields = {
+        "declined_at": now,
+        "declined_by": user.full_name,
+        "decline_reason": reason,
+        "declined_from": freed_from,
+        "updated_at": now,
+    }
+    if frees_the_day:
+        fields["slot_time"] = ""
+        fields["needs_assignment"] = True
+    else:
+        fields["status"] = "cancelled"
+
+    await v3_col(spec["collection"]).update_one({"id": booking_id}, {"$set": fields})
+
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": booking.get("lead_id"),
+        "action": "calendar_booking_declined",
+        "details": (
+            f"{_booking_label(spec, booking)} declined off {(freed_from or 'its slot').replace('T', ' at ')}"
+            + (" — it is back in the queue waiting on a new date." if frees_the_day else " and cancelled.")
+            + f" Reason: {reason}"
+        ),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+
+    updated = await v3_col(spec["collection"]).find_one({"id": booking_id}, {"_id": 0})
+    return {"booking": updated, "course": course, "freed_from": freed_from, "awaiting_new_date": frees_the_day}

@@ -399,6 +399,12 @@ export const createJrPhysio = async (payload) => (await api.post("/branch/jr-phy
 // Treatment days an absence pushed off the end of the booked slots, and the booking that puts one back.
 export const unscheduledSessions = async () => (await api.get("/branch/sessions/unscheduled")).data;
 export const scheduleSession = async (sessionId, slotTime) => (await api.post(`/branch/sessions/${sessionId}/schedule`, { slot_time: slotTime })).data;
+// Acting on one booking straight off an expert's calendar, whichever course it came from
+// (`course` is the tag the calendar's own `occupants` carry). Reschedule moves it to
+// another published hour and refuses unless the desk has confirmed the new time with the
+// patient; decline takes it off the hour it holds and always wants a reason.
+export const rescheduleCalendarBooking = async (course, bookingId, payload) => (await api.post(`/branch/calendar-bookings/${course}/${bookingId}/reschedule`, payload)).data;
+export const declineCalendarBooking = async (course, bookingId, reason) => (await api.post(`/branch/calendar-bookings/${course}/${bookingId}/decline`, { reason })).data;
 
 export const patientView = async (token) => (await api.get(`/patient/view/${token}`)).data;
 
