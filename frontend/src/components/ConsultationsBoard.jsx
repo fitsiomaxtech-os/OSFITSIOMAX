@@ -1445,11 +1445,18 @@ const PAST_FEE_DESK = ["Physio Assign", "Consultation Completed"];
  * every patient on it, including the one who owed eighteen thousand rupees of rehab and
  * had no way to be charged for it from that screen. A desk's list has to report the
  * desk's own fee, or the only money it names is money that is not its business.
+ *
+ * Physio Assign is a step, not a desk -- but it is exactly the same story. Every patient
+ * on it already has the Consultation Fee in (that is what a stage past the fee desk
+ * means), so the column read a wall of green "Paid" while the Treatment Fee -- the money
+ * this list is actually chasing, and the one a Partial Payment plan can leave part
+ * collected -- was nowhere on the row.
  */
 const STAGE_ROW_FEE = {
   Rehab: "rehab",
   "Diet Consultation": "diet",
   "Diet Chart": "diet_chart",
+  "Physio Assign": "treatment",
 };
 
 /**
@@ -6353,7 +6360,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
                   <span className="flex items-center gap-1.5"><Phone className="h-3 w-3 shrink-0" /> {selectedLead.phone || "—"}</span>
                   {selectedLead.appointment_date && (
-                    <span className="flex items-center gap-1.5"><Calendar className="h-3 w-3 shrink-0" /> {selectedLead.appointment_date} {to12h(selectedLead.appointment_time)}</span>
+                    {/* The same wording the row this was opened from now uses. The list
+                        says "Wed, 9 Sept" and the header it opens said "2026-09-10", so
+                        one appointment read two ways depending on which half of the screen
+                        somebody was looking at. */}
+                    <span className="flex items-center gap-1.5">
+                      <Calendar className="h-3 w-3 shrink-0" />
+                      {apptDayLabel(selectedLead.appointment_date)}
+                      {selectedLead.appointment_time ? ` · ${to12h(selectedLead.appointment_time)}` : ""}
+                    </span>
                   )}
                   {/* The confirmation the patient was sent, handed back. On the slot
                       itself rather than out among the tabs, because that is the fact it
