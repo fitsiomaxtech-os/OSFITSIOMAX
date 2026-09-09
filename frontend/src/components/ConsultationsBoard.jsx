@@ -6180,21 +6180,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                   : <IndianRupee className="mr-1 h-3.5 w-3.5 shrink-0" />}
                                 {gate ? gate.label : t.kind === "balance" ? "Collect Balance" : "Collect"}
                               </Button>
-                              {/* The figure the button is about, under it. A part-paid plan
-                                  is the one case where "Collect" alone is a question rather
-                                  than an instruction — how much, and by when. A blocked one
-                                  names what is missing instead: the figure is not the thing
-                                  standing in the way. */}
-                              <span
-                                className={`mt-1 block truncate text-[10px] font-medium ${gate ? "text-amber-600" : t.kind === "balance" && t.overdue ? "text-rose-600" : t.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
-                                title={gate ? gate.hint : t.kind === "balance" && t.due ? `Due ${t.due}` : undefined}
-                              >
-                                {gate
-                                  ? gate.note
-                                  : t.kind === "balance"
-                                  ? `${rupees(t.balance)} due${t.overdue ? " · overdue" : ""}`
-                                  : t.amount != null ? rupees(t.amount) : "—"}
-                              </span>
                             </>
                           )}
                         </td>
@@ -6263,27 +6248,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                                   : <IndianRupee className="mr-1 h-3.5 w-3.5 shrink-0" />}
                                 {rxMissing ? "Prescription" : gate ? gate.label : c.kind === "balance" ? "Collect Balance" : "Collect"}
                               </Button>
-                              {/* The figure the button is about, under it. A part-paid fee
-                                  is the one case where "Collect" alone is a question rather
-                                  than an instruction — how much, and by when.
-
-                                  Nothing under the prescription button, though. It reads
-                                  "Prescription" in amber with a document on it and carries
-                                  the whole sentence on hover; "Required first" beneath was
-                                  a second label saying what the first already said, on the
-                                  one row that is two lines tall anyway. */}
-                              {!rxMissing && (
-                                <span
-                                  className={`mt-1 block truncate text-[10px] font-medium ${gate ? "text-amber-600" : c.kind === "balance" && c.overdue ? "text-rose-600" : c.kind === "balance" ? "text-amber-600" : "text-slate-400"}`}
-                                  title={gate ? gate.hint : c.kind === "balance" && c.due ? `Due ${c.due}` : undefined}
-                                >
-                                  {gate
-                                    ? gate.note
-                                    : c.kind === "balance"
-                                    ? `${rupees(c.balance)} due${c.overdue ? " · overdue" : ""}`
-                                    : c.amount != null ? rupees(c.amount) : "—"}
-                                </span>
-                              )}
                             </>
                           )}
                         </td>
