@@ -2510,31 +2510,33 @@ async def _day_figures(branch_id: Optional[str], day: str, user: V3UserOut) -> d
     both re-apply their own branch scoping to `user`, so a Branch Admin cannot close
     somebody else's day by naming their branch.
 
-    Cash is the only mode that carries: it is the only one that physically stays in the
-    building overnight. UPI and a card batch settle to a bank and open each morning at
-    nothing.
+    No mode carries overnight. Cash used to: the drawer was taken to open on whatever the
+    night before had been counted into it, so a branch that took Rs.20,000 in cash on top
+    of a Rs.41,000 close was asked to find Rs.61,000 in it. But the takings are banked or
+    handed over each night, so the drawer opens each morning at nothing -- the same as UPI
+    and a card batch, which settle to a bank. Every mode is now just the day's own takings
+    less what was refunded or paid out by it.
+
+    A cash handover is not recorded anywhere, which is why this cannot be modelled as an
+    opening balance less a deposit: there is no deposit to subtract. If cash ever starts
+    staying in the building overnight, that is the piece to add first -- the carry-in is
+    only correct once the money leaving has somewhere to be written down.
     """
     rev = await revenue_overview(start_date=day, end_date=day, branch_id=branch_id, user=user)
     exp = await list_expenses(start_date=day, end_date=day, branch_id=branch_id, user=user)
     income = rev.get("payment_modes") or {}
     spent = exp.get("payment_modes") or {}
-    prev = _closing_balance_public(
-        await v3_col("closing_balances").find_one(
-            {"branch_id": branch_id, "on": _previous_day(day)}, {"_id": 0},
-        )
-    )
-    carried = prev["cash_total"] if prev else 0.0
 
     def mode(book: dict, key: str) -> float:
         return round(float(book.get(key) or 0), 2)
 
     expected = {
-        "cash": round(carried + mode(income, "cash") - mode(spent, "cash"), 2),
+        "cash": round(mode(income, "cash") - mode(spent, "cash"), 2),
         "upi": round(mode(income, "upi") - mode(spent, "upi"), 2),
         "card": round(mode(income, "card") - mode(spent, "card"), 2),
     }
     expected["total"] = round(expected["cash"] + expected["upi"] + expected["card"], 2)
-    return {"carried_cash": carried, "income": income, "expense": spent, "expected": expected}
+    return {"income": income, "expense": spent, "expected": expected}
 
 
 async def _book_for(branch_id: Optional[str], day: str) -> Optional[dict]:
@@ -2803,7 +2805,6 @@ async def close_book(
         },
         "expected": expected,
         "difference": difference,
-        "carried_cash": figures["carried_cash"],
         "note": counted["note"],
         "counted_by": counted["counted_by"],
         "closed_by": user.full_name,

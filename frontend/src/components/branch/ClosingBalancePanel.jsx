@@ -132,20 +132,18 @@ const expenseByDayFrom = (expenses) => {
 };
 
 /**
- * What each mode should come to on one day.
+ * What each mode should come to on one day: its own takings, less what was refunded or
+ * paid out by it.
  *
- * Cash is the only one that carries over, because it is the only one that physically stays
- * in the building: the drawer opens on what last night's count left in it, takes the day's
- * cash, and pays out whatever was spent in cash. UPI and a card batch settle to a bank and
- * start each morning at nothing, so yesterday's figure is history for them rather than an
- * opening balance.
- *
- * @param carriedCash  Last night's counted cash. Zero when the evening before was never
- *                     counted — the same answer the day form gives, so a day read here
- *                     and the same day read there show the same expected figure.
+ * Nothing carries overnight. Cash used to, on the reasoning that it is the one mode that
+ * physically stays in the building — the drawer opening on what last night's count left in
+ * it. It doesn't stay: the takings are banked or handed over each night, so the drawer
+ * opens each morning at nothing, and carrying yesterday in asked the counter to find money
+ * that had already left the building. Mirrored by _day_figures in v3_finance.py, so a day
+ * read here and the same day signed off there show the same expected figure.
  */
-const expectedFor = (carriedCash, income = {}, expense = {}) => ({
-  cash: round2((carriedCash || 0) + (income.cash || 0) - (expense.cash || 0)),
+const expectedFor = (income = {}, expense = {}) => ({
+  cash: round2((income.cash || 0) - (expense.cash || 0)),
   upi: round2((income.upi || 0) - (expense.upi || 0)),
   card: round2((income.card || 0) - (expense.card || 0)),
 });
@@ -288,8 +286,8 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
   const totalCounted = round2(cashCounted + upiCounted + cardCounted);
 
   const expected = useMemo(
-    () => expectedFor(yesterday?.cash_total || 0, income, expense),
-    [yesterday, income, expense],
+    () => expectedFor(income, expense),
+    [income, expense],
   );
   const totalExpected = sumModes(expected);
 
@@ -428,7 +426,7 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
               </div>
               <p className="mt-1 text-[11px] text-slate-400">
                 Expected {fmt(expected[m.key])}
-                {m.key === "cash" ? " — yesterday's cash, plus today's, less what was paid out in cash" : " — today's takings, less what was refunded or paid by it"}
+                {m.key === "cash" ? " — today's cash, less what was paid out in cash" : " — today's takings, less what was refunded or paid by it"}
               </p>
 
               {m.key === "cash" ? (
@@ -718,9 +716,6 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
 
   const expenseByDay = useMemo(() => expenseByDayFrom(expenses), [expenses]);
 
-  // The counts, keyed by their evening. `opening` joins them under its own date so the
-  // first day of the window carries in from the night before it exactly as every other day
-  // does — a window opening on the 1st should not report the branch as starting empty.
   // The books, by the day each belongs to. Their own map rather than folded into the
   // counts: a day can be counted and not yet signed off, which is the state most evenings
   // are in, and one lookup that answered both questions could not say so.
@@ -730,9 +725,11 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
     return out;
   }, [history]);
 
+  // The counts, keyed by their evening. `opening` -- the last count before the window --
+  // was folded in here so the first day could carry in from the night before it. Nothing
+  // carries now, so it would only key a date outside the window that nothing reads.
   const countByDay = useMemo(() => {
     const out = {};
-    if (history?.opening) out[history.opening.on] = history.opening;
     for (const r of history?.records || []) out[r.on] = r;
     return out;
   }, [history]);
@@ -747,7 +744,7 @@ const ClosingBalanceHistory = ({ branchId, start, end, refreshKey, onBusy, onOpe
       const book = bookByDay[on] || null;
       const income = incomeByDay[on] || {};
       const expense = expenseByDay[on] || {};
-      const expected = expectedFor(countByDay[shiftDays(on, -1)]?.cash_total || 0, income, expense);
+      const expected = expectedFor(income, expense);
       const liveExpected = sumModes(expected);
       // A closed day is reported as it was signed, not as it reads today. The live figure
       // is still worked out beside it so the row can say when the two have parted company
