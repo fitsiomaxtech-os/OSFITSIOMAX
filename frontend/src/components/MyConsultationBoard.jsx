@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Building2, ChevronDown, Check, AlertTriangle, X } from "lucide-react";
+import { Building2, ChevronDown, Check, AlertTriangle, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { hpResolvedConsultant } from "@/lib/api";
@@ -105,12 +105,20 @@ const BranchPicker = ({ value, branches, onPick }) => {
  * picker in front of it — a consultant covers the whole organisation, so which branch's
  * appointments are being read is the first question and there was nowhere to answer it.
  *
- * The banner is the point of the page being separate rather than a link to the CONSULTANT
- * board. A Super Admin without a consultant record of their own falls back, server-side, to
- * whichever consultant record exists — right for driving somebody else's branch, and quite
- * wrong on a page titled My Consultation, where it would show a stranger's appointments
- * under the reader's own name and say nothing about it. So the page asks whose book it is
- * and prints the answer when it is not yours.
+ * This page used to be about somebody else. A Super Admin is hired as a Super Admin, so
+ * HR never minted them a consultant record, and with nothing to match on the board fell
+ * back to whichever record existed and listed the whole branch's consultations under a
+ * title that says "My". Three different owners on one page: a banner naming a consultant
+ * picked at random, a table showing every consultant's patients, and a Review queue that
+ * could only ever be empty.
+ *
+ * Both halves are fixed at the source rather than papered over here. The record is created
+ * on mount (ensure_super_admin_consultant), so the reader always has one; and the board is
+ * asked for `mine`, so what it lists is the consultations booked to them. The page is now
+ * true to its name, and empty until they take one — which is the honest answer, not a bug.
+ *
+ * The banner stays for the one case still possible: a CONSULTANT hired without a record.
+ * A Super Admin can no longer reach it.
  */
 export const MyConsultationBoard = ({ user, search = "", onSearchChange, branches = [] }) => {
   const [branchId, setBranchId] = useState(ALL);
@@ -129,15 +137,32 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
     <div className="space-y-4" data-testid="my-consultation-board">
       <div className="flex flex-wrap items-center gap-2">
         <BranchPicker value={branchId} branches={branches} onPick={setBranchId} />
+
+        {/* Whose book this is, said once at the top. The page is named after the reader
+            and lists only their patients now, so the name is confirmation rather than a
+            warning — and the tag beside it is the same one their rows wear downstream,
+            so the reader recognises their own work on a Branch Admin's screen too. */}
+        {resolved?.is_mine && resolved.consultant_name && (
+          <div
+            className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+            data-testid="my-consultation-whoami"
+          >
+            <UserRound className="h-4 w-4 shrink-0 text-slate-400" />
+            <span className="text-xs font-semibold text-slate-700">{resolved.consultant_name}</span>
+            {resolved.is_super_admin && (
+              <span className="rounded-[4px] border border-slate-300 bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-600">
+                Super Admin
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {notMine && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid="my-consultation-not-mine">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <p className="text-xs text-amber-800">
-            {resolved.consultant_name
-              ? <>These are <b>{resolved.consultant_name}</b>&apos;s consultations, not yours — your account has no consultant record of its own, so the board falls back to the one that exists. Ask HR Admin to link a CONSULTANT record to this login to see your own.</>
-              : <>No consultant record exists yet, so there is nothing to show. Ask HR Admin to link a CONSULTANT record to this login.</>}
+            No consultant record is linked to this login, so there is nothing to show. Ask HR Admin to link a CONSULTANT record to it.
           </p>
         </div>
       )}
@@ -147,6 +172,9 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
       <HeadPhysioBoard
         branchId={branchId}
         user={user}
+        // The whole difference between this page and Operations > Consultant. Without it
+        // the board is branch-scoped, which is a supervisor's question, not this one's.
+        mine
         search={search}
         onSearchChange={onSearchChange}
       />

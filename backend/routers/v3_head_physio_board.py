@@ -44,6 +44,60 @@ async def _branch_consultation_visit_stage() -> str:
     return await get_stage_name_at("consultation", 1, "Consultation Visit")
 
 
+async def ensure_super_admin_consultant(user: V3UserOut) -> Optional[dict]:
+    """The Super Admin's own consultant record, created on first use if it isn't there.
+
+    A Super Admin is hired as a Super Admin, so HR never mints them a `doctors` record —
+    v3_hr skips one deliberately for that role. The consequence was a page called My
+    Consultation that could not be about the reader: with nothing to match on, the board
+    fell back to whichever consultant record Mongo happened to return first and showed a
+    stranger's patients under the reader's own name.
+
+    Creating it here rather than asking HR to is the point. The banner that used to sit on
+    that page told the reader to go and get a record linked, which is a dead end for the
+    one person in the building who outranks everybody who could do it. A Super Admin who
+    takes a consultation is a consultant for that hour, and this is the record that says so.
+
+    Branchless, exactly like a Consultant hired through HR (SINGLE_CALENDAR_ROLES) — one
+    person keeps one set of published hours, so splitting the record per branch would let
+    the same Super Admin be booked into the same hour at two of them with nothing to catch
+    it. Where they are OFFERED is decided from the login, in consultants_serving_branch.
+
+    `is_super_admin` is what every surface reads to tag the row. It lives on the record
+    rather than being re-derived from the login at each call site, because the booking
+    picker, the board column and the calendar all need the same answer and a rule kept in
+    three places is a rule kept in none.
+    """
+    if user.role != "super_admin":
+        return None
+    mine = await v3_col("doctors").find_one(
+        {"user_id": user.id, "profile_type": "head_physio"}, {"_id": 0},
+    )
+    if mine:
+        # Older records minted before this existed carry no flag; stamp it once so the
+        # tag is not missing on exactly the accounts that have been here longest.
+        if not mine.get("is_super_admin"):
+            await v3_col("doctors").update_one(
+                {"id": mine["id"]}, {"$set": {"is_super_admin": True}},
+            )
+            mine["is_super_admin"] = True
+        return mine
+    doctor = {
+        "id": str(uuid.uuid4()),
+        "full_name": user.full_name,
+        "profile_type": "head_physio",
+        "branch_id": None,
+        "specialization": "",
+        "slots": [],
+        "slot_details": [],
+        "user_id": user.id,
+        "is_super_admin": True,
+        "created_at": now_iso(),
+    }
+    await v3_col("doctors").insert_one(doctor.copy())
+    return doctor
+
+
 async def _resolve_hp_doctor(user: V3UserOut, branch_id: Optional[str] = None) -> Optional[dict]:
     """Find the doctors record for the logged-in head physio/consultant.
 
@@ -84,8 +138,12 @@ async def _resolve_hp_doctor(user: V3UserOut, branch_id: Optional[str] = None) -
             str(d.get("created_at") or ""),
         ))
         return mine[0]
+    # Their own record, minted here the first time they need it. It used to be
+    # `find_one({"profile_type": "head_physio"})` — no user, no sort, no branch, so the
+    # answer was whichever record Mongo listed first and could change between deploys
+    # without anything in the data changing.
     if user.role == "super_admin":
-        return await v3_col("doctors").find_one({"profile_type": "head_physio"}, {"_id": 0})
+        return await ensure_super_admin_consultant(user)
     return None
 
 
@@ -93,28 +151,31 @@ async def _resolve_hp_doctor(user: V3UserOut, branch_id: Optional[str] = None) -
 async def hp_resolved_consultant(user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
     """Whose consultant book the board is about to show, and whether it is the caller's own.
 
-    _resolve_hp_doctor falls back to any consultant record for a Super Admin, which is right
-    for driving somebody else's branch board and wrong for a page called My Consultation —
-    a Super Admin with no consultant record of their own would be shown a stranger's
-    appointments under their own name, with nothing on screen saying so.
+    Called on My Consultation's mount, which is also where a Super Admin's own consultant
+    record gets created if they haven't got one — see ensure_super_admin_consultant. So the
+    answer for a Super Admin is now always "yours", and the page no longer has to explain
+    that it is showing somebody else's work.
 
-    Read-only and additive: it changes no existing resolution, it only reports it, so the
-    caller can say plainly whose book this is.
+    `is_super_admin` comes back with it so the page can wear the tag beside the name, which
+    is the whole point of a Super Admin taking a consultation being visible as such.
     """
     own = await v3_col("doctors").find_one(
-        {"user_id": user.id, "profile_type": "head_physio"}, {"_id": 0, "id": 1, "full_name": 1},
+        {"user_id": user.id, "profile_type": "head_physio"},
+        {"_id": 0, "id": 1, "full_name": 1, "is_super_admin": 1},
     )
+    if not own and user.role == "super_admin":
+        own = await ensure_super_admin_consultant(user)
     if own:
-        return {"consultant_id": own["id"], "consultant_name": own.get("full_name") or "", "is_mine": True}
+        return {
+            "consultant_id": own["id"],
+            "consultant_name": own.get("full_name") or "",
+            "is_super_admin": bool(own.get("is_super_admin")),
+            "is_mine": True,
+        }
 
-    fallback = await _resolve_hp_doctor(user)
-    if not fallback:
-        return {"consultant_id": "", "consultant_name": "", "is_mine": False}
-    return {
-        "consultant_id": fallback.get("id", ""),
-        "consultant_name": fallback.get("full_name") or "",
-        "is_mine": False,
-    }
+    # Only a head_physio login can still land here — one hired without a record. There is
+    # nothing to fall back to that would be theirs, so the page is told plainly.
+    return {"consultant_id": "", "consultant_name": "", "is_super_admin": False, "is_mine": False}
 
 
 @router.get("/head-physio/my-calendar")

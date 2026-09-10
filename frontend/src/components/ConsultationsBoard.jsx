@@ -1862,6 +1862,28 @@ const buildRehabProgress = (rows, lead) => {
   };
 };
 
+/**
+ *  The tag on a consultation a Super Admin is taking themselves.
+ *
+ *  A Super Admin has no consultant record until they need one, so anybody they consult is
+ *  booked against a record that did not exist when the branch was set up. Left unmarked,
+ *  that row is indistinguishable from a hire's — the same name in the same column — and
+ *  "who saw this patient" is a question the Consultant column exists to answer.
+ *
+ *  Deliberately quiet: a slate outline, not a colour that competes with the stage pills
+ *  beside it. It says who, not how urgent.
+ */
+const SuperAdminTag = ({ className = "" }) => (
+  <span
+    className={`ml-1.5 shrink-0 whitespace-nowrap rounded-[4px] border border-slate-300 bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-600 ${className}`}
+    title="Consultation taken by the Super Admin"
+    data-testid="super-admin-tag"
+  >
+    Super Admin
+  </span>
+);
+
+
 /** Pick a consultation slot the way the branch actually has to pick one: a date, then
  *  whoever is free on it, then one of that consultant's own open times.
  *
@@ -2028,6 +2050,7 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs font-semibold text-slate-700">
                         {doc.full_name}
+                        {doc.is_super_admin && <SuperAdminTag />}
                         {/* Named rather than hidden. Keeping the same consultant is a
                             legitimate reschedule — the patient is the one who could not
                             make the day — and a list that quietly left them out would
@@ -2079,7 +2102,7 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
   );
 };
 
-const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment", externalSortOrder = "oldest" }) => {
+const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment", externalSortOrder = "oldest" }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
   // worth remarking on when they are assigned. Passed in rather than worked out here for
@@ -2101,6 +2124,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
   // Uploads are folded in as they happen (see notePrescriptionCount) so a row unlocks the
   // moment the page is filed, without waiting for a reload.
   const [rxLeadIds, setRxLeadIds] = useState(() => new Set());
+  // Which consultants on this board are a Super Admin taking consultations. Held beside
+  // the leads, not on them — see super_admin_consultant_ids on the endpoint.
+  const [saConsultantIds, setSaConsultantIds] = useState(() => new Set());
   const noteRxFiled = useCallback((leadId, filed) => {
     setRxLeadIds((prev) => {
       if (prev.has(leadId) === !!filed) return prev;
@@ -2654,8 +2680,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
     (async () => {
       try {
         setLoading(true);
-        const res = await getConsultationsBoard(branchId, isConsultant ? "head_consultation" : undefined);
-        if (!cancelled) { setBoard(res); setRxLeadIds(new Set(res?.rx_lead_ids || [])); }
+        const res = await getConsultationsBoard(branchId, isConsultant ? "head_consultation" : undefined, mine);
+        if (!cancelled) {
+          setBoard(res);
+          setRxLeadIds(new Set(res?.rx_lead_ids || []));
+          setSaConsultantIds(new Set(res?.super_admin_consultant_ids || []));
+        }
       } catch (err) {
         console.error("Consultations board load error:", err);
         if (!cancelled) toast.error("Failed to load consultations");
@@ -2664,22 +2694,23 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
       }
     })();
     return () => { cancelled = true; };
-  }, [branchId]);
+  }, [branchId, mine]);
 
   const load = useCallback(async () => {
     if (!branchId) return;
     try {
       setLoading(true);
-      const res = await getConsultationsBoard(branchId, isConsultant ? "head_consultation" : undefined);
+      const res = await getConsultationsBoard(branchId, isConsultant ? "head_consultation" : undefined, mine);
       setBoard(res);
       setRxLeadIds(new Set(res?.rx_lead_ids || []));
+      setSaConsultantIds(new Set(res?.super_admin_consultant_ids || []));
     } catch (err) {
       console.error("Consultations board load error:", err);
       toast.error("Failed to load consultations");
     } finally {
       setLoading(false);
     }
-  }, [branchId]);
+  }, [branchId, mine]);
 
   const toggleSelectMode = () => {
     setSelectMode((v) => !v);
@@ -5908,7 +5939,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                   {l.patient_number && <span className="font-mono">{l.patient_number}</span>}
-                  {l.assigned_physio_name && <span>· {l.assigned_physio_name}</span>}
+                  {l.assigned_physio_name && (
+                    <span className="inline-flex items-center">
+                      · {l.assigned_physio_name}
+                      {saConsultantIds.has(l.assigned_physio_id) && <SuperAdminTag />}
+                    </span>
+                  )}
                   {l.appointment_date && (
                     <span>· {l.appointment_date} {l.appointment_time ? to12h(l.appointment_time) : ""}</span>
                   )}
@@ -6074,7 +6110,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                         </span>
                       ) : <span className="block text-center text-slate-400">—</span>}
                     </td>
-                    <td className="truncate px-4 py-3 align-middle leading-5 text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
+                    <td className="px-4 py-3 align-middle leading-5 text-slate-600" title={l.assigned_physio_name}>
+                      <span className="flex min-w-0 items-center">
+                        <span className="truncate">{l.assigned_physio_name || "—"}</span>
+                        {saConsultantIds.has(l.assigned_physio_id) && <SuperAdminTag />}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 align-middle">
                       <span
                         className="inline-flex max-w-full items-center gap-1 truncate rounded-[5px] px-2 py-0.5 align-middle text-xs font-semibold"
@@ -6387,6 +6428,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, externalStageFilter, sh
                           weight instead of the colour. */}
                       <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Expert</span>
                       <span className="truncate font-semibold text-slate-800">{selectedLead.assigned_physio_name}</span>
+                      {saConsultantIds.has(selectedLead.assigned_physio_id) && <SuperAdminTag className="ml-0" />}
                     </p>
                   )}
                   {isConsultant && (

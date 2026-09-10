@@ -220,7 +220,9 @@ export const publicAppointmentUrl = (token) => `${BACKEND_URL}/api/v3/public/app
 // over again. 404s when the patient has no live consultation booked — the caller says so
 // rather than opening an empty card.
 export const getLeadAppointmentCard = async (leadId) => (await api.get(`/leads/${leadId}/appointment-card`)).data;
-export const getConsultationsBoard = async (branchId, pipeline) => (await api.get(`/branch-admin/consultations/${branchId}/board`, { params: pipeline ? { pipeline } : {} })).data;
+// `mine` narrows the board to the consultations booked to the caller — what My
+// Consultation needs and what Operations, reading a whole branch, must not send.
+export const getConsultationsBoard = async (branchId, pipeline, mine) => (await api.get(`/branch-admin/consultations/${branchId}/board`, { params: { ...(pipeline ? { pipeline } : {}), ...(mine ? { mine: true } : {}) } })).data;
 // Consultation Appointment Scheduling (Branch Admin > Calendar > Schedule)
 export const listConsultAppointments = async (branchId) => (await api.get(`/branch-admin/${branchId}/consult-appointments`)).data;
 export const getConsultAvailability = async (branchId, date, doctorId) => (await api.get(`/branch-admin/${branchId}/consult-availability`, { params: { date, doctor_id: doctorId } })).data;

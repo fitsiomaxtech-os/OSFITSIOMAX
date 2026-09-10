@@ -1309,7 +1309,12 @@ async def v3_available_dates(
 
 
 @router.get("/branch-admin/consultations/{branch_id}/board")
-async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def v3_consultations_board(
+    branch_id: str,
+    pipeline: Optional[str] = None,
+    mine: bool = False,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
     """Return leads in the Consultations pipeline for a branch, grouped by the caller's own
     pipeline field. Head Physio has a fully independent pipeline (head_consultation_stage) from
     Branch Admin's own (consultation_stage) — filtering by the wrong field would show a Head
@@ -1320,7 +1325,17 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
 
     branch_id="all" drops the branch filter. Head Physios cover every branch and so carry no
     branch of their own; without this their board would ask for a branch it doesn't have and
-    come back empty."""
+    come back empty.
+
+    `mine=true` narrows it further, to the consultations booked to the CALLER. This board is
+    branch-scoped and has never been person-scoped, which was right for Operations, where a
+    supervisor is reading a branch, and wrong for My Consultation, where the page is named
+    after the reader and was listing every consultant in the organisation under that title.
+
+    Whose it is comes off `appointments.doctor_id`, not off `leads.assigned_physio_id`. Only
+    the appointment records who actually took the consultation — `assigned_physio_id` is the
+    treating physio, despite the booking copying a consultant onto it at times. See
+    consultant_thread_target in physio_scope."""
     try:
         # Off the predicate, not the literal: the desk is `consultant`/`online_consultant`
         # now, and matching the retired slug exactly dropped every consultant onto the
@@ -1330,6 +1345,17 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
         query = {field: {"$ne": None}}
         if branch_id and branch_id != "all":
             query["branch_id"] = branch_id
+        if mine:
+            my_doctor_ids = await v3_col("doctors").distinct(
+                "id", {"user_id": user.id, "profile_type": "head_physio"},
+            )
+            # An empty answer here has to stay empty rather than fall through to the whole
+            # branch. A consultant with nothing booked yet reading an empty page is correct;
+            # the same consultant reading everybody else's patients is the bug this fixes.
+            my_lead_ids = await v3_col("appointments").distinct(
+                "lead_id", {"doctor_id": {"$in": my_doctor_ids}},
+            ) if my_doctor_ids else []
+            query["id"] = {"$in": my_lead_ids}
         leads_docs = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
         stage_names = await _head_consultation_stage_names() if is_hp else await _consultation_stage_names()
         stage_counts = {}
@@ -1360,11 +1386,21 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
         # would be dropped by every one of them — locking a row whose prescription is on
         # file. Answered once for the board, held beside it, and untouched by any of that.
         rx_ids = await leads_with_prescription([ld.get("id") for ld in leads_docs if ld.get("id")])
+        # Which consultants on this board are a Super Admin taking consultations, so the
+        # Consultant column can say so. Sent as a list of ids beside the leads rather than a
+        # flag on each of them, for the same reason rx_lead_ids is: every collect and every
+        # stage move replaces the row it touched with the lead that endpoint returns, and a
+        # flag riding on the lead would be dropped by all of them — the tag would vanish off
+        # a row the moment anybody worked on it.
+        sa_consultant_ids = await v3_col("doctors").distinct(
+            "id", {"profile_type": "head_physio", "is_super_admin": True},
+        )
         return {
             "leads": lead_list,
             "stage_counts": stage_counts,
             "stages": stage_names,
             "rx_lead_ids": sorted(rx_ids),
+            "super_admin_consultant_ids": sorted(sa_consultant_ids),
         }
     except HTTPException:
         raise

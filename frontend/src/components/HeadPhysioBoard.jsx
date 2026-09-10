@@ -94,7 +94,7 @@ const isDone = (...stages) => stages.some((s) => /complete/i.test(String(s || ""
  * login rather than to the branch. Everything else on the board has always been the
  * branch's queue, so a supervisor saw the branch's consultations beside an empty Review.
  */
-export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, search = "", onSearchChange }) => {
+export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, mine = false, search = "", onSearchChange }) => {
   const [workTab, setWorkTab] = useState("consultations");
   // The day every list under Consultations answers to. Starts on today.
   const [workDate, setWorkDate] = useState(todayIso());
@@ -498,6 +498,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
             <ConsultationsBoard
               branchId={effectiveBranchId}
               viewerRole="head_physio"
+              // My Consultation asks for the reader's own patients; a supervisor reading a
+              // branch in Operations asks for the branch's. One flag, opposite answers, and
+              // the board has no way to tell which it is being mounted for on its own.
+              mine={mine}
               externalDate={allTime ? null : (dateRange ? undefined : workDate)}
               externalDateFilter={allTime ? undefined : (dateRange || undefined)}
               hideDateFilter

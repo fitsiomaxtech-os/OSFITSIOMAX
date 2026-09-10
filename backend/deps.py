@@ -435,6 +435,8 @@ async def consultants_serving_branch(rows: list, branch_id: str) -> list:
 
     An empty list means NOWHERE. That is the reversal, and it is the whole point: a
     Consultant nobody has posted yet is offered at no branch rather than at all of them.
+    The one exception is a Super Admin taking consultations: nobody posts them anywhere
+    because they run every branch, so their empty list means EVERYWHERE instead.
 
     A record with no login is a profile-only entry from Fitsiomax Experts, which requires a
     branch when it is created, so its own branch_id is its posting and is read directly.
@@ -451,10 +453,19 @@ async def consultants_serving_branch(rows: list, branch_id: str) -> list:
     """
     user_ids = [r.get("user_id") for r in rows if r.get("profile_type") == "head_physio" and r.get("user_id")]
     posted_by_user: Dict[str, list] = {}
+    # A Super Admin taking consultations is the one consultant "posted nowhere" must not
+    # apply to. Their account carries no branch list — they are not posted to branches,
+    # they run all of them — so the rule above would offer them at none, which is the
+    # opposite of what the role means. Held as a set of user ids rather than a branch list
+    # per account, because the answer is "everywhere" and a list cannot say that.
+    everywhere: set = set()
     if user_ids:
         async for u in v3_col("users").find(
-            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1},
+            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1, "role": 1},
         ):
+            if (u.get("role") or "").strip().lower() == "super_admin":
+                everywhere.add(u["id"])
+                continue
             at = [b for b in (u.get("branch_ids") or []) if b]
             if not at and u.get("branch_id"):
                 at = [u["branch_id"]]
@@ -467,7 +478,7 @@ async def consultants_serving_branch(rows: list, branch_id: str) -> list:
             continue
         uid = r.get("user_id")
         if uid:
-            if branch_id in posted_by_user.get(uid, []):
+            if uid in everywhere or branch_id in posted_by_user.get(uid, []):
                 kept.append(r)
         elif r.get("branch_id") == branch_id:
             kept.append(r)
