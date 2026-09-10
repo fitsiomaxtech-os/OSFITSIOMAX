@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, CheckCircle2, Minus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { toast } from "@/components/ui/sonner";
 import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransaction, bulkApproveTransactions } from "@/lib/api";
 import { ExpenseApprovalsPanel } from "@/components/finance/ExpenseApprovalsPanel";
@@ -59,6 +60,44 @@ const PAYMENT_MODES = [
   ["account_transfer", "Bank Transfer"],
   ["cheque", "Cheque"],
 ];
+
+/**
+ * One filter pill. The three rows of these used to be written out three times with three
+ * different sizes -- the vertical row at text-xs/px-3, the other two at text-sm/px-3.5 --
+ * so a filter block that asks three questions of equal weight answered them in two
+ * typefaces. One size now, and the accent is the only thing that varies: sky for what was
+ * bought, indigo for how it was paid, which is the distinction the rows are grouped on.
+ */
+const FilterPill = ({ on, accent = "sky", onClick, children, testId }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={on}
+    className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+      on
+        ? accent === "indigo"
+          ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
+          : "border-sky-600 bg-sky-600 text-white shadow-sm"
+        : `border-slate-200 bg-white text-slate-600 ${accent === "indigo" ? "hover:border-indigo-300 hover:text-indigo-600" : "hover:border-sky-300 hover:text-sky-600"}`
+    }`}
+    data-testid={testId}
+  >
+    {children}
+  </button>
+);
+
+/**
+ * A labelled line of the filter block. The label carries its weight: three unlabelled
+ * bands of pills, each opening with a pill called "All", left the reader to work out from
+ * the words in them which question each band was asking -- and "All" against "All" against
+ * "All Modes" is the same answer to three different questions.
+ */
+const FilterRow = ({ label, children, testId }) => (
+  <div className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-3" data-testid={testId}>
+    <p className="w-20 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+    <div className="flex flex-wrap items-center gap-2">{children}</div>
+  </div>
+);
 
 /**
  * Approve popup — what it asks for depends on the row's own payment mode: Cash gets a
@@ -218,6 +257,12 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
   const [category, setCategory] = useState("all");
   const [paymentMode, setPaymentMode] = useState("all"); // "all" | "cash" | "upi" | "card" | "account_transfer" | "cheque"
+  // The window both ledgers are read through. Held here rather than in each of them
+  // because it is the one filter that means the same thing on either side -- a day's
+  // collections and a day's spending are the same day -- so it is asked once, above the
+  // ledger switch, and both /finance/approvals and /finance/expenses take it from here.
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [view, setView] = useState("pending"); // "pending" | "approved"
   const [ledger, setLedger] = useState("income"); // "income" | "expenses"
   const [data, setData] = useState({ transactions: [], summary: {} });
@@ -240,6 +285,8 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
       if (mode !== "all") params.mode = mode;
       if (category !== "all") params.category = category;
       if (paymentMode !== "all") params.payment_mode = paymentMode;
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
       setData(await getFinanceApprovals(params));
       // Every filter change comes through here, and a selection that outlived one would
       // approve rows the accountant can no longer see. Cleared on the reload after an
@@ -247,7 +294,7 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
       setSelected(new Set());
     } catch { /* silent */ }
     setLoading(false);
-  }, [branchId, mode, category, paymentMode, view]);
+  }, [branchId, mode, category, paymentMode, startDate, endDate, view]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -319,7 +366,117 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
         ))}
       </div>
 
-      {ledger === "expenses" && <ExpenseApprovalsPanel onChanged={onChanged} branchId={branchIdProp} scoped={scoped} />}
+      {/* One filter block for both ledgers, above the switch's two sides rather than
+          inside one of them. What is on it follows the ledger: the window and the vertical
+          narrow money going either way and stay put, while Category and Paid by describe a
+          collection and have nothing to say about an expense — /finance/expenses does not
+          take them — so they are not offered against one.
+
+          Three loose bands of pills stood here before, unlabelled, in two sizes, each
+          opening with a pill called "All". Now it is one card, one pill size, and every
+          line says which question it is asking. */}
+      <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="finance-approvals-filters">
+        <FilterRow label="Window" testId="finance-approvals-date-filter">
+          <MilkDateInput
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            max={endDate || undefined}
+            className="rounded-md border-slate-200 px-2 text-xs"
+            data-testid="finance-approvals-start-date"
+          />
+          <span className="text-xs text-slate-400">to</span>
+          <MilkDateInput
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            min={startDate || undefined}
+            className="rounded-md border-slate-200 px-2 text-xs"
+            data-testid="finance-approvals-end-date"
+          />
+          {/* Only once there is something to clear. A permanent Clear beside two empty
+              date boxes offers to undo a filter nobody has set. */}
+          {(startDate || endDate) && (
+            <button
+              type="button"
+              onClick={() => { setStartDate(""); setEndDate(""); }}
+              className="text-xs font-medium text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+              data-testid="finance-approvals-date-clear"
+            >
+              Clear
+            </button>
+          )}
+        </FilterRow>
+
+        <FilterRow label="Vertical" testId="finance-approvals-mode-filter">
+          {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
+            <FilterPill
+              key={key}
+              on={mode === key}
+              onClick={() => setMode(key)}
+              testId={`finance-approvals-mode-${key}`}
+            >
+              {label}
+            </FilterPill>
+          ))}
+          {/* Already picked by the branch-pill row above this board when it is embedded in
+              Super Admin's Finance screen — asking again underneath it would be a second
+              answer to a question that has one. */}
+          {!controlled && (
+            <select
+              value={branchId}
+              onChange={(e) => setBranchId(e.target.value)}
+              className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+              data-testid="finance-approvals-branch"
+            >
+              <option value="">All Branches</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+            </select>
+          )}
+        </FilterRow>
+
+        {ledger === "income" && (
+          <FilterRow label="Category" testId="finance-approvals-category-filter">
+            {CATEGORIES.map(([key, label]) => (
+              <FilterPill
+                key={key}
+                on={category === key}
+                onClick={() => setCategory(key)}
+                testId={`finance-approvals-category-${key}`}
+              >
+                {label}
+              </FilterPill>
+            ))}
+          </FilterRow>
+        )}
+
+        {/* Same set Branch Admin picks from when collecting the fee in the first place —
+            not a category (what was paid for) but how, so it keeps its own line and its
+            own accent rather than folding into the one above. */}
+        {ledger === "income" && (
+          <FilterRow label="Paid by" testId="finance-approvals-payment-mode-filter">
+            {PAYMENT_MODES.map(([key, label]) => (
+              <FilterPill
+                key={key}
+                accent="indigo"
+                on={paymentMode === key}
+                onClick={() => setPaymentMode(key)}
+                testId={`finance-approvals-payment-mode-${key}`}
+              >
+                {label}
+              </FilterPill>
+            ))}
+          </FilterRow>
+        )}
+      </div>
+
+      {ledger === "expenses" && (
+        <ExpenseApprovalsPanel
+          onChanged={onChanged}
+          branchId={branchId}
+          mode={mode}
+          startDate={startDate}
+          endDate={endDate}
+        />
+      )}
 
       {ledger === "income" && (
       <>
@@ -350,71 +507,6 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
           <p className={`text-2xl font-bold ${view === "approved" ? "text-emerald-700" : "text-slate-700"}`}>{fmt(s.approved_total)}</p>
           <p className={`text-[10px] ${view === "approved" ? "text-emerald-600" : "text-slate-400"}`}>{s.approved_count || 0} payments</p>
         </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setMode(key)}
-            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-              mode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-            }`}
-            data-testid={`finance-approvals-mode-${key}`}
-          >
-            {label}
-          </button>
-        ))}
-        {/* Already picked by the branch-pill row above this board when it is embedded in
-            Super Admin's Finance screen — asking again underneath it would be a second
-            answer to a question that has one. */}
-        {!controlled && (
-          <select
-            value={branchId}
-            onChange={(e) => setBranchId(e.target.value)}
-            className="h-8 rounded-md border border-slate-200 px-2 text-xs"
-            data-testid="finance-approvals-branch"
-          >
-            <option value="">All Branches</option>
-            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-          </select>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2" data-testid="finance-approvals-category-filter">
-        {CATEGORIES.map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setCategory(key)}
-            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-              category === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-            }`}
-            data-testid={`finance-approvals-category-${key}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Same set Branch Admin picks from when collecting the fee in the first place —
-          not a category (what was paid for) but how, so it gets its own row rather than
-          folding into the one above. */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="finance-approvals-payment-mode-filter">
-        {PAYMENT_MODES.map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setPaymentMode(key)}
-            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-              paymentMode === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
-            }`}
-            data-testid={`finance-approvals-payment-mode-${key}`}
-          >
-            {label}
-          </button>
-        ))}
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-testid="finance-approvals-summary">

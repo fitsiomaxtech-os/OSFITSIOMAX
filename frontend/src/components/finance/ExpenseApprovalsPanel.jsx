@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Coins, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import { getBranches, getFinanceExpenses, approveFinanceExpense, rejectFinanceExpense } from "@/lib/api";
+import { getFinanceExpenses, approveFinanceExpense, rejectFinanceExpense } from "@/lib/api";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
@@ -20,28 +20,34 @@ const MODE_LABELS = {
  * against a patient, and the filters that matter on the income side (which fee, which
  * patient) mean nothing here.
  *
- * `branchId`/`scoped` come down from Super Admin > Finance, whose branch-pill row has
- * already picked the scope; left off on the Accountant's own board, where the select
- * below is the only place the branch gets picked.
+ * Every filter comes from the block above the ledger switch, which asks them once for both
+ * sides of this tab: a day's collections and a day's spending are the same day, and the
+ * two would not stay together if each side kept its own window. This panel used to keep a
+ * branch select of its own, which meant the tab could be looking at one branch's income
+ * beside another branch's expenses — two answers to a question the reader asked once.
  */
-export const ExpenseApprovalsPanel = ({ onChanged = () => {}, branchId: branchIdProp, scoped = false }) => {
-  const controlled = scoped;
+export const ExpenseApprovalsPanel = ({
+  onChanged = () => {},
+  branchId = "",
+  mode = "all",
+  startDate = "",
+  endDate = "",
+}) => {
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({ approved_total: 0, approved_count: 0, pending_total: 0, pending_count: 0 });
-  const [branches, setBranches] = useState([]);
-  const [ownBranchId, setOwnBranchId] = useState("");
-  const branchId = controlled ? (branchIdProp || "") : ownBranchId;
-  const setBranchId = setOwnBranchId;
   const [view, setView] = useState("pending"); // "pending" | "approved"
   const [loading, setLoading] = useState(true);
   const [deciding, setDeciding] = useState(null);
 
-  useEffect(() => { if (!controlled) getBranches().then(setBranches).catch(() => {}); }, [controlled]);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getFinanceExpenses(branchId ? { branch_id: branchId } : {});
+      const params = {};
+      if (branchId) params.branch_id = branchId;
+      if (mode && mode !== "all") params.mode = mode;
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
+      const data = await getFinanceExpenses(params);
       setRows(data.expenses || []);
       setTotals({
         approved_total: data.approved_total || 0,
@@ -54,7 +60,7 @@ export const ExpenseApprovalsPanel = ({ onChanged = () => {}, branchId: branchId
     } finally {
       setLoading(false);
     }
-  }, [branchId]);
+  }, [branchId, mode, startDate, endDate]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -114,19 +120,6 @@ export const ExpenseApprovalsPanel = ({ onChanged = () => {}, branchId: branchId
           <p className={`text-[10px] ${view === "approved" ? "text-emerald-600" : "text-slate-400"}`}>{totals.approved_count} {totals.approved_count === 1 ? "expense" : "expenses"}</p>
         </button>
       </div>
-
-      {/* Already picked by the branch-pill row above, where there is one. */}
-      {!controlled && (
-        <select
-          value={branchId}
-          onChange={(e) => setBranchId(e.target.value)}
-          className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600"
-          data-testid="finance-expense-approvals-branch"
-        >
-          <option value="">All Branches</option>
-          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-        </select>
-      )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="divide-y divide-slate-50">
