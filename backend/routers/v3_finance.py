@@ -611,8 +611,6 @@ async def finance_approvals(
             if category and category not in ("all", "") and cat != category:
                 continue
             is_approved = bool(act.get("approved"))
-            if approved is not None and is_approved != approved:
-                continue
             details = act.get("details", "")
             pm = _parse_payment_mode(details)
             if payment_mode and payment_mode not in ("all", "") and pm != payment_mode:
@@ -646,8 +644,6 @@ async def finance_approvals(
             if mode_branch_ids is not None and bid not in mode_branch_ids:
                 continue
             is_approved = bool(sale.get("approved"))
-            if approved is not None and is_approved != approved:
-                continue
             pm = sale.get("payment_mode") or "unknown"
             if payment_mode and payment_mode not in ("all", "") and pm != payment_mode:
                 continue
@@ -691,8 +687,6 @@ async def finance_approvals(
             if amount <= 0:
                 continue
             is_approved = bool(reg.get("approved"))
-            if approved is not None and is_approved != approved:
-                continue
             pm = reg.get("payment_mode") or "unknown"
             if payment_mode and payment_mode not in ("all", "") and pm != payment_mode:
                 continue
@@ -738,8 +732,6 @@ async def finance_approvals(
             if amount <= 0:
                 continue
             is_approved = bool(reg.get("approved"))
-            if approved is not None and is_approved != approved:
-                continue
             pm = reg.get("payment_mode") or "unknown"
             if payment_mode and payment_mode not in ("all", "") and pm != payment_mode:
                 continue
@@ -766,8 +758,15 @@ async def finance_approvals(
     rows.sort(key=lambda r: r["collected_at"], reverse=True)
     pending = [r for r in rows if not r["approved"]]
     approved_rows = [r for r in rows if r["approved"]]
+    # `approved` cuts the list, not the summary. Every loop above used to skip the other
+    # pile outright, which meant the summary was totalled over whichever side had been
+    # asked for and the other read Rs.0 with 0 payments -- so the tab showed nothing
+    # approved until Approved was picked, and then nothing pending. The two cards are
+    # there to be compared, and a figure that only appears once you are looking at it is
+    # not a comparison. Both piles are built now; only what is listed narrows.
+    listed = rows if approved is None else (approved_rows if approved else pending)
     return {
-        "transactions": rows[:1000],
+        "transactions": listed[:1000],
         "summary": {
             "pending_count": len(pending),
             "pending_total": sum(r["amount"] for r in pending),
