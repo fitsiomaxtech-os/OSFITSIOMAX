@@ -1096,7 +1096,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
         <ConsultationDetailModal
           lead={selectedLead}
           physioId={physioId}
-          activeDate={selectedDate}
           // Days are completed inside the popup, so re-pull on close to refresh the counts.
           onClose={() => { setSelectedLead(null); load(); }}
           onDone={() => { setSelectedLead(null); load(); }}
@@ -1650,7 +1649,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
   );
 }
 
-function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }) {
+function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   const [submitting, setSubmitting] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [assessments, setAssessments] = useState([]);
@@ -1917,13 +1916,20 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     // behind the popup, which opened Day 3 for a patient who had not had
     // Day 1 yet: a day the server would refuse as out of order anyway.
     const isOpenDay = !done && !awaiting && blockedBy === null;
-    // Today or already behind, and it can be worked; still to come and it
-    // waits. A day that has slipped past stays workable rather than turning
-    // into a dead end — days run in order, so leaving it shut would wall off
-    // every day after it as well. The strip's own date still counts, so a day
-    // opened from the calendar on the morning it falls is workable on it.
+    // A day is worked on the date it was booked for and on no other. Today's
+    // row carries Complete and Absent; every other row — gone by or still to
+    // come — draws as what it is, a line in the treatment list with nothing on
+    // it to press, so the one day actually being worked is the only one
+    // offering an action.
     const dayIso = (s.slot_time || "").slice(0, 10);
-    const canWork = isOpenDay && (dayIso <= todayIso || dayIso === activeDate);
+    const isToday = !!dayIso && dayIso === todayIso;
+    const canWork = isOpenDay && isToday;
+    // The day the course stands on, on a date that has already gone by. Named
+    // rather than left blank: an "Opened" day with no buttons on it reads as a
+    // broken screen rather than a day whose date came and went. Distinct from
+    // `missed` below, which is the absences the day already carries — this is a
+    // date that passed with nothing recorded against it either way.
+    const datePassed = isOpenDay && !!dayIso && dayIso < todayIso;
     // The dates this day was already booked for and the patient did not arrive. An
     // absence does not cancel the day — it slides the day onto the next slot and pushes
     // the rest of the course down one — so once the Branch Admin has re-dated it the row
@@ -1977,7 +1983,15 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                 heads the list too and cannot be worked — so the row says
                 in words which day this is. */}
             {isOpenDay && (
-              heldByReview ? (
+              datePassed ? (
+                // The date came and went with nothing signed off on it. Naming
+                // it is all this screen can do — a day is worked on its own
+                // date, so putting this one back in play is a new date from the
+                // Branch Admin.
+                <span className="rounded bg-rose-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-rose-700">
+                  Overdue
+                </span>
+              ) : heldByReview ? (
                 // The day is next in line and still cannot be worked. Saying
                 // "Opened" over a button that refuses to open it is the one
                 // reading that helps nobody.
@@ -2070,6 +2084,12 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
           >
             <AlertCircle className="h-3 w-3" /> Needs a date
           </span>
+        ) : !isToday ? (
+          // Not today. Complete and Absent belong to the day being worked, and
+          // only one date is being worked, so this row is a list entry and
+          // nothing more. The title line already says which day it is and
+          // whether its date has gone by.
+          null
         ) : blockedBy ? (
           // Treatment runs in order, so a later day cannot be ticked off
           // while an earlier one is open. Said in the button's tooltip
@@ -2120,17 +2140,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               </Button>
             )}
           </div>
-        ) : (
-          <Button
-            size="sm"
-            disabled
-            className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
-            title={heldByReview ? reviewHoldMessage : `This day is next, but ${fmtDate(s.slot_time)} has not come round yet`}
-            data-testid={`physio-day-locked-${s.id}`}
-          >
-            <Check className="mr-1 h-3 w-3" /> Complete
-          </Button>
-        )}
+        ) : null}
       </div>
     );
   };
