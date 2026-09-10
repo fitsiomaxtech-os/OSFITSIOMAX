@@ -1304,6 +1304,24 @@ const FEE_TABS = [
     mode: (l) => l.diet_fee_payment_mode || "",
     action: "diet",
   },
+  {
+    key: "diet_chart",
+    label: "Diet Chart",
+    // A lighter orange than Diet's, the same pairing the stage tiles use — one diet
+    // family, two steps.
+    tone: "#fb923c",
+    empty: "Nobody has reached the Diet Chart step in this stage yet.",
+    // The step after the Diet Consultation, not beside it: a patient reaches this tab once
+    // their Diet Consultation fee is in and a chart has been called for -- collect_diet_
+    // chart_fee refuses on either count. Before that they are on the Diet tab, being sold
+    // the consultation the chart is written at.
+    scope: (l) => l.diet_fee_paid != null
+      && (!!l.diet_chart || !!l.diet_chart_package_id || l.diet_chart_fee_paid != null),
+    paid: (l) => Number(l.diet_chart_fee_paid) || 0,
+    item: (l) => l.diet_chart_package_name || "",
+    mode: (l) => l.diet_chart_fee_payment_mode || "",
+    action: "diet_chart",
+  },
 ];
 
 /**
@@ -1541,6 +1559,12 @@ const rowFeeGate = (l, fee) => {
   }
   if (fee === "rehab" && (!l.rehab_package_id || l.rehab_package_price == null)) {
     return { label: "Open Rehab", note: "No course chosen", hint: "Choose the rehab course before collecting the Rehab Fee", to: "rehab" };
+  }
+  // The Diet Chart is the step after the Diet Consultation -- collect_diet_chart_fee
+  // refuses until that fee is in, because the chart is written at the consultation it
+  // buys. Sends the desk to the Diet programme, where the first fee is collected.
+  if (fee === "diet_chart" && l.diet_fee_paid == null) {
+    return { label: "Collect Diet Fee", note: "Diet Consultation fee first", hint: "Collect the Diet Consultation Fee before the Diet Chart Fee", to: "diet" };
   }
   return null;
 };
@@ -5892,7 +5916,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
               {loading
                 ? "Loading…"
                 : showDiscountColumn && activeFee.key !== "consultation"
-                  ? `No patients referred to ${activeFee.label} in this stage.`
+                  ? activeFee.empty
                   : externalDate
                     ? "No patients on this day."
                     : "No patients in this stage yet."}
