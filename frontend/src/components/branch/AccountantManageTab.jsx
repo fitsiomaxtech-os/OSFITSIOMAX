@@ -345,10 +345,21 @@ const PaymentModes = ({ tx }) => {
  *              showing it as such overstates the books. The income side fixes on the
  *              Approved pile, and the three stage pills stop being a filter and become
  *              what the expense side's pair already are -- three figures to read.
+ * @param scoped  The branch is picked somewhere above this board and moves while it
+ *              stays mounted -- Super Admin > Finance's branch-pill row. The select here
+ *              is dropped (those pills already are it) and the branch is read straight
+ *              off the prop on every render, so an empty one means All Branches rather
+ *              than "pick your own", which is what a bare branchId would mean.
  */
-export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = true, approvedOnly = false }) => {
+export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = true, approvedOnly = false, scoped = false }) => {
   const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState(fixedBranchId || "");
+  const [ownBranchId, setOwnBranchId] = useState(fixedBranchId || "");
+  // Scoped: whatever the row above says, right now. Otherwise this board's own select,
+  // seeded from a fixed branch where one was handed down and never moved after.
+  const branchId = scoped ? (fixedBranchId || "") : ownBranchId;
+  // Only the unscoped select sets it; kept under the old name so the JSX below reads
+  // exactly as it did.
+  const setBranchId = setOwnBranchId;
   const [tab, setTab] = useState("summary");
   const [ledger, setLedger] = useState("income");
   // Which of the three piles the income side is showing. Opens on Collected because that
@@ -378,10 +389,12 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
   // The eye beside it opens the client; this opens the piece of paper.
   const [receipt, setReceipt] = useState(null);
 
+  // A scoped board still wants the list: nothing on it picks from it, but the scope chip
+  // names the branch off it, and without the names it can only say "This branch".
   useEffect(() => {
-    if (fixedBranchId) return;
+    if (fixedBranchId && !scoped) return;
     getBranches().then(setBranches).catch(() => setBranches([]));
-  }, [fixedBranchId]);
+  }, [fixedBranchId, scoped]);
 
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
@@ -413,16 +426,18 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
 
   // Kept beside the revenue call rather than inside it: this one answers about money going
   // out, takes no date range yet, and a branch with no expenses should not stop the eight
-  // revenue cards rendering.
+  // revenue cards rendering. Scoped to the same branch the revenue call is, though — the
+  // expense tile sits in the same row as the income tiles, and one of them counting every
+  // branch while the others counted the picked one is two scopes in one row of figures.
   const loadExpenseTotals = useCallback(() => {
-    getFinanceExpenses()
+    getFinanceExpenses(branchId ? { branch_id: branchId } : {})
       .then((d) => setExpenseTotals({
         approved_total: d.approved_total || 0,
         approved_count: d.approved_count || 0,
         pending_count: d.pending_count || 0,
       }))
       .catch(() => { /* the card falls back to zero; the panel says why when opened */ });
-  }, []);
+  }, [branchId]);
 
   useEffect(() => { loadExpenseTotals(); }, [loadExpenseTotals]);
 
@@ -634,7 +649,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
           that scope them. The branch select keeps its condition: the boards that pass a
           fixed branch have nothing to choose, and the row starts at the tabs for them. */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm" data-testid="accountant-manage-maintabs">
-        {!fixedBranchId && (
+        {!fixedBranchId && !scoped && (
           // The divider is desktop-only: once this wraps on a phone it is a line across
           // the middle of a row rather than between two of them.
           <div className="flex items-center gap-2 pl-1.5 sm:border-r sm:border-slate-200 sm:pr-3">

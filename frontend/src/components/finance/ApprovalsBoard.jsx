@@ -204,10 +204,17 @@ const BulkApproveModal = ({ count, total, saving, onClose, onConfirm }) => (
  * the OS — see approve_transaction's docstring — it only records that someone other
  * than whoever collected it looked the payment over, plus whatever the popup asked them
  * to confirm against the payment mode.
+ *
+ * `branchId`/`scoped` are the same pair ExpenseBoard and ProfitBoard take: passed by
+ * Super Admin > Finance, whose branch-pill row has already picked the scope, and left off
+ * on the Accountant's own board, where this keeps its own select.
  */
-export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged = () => {} }) => {
+export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged = () => {}, branchId: branchIdProp, scoped = false }) => {
+  const controlled = scoped;
   const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState("");
+  const [ownBranchId, setOwnBranchId] = useState("");
+  const branchId = controlled ? (branchIdProp || "") : ownBranchId;
+  const setBranchId = setOwnBranchId;
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
   const [category, setCategory] = useState("all");
   const [paymentMode, setPaymentMode] = useState("all"); // "all" | "cash" | "upi" | "card" | "account_transfer" | "cheque"
@@ -223,7 +230,7 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkSaving, setBulkSaving] = useState(false);
 
-  useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
+  useEffect(() => { if (!controlled) getBranches().then(setBranches).catch(() => {}); }, [controlled]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -312,7 +319,7 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
         ))}
       </div>
 
-      {ledger === "expenses" && <ExpenseApprovalsPanel onChanged={onChanged} />}
+      {ledger === "expenses" && <ExpenseApprovalsPanel onChanged={onChanged} branchId={branchIdProp} scoped={scoped} />}
 
       {ledger === "income" && (
       <>
@@ -359,15 +366,20 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
             {label}
           </button>
         ))}
-        <select
-          value={branchId}
-          onChange={(e) => setBranchId(e.target.value)}
-          className="h-8 rounded-md border border-slate-200 px-2 text-xs"
-          data-testid="finance-approvals-branch"
-        >
-          <option value="">All Branches</option>
-          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-        </select>
+        {/* Already picked by the branch-pill row above this board when it is embedded in
+            Super Admin's Finance screen — asking again underneath it would be a second
+            answer to a question that has one. */}
+        {!controlled && (
+          <select
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+            data-testid="finance-approvals-branch"
+          >
+            <option value="">All Branches</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+          </select>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2" data-testid="finance-approvals-category-filter">

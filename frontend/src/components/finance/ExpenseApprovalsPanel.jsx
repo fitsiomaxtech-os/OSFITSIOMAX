@@ -19,17 +19,24 @@ const MODE_LABELS = {
  * It carries who it was paid to and what for, it is approved against a bill rather than
  * against a patient, and the filters that matter on the income side (which fee, which
  * patient) mean nothing here.
+ *
+ * `branchId`/`scoped` come down from Super Admin > Finance, whose branch-pill row has
+ * already picked the scope; left off on the Accountant's own board, where the select
+ * below is the only place the branch gets picked.
  */
-export const ExpenseApprovalsPanel = ({ onChanged = () => {} }) => {
+export const ExpenseApprovalsPanel = ({ onChanged = () => {}, branchId: branchIdProp, scoped = false }) => {
+  const controlled = scoped;
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({ approved_total: 0, approved_count: 0, pending_total: 0, pending_count: 0 });
   const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState("");
+  const [ownBranchId, setOwnBranchId] = useState("");
+  const branchId = controlled ? (branchIdProp || "") : ownBranchId;
+  const setBranchId = setOwnBranchId;
   const [view, setView] = useState("pending"); // "pending" | "approved"
   const [loading, setLoading] = useState(true);
   const [deciding, setDeciding] = useState(null);
 
-  useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
+  useEffect(() => { if (!controlled) getBranches().then(setBranches).catch(() => {}); }, [controlled]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,15 +115,18 @@ export const ExpenseApprovalsPanel = ({ onChanged = () => {} }) => {
         </button>
       </div>
 
-      <select
-        value={branchId}
-        onChange={(e) => setBranchId(e.target.value)}
-        className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600"
-        data-testid="finance-expense-approvals-branch"
-      >
-        <option value="">All Branches</option>
-        {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-      </select>
+      {/* Already picked by the branch-pill row above, where there is one. */}
+      {!controlled && (
+        <select
+          value={branchId}
+          onChange={(e) => setBranchId(e.target.value)}
+          className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600"
+          data-testid="finance-expense-approvals-branch"
+        >
+          <option value="">All Branches</option>
+          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+        </select>
+      )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="divide-y divide-slate-50">
