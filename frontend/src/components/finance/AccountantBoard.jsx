@@ -34,7 +34,9 @@ const SummaryTab = () => {
           </button>
         ))}
       </div>
-      <AccountantManageTab mode={mode === "all" ? undefined : mode} />
+      {/* canSend off: sending a day up for approval is the branch desk's move, and this is
+          the desk it gets sent to. What lands here is signed off on the Approvals tab. */}
+      <AccountantManageTab mode={mode === "all" ? undefined : mode} canSend={false} />
     </div>
   );
 };

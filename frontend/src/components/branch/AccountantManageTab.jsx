@@ -344,8 +344,13 @@ const PaymentModes = ({ tx }) => {
  *
  * @param mode  "online" | "offline", an optional vertical filter only the Accountant's
  *              Summary tab passes (and owns the pills for) — left unset everywhere else.
+ * @param canSend  Whether the Send-to-accountant and Pull-back buttons are offered.
+ *              Handing a day up is the branch desk's move, so the Accountant's own
+ *              Summary tab passes false: from that chair the three piles are something
+ *              to read, and the only thing to do with them is sign them off on the
+ *              Approvals tab. Everywhere else it stays on.
  */
-export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
+export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = true }) => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(fixedBranchId || "");
   const [tab, setTab] = useState("summary");
@@ -809,8 +814,10 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
 
             {/* Acts on what the filters above have left in view -- see sendStage. Absent
                 on Approved, where there is nothing left to do: taking an approval back is
-                the accountant's own undo, not the branch's. */}
-            {incomeStage === "collected" && (
+                the accountant's own undo, not the branch's. Absent entirely where canSend
+                is off, which is the accountant's own copy of this tab -- nobody sends a
+                day up to themselves. */}
+            {canSend && incomeStage === "collected" && (
               <Button
                 onClick={() => sendStage(false)}
                 disabled={sending || filteredTxns.length === 0}
@@ -821,7 +828,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
                 {sending ? "Sending…" : `Send ${filteredTxns.length} to accountant`}
               </Button>
             )}
-            {incomeStage === "requested" && (
+            {canSend && incomeStage === "requested" && (
               <Button
                 onClick={() => sendStage(true)}
                 disabled={sending || filteredTxns.length === 0}

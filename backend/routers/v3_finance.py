@@ -374,13 +374,20 @@ class TransactionRequestInput(BaseModel):
 @router.post("/finance/transactions/request")
 async def request_transactions(
     payload: TransactionRequestInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
 ):
     """Send collections up for approval.
 
     This is the step the branch owns. Approval is somebody else's -- see
     approve_transaction -- so raising and signing off stay two different endpoints with two
     different role lists, and a Branch Admin can reach only this one.
+
+    An Accountant used to be on this list too, because the tab the button lives on
+    (branch/AccountantManageTab.jsx) is the same component in all three chairs and the
+    role list was widened to match rather than the button being hidden in one of them.
+    That let the desk these collections are sent *to* send them to itself. The button is
+    gone from the Accountant's copy now (canSend), and the role goes with it: an
+    Accountant signs off, and does not raise what they then sign.
 
     Already-approved rows are left alone rather than refused: sending a day up again after
     adding one late payment to it should move the late payment, not fail on the thirty
@@ -412,13 +419,13 @@ async def request_transactions(
 @router.post("/finance/transactions/unrequest")
 async def unrequest_transactions(
     payload: TransactionRequestInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
 ):
     """Pull a collection back before it has been signed off.
 
-    Kept to the same role list as sending, because it is the same act undone -- a branch
-    that sent the wrong day up needs to be able to take it back without asking the person
-    it was sent to. Rows already approved are not pulled back: that is an approval to
+    Kept to the same role list as sending, Accountant's removal from it included, because
+    it is the same act undone -- a branch that sent the wrong day up needs to be able to
+    take it back without asking the person it was sent to. Rows already approved are not pulled back: that is an approval to
     undo, and unapprove_transaction is the endpoint that says so.
     """
     ids = [i for i in (payload.activity_ids or []) if i]
