@@ -789,7 +789,18 @@ class ExpenseCreate(BaseModel):
     # accountant can check — they need to know who it went to and how it was paid.
     paid_to: Optional[str] = ""
     payment_mode: Optional[str] = ""
+    # What the payment can be traced by, whatever the tender calls it: a UPI id, a card
+    # batch, a bank transaction number, a cheque number. One field rather than four
+    # because it answers one question -- how would somebody find this payment again --
+    # and the tender beside it already says which kind of answer it is.
     reference: Optional[str] = ""
+    # Cash: the notes handed over, counted. Same two fields and same shape a closing
+    # count carries (see ClosingBalanceInput), so a pile of cash is described one way
+    # across the whole book. Anything not a note this desk holds is dropped by
+    # _denomination_total rather than guessed at, and the coins field exists because the
+    # ladder stops at ten and a payment of Rs.1,234 does not.
+    cash_denominations: Optional[dict] = None
+    cash_coins: Optional[float] = 0
 
 
 class ExpenseDecision(BaseModel):
@@ -916,6 +927,12 @@ async def create_expense(
         "paid_to": (payload.paid_to or "").strip(),
         "payment_mode": (payload.payment_mode or "").strip(),
         "reference": (payload.reference or "").strip(),
+        # Stored as sent, not required here. The accountant's own form asks for the count
+        # and will not submit one that does not add up to the amount; a branch's form does
+        # not ask at all, and refusing its expenses for a field it has no box for would
+        # close the door this endpoint deliberately holds open for both.
+        "cash_denominations": _denomination_total(payload.cash_denominations)[1],
+        "cash_coins": round(float(payload.cash_coins or 0), 2),
         "expense_date": payload.expense_date or _now()[:10],
         "created_by": user.full_name,
         "created_by_role": user.role,

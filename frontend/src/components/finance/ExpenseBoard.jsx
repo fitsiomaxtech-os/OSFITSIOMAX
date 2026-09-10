@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { EXPENSE_PAYMENT_MODE_OPTIONS, PAYMENT_MODE_LABELS, PAYMENT_MODE_COLORS, orderedPaymentModeEntries } from "@/lib/paymentModes";
 import { PETTY_CASH_LIMIT, PETTY_CASH_REASON_REQUIRED, isPettyCash } from "@/lib/pettyCash";
+import { DENOMINATIONS, noteTotal, countedNotes, noteBreakdown, notesLabel } from "@/lib/denominations";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 
@@ -30,7 +31,23 @@ const shiftDays = (iso, n) => { const d = fromIso(iso); d.setDate(d.getDate() + 
 const startOfWeek = (iso) => { const d = fromIso(iso); d.setDate(d.getDate() - d.getDay()); return toIso(d); };
 const startOfMonth = (iso) => { const d = fromIso(iso); return toIso(new Date(d.getFullYear(), d.getMonth(), 1)); };
 
-const blankExpense = { category: "", amount: "", branch_id: "", note: "", expense_date: todayIso(), payment_mode: "cash" };
+const blankExpense = { category: "", amount: "", branch_id: "", note: "", expense_date: todayIso(), payment_mode: "cash", reference: "" };
+
+/**
+ * What each cashless tender is asked for, so the row carries something the payment can
+ * actually be found by. All four land in the one `reference` field the record already
+ * keeps and the list already prints — the tender beside it says which kind of number it
+ * is, so four columns would be four ways of storing one answer.
+ *
+ * Cash is not here: notes have no reference to quote, so it is asked for the count
+ * instead — see the denominations grid below.
+ */
+const REFERENCE_ASK = {
+  upi: { label: "UPI ID", placeholder: "name@bank", missing: "Enter the UPI ID it was paid to" },
+  card: { label: "Card Transaction ID", placeholder: "Terminal batch / txn no.", missing: "Enter the card transaction ID" },
+  account_transfer: { label: "Transaction ID", placeholder: "Bank transaction ID / UTR", missing: "Enter the bank transaction ID" },
+  cheque: { label: "Cheque Number", placeholder: "Cheque no.", missing: "Enter the cheque number" },
+};
 
 // "All" first and the default: this page opens on the whole book, because opening it
 // scoped to Today would hide every expense older than this morning behind a filter
@@ -140,6 +157,11 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(blankExpense);
+  // The cash count, kept beside the form rather than in it: the grid is keyed by the
+  // note's face value and the record stores only the notes actually seen, so the two are
+  // different shapes — see countedNotes.
+  const [notes, setNotes] = useState({});
+  const [coins, setCoins] = useState("");
   const [saving, setSaving] = useState(false);
   const [deciding, setDeciding] = useState(null);
 
@@ -183,9 +205,38 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
   const expenseBranchId = (controlled ? effectiveBranchId : form.branch_id) || null;
   const petty = isPettyCash(form.amount, form.payment_mode, expenseBranchId);
 
+  // What the form asks for below the tender: a count for cash, a reference for the four
+  // that settle somewhere and can be traced by a number.
+  const paidInCash = form.payment_mode === "cash";
+  const ask = REFERENCE_ASK[form.payment_mode];
+  const coinsPaid = Math.round((parseFloat(coins) || 0) * 100) / 100;
+  const countedCash = useMemo(() => noteTotal(notes) + coinsPaid, [notes, coinsPaid]);
+  const cashShortfall = Math.round((Number(form.amount) - countedCash) * 100) / 100;
+
+  const closeAdd = () => {
+    setShowAdd(false);
+    setForm(blankExpense);
+    setNotes({});
+    setCoins("");
+  };
+
   const submit = async () => {
     if (!form.category.trim()) { toast.error("Expense name is required"); return; }
     if (!(Number(form.amount) > 0)) { toast.error("Enter an amount"); return; }
+    // Asked for the same reason the approve popup asks: an expense somebody has to sign
+    // off is a claim about a real payment, and a figure with nothing to trace it to
+    // cannot be checked against a statement.
+    if (ask && !form.reference.trim()) { toast.error(ask.missing); return; }
+    // Cash has no reference, so the count is what stands in for one — and a count that
+    // does not come to the amount is not a count of this payment.
+    if (paidInCash && Math.abs(cashShortfall) >= 0.01) {
+      toast.error(
+        cashShortfall > 0
+          ? `The notes come to ${fmt(countedCash)}, ${fmt(cashShortfall)} short of the amount`
+          : `The notes come to ${fmt(countedCash)}, ${fmt(-cashShortfall)} more than the amount`,
+      );
+      return;
+    }
     if (petty && !form.note.trim()) { toast.error(PETTY_CASH_REASON_REQUIRED); return; }
     setSaving(true);
     try {
@@ -193,10 +244,14 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
         ...form,
         amount: Number(form.amount),
         branch_id: expenseBranchId,
+        // Only off the tender it belongs to: a UPI id left in the box from before the
+        // mode was switched to Cash is not this payment's reference.
+        reference: ask ? form.reference.trim() : "",
+        cash_denominations: paidInCash ? (countedNotes(notes) || {}) : {},
+        cash_coins: paidInCash ? coinsPaid : 0,
       });
       toast.success("Expense logged");
-      setForm(blankExpense);
-      setShowAdd(false);
+      closeAdd();
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to log expense"); }
     setSaving(false);
@@ -231,6 +286,14 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
   };
 
   const pending = (exp) => exp.approved === false && !exp.rejected;
+  /** The line under an expense's name: where the money went, what it can be traced by,
+   *  and — where it was cash — the notes it was counted out in. */
+  const detailLine = (exp) => [
+    exp.paid_to && `to ${exp.paid_to}`,
+    exp.reference,
+    notesLabel(exp.cash_denominations),
+    exp.note,
+  ].filter(Boolean).join(" · ");
   const emptyLine = tender
     ? `Nothing paid by ${PAYMENT_MODE_LABELS[tender] || "that tender"} in this window.`
     : preset === "all" ? "No expenses logged yet." : "No expenses in this window.";
@@ -420,10 +483,8 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
                         {/* What the money bought and who it went to, under the name rather
                             than in columns of their own: both are blank on plenty of rows,
                             and two mostly-empty columns cost the width the figures need. */}
-                        {[exp.paid_to && `to ${exp.paid_to}`, exp.reference, exp.note].filter(Boolean).length ? (
-                          <p className="mt-0.5 truncate text-xs text-slate-500">
-                            {[exp.paid_to && `to ${exp.paid_to}`, exp.reference, exp.note].filter(Boolean).join(" · ")}
-                          </p>
+                        {detailLine(exp) ? (
+                          <p className="mt-0.5 truncate text-xs text-slate-500">{detailLine(exp)}</p>
                         ) : null}
                         {/* Who asked, on a row somebody is being asked to sign off.
                             Approving a figure without knowing whose spending it is, is
@@ -476,7 +537,7 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
                         {exp.petty_cash ? <PettyChip /> : null}
                       </div>
                       <p className="mt-0.5 truncate text-xs text-slate-500">
-                        {[exp.branch_name, exp.expense_date, exp.paid_to && `to ${exp.paid_to}`, exp.reference, exp.note].filter(Boolean).join(" · ")}
+                        {[exp.branch_name, exp.expense_date, detailLine(exp)].filter(Boolean).join(" · ")}
                       </p>
                     </div>
                     <span className="shrink-0 text-sm font-bold tabular-nums text-rose-600">{fmt(exp.amount)}</span>
@@ -514,7 +575,7 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
           <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
               <h3 className="text-base font-semibold">Add Expense</h3>
-              <button onClick={() => setShowAdd(false)} className="text-slate-400 hover:text-slate-600" data-testid="finance-expense-add-close"><X className="h-4 w-4" /></button>
+              <button onClick={closeAdd} className="text-slate-400 hover:text-slate-600" data-testid="finance-expense-add-close"><X className="h-4 w-4" /></button>
             </div>
             <div className="space-y-3 p-5">
               <Input placeholder="Expense Name (e.g. Rent, Salaries)" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} data-testid="finance-expense-category" />
@@ -559,6 +620,83 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
                   })}
                 </div>
               </div>
+
+              {/* What this tender can be found by later. Cash is counted; everything else
+                  is quoted. Both sit directly under the mode row that decides which one
+                  is asked, so switching the mode visibly changes the question. */}
+              {ask && (
+                <div data-testid="finance-expense-reference-field">
+                  <label className="mb-1 block text-xs font-medium text-slate-700">{ask.label}</label>
+                  <Input
+                    value={form.reference}
+                    onChange={(e) => setForm({ ...form, reference: e.target.value })}
+                    placeholder={ask.placeholder}
+                    data-testid="finance-expense-reference"
+                  />
+                </div>
+              )}
+
+              {paidInCash && (
+                <div data-testid="finance-expense-denominations">
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-700">Denominations</label>
+                    {/* The fewest notes that make the amount, for the common case where
+                        the drawer was paid out in exactly that. Same button Closing
+                        Balance offers over the same grid. */}
+                    <button
+                      type="button"
+                      onClick={() => { setNotes(noteBreakdown(Number(form.amount) || 0)); setCoins(""); }}
+                      disabled={!(Number(form.amount) > 0)}
+                      className="text-[11px] font-semibold text-sky-600 hover:text-sky-700 disabled:text-slate-300"
+                      data-testid="finance-expense-fill-notes"
+                    >
+                      Fill to amount
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {DENOMINATIONS.map((d) => (
+                      <div key={d}>
+                        <label className="mb-0.5 block text-[10px] text-slate-500">Rs.{d}</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={notes[d] ?? ""}
+                          onChange={(e) => setNotes({ ...notes, [d]: e.target.value })}
+                          className="h-9"
+                          data-testid={`finance-expense-note-${d}`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {/* The ladder stops at ten and a payment does not: without this a cash
+                      expense of Rs.1,234 could never be made to add up. */}
+                  <label className="mb-0.5 mt-2 block text-[10px] text-slate-500">Coins and change (Rs.)</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={coins}
+                    onChange={(e) => setCoins(e.target.value)}
+                    className="h-9"
+                    data-testid="finance-expense-coins"
+                  />
+                  <div className="mt-2 flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Counted</span>
+                    <span className={`font-bold tabular-nums ${
+                      Number(form.amount) > 0 && Math.abs(cashShortfall) < 0.01 ? "text-emerald-600" : "text-slate-700"
+                    }`} data-testid="finance-expense-counted-cash">
+                      {fmt(countedCash)}
+                    </span>
+                  </div>
+                  {Number(form.amount) > 0 && Math.abs(cashShortfall) >= 0.01 && (
+                    <p className="mt-1 text-[11px] text-amber-700" data-testid="finance-expense-cash-mismatch">
+                      {cashShortfall > 0
+                        ? `${fmt(cashShortfall)} short of the amount above.`
+                        : `${fmt(-cashShortfall)} more than the amount above.`}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <Input
                 placeholder={petty ? "Reason — what the petty cash was spent on" : "Remarks (optional)"}
                 value={form.note}
@@ -577,7 +715,7 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
               )}
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
-              <Button variant="outline" onClick={() => setShowAdd(false)} data-testid="finance-expense-cancel">Cancel</Button>
+              <Button variant="outline" onClick={closeAdd} data-testid="finance-expense-cancel">Cancel</Button>
               <Button onClick={submit} disabled={saving} className="bg-sky-600 hover:bg-sky-700" data-testid="finance-expense-submit">
                 {saving ? "Saving..." : "Add Expense"}
               </Button>
