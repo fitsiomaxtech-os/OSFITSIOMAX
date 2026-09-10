@@ -86,7 +86,7 @@ export const ProfitBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = f
           <select
             value={branchId}
             onChange={(e) => setBranchId(e.target.value)}
-            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+            className="h-10 rounded-md border border-slate-200 px-2 text-sm"
             data-testid="finance-profit-branch"
           >
             <option value="">All Branches</option>

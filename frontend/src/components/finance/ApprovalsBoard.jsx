@@ -437,13 +437,19 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
 
           {/* The shared finance row, so this desk and the three pages beside it name their
               windows with the same words and reach them the same way. Custom Range opens
-              the dialog rather than dropping two date fields into the block underneath. */}
+              the dialog rather than dropping two date fields into the block underneath.
+
+              `compact` alone among the four: this row shares its line with the vertical
+              pills at the other end of it, and the toolbar button the other three carry
+              stands 8px taller than those. One group taller than the group beside it reads
+              as a mistake rather than as a different kind of control. */}
           <FinanceDateFilter
             preset={preset}
             customFrom={customFrom}
             customTo={customTo}
             onChange={pickDates}
             presets={DATE_PRESETS}
+            compact
             testid="finance-approvals-window"
           />
         </FilterRow>

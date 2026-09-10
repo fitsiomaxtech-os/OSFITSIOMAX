@@ -659,7 +659,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
             disabled={loading}
             title="Refresh"
             aria-label="Refresh"
-            className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+            className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
             data-testid="accountant-manage-refresh"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />

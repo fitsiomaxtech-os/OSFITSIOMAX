@@ -342,7 +342,7 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
         {/* The tin has its own way in — Top Up, on the panel itself — and it is not an
             expense, so it does not belong behind this button. */}
         {view === "expenses" && (
-          <Button onClick={() => setShowAdd(true)} className="shrink-0 bg-sky-600 hover:bg-sky-700" data-testid="finance-expense-add-btn">
+          <Button onClick={() => setShowAdd(true)} className="h-10 shrink-0 bg-sky-600 hover:bg-sky-700" data-testid="finance-expense-add-btn">
             <Plus className="mr-1 h-4 w-4" />Add Expense
           </Button>
         )}

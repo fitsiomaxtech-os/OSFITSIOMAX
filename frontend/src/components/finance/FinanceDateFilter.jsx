@@ -174,31 +174,46 @@ const CustomRangeDialog = ({ from, to, onApply, onClose, testid }) => {
  * @param onChange    (preset, from, to) => void. The two dates come back unchanged when a
  *                    preset is pressed, so the board keeps them for the next Custom Range.
  * @param presets     which windows this board offers, if not all of them.
+ * @param compact     pill geometry instead of the toolbar's, for the one row that shares
+ *                    its line with filter pills rather than standing on its own.
  */
 export const FinanceDateFilter = ({
   preset, customFrom = "", customTo = "", onChange,
-  presets = FINANCE_DATE_PRESETS, testid = "finance-date",
+  presets = FINANCE_DATE_PRESETS, compact = false, testid = "finance-date",
 }) => {
   const [open, setOpen] = useState(false);
   const hasRange = preset === "custom" && customFrom && customTo;
 
+  // The house toolbar button, the same one Consultations and Pre-Sales carry their own
+  // ranges on: a 40px square-cornered button, bordered white while idle and filled solid
+  // when it is the one deciding the screen. Rounded-full pills read as tags — something
+  // attached to a row of data — where these are controls being pressed, and a finance page
+  // that reaches for a window every few seconds should reach for the same shape as every
+  // other board in the OS.
+  //
+  // `compact` is the exception: Approvals' row shares a line with pills of its own, and one
+  // group standing 8px taller than the group beside it reads as a mistake rather than as a
+  // different kind of control.
+  const btn = (on) => (compact
+    ? `shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+      on ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+         : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"}`
+    : `h-10 shrink-0 rounded-md px-2 text-xs font-medium transition sm:px-3 sm:text-sm ${
+      on ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`);
+
   return (
-    <div className="flex min-w-0 items-center gap-1.5" data-testid={testid}>
+    <div className={`flex min-w-0 items-center ${compact ? "gap-1.5" : "gap-1 sm:gap-2"}`} data-testid={testid}>
       {/* flex-nowrap over a sideways scroll, not flex-wrap: see the note above on why this
           stays one row at every width. The bar itself is hidden where the browser allows
           it, since a scrollbar under seven buttons reads as a broken control. */}
-      <div className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className={`flex min-w-0 flex-nowrap items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${compact ? "gap-1.5" : "gap-1 sm:gap-2"}`}>
         {presets.map((key) => (
           <button
             key={key}
             type="button"
             onClick={() => (key === "custom" ? setOpen(true) : onChange(key, customFrom, customTo))}
             aria-pressed={preset === key}
-            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-              preset === key
-                ? "border-sky-600 bg-sky-600 text-white shadow-sm"
-                : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-            }`}
+            className={btn(preset === key)}
             data-testid={`${testid}-preset-${key}`}
           >
             <span className="sm:hidden">{DATE_PRESET_SHORT[key]}</span>
@@ -215,7 +230,9 @@ export const FinanceDateFilter = ({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="flex items-center gap-1.5 rounded-l-full border border-sky-200 bg-sky-50 py-1.5 pl-3 pr-2 text-xs font-medium text-sky-700 hover:bg-sky-100"
+            className={`flex items-center gap-1.5 border border-sky-200 bg-sky-50 font-medium text-sky-700 hover:bg-sky-100 ${
+              compact ? "rounded-l-full py-1.5 pl-3 pr-2 text-xs" : "h-10 rounded-l-md pl-3 pr-2 text-xs sm:text-sm"
+            }`}
             data-testid={`${testid}-chip-edit`}
           >
             <CalendarDays className="h-3.5 w-3.5" />
@@ -224,7 +241,9 @@ export const FinanceDateFilter = ({
           <button
             type="button"
             onClick={() => onChange("all", "", "")}
-            className="rounded-r-full border border-l-0 border-sky-200 bg-sky-50 py-1.5 pl-1 pr-2.5 text-sky-700 hover:bg-sky-100"
+            className={`border border-l-0 border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 ${
+              compact ? "rounded-r-full py-1.5 pl-1 pr-2.5" : "h-10 rounded-r-md pl-1 pr-2.5"
+            }`}
             title="Clear date filter"
             aria-label="Clear date filter"
             data-testid={`${testid}-chip-clear`}
