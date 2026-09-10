@@ -495,10 +495,10 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
         </span>
       </div>
 
-      {/* The drawer. What a branch holds in cash right now — the day's collections, less
-          what it has spent, less what it has handed over. Governs whether the next expense
-          can actually be paid. Shown whether or not the accountant has set the opening
-          count; without it the figure is only "since tracking began", said so on the row. */}
+      {/* The drawer, as a sum that ties out: every cash payment taken, less what was
+          spent in cash, less what has been handed over, is what should be in the drawer.
+          Shown whether or not the accountant has set the opening count; without it the
+          figure is only "since tracking began", said so under it. */}
       {branchId && cash && (
         <div
           className={`rounded-xl border p-3.5 ${
@@ -506,7 +506,7 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
           }`}
           data-testid="branch-cash-box"
         >
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <span className={`rounded-lg p-2 ${cash.cash_in_hand < 0 ? "bg-rose-100" : "bg-emerald-50"}`}>
                 <Coins className={`h-4 w-4 ${cash.cash_in_hand < 0 ? "text-rose-600" : "text-emerald-600"}`} />
@@ -526,22 +526,55 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
                 )}
               </div>
             </div>
-
-            <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-500">
-              <span>Collected (cash) <b className="text-slate-700 tabular-nums">{fmt(cash.collected_cash)}</b></span>
-              <span>Spent <b className="text-slate-700 tabular-nums">{fmt(cash.cash_spent)}</b></span>
-              <span>Handed over <b className="text-slate-700 tabular-nums">{fmt(cash.handed_over)}</b></span>
-              {cash.in_transit > 0 && <span>In transit <b className="text-amber-700 tabular-nums">{fmt(cash.in_transit)}</b></span>}
-            </div>
-
             <Button
               onClick={() => setHandingOver(true)}
-              className="ml-auto h-9 bg-amber-600 text-xs text-white hover:bg-amber-700"
+              className="h-9 bg-amber-600 text-xs text-white hover:bg-amber-700"
               data-testid="branch-handover-open"
             >
               <HandCoins className="mr-1.5 h-3.5 w-3.5" /> Hand over cash
             </Button>
           </div>
+
+          {/* The reconciliation, one line each, so the branch can check it against the
+              Income tab (Cash filter: approved + awaiting) and the Expenses list. */}
+          <dl className="mt-3 max-w-sm space-y-1 border-t border-slate-100 pt-2 text-xs" data-testid="branch-cash-breakdown">
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-slate-500">Collected in cash</dt>
+              <dd className="tabular-nums font-medium text-slate-700">{fmt(cash.collected_cash)}</dd>
+            </div>
+            {(cash.cash_approved != null || cash.cash_awaiting != null) && (
+              <div className="flex items-baseline justify-between gap-3 pl-3 text-[11px] text-slate-400">
+                <dt>approved {fmt(cash.cash_approved)} · awaiting {fmt(cash.cash_awaiting)}</dt>
+                <dd />
+              </div>
+            )}
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-slate-500">Spent in cash</dt>
+              <dd className="tabular-nums font-medium text-rose-600">− {fmt(cash.cash_spent)}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-slate-500">Handed over</dt>
+              <dd className="tabular-nums font-medium text-rose-600">− {fmt(cash.handed_over)}</dd>
+            </div>
+            {cash.in_transit > 0 && (
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-slate-500">In transit (not yet received)</dt>
+                <dd className="tabular-nums font-medium text-amber-700">− {fmt(cash.in_transit)}</dd>
+              </div>
+            )}
+            {cash.adjustments !== 0 && (
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-slate-500">Opening / corrections</dt>
+                <dd className={`tabular-nums font-medium ${cash.adjustments < 0 ? "text-rose-600" : "text-emerald-700"}`}>
+                  {cash.adjustments > 0 ? "+ " : "− "}{fmt(Math.abs(cash.adjustments))}
+                </dd>
+              </div>
+            )}
+            <div className="flex items-baseline justify-between gap-3 border-t border-slate-200 pt-1">
+              <dt className="font-semibold text-slate-700">Cash in hand</dt>
+              <dd className="tabular-nums font-bold text-slate-800">{fmt(cash.cash_in_hand)}</dd>
+            </div>
+          </dl>
 
           {pendingHandovers.length > 0 && (
             <div className="mt-3 space-y-1 border-t border-slate-100 pt-2" data-testid="branch-handovers-pending">

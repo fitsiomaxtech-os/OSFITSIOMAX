@@ -249,11 +249,20 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
             <Figure label="Collected" value={fmt(data.collected_total)} testId="branch-cash-collected" />
             <Figure label="Collected (cash)" value={fmt(data.collected_cash)} testId="branch-cash-cash" />
-            <Figure label="Cash spent" value={fmt(data.cash_spent)} testId="branch-cash-spent" />
+            <Figure label="Spent (cash)" value={fmt(data.cash_spent)} testId="branch-cash-spent" />
             <Figure label="Handed over" value={fmt(data.handed_over)} testId="branch-cash-handed" />
             <Figure label="In transit" value={fmt(data.in_transit)} tone="amber" testId="branch-cash-transit" />
-            <Figure label="Cash in hand" value={data.opening_set ? fmt(data.cash_in_hand) : "—"} tone="emerald" testId="branch-cash-hand" />
+            <Figure label="Cash in hand" value={fmt(data.cash_in_hand)} tone="emerald" testId="branch-cash-hand" />
           </div>
+          <p className="text-[11px] text-slate-500" data-testid="branch-cash-reconcile">
+            Collected in cash {fmt(data.collected_cash)}
+            {(data.cash_approved != null) && <span className="text-slate-400"> (approved {fmt(data.cash_approved)} · awaiting {fmt(data.cash_awaiting)})</span>}
+            {" "}− spent {fmt(data.cash_spent)} − handed over {fmt(data.handed_over)}
+            {data.in_transit > 0 ? ` − in transit ${fmt(data.in_transit)}` : ""}
+            {data.adjustments !== 0 ? ` ${data.adjustments > 0 ? "+" : "−"} opening/corrections ${fmt(Math.abs(data.adjustments))}` : ""}
+            {" = "}<b className="text-slate-700">{fmt(data.cash_in_hand)}</b>
+            {!data.opening_set && <span className="text-amber-700"> · opening cash not set yet</span>}
+          </p>
 
           {pendingHandovers.length > 0 && (
             <div className="space-y-2" data-testid="branch-cash-handovers">

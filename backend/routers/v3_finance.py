@@ -3183,12 +3183,19 @@ class CashAdjustmentCreate(BaseModel):
     note: Optional[str] = ""
 
 
-async def _branch_cash_figures(branch_id: str, user: V3UserOut, up_to: Optional[str] = None) -> dict:
+async def _branch_cash_figures(
+    branch_id: str, user: V3UserOut, up_to: Optional[str] = None, with_split: bool = False,
+) -> dict:
     """Everything one branch's cash box holds and how it got there.
 
     `up_to` (YYYY-MM-DD, inclusive) freezes every figure at the end of that day, which is
     what Closing Balance needs to say what the drawer should have held that evening. Left
     off, it is the box as it stands now.
+
+    `with_split` adds cash_approved / cash_awaiting — the same cash collected, cut by
+    whether the accountant has signed it off — off /finance/approvals' own summary, so the
+    branch can set the box against the two income pills it already reads. An extra pass over
+    the collections, so only asked for where a screen shows it (the single-branch view).
 
     revenue_overview and list_expenses are called as plain functions — their Depends
     defaults are only defaults — and both re-apply their own branch scoping to `user`, so
@@ -3197,6 +3204,13 @@ async def _branch_cash_figures(branch_id: str, user: V3UserOut, up_to: Optional[
     rev = await revenue_overview(start_date=None, end_date=up_to, branch_id=branch_id, user=user)
     collected_cash = round(float((rev.get("payment_modes") or {}).get("cash") or 0), 2)
     collected_total = round(float((rev.get("kpis") or {}).get("total_collected") or 0), 2)
+
+    cash_approved = cash_awaiting = None
+    if with_split:
+        appr = await finance_approvals(branch_id=branch_id, payment_mode="cash", user=user)
+        summ = appr.get("summary") or {}
+        cash_approved = round(float(summ.get("approved_total") or 0), 2)
+        cash_awaiting = round(float(summ.get("pending_total") or 0), 2)
 
     # Every branch expense is cash now, so this is all of them — approved or still waiting,
     # never a rejected one. The notes left the branch when it was spent, whatever the
@@ -3234,6 +3248,8 @@ async def _branch_cash_figures(branch_id: str, user: V3UserOut, up_to: Optional[
         "branch_id": branch_id,
         "collected_total": collected_total,
         "collected_cash": collected_cash,
+        "cash_approved": cash_approved,
+        "cash_awaiting": cash_awaiting,
         "cash_spent": cash_spent,
         "handed_over": handed_over,
         "in_transit": in_transit,
@@ -3290,7 +3306,7 @@ async def get_branch_cash(
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
 
     if branch_id:
-        figures = await _branch_cash_figures(branch_id, user)
+        figures = await _branch_cash_figures(branch_id, user, with_split=True)
         figures["branch_name"] = branch_name_map.get(branch_id, "")
         ho_rows = await v3_col("cash_handovers").find(
             {"branch_id": branch_id}, {"_id": 0}
