@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { BadgeIndianRupee, Building2, CheckSquare, Layers, Receipt, Wallet } from "lucide-react";
+import { BadgeIndianRupee, Building2, CheckSquare, Layers, QrCode, Receipt, Wallet } from "lucide-react";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { ApprovalsBoard, PendingBadge } from "@/components/finance/ApprovalsBoard";
 import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
 import { ProfitBoard } from "@/components/finance/ProfitBoard";
+import { UpiAccountBoard } from "@/components/finance/UpiAccountBoard";
 import { getFinanceApprovals, getFinanceExpenses } from "@/lib/api";
 
 // How often the Approvals badge asks again. A branch sends a day up while this board sits
@@ -104,6 +105,19 @@ const TABS = [
     icon: Wallet,
     render: ({ branchId, scoped }) => <ProfitBoard branchId={branchId} scoped={scoped} />,
   },
+  {
+    key: "upi",
+    label: "UPI",
+    icon: QrCode,
+    // Super Admin only: a branch's own UPI/bank details are administrative setup — who
+    // is putting a QR up at a counter, not a figure either desk works day to day — and
+    // the endpoints behind it are gated the same way (super_admin writes, branch_admin
+    // reads its own; the Accountant's own login has no route to them at all).
+    superAdminOnly: true,
+    render: ({ branchId, branchName, onSelectBranch }) => (
+      <UpiAccountBoard branchId={branchId} branchName={branchName} onSelectBranch={onSelectBranch} />
+    ),
+  },
 ];
 
 /**
@@ -117,6 +131,10 @@ const TABS = [
  */
 export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => {
   const scoped = !!branches;
+  // Tabs gated to super_admin drop out entirely on the Accountant's own board rather than
+  // sitting there to 404 on a click — the same reason each one's own endpoints refuse an
+  // accountant, said once here instead of inside every such page.
+  const visibleTabs = TABS.filter((t) => !t.superAdminOnly || scoped);
   const [tab, setTab] = useState(TABS[0].key);
   const [selectedId, setSelectedId] = useState(ALL_KEY);
   const branchId = scoped && selectedId !== ALL_KEY ? selectedId : undefined;
@@ -126,6 +144,7 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
     if (onlineDiff !== 0) return onlineDiff;
     return (a.branch_name || "").localeCompare(b.branch_name || "");
   });
+  const branchName = sortedBranches.find((b) => b.id === selectedId)?.branch_name;
 
   // What is waiting on this desk, per ledger, across every branch. Held here rather than
   // read off the Approvals page's own figures: those follow its filters, so a badge fed by
@@ -152,7 +171,7 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
     return () => clearInterval(id);
   }, [refreshPending]);
 
-  const active = TABS.find((t) => t.key === tab) || TABS[0];
+  const active = visibleTabs.find((t) => t.key === tab) || visibleTabs[0];
 
   return (
     <div className="space-y-4" data-testid={`${testId}-root`}>
@@ -202,7 +221,7 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
       {/* Which page of it. No heading over this row: "Finance" above a row that already
           names its pages costs a band of screen to say where you are. */}
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid={`${testId}-tabs`}>
-        {TABS.map((t) => {
+        {visibleTabs.map((t) => {
           const Icon = t.icon;
           const count = t.key === "approvals" ? pending.income + pending.expenses : 0;
           return (
@@ -228,7 +247,7 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
           different components, already unmounted and remounted by React swapping which
           one renders. */}
       <div key={selectedId}>
-        {active.render({ branchId, scoped, pending, onChanged: refreshPending })}
+        {active.render({ branchId, branchName, scoped, pending, onChanged: refreshPending, onSelectBranch: setSelectedId })}
       </div>
     </div>
   );

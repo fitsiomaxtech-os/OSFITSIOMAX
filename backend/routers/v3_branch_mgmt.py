@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
+import os
 import uuid
 
 from database import v3_col
@@ -603,3 +604,138 @@ async def team_remove_member(branch_id: str, user_id: str, desk: str, _: V3UserO
         "message": f"{user.get('full_name')} removed from {branch.get('branch_name')}",
         "still_at": len(remaining),
     }
+
+
+# ---------- UPI Collection Account (Super Admin, Finance > UPI) ----------
+
+# Each branch takes UPI payments against its own account -- Anna Nagar's QR is not
+# Parrys' QR -- so this is kept on the branch document itself (nested, the same shape
+# weekly_hours/holidays already are) rather than copied into every payment. A payment
+# collected by UPI at a branch already carries that branch's branch_id; which UPI
+# account it landed in follows from that alone, nothing more to record per payment.
+UPI_QR_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "branch_qr")
+os.makedirs(UPI_QR_UPLOAD_DIR, exist_ok=True)
+UPI_QR_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+UPI_QR_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+# The five fields one account is made of, fixed rather than read off whatever the
+# payload happened to carry -- so Lock's completeness check (below) can't be answered
+# by a field nobody agreed belongs on this card in the first place.
+UPI_ACCOUNT_FIELDS = ["qr_code_url", "upi_id", "bank_name", "account_holder_name", "bank_branch"]
+
+
+class UpiAccountSave(BaseModel):
+    qr_code_url: Optional[str] = ""
+    upi_id: Optional[str] = ""
+    bank_name: Optional[str] = ""
+    account_holder_name: Optional[str] = ""
+    bank_branch: Optional[str] = ""
+
+
+@router.post("/upload-qr-image")
+async def upload_branch_qr_image(file: UploadFile = File(...), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """The QR code alone, uploaded ahead of Save -- mirrors upload_store_image in
+    v3_store.py exactly, including where it lands: public and unauthenticated once
+    served, because a QR is meant to be shown to a patient at the counter, the same
+    reason a store item's photo is public rather than filed with a patient's own
+    documents (see the note on employee photos in v3_hr.py)."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in UPI_QR_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only JPG, PNG, or WEBP images are allowed")
+    contents = await file.read()
+    if len(contents) > UPI_QR_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="Image must be under 5MB")
+    filename = f"{uuid.uuid4()}{ext}"
+    with open(os.path.join(UPI_QR_UPLOAD_DIR, filename), "wb") as f:
+        f.write(contents)
+    return {"url": f"/api/v3/uploads/branch_qr/{filename}"}
+
+
+@router.get("/upi-accounts")
+async def list_upi_accounts(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Every branch's own UPI account in one list -- Finance > UPI reads this for its
+    All Branches grid rather than the plain branch list (GET /branches), which would
+    silently drop upi_account: V3BranchOut declares extra="ignore" and has no field
+    for it."""
+    branches = await v3_col("branches").find(
+        {"archived": {"$ne": True}}, {"_id": 0, "id": 1, "branch_name": 1, "upi_account": 1},
+    ).sort("branch_name", 1).to_list(500)
+    return [
+        {"branch_id": b["id"], "branch_name": b.get("branch_name", ""), "upi_account": b.get("upi_account")}
+        for b in branches
+    ]
+
+
+@router.get("/{branch_id}/upi-account")
+async def get_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin"))):
+    # Read-only for a Branch Admin on their own branch -- same rule branch_detail above
+    # gives them -- so the desk that will actually stand behind this counter can at
+    # least see what it says, without being able to touch it.
+    if is_branch_admin_role(user.role) and user.branch_id != branch_id:
+        raise HTTPException(status_code=403, detail="You can only view your own branch's UPI account")
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "branch_name": 1, "upi_account": 1})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return {"branch_id": branch_id, "branch_name": branch.get("branch_name", ""), "upi_account": branch.get("upi_account")}
+
+
+@router.put("/{branch_id}/upi-account")
+async def save_upi_account(branch_id: str, payload: UpiAccountSave, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Save this branch's own UPI collection account: the QR a patient scans to pay by
+    UPI, and who that money is confirmed to be sitting with.
+
+    Refused once locked. Lock exists so a card already printed and taped to a branch's
+    counter cannot then quietly change under the same name -- Unlock first, on purpose,
+    so changing it after that point is a decision somebody made rather than a slip.
+    """
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "upi_account": 1})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    if (branch.get("upi_account") or {}).get("locked"):
+        raise HTTPException(status_code=400, detail="This UPI account is locked — unlock it first to edit")
+    account = {
+        "qr_code_url": (payload.qr_code_url or "").strip(),
+        "upi_id": (payload.upi_id or "").strip(),
+        "bank_name": (payload.bank_name or "").strip(),
+        "account_holder_name": (payload.account_holder_name or "").strip(),
+        "bank_branch": (payload.bank_branch or "").strip(),
+        "locked": False,
+        "updated_by": user.full_name,
+        "updated_at": now_iso(),
+    }
+    await v3_col("branches").update_one({"id": branch_id}, {"$set": {"upi_account": account}})
+    return {"branch_id": branch_id, "upi_account": account}
+
+
+@router.post("/{branch_id}/upi-account/lock")
+async def lock_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Finalize this branch's UPI account. Refused incomplete -- a card missing its QR
+    or its UPI ID is not one worth locking down, since there is nothing yet for
+    Unlock-then-edit to be protecting."""
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "upi_account": 1})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    account = dict(branch.get("upi_account") or {})
+    missing = [f for f in UPI_ACCOUNT_FIELDS if not (account.get(f) or "").strip()]
+    if missing:
+        raise HTTPException(status_code=400, detail="Fill in every field, including the QR code, before locking")
+    account["locked"] = True
+    account["locked_by"] = user.full_name
+    account["locked_at"] = now_iso()
+    await v3_col("branches").update_one({"id": branch_id}, {"$set": {"upi_account": account}})
+    return {"branch_id": branch_id, "upi_account": account}
+
+
+@router.post("/{branch_id}/upi-account/unlock")
+async def unlock_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Reopen a locked account for editing. Super Admin only, same as Lock and Save --
+    this account has no lesser role to hand it to."""
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "upi_account": 1})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    account = dict(branch.get("upi_account") or {})
+    account["locked"] = False
+    account["unlocked_by"] = user.full_name
+    account["unlocked_at"] = now_iso()
+    await v3_col("branches").update_one({"id": branch_id}, {"$set": {"upi_account": account}})
+    return {"branch_id": branch_id, "upi_account": account}

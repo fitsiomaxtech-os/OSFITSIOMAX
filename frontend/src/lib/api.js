@@ -670,6 +670,20 @@ export const bmTeamCandidates = async (branchId, desk) => (await api.get(`/branc
 export const bmTeamAdd = async (branchId, userId, desk) => (await api.post(`/branch-mgmt/${branchId}/team/${userId}`, null, { params: { desk } })).data;
 export const bmTeamRemove = async (branchId, userId, desk) => (await api.delete(`/branch-mgmt/${branchId}/team/${userId}`, { params: { desk } })).data;
 
+// Finance > UPI — each branch's own UPI collection account (QR, UPI ID, bank details),
+// Save/Lock/Unlock. See UPI_ACCOUNT_FIELDS in v3_branch_mgmt.py for the shape.
+export const bmUploadQrImage = async (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post("/branch-mgmt/upload-qr-image", form);
+  return data;
+};
+export const bmListUpiAccounts = async () => (await api.get("/branch-mgmt/upi-accounts")).data;
+export const bmGetUpiAccount = async (branchId) => (await api.get(`/branch-mgmt/${branchId}/upi-account`)).data;
+export const bmSaveUpiAccount = async (branchId, payload) => (await api.put(`/branch-mgmt/${branchId}/upi-account`, payload)).data;
+export const bmLockUpiAccount = async (branchId) => (await api.post(`/branch-mgmt/${branchId}/upi-account/lock`)).data;
+export const bmUnlockUpiAccount = async (branchId) => (await api.post(`/branch-mgmt/${branchId}/upi-account/unlock`)).data;
+
 // Google Sheets OAuth
 export const gsStatus = async () => (await api.get("/marketing/google-sheets/status")).data;
 export const gsAuthUrl = async () => (await api.get("/marketing/google-sheets/auth")).data;
