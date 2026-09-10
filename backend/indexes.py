@@ -98,6 +98,13 @@ CORE_INDEXES = [
     ("patient_feedback", [("lead_id", 1), ("created_at", -1)], "lead_recent"),
     ("patient_feedback", [("branch_id", 1), ("created_at", -1)], "branch_recent"),
     ("patient_feedback", [("id", 1)], "id"),
+    # Branch Cash -- see the branch-cash section of routers/v3_finance.py. Every read of a
+    # branch's box scans its handovers and its adjustments by branch_id (the adjustments
+    # also as a date range, up to a day, for the closing screen), and receiving a handover
+    # reaches it by its own id.
+    ("cash_handovers", [("branch_id", 1), ("raised_at", -1)], "branch_recent"),
+    ("cash_handovers", [("id", 1)], "id"),
+    ("cash_adjustments", [("branch_id", 1), ("on", 1)], "branch_on"),
     # HR's running month — see routers/v3_hr_ops.py. `attendance` is the one that matters:
     # saving a register upserts one row per employee on {date, employee_id}, so a clinic of
     # fifty does fifty of these in a call, against a collection that gains fifty rows a day

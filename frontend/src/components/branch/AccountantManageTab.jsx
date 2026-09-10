@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight, Send, Undo2 } from "lucide-react";
+import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -7,7 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import { BranchExpensesPanel } from "@/components/branch/BranchExpensesPanel";
 import { FinanceDateFilter } from "@/components/finance/FinanceDateFilter";
 import { rangeFor } from "@/lib/dateRange";
-import { getBranches, getRevenueOverview, getFinanceExpenses, requestTransactions, unrequestTransactions } from "@/lib/api";
+import { getBranches, getRevenueOverview, getFinanceExpenses } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { receiptFromTransaction } from "@/lib/receipt";
@@ -61,30 +61,27 @@ const LEDGER_VIEWS = [
 /**
  * Where a collection stands between the desk that took it and the books.
  *
- * Three, because two could not say the thing that matters: a payment sitting in a drawer
- * that nobody has sent up is not the same as one the accountant has been asked to check,
- * and the queue used to hold both. Collected is the branch's own pile, Request is what it
- * has handed over, Approved is what came back signed.
+ * Two, not three. There used to be a "Collected" pile between them — money taken at the
+ * desk that the branch had not yet pressed "Send to accountant" on — but that step gated
+ * nothing: the accountant's Approvals queue always showed every unapproved collection
+ * whether it had been "sent" or not. So the moment a collection is taken it is awaiting
+ * approval, and the branch has one less thing to remember at the end of a day.
  *
- * `all` is not one of them on purpose. Every row is in exactly one of these three, so a
- * fourth pill showing all of them at once would be a total that no one is responsible for.
+ * `all` is not one of them on purpose. Every row is in exactly one of these two, so a
+ * third pill showing both at once would be a total that no one is responsible for.
  */
-// Tones are the ones the expense pills already wear for the same three states -- amber
-// for waiting on somebody, emerald for signed off -- so a branch reading Income after
-// Expenses is reading the same colours for the same thing. Collected is the pile nobody
-// is waiting on yet, and takes the sky the stage row was already picked out in.
+// Tones match the expense pills for the same two states -- amber for waiting on somebody,
+// emerald for signed off -- so a branch reading Income after Expenses reads the same
+// colours for the same thing.
 const INCOME_STAGES = [
-  { key: "collected", label: "Collected", hint: "Taken at the desk, not sent up yet",
-    tone: { dot: "bg-sky-500", border: "border-sky-200", bg: "bg-sky-50/70", text: "text-sky-700", sub: "text-sky-600/80", ring: "#0284c7" } },
-  { key: "requested", label: "Income Request", hint: "Sent to the accountant, waiting to be signed off",
+  { key: "requested", label: "Awaiting Approval", hint: "Taken at the desk, waiting for the accountant to sign it off",
     tone: { dot: "bg-amber-500", border: "border-amber-200", bg: "bg-amber-50/70", text: "text-amber-700", sub: "text-amber-600/80", ring: "#d97706" } },
   { key: "approved", label: "Income Approved", hint: "Signed off by the accountant",
     tone: { dot: "bg-emerald-500", border: "border-emerald-200", bg: "bg-emerald-50/70", text: "text-emerald-700", sub: "text-emerald-600/80", ring: "#059669" } },
 ];
 
-/** Which of the three one collection is in. Approved wins over requested: a row that has
- *  been signed off is approved whatever it looked like on the way there. */
-const stageOf = (tx) => (tx?.approved ? "approved" : tx?.income_requested ? "requested" : "collected");
+/** Which of the two one collection is in. Everything not yet signed off is awaiting it. */
+const stageOf = (tx) => (tx?.approved ? "approved" : "requested");
 
 // Same set a Branch Admin picks from when collecting a fee (V3MarkInstallmentPaidInput
 // and its siblings across v3_packages.py) — not a separate list invented for this filter,
@@ -324,24 +321,18 @@ const PaymentModes = ({ tx }) => {
  *
  * @param mode  "online" | "offline", an optional vertical filter only the Accountant's
  *              Summary tab passes (and owns the pills for) — left unset everywhere else.
- * @param canSend  Whether the Send-to-accountant and Pull-back buttons are offered.
- *              Handing a day up is the branch desk's move, so the Accountant's own
- *              Summary tab passes false: from that chair the three piles are something
- *              to read, and the only thing to do with them is sign them off on the
- *              Approvals tab. Everywhere else it stays on.
  * @param approvedOnly  Counts signed-off money and nothing else, which is what the
- *              Accountant's own Summary tab asks for: money the branch has not sent up,
- *              or has sent up and had nobody sign, is not the accountant's income yet and
- *              showing it as such overstates the books. The income side fixes on the
- *              Approved pile, and the three stage pills stop being a filter and become
- *              what the expense side's pair already are -- three figures to read.
+ *              Accountant's own Summary tab asks for: money the branch has collected but
+ *              had nobody sign is not the accountant's income yet, and showing it as such
+ *              overstates the books. The income side fixes on the Approved pile, and the
+ *              two stage pills stop being a filter and become figures to read.
  * @param scoped  The branch is picked somewhere above this board and moves while it
  *              stays mounted -- Super Admin > Finance's branch-pill row. The select here
  *              is dropped (those pills already are it) and the branch is read straight
  *              off the prop on every render, so an empty one means All Branches rather
  *              than "pick your own", which is what a bare branchId would mean.
  */
-export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = true, approvedOnly = false, scoped = false }) => {
+export const AccountantManageTab = ({ branchId: fixedBranchId, mode, approvedOnly = false, scoped = false }) => {
   const [branches, setBranches] = useState([]);
   const [ownBranchId, setOwnBranchId] = useState(fixedBranchId || "");
   // Scoped: whatever the row above says, right now. Otherwise this board's own select,
@@ -355,8 +346,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
   // Which of the three piles the income side is showing. Opens on Collected because that
   // is the one with something to do in it -- except where only signed-off money counts,
   // which fixes it on Approved and never moves it again.
-  const [incomeStage, setIncomeStage] = useState(approvedOnly ? "approved" : "collected");
-  const [sending, setSending] = useState(false);
+  const [incomeStage, setIncomeStage] = useState(approvedOnly ? "approved" : "requested");
   const [expenseTotals, setExpenseTotals] = useState({ approved_total: 0, approved_count: 0, pending_count: 0 });
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
   const [revenueView, setRevenueView] = useState("collected");
@@ -447,7 +437,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
   // would make money look like it had already gone.
   const stagePiles = useMemo(() => {
     const out = {
-      collected: { count: 0, total: 0 },
       requested: { count: 0, total: 0 },
       approved: { count: 0, total: 0 },
     };
@@ -480,29 +469,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
         };
       });
   }, [stagedTxns, paymentModeFilter]);
-
-  /**
-   * Send everything currently in view up to the accountant, or pull it back.
-   *
-   * Everything in view rather than a set of ticked boxes: what a branch actually does at
-   * the end of a day is hand the day over, and the filters above already say which day,
-   * which branch and which payment mode. A column of forty checkboxes is forty chances to
-   * miss one, and the row that gets missed is the one nobody notices is missing.
-   */
-  const sendStage = async (pull = false) => {
-    const ids = filteredTxns.map((t) => t.id).filter(Boolean);
-    if (!ids.length) { toast.message("There is nothing in view to send"); return; }
-    setSending(true);
-    try {
-      const res = pull ? await unrequestTransactions(ids) : await requestTransactions(ids);
-      toast.success(res?.message || (pull ? "Pulled back" : "Sent to the accountant"));
-      load();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || (pull ? "Could not pull those back" : "Could not send those"));
-    } finally {
-      setSending(false);
-    }
-  };
 
   // Every card's figure and the count under it, from one pass over whichever set the
   // filters above left standing.
@@ -702,21 +668,18 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
 
           {ledger === "income" && (
           <>
-          {/* The three piles, and the one thing to do with the pile being looked at. Above
-              the revenue tiles because it scopes them: the eight figures below are this
-              pile's, not the day's. */}
+          {/* The two piles. Above the revenue tiles because it scopes them: the eight
+              figures below are the picked pile's, not the day's. */}
           <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-income-stages">
-            {/* Each pile says what it holds, not just how many rows it holds it in -- the
-                same pills the expense side shows, and for the same reason: what is still
-                sitting at the desk and what has been signed off are figures, and a branch
-                had to press through all three to add them up.
+            {/* Each pile says what it holds, not just how many rows -- the same pills the
+                expense side shows, for the same reason: what is waiting on a signature and
+                what has been signed off are figures a branch used to have to press through
+                to add up.
 
                 Where the piles can be moved between they are the filter they always were:
-                the picked one is ringed and the other two step back rather than switching
-                off -- the shape the Income/Expenses cards above already use for a choice
-                that carries its own number. Where only signed-off money counts there is
-                nothing to pick, so they are plain figures at full strength, three of the
-                same thing the expense side shows two of. */}
+                the picked one is ringed and the other steps back rather than switching
+                off. Where only signed-off money counts there is nothing to pick, so they
+                are plain figures at full strength. */}
             <div className="flex flex-wrap items-center gap-2">
               {INCOME_STAGES.map((st) => {
                 const pile = stagePiles[st.key];
@@ -744,38 +707,12 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
               })}
             </div>
 
-            {/* Acts on what the filters above have left in view -- see sendStage. Absent
-                on Approved, where there is nothing left to do: taking an approval back is
-                the accountant's own undo, not the branch's. Absent entirely where canSend
-                is off, which is the accountant's own copy of this tab -- nobody sends a
-                day up to themselves. */}
-            {canSend && incomeStage === "collected" && (
-              <Button
-                onClick={() => sendStage(false)}
-                disabled={sending || filteredTxns.length === 0}
-                className="h-9 bg-emerald-600 text-xs text-white hover:bg-emerald-700"
-                data-testid="accountant-manage-send-for-approval"
-              >
-                <Send className="mr-1.5 h-3.5 w-3.5" />
-                {sending ? "Sending…" : `Send ${filteredTxns.length} to accountant`}
-              </Button>
-            )}
-            {canSend && incomeStage === "requested" && (
-              <Button
-                onClick={() => sendStage(true)}
-                disabled={sending || filteredTxns.length === 0}
-                variant="outline"
-                className="h-9 text-xs"
-                data-testid="accountant-manage-pull-back"
-              >
-                <Undo2 className="mr-1.5 h-3.5 w-3.5" />
-                {sending ? "Pulling back…" : `Pull ${filteredTxns.length} back`}
-              </Button>
-            )}
+            {/* No "Send to accountant" button any more: a collection is awaiting approval
+                the moment it is taken, and the accountant's Approvals queue picks it up
+                without the branch pressing anything. */}
             {/* With a pile to pick, this says what the picked one is. With none, it says
                 what every figure below is counting -- worth saying plainly, because the
-                three pills above it are showing two figures that are deliberately not in
-                it. */}
+                two pills above it are showing figures that are deliberately not in it. */}
             <p className="text-[11px] text-slate-400">
               {approvedOnly
                 ? "Signed off only \u2014 what the branches have collected but not had approved is not counted below"

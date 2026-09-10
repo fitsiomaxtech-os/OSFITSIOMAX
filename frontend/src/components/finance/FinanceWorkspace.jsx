@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { BadgeIndianRupee, Building2, CheckSquare, Layers, QrCode, Receipt, Wallet } from "lucide-react";
+import { BadgeIndianRupee, Building2, CheckSquare, Coins, Layers, QrCode, Receipt, Wallet } from "lucide-react";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { ApprovalsBoard, PendingBadge } from "@/components/finance/ApprovalsBoard";
+import { BranchCashBoard } from "@/components/finance/BranchCashBoard";
 import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
 import { ProfitBoard } from "@/components/finance/ProfitBoard";
 import { UpiAccountBoard } from "@/components/finance/UpiAccountBoard";
@@ -51,7 +52,6 @@ const SummaryTab = ({ branchId, scoped }) => {
         branchId={branchId}
         scoped={scoped}
         mode={mode === "all" ? undefined : mode}
-        canSend={false}
         approvedOnly
       />
     </div>
@@ -104,6 +104,14 @@ const TABS = [
     label: "Profit",
     icon: Wallet,
     render: ({ branchId, scoped }) => <ProfitBoard branchId={branchId} scoped={scoped} />,
+  },
+  {
+    key: "cash",
+    label: "Branch Cash",
+    icon: Coins,
+    // The accountant's side of the branch cash box: set each branch's opening count,
+    // receive the cash the branches hand up, and read what every drawer is holding.
+    render: ({ branchId, scoped }) => <BranchCashBoard branchId={branchId} scoped={scoped} />,
   },
   {
     key: "upi",

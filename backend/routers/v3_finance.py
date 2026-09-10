@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from database import v3_col
+from constants import BRANCH_BLOCKED_EXPENSE_CATEGORIES
 from physio_scope import physio_owns_lead, resolve_physio_doctor
 from deps import v3_require_roles, is_branch_admin_role, is_physio_role
 from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
@@ -906,16 +907,33 @@ async def create_expense(
 
     branch_id = user.branch_id if raised_by_branch else (payload.branch_id or None)
     reason = (payload.note or "").strip()
-    # Petty cash is the one kind of spending with no paper behind it. Rent has an invoice,
-    # a transfer has a reference, a card payment has a batch -- notes out of a tin have
-    # only whoever took them and whatever they say it was for, so that sentence is the
-    # whole of what the accountant has to sign off on and it is required here rather than
-    # invited. Left optional for everything else, which arrives carrying a payee and a
-    # bill number somebody can check the claim against.
-    if _is_petty_cash_expense(payload.amount, payload.payment_mode or "", branch_id) and not reason:
+
+    # A branch spends cash and only cash. Everything else it might pay by — a transfer, a
+    # card, a cheque — is a payment the accountant makes centrally against a bill, not one
+    # a branch settles from the drawer. Pinned here rather than trusted from the form, so a
+    # crafted request cannot log a branch card payment that the cash box would never see.
+    payment_mode = "cash" if raised_by_branch else (payload.payment_mode or "").strip()
+
+    # Rent, Salary and Electricity are head office's to pay — a branch has no float to
+    # cover a month of any of them, and an accountant signing off a Rs.80,000 line a branch
+    # typed is signing off a figure with nothing behind it. Blocked here as well as left
+    # off the branch's category list, because a list is only a suggestion to anyone holding
+    # the URL. See BRANCH_BLOCKED_EXPENSE_CATEGORIES.
+    if raised_by_branch and payload.category.strip().lower() in BRANCH_BLOCKED_EXPENSE_CATEGORIES:
         raise HTTPException(
             status_code=400,
-            detail="Say what the petty cash was spent on — it is what the accountant approves it on",
+            detail=f"{payload.category.strip()} is paid centrally by the accountant, not from a branch — pick another category",
+        )
+
+    # A branch expense is cash out of the drawer, and cash leaves no invoice, no reference
+    # and no transfer behind it — only whoever took it and whatever they say it was for. So
+    # that sentence is the whole of what the accountant has to sign off on, and it is
+    # required of every branch expense rather than only the small ones. An accountant's own
+    # entry arrives carrying a payee and a bill number and is left to say why or not.
+    if raised_by_branch and not reason:
+        raise HTTPException(
+            status_code=400,
+            detail="Say what the cash was spent on — it is what the accountant approves it on",
         )
 
     doc = {
@@ -925,7 +943,7 @@ async def create_expense(
         "branch_id": branch_id,
         "note": reason,
         "paid_to": (payload.paid_to or "").strip(),
-        "payment_mode": (payload.payment_mode or "").strip(),
+        "payment_mode": payment_mode,
         "reference": (payload.reference or "").strip(),
         # Stored as sent, not required here. The accountant's own form asks for the count
         # and will not submit one that does not add up to the amount; a branch's form does
@@ -2534,10 +2552,14 @@ async def _day_figures(branch_id: Optional[str], day: str, user: V3UserOut) -> d
     and a card batch, which settle to a bank. Every mode is now just the day's own takings
     less what was refunded or paid out by it.
 
-    A cash handover is not recorded anywhere, which is why this cannot be modelled as an
-    opening balance less a deposit: there is no deposit to subtract. If cash ever starts
-    staying in the building overnight, that is the piece to add first -- the carry-in is
-    only correct once the money leaving has somewhere to be written down.
+    Cash now carries overnight again, but properly: once the accountant has set a branch's
+    opening cash (see _branch_cash_figures), the cash the drawer should hold that evening
+    is the running box balance as of that day — every rupee taken, less what was spent,
+    less what has been handed over — not the day's takings alone. Until opening is set the
+    old day-only figure stands, so a branch that has not been switched over is unaffected.
+
+    UPI and a card batch still settle to a bank each night, so those two stay the day's
+    own takings less what went out by them.
     """
     rev = await revenue_overview(start_date=day, end_date=day, branch_id=branch_id, user=user)
     exp = await list_expenses(start_date=day, end_date=day, branch_id=branch_id, user=user)
@@ -2547,8 +2569,15 @@ async def _day_figures(branch_id: Optional[str], day: str, user: V3UserOut) -> d
     def mode(book: dict, key: str) -> float:
         return round(float(book.get(key) or 0), 2)
 
+    day_cash = round(mode(income, "cash") - mode(spent, "cash"), 2)
+    cash_expected = day_cash
+    if branch_id:
+        box = await _branch_cash_figures(branch_id, user, up_to=day)
+        if box["opening_set"]:
+            cash_expected = box["cash_in_hand"]
+
     expected = {
-        "cash": round(mode(income, "cash") - mode(spent, "cash"), 2),
+        "cash": cash_expected,
         "upi": round(mode(income, "upi") - mode(spent, "upi"), 2),
         "card": round(mode(income, "card") - mode(spent, "card"), 2),
     }
@@ -2587,11 +2616,19 @@ async def get_closing_balance(
     query = {"branch_id": branch_id if branch_id else None}
     today_row = await v3_col("closing_balances").find_one({**query, "on": day}, {"_id": 0})
     prev_row = await v3_col("closing_balances").find_one({**query, "on": prev}, {"_id": 0})
+    # The figure each day is judged against, worked out here so the screen shows exactly
+    # what close_book will compare the count to — the same _day_figures both call. For a
+    # branch whose opening cash is set this is the running cash box as of that evening, not
+    # the day's takings alone; see _day_figures.
+    figures_today = await _day_figures(branch_id, day, user)
+    figures_prev = await _day_figures(branch_id, prev, user)
     return {
         "on": day,
         "branch_id": branch_id,
         "today": _closing_balance_public(today_row),
         "yesterday": _closing_balance_public(prev_row),
+        "expected": figures_today["expected"],
+        "yesterday_expected": figures_prev["expected"],
         # Whether this day has been signed off, beside the count it was signed off on. Here
         # rather than behind its own request because the two are read together every time:
         # a screen that fetched the count first would offer a Close button on a day that is
@@ -3085,3 +3122,420 @@ async def top_up_petty_cash(
         "message": "Petty cash topped up",
         "balance": await _petty_cash_balance(branch_id),
     }
+
+
+# ---------------------------------------------------------------------------
+# Branch Cash — one running box per branch: what it collected in cash, what it
+# spent, what it handed over, and what should be left in the drawer right now.
+# ---------------------------------------------------------------------------
+#
+# Derived, not stored. The cash a branch has taken is revenue-overview's own cash figure;
+# what it has spent is the expense list's; and only the two things with no other home — a
+# handover to the person who carries it to the accountant, and an accountant's correction
+# after a count — are read from collections of their own. A stored running balance is a
+# number that drifts from the rows that produced it, and here the rows are the record.
+#
+# The box only means anything once the accountant has set its opening figure: historical
+# cash income was never handed over through this system, so before the opening count the
+# derived balance is every rupee of cash ever taken less a handful of petty expenses —
+# a wild number. `opening_set` gates every reader on that: no opening, no branch-cash
+# expectation on the closing screen, and the panel prompts for the count instead.
+
+# What a handover can be in. `pending` — raised by the branch, the carrier has the notes.
+# `received` — the accountant has counted them in. `disputed` — counted in, but short or
+# over what the branch said, and the difference written as a correction.
+HANDOVER_STATUSES = ("pending", "received", "disputed")
+
+
+class CashHandoverCreate(BaseModel):
+    # Ignored for a Branch Admin, who hands over their own branch's cash and nobody else's.
+    branch_id: Optional[str] = None
+    amount: float
+    # The notes handed over, counted — same shape a closing count carries.
+    cash_denominations: Optional[dict] = None
+    cash_coins: Optional[float] = 0
+    # Who is physically carrying it to the accountant. Required — a handover with no
+    # carrier named is a bag of cash nobody is answerable for on the road.
+    handed_to: str
+    on: Optional[str] = None
+    note: Optional[str] = ""
+
+
+class CashHandoverReceive(BaseModel):
+    # What the accountant actually counted. Left unset means "exactly what the branch
+    # said"; a figure that differs is recorded and the gap written as a correction.
+    received_amount: Optional[float] = None
+    received_denominations: Optional[dict] = None
+    received_coins: Optional[float] = 0
+    note: Optional[str] = ""
+
+
+class CashAdjustmentCreate(BaseModel):
+    # Ignored for nobody — only the accountant and Super Admin can reach this endpoint.
+    branch_id: str
+    # "opening" seeds the box: the accountant counts the branch's real cash and the box
+    # is set to it, whatever the derived figure said. "correction" is a later nudge for a
+    # miscount found afterwards.
+    reason: str = "correction"
+    # What the cash actually is. The stored adjustment is the difference between this and
+    # the box's current derived balance, so the balance becomes exactly this figure.
+    counted_amount: float
+    note: Optional[str] = ""
+
+
+async def _branch_cash_figures(branch_id: str, user: V3UserOut, up_to: Optional[str] = None) -> dict:
+    """Everything one branch's cash box holds and how it got there.
+
+    `up_to` (YYYY-MM-DD, inclusive) freezes every figure at the end of that day, which is
+    what Closing Balance needs to say what the drawer should have held that evening. Left
+    off, it is the box as it stands now.
+
+    revenue_overview and list_expenses are called as plain functions — their Depends
+    defaults are only defaults — and both re-apply their own branch scoping to `user`, so
+    a Branch Admin cannot read another branch's box through this.
+    """
+    rev = await revenue_overview(start_date=None, end_date=up_to, branch_id=branch_id, user=user)
+    collected_cash = round(float((rev.get("payment_modes") or {}).get("cash") or 0), 2)
+    collected_total = round(float((rev.get("kpis") or {}).get("total_collected") or 0), 2)
+
+    # Every branch expense is cash now, so this is all of them — approved or still waiting,
+    # never a rejected one. The notes left the branch when it was spent, whatever the
+    # accountant does with the row afterwards.
+    exp_query = {"branch_id": branch_id, "payment_mode": "cash", "rejected": {"$ne": True}}
+    if up_to:
+        exp_query["expense_date"] = {"$lte": up_to}
+    exp_rows = await v3_col("expenses").find(exp_query, {"_id": 0, "amount": 1}).to_list(20000)
+    cash_spent = round(sum(float(r.get("amount") or 0) for r in exp_rows), 2)
+
+    ho_query = {"branch_id": branch_id}
+    if up_to:
+        ho_query["on"] = {"$lte": up_to}
+    ho_rows = await v3_col("cash_handovers").find(ho_query, {"_id": 0}).to_list(5000)
+    in_transit = round(sum(
+        float(h.get("amount") or 0) for h in ho_rows if h.get("status") == "pending"
+    ), 2)
+    handed_over = round(sum(
+        float(h["received_amount"] if h.get("received_amount") is not None else h.get("amount") or 0)
+        for h in ho_rows if h.get("status") in ("received", "disputed")
+    ), 2)
+
+    adj_query = {"branch_id": branch_id}
+    if up_to:
+        adj_query["on"] = {"$lte": up_to}
+    adj_rows = await v3_col("cash_adjustments").find(adj_query, {"_id": 0}).to_list(5000)
+    adjustments = round(sum(float(r.get("amount") or 0) for r in adj_rows), 2)
+    opening_set = any(r.get("reason") == "opening" for r in adj_rows)
+
+    # In the drawer now = the opening count and corrections, plus cash taken, less cash
+    # spent, less everything that has left with a carrier (whether the accountant has
+    # counted it in yet or not — the notes are gone from the branch either way).
+    cash_in_hand = round(adjustments + collected_cash - cash_spent - handed_over - in_transit, 2)
+    return {
+        "branch_id": branch_id,
+        "collected_total": collected_total,
+        "collected_cash": collected_cash,
+        "cash_spent": cash_spent,
+        "handed_over": handed_over,
+        "in_transit": in_transit,
+        "adjustments": adjustments,
+        "cash_in_hand": cash_in_hand,
+        "opening_set": opening_set,
+    }
+
+
+def _handover_public(row: Optional[dict]) -> Optional[dict]:
+    if not row:
+        return None
+    return {
+        "id": row.get("id", ""),
+        "branch_id": row.get("branch_id"),
+        "branch_name": row.get("branch_name") or "",
+        "amount": round(float(row.get("amount") or 0), 2),
+        "status": row.get("status") or "pending",
+        "handed_to": row.get("handed_to") or "",
+        "on": row.get("on") or "",
+        "note": row.get("note") or "",
+        "raised_by": row.get("raised_by") or "",
+        "raised_at": row.get("raised_at") or "",
+        "received_amount": (
+            round(float(row["received_amount"]), 2) if row.get("received_amount") is not None else None
+        ),
+        "received_by": row.get("received_by") or "",
+        "received_at": row.get("received_at") or "",
+        "variance": round(float(row.get("variance") or 0), 2),
+    }
+
+
+@router.get("/finance/branch-cash")
+async def get_branch_cash(
+    branch_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """One branch's cash box — the five figures, its recent handovers, and its adjustments.
+
+    A Branch Admin gets their own and only their own. The accountant and Super Admin pass
+    a branch_id; with none passed they get the roll-up across every branch, which is the
+    figure a head office is actually asking for.
+    """
+    if is_branch_admin_role(user.role):
+        if not user.branch_id:
+            raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
+        branch_id = user.branch_id
+
+    branch_docs = await v3_col("branches").find(
+        {"archived": {"$ne": True}}, {"_id": 0, "id": 1, "branch_name": 1}
+    ).to_list(500)
+    branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+
+    if branch_id:
+        figures = await _branch_cash_figures(branch_id, user)
+        figures["branch_name"] = branch_name_map.get(branch_id, "")
+        ho_rows = await v3_col("cash_handovers").find(
+            {"branch_id": branch_id}, {"_id": 0}
+        ).sort("raised_at", -1).to_list(200)
+        adj_rows = await v3_col("cash_adjustments").find(
+            {"branch_id": branch_id}, {"_id": 0}
+        ).sort("created_at", -1).to_list(200)
+        return {
+            **figures,
+            "handovers": [_handover_public(h) for h in ho_rows],
+            "adjustments_log": adj_rows,
+        }
+
+    # Roll-up: every branch's box, summed, with a row each so a head office can see which
+    # branch is holding what.
+    rows = []
+    for b in branch_docs:
+        fig = await _branch_cash_figures(b["id"], user)
+        fig["branch_name"] = b.get("branch_name", "")
+        rows.append(fig)
+    total = {
+        "collected_total": round(sum(r["collected_total"] for r in rows), 2),
+        "collected_cash": round(sum(r["collected_cash"] for r in rows), 2),
+        "cash_spent": round(sum(r["cash_spent"] for r in rows), 2),
+        "handed_over": round(sum(r["handed_over"] for r in rows), 2),
+        "in_transit": round(sum(r["in_transit"] for r in rows), 2),
+        "cash_in_hand": round(sum(r["cash_in_hand"] for r in rows), 2),
+    }
+    return {"branch_id": None, "total": total, "by_branch": sorted(rows, key=lambda r: -r["cash_in_hand"])}
+
+
+@router.post("/finance/branch-cash/adjustment")
+async def create_cash_adjustment(
+    payload: CashAdjustmentCreate,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+):
+    """Set a branch's cash box to what was actually counted.
+
+    Not open to the Branch Admin: the box is the branch's own figure to keep true by
+    handing cash over and logging what it spends, and a branch that can also just type the
+    balance it wants has a box that says nothing. The opening count especially is the
+    accountant's — it is the moment the branch's cash becomes something head office is
+    tracking.
+    """
+    branch_id = payload.branch_id
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="Pick a branch")
+    reason = (payload.reason or "correction").strip().lower()
+    if reason not in ("opening", "correction"):
+        reason = "correction"
+
+    current = await _branch_cash_figures(branch_id, user)
+    if reason == "opening" and current["opening_set"]:
+        raise HTTPException(
+            status_code=409,
+            detail="This branch's opening cash is already set — use a correction to change the balance",
+        )
+    counted = round(float(payload.counted_amount), 2)
+    delta = round(counted - current["cash_in_hand"], 2)
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "branch_id": branch_id,
+        "reason": reason,
+        "amount": delta,
+        "counted_to": counted,
+        "note": (payload.note or "").strip(),
+        "on": _now()[:10],
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    }
+    await v3_col("cash_adjustments").insert_one(doc.copy())
+    return {
+        "message": "Opening cash set" if reason == "opening" else "Cash balance corrected",
+        "branch_cash": await _branch_cash_figures(branch_id, user),
+    }
+
+
+@router.post("/finance/cash-handover")
+async def create_cash_handover(
+    payload: CashHandoverCreate,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+):
+    """The branch settles cash to the person who carries it to the accountant.
+
+    The notes leave the branch the moment this is raised, so the box drops by the amount
+    straight away — `pending` until the accountant counts it in. Not the accountant's to
+    raise: it is a statement by the branch about money it is sending, and the accountant's
+    move is to receive it.
+    """
+    if is_branch_admin_role(user.role):
+        if not user.branch_id:
+            raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
+        branch_id = user.branch_id
+    else:
+        branch_id = payload.branch_id
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="Pick a branch")
+
+    amount = round(float(payload.amount or 0), 2)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    if not (payload.handed_to or "").strip():
+        raise HTTPException(status_code=400, detail="Name who is carrying the cash")
+
+    # A count is optional, but one that was taken has to agree with the amount — the same
+    # rule a fee collection's cash count follows.
+    counted_cash, notes = _denomination_total(payload.cash_denominations)
+    coins = round(float(payload.cash_coins or 0), 2)
+    if notes and abs((counted_cash + coins) - amount) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The notes counted come to Rs.{counted_cash + coins:g}, but the handover is Rs.{amount:g}",
+        )
+
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "branch_name": 1})
+    doc = {
+        "id": str(uuid.uuid4()),
+        "branch_id": branch_id,
+        "branch_name": (branch or {}).get("branch_name", ""),
+        "amount": amount,
+        "cash_denominations": notes,
+        "cash_coins": coins,
+        "handed_to": payload.handed_to.strip(),
+        "on": payload.on or _now()[:10],
+        "note": (payload.note or "").strip(),
+        "status": "pending",
+        "raised_by": user.full_name,
+        "raised_by_role": user.role,
+        "raised_at": _now(),
+        "received_amount": None,
+        "received_by": None,
+        "received_at": None,
+        "variance": 0.0,
+    }
+    await v3_col("cash_handovers").insert_one(doc.copy())
+    return {
+        "message": "Cash handed over — waiting for the accountant to receive it",
+        "handover": _handover_public(doc),
+        "branch_cash": await _branch_cash_figures(branch_id, user),
+    }
+
+
+@router.get("/finance/cash-handovers")
+async def list_cash_handovers(
+    branch_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+):
+    """Handovers, newest first. A Branch Admin sees their own branch's; the accountant and
+    Super Admin see every branch's, or one if they name it."""
+    if is_branch_admin_role(user.role):
+        branch_id = user.branch_id
+    query = {}
+    if branch_id:
+        query["branch_id"] = branch_id
+    if status in HANDOVER_STATUSES:
+        query["status"] = status
+    rows = await v3_col("cash_handovers").find(query, {"_id": 0}).sort("raised_at", -1).to_list(1000)
+    listed = [_handover_public(r) for r in rows]
+    return {
+        "handovers": listed,
+        "pending_total": round(sum(r["amount"] for r in listed if r["status"] == "pending"), 2),
+        "pending_count": sum(1 for r in listed if r["status"] == "pending"),
+    }
+
+
+@router.post("/finance/cash-handover/{handover_id}/receive")
+async def receive_cash_handover(
+    handover_id: str,
+    payload: CashHandoverReceive = CashHandoverReceive(),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+):
+    """The accountant counts a handover in. A figure that differs from what the branch
+    said is recorded and the gap written straight onto the branch's box as a correction,
+    so the branch's cash-in-hand reflects the count that actually happened."""
+    row = await v3_col("cash_handovers").find_one({"id": handover_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Handover not found")
+    if row.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="This handover has already been received")
+
+    stated = round(float(row.get("amount") or 0), 2)
+    if payload.received_amount is not None:
+        received = round(float(payload.received_amount), 2)
+    else:
+        counted_cash, _ = _denomination_total(payload.received_denominations)
+        coins = round(float(payload.received_coins or 0), 2)
+        received = round(counted_cash + coins, 2) if (counted_cash or coins) else stated
+    if received < 0:
+        raise HTTPException(status_code=400, detail="A counted amount cannot be negative")
+
+    variance = round(received - stated, 2)
+    now = _now()
+    update = {
+        "status": "disputed" if abs(variance) >= 0.01 else "received",
+        "received_amount": received,
+        "received_by": user.full_name,
+        "received_at": now,
+        "variance": variance,
+        "receive_note": (payload.note or "").strip(),
+    }
+    await v3_col("cash_handovers").update_one({"id": handover_id}, {"$set": update})
+
+    # The branch sent what it sent; if the accountant counted less, the branch is that
+    # much shorter than its box says, so the box is corrected down (and up for an over).
+    if abs(variance) >= 0.01:
+        await v3_col("cash_adjustments").insert_one({
+            "id": str(uuid.uuid4()),
+            "branch_id": row.get("branch_id"),
+            "reason": "correction",
+            "amount": variance,
+            "counted_to": None,
+            "note": f"Handover {handover_id[:8]} counted Rs.{received:g} against Rs.{stated:g} stated"
+                    + (f" — {payload.note.strip()}" if (payload.note or '').strip() else ""),
+            "on": now[:10],
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "created_at": now,
+            "handover_id": handover_id,
+        })
+
+    saved = await v3_col("cash_handovers").find_one({"id": handover_id}, {"_id": 0})
+    return {
+        "message": "Handover received" if update["status"] == "received" else "Handover received with a difference",
+        "handover": _handover_public(saved),
+    }
+
+
+@router.post("/finance/cash-handover/{handover_id}/cancel")
+async def cancel_cash_handover(
+    handover_id: str,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+):
+    """Pull a handover back before the accountant has received it — the notes never left,
+    or left and came back. Only while pending: once received it is the accountant's record
+    to unpick, not the branch's."""
+    row = await v3_col("cash_handovers").find_one({"id": handover_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Handover not found")
+    if is_branch_admin_role(user.role) and row.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=403, detail="That handover is not your branch's")
+    if row.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="This handover has already been received — it cannot be cancelled")
+    await v3_col("cash_handovers").update_one(
+        {"id": handover_id},
+        {"$set": {"status": "cancelled", "cancelled_by": user.full_name, "cancelled_at": _now()}},
+    )
+    return {"message": "Handover cancelled"}

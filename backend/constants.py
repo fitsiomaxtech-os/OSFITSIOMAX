@@ -158,3 +158,35 @@ V3_RECRUITMENT_STAGES = [
     ("Joined", "#22c55e", True),
     ("Rejected", "#ef4444", True),
 ]
+
+# ------------------------------------------------------------- Branch expense categories
+#
+# What a branch may record spending against. A fixed list, not a free-text box: an
+# accountant reading a month of these wants them to add up by category, and typed
+# categories drift into "Maintenance", "maintenence" and "AC repair" for one thing.
+#
+# Rent, Salary and Electricity ("EB") are deliberately absent. They are large, fixed and
+# paid centrally by the accountant against an invoice or a standing instruction — a branch
+# holds no cash to pay a month's rent out of, and an accountant signing off a Rs.80,000
+# "rent" line a branch typed is signing off a figure with nothing behind it. Those stay on
+# the accountant's own expense screen. Enforced in create_expense (v3_finance.py); mirrored
+# on the client in frontend/src/lib/expenseCategories.js.
+BRANCH_EXPENSE_CATEGORIES = [
+    "Water",
+    "Internet & Phone",
+    "Maintenance",
+    "Equipment",
+    "Consumables",
+    "Housekeeping",
+    "Marketing",
+    "Travel",
+    "Staff Welfare",
+    "Other",
+]
+
+# A branch may never file against these — head office pays them. Matched on the trimmed
+# lowercased string so "Rent ", "RENT" and "eb" cannot slip past.
+BRANCH_BLOCKED_EXPENSE_CATEGORIES = {
+    "rent", "salary", "salaries", "staff salary", "staff salaries",
+    "electricity", "eb", "electricity board", "electricity bill", "current bill",
+}

@@ -436,6 +436,18 @@ export const unrequestTransactions = async (activityIds) => (await api.post("/fi
 export const getPettyCash = async (params = {}) => (await api.get("/finance/petty-cash", { params })).data;
 export const topUpPettyCash = async (payload) => (await api.post("/finance/petty-cash/topup", payload)).data;
 
+// Branch Cash — one running box per branch: what it collected in cash, spent, handed over,
+// and what should be in the drawer now. `branch_id` omitted gives the accountant/Super
+// Admin the roll-up across every branch. The box only means anything once the accountant
+// has set its opening figure (opening_set); before that the derived balance is every rupee
+// of cash ever taken and the panel prompts for the count instead.
+export const getBranchCash = async (params = {}) => (await api.get("/finance/branch-cash", { params })).data;
+export const setBranchCashAdjustment = async (payload) => (await api.post("/finance/branch-cash/adjustment", payload)).data;
+export const createCashHandover = async (payload) => (await api.post("/finance/cash-handover", payload)).data;
+export const listCashHandovers = async (params = {}) => (await api.get("/finance/cash-handovers", { params })).data;
+export const receiveCashHandover = async (id, payload = {}) => (await api.post(`/finance/cash-handover/${id}/receive`, payload)).data;
+export const cancelCashHandover = async (id) => (await api.post(`/finance/cash-handover/${id}/cancel`)).data;
+
 export const getRevenueOverview = async (params = {}) => (await api.get("/finance/revenue-overview", { params })).data;
 
 export const getClientTransactionHistory = async (leadId) => (await api.get(`/finance/client/${leadId}`)).data;

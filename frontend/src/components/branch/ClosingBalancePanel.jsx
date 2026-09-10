@@ -219,6 +219,10 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
   const [closingBook, setClosingBook] = useState(false);
   const [income, setIncome] = useState({});
   const [expense, setExpense] = useState({});
+  // The expected split as the server works it out — the same figure close_book compares
+  // the count to. Preferred over the client calc below, which cannot see the branch cash
+  // box; kept as the fallback for an older backend that does not send this.
+  const [serverExpected, setServerExpected] = useState(null);
   // The form: the notes counted, the coins under them, and each cashless mode's amount
   // with the reference it is traced by.
   const [notes, setNotes] = useState({});
@@ -256,6 +260,7 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
       setYesterday(cb?.yesterday || null);
       setSaved(cb?.today || null);
       setBook(cb?.book || null);
+      setServerExpected(cb?.expected || null);
       fillFrom(cb?.today);
       // Both sides read off the server's own split rather than re-derived here. It is the
       // same figure close_book signs the day against, so what the branch is looking at
@@ -286,8 +291,8 @@ const DayCount = ({ branchId, day, refreshKey, onBusy }) => {
   const totalCounted = round2(cashCounted + upiCounted + cardCounted);
 
   const expected = useMemo(
-    () => expectedFor(income, expense),
-    [income, expense],
+    () => serverExpected || expectedFor(income, expense),
+    [serverExpected, income, expense],
   );
   const totalExpected = sumModes(expected);
 
