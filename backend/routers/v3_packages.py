@@ -782,12 +782,17 @@ async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInp
     settle_standard_payment: a chart is one plan at one price, but what a patient may pay
     that price with is the branch's rule, not this product's.
 
-    Still two products on two shelves, and still not gated on the Diet Consultation Fee
-    having been paid. What it now requires is that a chart has been CALLED FOR: the
-    Nutritionist recommends one at the consultation, having seen the patient, and until they
-    do there is nothing here to price. The Consultant used to answer that question at their
-    own consultation, before the patient had met a coach at all, which let this desk collect
-    for a chart nobody had decided was needed.
+    Two products on two shelves, but sold in an order: the Diet Consultation Fee comes
+    first and this one after it. A chart is what the Nutritionist writes having seen the
+    patient at the consultation the first fee buys, so a chart fee with no consultation fee
+    behind it is charging for the output of a meeting that was never paid for — the branch
+    collects the two on the same visit in practice, and the desk's own Diet Chart tab only
+    lists a patient once their consultation fee is in.
+
+    It also requires that a chart has been CALLED FOR: the Nutritionist recommends one at
+    the consultation, and until they do there is nothing here to price. The Consultant used
+    to answer that question at their own consultation, before the patient had met a coach at
+    all, which let this desk collect for a chart nobody had decided was needed.
 
     Does not touch consultation_stage, for the same reason collect_diet_fee does not: diet
     is a parallel vertical, and moving the physio pipeline as a side effect of a diet
@@ -798,6 +803,15 @@ async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInp
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.get("package_paid") is None:
         raise HTTPException(status_code=400, detail="Collect the Consultation Fee first")
+    # The chart is the step after the Diet Consultation, not beside it: the plan this fee
+    # buys is written at that consultation, so its own fee has to be in first. The desk's
+    # Diet Chart tab already only surfaces a patient once diet_fee_paid is set; this holds
+    # whatever reaches the route another way.
+    if lead.get("diet_fee_paid") is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Collect the Diet Consultation Fee first — the chart is the step after it",
+        )
     # A chart has to have been called for before it can be sold, and the Nutritionist is who
     # calls for one -- see recommend_diet_chart. The branch's own panel already holds the
     # button behind this flag; this is the half that holds whatever reaches the route
