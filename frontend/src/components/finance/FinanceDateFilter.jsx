@@ -174,46 +174,76 @@ const CustomRangeDialog = ({ from, to, onApply, onClose, testid }) => {
  * @param onChange    (preset, from, to) => void. The two dates come back unchanged when a
  *                    preset is pressed, so the board keeps them for the next Custom Range.
  * @param presets     which windows this board offers, if not all of them.
- * @param compact     pill geometry instead of the toolbar's, for the one row that shares
- *                    its line with filter pills rather than standing on its own.
+ * @param variant     how the row is dressed, and whether it scrolls itself. See VARIANTS.
  */
+
+/**
+ * The three shapes this row is worn in.
+ *
+ * `toolbar` is the house one, the same button Consultations and Pre-Sales carry their own
+ * ranges on: 40px tall, square-cornered, bordered white while idle and filled solid when it
+ * is the one deciding the screen. It stands alone on its line, so it has the width for full
+ * padding and scrolls itself if a phone leaves it short.
+ *
+ * `pill` is Approvals', whose row shares a line with filter pills of its own. One group
+ * standing 8px taller than the group beside it reads as a mistake rather than as a
+ * different kind of control.
+ *
+ * `inline` is the toolbar button on a diet, for Summary, where the row shares its line with
+ * five tab buttons and the two together have to fit without wrapping. It gives back its
+ * padding and a point of type below 2xl, which is roughly a quarter of the row's width, and
+ * takes both back on a wide desk where the smaller type would read as a mistake rather than
+ * as a fit. It never scrolls itself: the toolbar it sits in is the one scroll container, and
+ * a scrolling row inside a scrolling row is a trap to get a mouse out of.
+ */
+const VARIANTS = {
+  toolbar: {
+    gap: "gap-1 sm:gap-2",
+    scrolls: true,
+    btn: "h-10 shrink-0 rounded-md px-2 text-xs font-medium transition sm:px-3 sm:text-sm",
+    on: "bg-sky-600 text-white",
+    off: "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+  },
+  inline: {
+    gap: "gap-1 2xl:gap-1.5",
+    scrolls: false,
+    btn: "h-10 shrink-0 rounded-md px-2 text-xs font-medium transition 2xl:px-3 2xl:text-sm",
+    on: "bg-sky-600 text-white",
+    off: "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+  },
+  pill: {
+    gap: "gap-1.5",
+    scrolls: true,
+    btn: "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+    on: "border-sky-600 bg-sky-600 text-white shadow-sm",
+    off: "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600",
+  },
+};
+
 export const FinanceDateFilter = ({
   preset, customFrom = "", customTo = "", onChange,
-  presets = FINANCE_DATE_PRESETS, compact = false, testid = "finance-date",
+  presets = FINANCE_DATE_PRESETS, variant = "toolbar", testid = "finance-date",
 }) => {
   const [open, setOpen] = useState(false);
   const hasRange = preset === "custom" && customFrom && customTo;
-
-  // The house toolbar button, the same one Consultations and Pre-Sales carry their own
-  // ranges on: a 40px square-cornered button, bordered white while idle and filled solid
-  // when it is the one deciding the screen. Rounded-full pills read as tags — something
-  // attached to a row of data — where these are controls being pressed, and a finance page
-  // that reaches for a window every few seconds should reach for the same shape as every
-  // other board in the OS.
-  //
-  // `compact` is the exception: Approvals' row shares a line with pills of its own, and one
-  // group standing 8px taller than the group beside it reads as a mistake rather than as a
-  // different kind of control.
-  const btn = (on) => (compact
-    ? `shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-      on ? "border-sky-600 bg-sky-600 text-white shadow-sm"
-         : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"}`
-    : `h-10 shrink-0 rounded-md px-2 text-xs font-medium transition sm:px-3 sm:text-sm ${
-      on ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`);
+  const V = VARIANTS[variant] || VARIANTS.toolbar;
+  const compact = variant === "pill";
 
   return (
-    <div className={`flex min-w-0 items-center ${compact ? "gap-1.5" : "gap-1 sm:gap-2"}`} data-testid={testid}>
+    <div className={`flex min-w-0 items-center ${V.gap}`} data-testid={testid}>
       {/* flex-nowrap over a sideways scroll, not flex-wrap: see the note above on why this
           stays one row at every width. The bar itself is hidden where the browser allows
           it, since a scrollbar under seven buttons reads as a broken control. */}
-      <div className={`flex min-w-0 flex-nowrap items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${compact ? "gap-1.5" : "gap-1 sm:gap-2"}`}>
+      <div className={`flex flex-nowrap items-center ${V.gap} ${
+        V.scrolls ? "min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "shrink-0"
+      }`}>
         {presets.map((key) => (
           <button
             key={key}
             type="button"
             onClick={() => (key === "custom" ? setOpen(true) : onChange(key, customFrom, customTo))}
             aria-pressed={preset === key}
-            className={btn(preset === key)}
+            className={`${V.btn} ${preset === key ? V.on : V.off}`}
             data-testid={`${testid}-preset-${key}`}
           >
             <span className="sm:hidden">{DATE_PRESET_SHORT[key]}</span>

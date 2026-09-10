@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight, Send, Undo2 } from "lucide-react";
+import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight, Send, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
 import { BranchExpensesPanel } from "@/components/branch/BranchExpensesPanel";
-import { isoToManual } from "@/components/DateFilterPopover";
 import { FinanceDateFilter } from "@/components/finance/FinanceDateFilter";
-import { DATE_PRESET_LABELS, rangeFor } from "@/lib/dateRange";
+import { rangeFor } from "@/lib/dateRange";
 import { getBranches, getRevenueOverview, getFinanceExpenses, requestTransactions, unrequestTransactions } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
@@ -558,62 +557,37 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
     [transactions],
   );
 
-  // What the figures below are actually scoped to, said in words. Read off the same state
-  // the controls set, so it cannot drift from them the way a hand-written caption would.
-  const scopeLabel = [
-    fixedBranchId || branchId
-      ? (branches.find((b) => b.id === (fixedBranchId || branchId))?.branch_name || "This branch")
-      : "All branches",
-    tab === "closing"
-      ? "day-end count"
-      : tab === "closebooks"
-      ? "closed books"
-      : preset === "custom" && customFrom && customTo
-      ? `${isoToManual(customFrom)} to ${isoToManual(customTo)}`
-      // "to date" belongs only to the two windows that run up to today. Yesterday and Last
-      // Month are closed periods, and "Last Month to date" names a window that does not
-      // exist; Today and All say what they mean on their own.
-      : (DATE_PRESET_LABELS[preset] || "All")
-        + (preset === "this_week" || preset === "this_month" ? " to date" : ""),
-  ].join(" \u00b7 ");
+  // The scope chip that read all of this back in words is gone with the header it sat in.
+  // It described the branch select and the range row directly beneath it, both of which say
+  // what they are set to on their own faces, so it was a third control's worth of screen
+  // spent repeating two.
 
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
-      {/* The page says what it is before it says what the numbers are. */}
-      <div className="flex flex-wrap items-end justify-between gap-3" data-testid="accountant-manage-header">
-        <div>
-          <h2 className="font-heading text-2xl font-semibold tracking-tight text-slate-900">Accountant Manage</h2>
-          <p className="mt-0.5 text-sm text-slate-600">
-            Every rupee this branch took and spent, what has been signed off, and what it counted at close.
-          </p>
-        </div>
-        {/* The scope as a chip rather than a third row of controls: it is there to be read
-            back, not set -- the controls that set it are directly underneath. */}
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600"
-          data-testid="accountant-manage-scope"
-        >
-          <CalendarDays className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
-          {scopeLabel}
-        </span>
-      </div>
+      {/* No title, no standfirst, no scope chip. This board is only ever reached by opening
+          the tab named after it, so a heading repeating that name, a sentence explaining
+          what a ledger is, and a chip reading back the two controls directly under it cost
+          a band of screen each to say what the screen already said. The figures start at the
+          top of the page now, which is what anybody opening it came for.
 
-      {/* One row, read left to right: which branch, then which view of it, then the range
-          it is narrowed to. Branch and range each used to hold a band of their own — three
-          rows of controls above the figures, with the tabs stranded between the two things
-          that scope them. The branch select keeps its condition: the boards that pass a
-          fixed branch have nothing to choose, and the row starts at the tabs for them. */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm" data-testid="accountant-manage-maintabs">
+          One row, read left to right: which branch, then which view of it, then the range it
+          is narrowed to. The branch select keeps its condition: the boards that pass a fixed
+          branch have nothing to choose, and the row starts at the tabs for them.
+
+          flex-nowrap, and the only scroll container on this line. Wrapping put the range on
+          a second row under the tabs, which is a second band of controls above the figures
+          and moves the whole page down whenever the row is one button too wide. Everything
+          in here is shrink-0 and gives back padding rather than width below 2xl, so on any
+          ordinary desk it simply fits; a phone scrolls this one strip sideways instead. */}
+      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="accountant-manage-maintabs">
         {!fixedBranchId && !scoped && (
-          // The divider is desktop-only: once this wraps on a phone it is a line across
-          // the middle of a row rather than between two of them.
-          <div className="flex items-center gap-2 pl-1.5 sm:border-r sm:border-slate-200 sm:pr-3">
+          <div className="flex shrink-0 items-center gap-2 border-r border-slate-200 pl-1.5 pr-2 2xl:pr-3">
             <label htmlFor="accountant-manage-branch" className="text-xs font-medium text-slate-600">Branch:</label>
             <select
               id="accountant-manage-branch"
               value={branchId}
               onChange={(e) => setBranchId(e.target.value)}
-              className="h-9 rounded-md border border-slate-200 px-2 text-sm text-slate-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1"
+              className="h-10 rounded-md border border-slate-200 px-2 text-xs text-slate-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 2xl:text-sm"
               data-testid="accountant-manage-branch-select"
             >
               <option value="">All Branches</option>
@@ -621,20 +595,20 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
             </select>
           </div>
         )}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-nowrap gap-1 2xl:gap-1.5">
           {MAIN_TABS.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`min-w-0 rounded-md px-3.5 py-2 text-center text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${mainTabClasses(t, tab === t.key)}`}
+              className={`h-10 shrink-0 whitespace-nowrap rounded-md px-2 text-center text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 2xl:px-3.5 2xl:text-sm ${mainTabClasses(t, tab === t.key)}`}
               data-testid={`accountant-manage-maintab-${t.key}`}
             >
               {t.label}
             </button>
           ))}
         </div>
-        {/* ml-auto so the range sits at the far end on a desk and simply wraps to the next
-            line on a phone, where there is no far end to sit at.
+        {/* ml-auto so the range sits at the far end of the line, with the empty middle
+            between it and the tabs standing for the two being different questions.
 
             Hidden on Closing Balance, which carries its own Daily/Weekly/Monthly/Custom
             control because it narrows a different thing: this range narrows a ledger, that
@@ -643,15 +617,18 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
             -- that the range governs everything except the panel below it -- is not one a
             toolbar can say. */}
         {tab !== "closing" && tab !== "closebooks" && (
-        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-3" data-testid="accountant-manage-date-filter">
+        <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-2" data-testid="accountant-manage-date-filter">
           {/* The shared finance row, so this page and the three beside it are one control
               in four places rather than four that have to be kept in step by hand. It
-              carries the range in force and the way back into the dialog itself. */}
+              carries the range in force and the way back into the dialog itself.
+
+              `inline` because it shares its line with the tabs -- see VARIANTS. */}
           <FinanceDateFilter
             preset={preset}
             customFrom={customFrom}
             customTo={customTo}
             onChange={pickDates}
+            variant="inline"
             testid="accountant-manage-window"
           />
           <Button

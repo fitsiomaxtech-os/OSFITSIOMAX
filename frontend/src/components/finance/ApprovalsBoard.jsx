@@ -439,7 +439,7 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
               windows with the same words and reach them the same way. Custom Range opens
               the dialog rather than dropping two date fields into the block underneath.
 
-              `compact` alone among the four: this row shares its line with the vertical
+              The pill alone among the four: this row shares its line with the vertical
               pills at the other end of it, and the toolbar button the other three carry
               stands 8px taller than those. One group taller than the group beside it reads
               as a mistake rather than as a different kind of control. */}
@@ -449,7 +449,7 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
             customTo={customTo}
             onChange={pickDates}
             presets={DATE_PRESETS}
-            compact
+            variant="pill"
             testid="finance-approvals-window"
           />
         </FilterRow>
