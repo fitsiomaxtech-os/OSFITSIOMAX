@@ -35,8 +35,13 @@ const SummaryTab = () => {
         ))}
       </div>
       {/* canSend off: sending a day up for approval is the branch desk's move, and this is
-          the desk it gets sent to. What lands here is signed off on the Approvals tab. */}
-      <AccountantManageTab mode={mode === "all" ? undefined : mode} canSend={false} />
+          the desk it gets sent to. What lands here is signed off on the Approvals tab.
+
+          approvedOnly: from this chair income means money that has been signed off. A
+          collection still sitting at a branch desk is the branch's figure, not the
+          accountant's, and counting it here would have this board disagree with the books
+          it is read against. The three piles still show, as figures rather than a filter. */}
+      <AccountantManageTab mode={mode === "all" ? undefined : mode} canSend={false} approvedOnly />
     </div>
   );
 };

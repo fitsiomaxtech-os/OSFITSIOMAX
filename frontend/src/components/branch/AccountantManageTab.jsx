@@ -339,15 +339,22 @@ const PaymentModes = ({ tx }) => {
  *              Summary tab passes false: from that chair the three piles are something
  *              to read, and the only thing to do with them is sign them off on the
  *              Approvals tab. Everywhere else it stays on.
+ * @param approvedOnly  Counts signed-off money and nothing else, which is what the
+ *              Accountant's own Summary tab asks for: money the branch has not sent up,
+ *              or has sent up and had nobody sign, is not the accountant's income yet and
+ *              showing it as such overstates the books. The income side fixes on the
+ *              Approved pile, and the three stage pills stop being a filter and become
+ *              what the expense side's pair already are -- three figures to read.
  */
-export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = true }) => {
+export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = true, approvedOnly = false }) => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(fixedBranchId || "");
   const [tab, setTab] = useState("summary");
   const [ledger, setLedger] = useState("income");
   // Which of the three piles the income side is showing. Opens on Collected because that
-  // is the one with something to do in it.
-  const [incomeStage, setIncomeStage] = useState("collected");
+  // is the one with something to do in it -- except where only signed-off money counts,
+  // which fixes it on Approved and never moves it again.
+  const [incomeStage, setIncomeStage] = useState(approvedOnly ? "approved" : "collected");
   const [sending, setSending] = useState(false);
   const [expenseTotals, setExpenseTotals] = useState({ approved_total: 0, approved_count: 0, pending_count: 0 });
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
@@ -773,31 +780,35 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
                 sitting at the desk and what has been signed off are figures, and a branch
                 had to press through all three to add them up.
 
-                Still the filter it always was, so the picked one is ringed and the other
-                two step back rather than switching off -- the shape the Income/Expenses
-                cards above already use for a choice that carries its own number. */}
+                Where the piles can be moved between they are the filter they always were:
+                the picked one is ringed and the other two step back rather than switching
+                off -- the shape the Income/Expenses cards above already use for a choice
+                that carries its own number. Where only signed-off money counts there is
+                nothing to pick, so they are plain figures at full strength, three of the
+                same thing the expense side shows two of. */}
             <div className="flex flex-wrap items-center gap-2">
               {INCOME_STAGES.map((st) => {
-                const active = incomeStage === st.key;
                 const pile = stagePiles[st.key];
+                const picked = !approvedOnly && incomeStage === st.key;
+                const Pill = approvedOnly ? "span" : "button";
                 return (
-                  <button
+                  <Pill
                     key={st.key}
-                    type="button"
+                    type={approvedOnly ? undefined : "button"}
                     title={st.hint}
-                    onClick={() => setIncomeStage(st.key)}
-                    aria-pressed={active}
-                    className={`inline-flex items-center gap-2 rounded-full border ${st.tone.border} ${st.tone.bg} py-1.5 pl-3 pr-4 transition ${
-                      active ? "" : "opacity-60 hover:opacity-100"
+                    onClick={approvedOnly ? undefined : () => setIncomeStage(st.key)}
+                    aria-pressed={approvedOnly ? undefined : picked}
+                    className={`inline-flex items-center gap-2 rounded-full border ${st.tone.border} ${st.tone.bg} py-1.5 pl-3 pr-4 ${
+                      approvedOnly ? "" : `transition ${picked ? "" : "opacity-60 hover:opacity-100"}`
                     }`}
-                    style={active ? { boxShadow: `0 0 0 2px ${st.tone.ring}` } : undefined}
+                    style={picked ? { boxShadow: `0 0 0 2px ${st.tone.ring}` } : undefined}
                     data-testid={`accountant-manage-income-stage-${st.key}`}
                   >
                     <span className={`h-2 w-2 shrink-0 rounded-full ${st.tone.dot}`} />
                     <span className={`text-[11px] font-bold uppercase tracking-wider ${st.tone.text}`}>{st.label}</span>
                     <span className={`text-sm font-bold tabular-nums ${st.tone.text}`}>{fmt(pile.total)}</span>
                     <span className={`text-[11px] ${st.tone.sub}`}>· {countLabel(pile.count, "payment")}</span>
-                  </button>
+                  </Pill>
                 );
               })}
             </div>
@@ -830,8 +841,14 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
                 {sending ? "Pulling back…" : `Pull ${filteredTxns.length} back`}
               </Button>
             )}
+            {/* With a pile to pick, this says what the picked one is. With none, it says
+                what every figure below is counting -- worth saying plainly, because the
+                three pills above it are showing two figures that are deliberately not in
+                it. */}
             <p className="text-[11px] text-slate-400">
-              {INCOME_STAGES.find((st) => st.key === incomeStage)?.hint}
+              {approvedOnly
+                ? "Signed off only \u2014 what the branches have collected but not had approved is not counted below"
+                : INCOME_STAGES.find((st) => st.key === incomeStage)?.hint}
             </p>
           </div>
 
