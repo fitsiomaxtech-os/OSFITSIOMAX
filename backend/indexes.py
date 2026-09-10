@@ -42,6 +42,21 @@ CORE_INDEXES = [
     # physio boards read a patient's days by it.
     ("sessions", [("lead_id", 1)], "lead_id"),
     ("sessions", [("id", 1)], "id"),
+    # The other half of a course. Every Branch Leads board runs leads_awaiting_review to
+    # decide who is Completed, which reads _course_progress and _completed_day_counts, and
+    # both scan rehab_sessions by lead_id -- twice per load, and unindexed it was the whole
+    # collection each time even for a branch holding two patients. The Rehab board and
+    # _first_session_date read a patient's rehab days by the same key; find_one/update hit
+    # the row's own id.
+    ("rehab_sessions", [("lead_id", 1)], "lead_id"),
+    ("rehab_sessions", [("id", 1)], "id"),
+    # leads_awaiting_review again: the closing review it looks for is found by lead_id, once
+    # per finished course on every board that shows a Completed pill (Branch Leads, the
+    # Consultations board, Physio Master View). Grows with every review ever written, so
+    # unindexed this scan got slower for the life of the install. The Review tab's own
+    # find_one/update reach a review by its id.
+    ("reviews", [("lead_id", 1)], "lead_id"),
+    ("reviews", [("id", 1)], "id"),
     # 107 find_one and 58 update_one across the routers, all keyed on the lead's own id.
     ("leads", [("id", 1)], "id"),
     # /branch-board/{branch_id} and /branch-admin/consultations/{branch_id}/board: the same
