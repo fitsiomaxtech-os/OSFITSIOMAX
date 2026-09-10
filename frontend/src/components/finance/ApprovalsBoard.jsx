@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, CheckCircle2, Minus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { toast } from "@/components/ui/sonner";
+import { DATE_PRESET_LABELS, rangeFor } from "@/lib/dateRange";
 import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransaction, bulkApproveTransactions } from "@/lib/api";
 import { ExpenseApprovalsPanel } from "@/components/finance/ExpenseApprovalsPanel";
 
@@ -61,6 +62,13 @@ const PAYMENT_MODES = [
   ["cheque", "Cheque"],
 ];
 
+const VERTICALS = [["all", "All"], ["offline", "Offline"], ["online", "Online"]];
+
+// Yesterday is left off, though rangeFor knows it: this desk signs off a batch rather than
+// closing an evening, and five pills fit beside the vertical row where six start pushing
+// it. Custom stays last, where a preset row ends everywhere else in the OS.
+const DATE_PRESETS = ["all", "today", "this_week", "this_month", "custom"];
+
 /**
  * One filter pill. The three rows of these used to be written out three times with three
  * different sizes -- the vertical row at text-xs/px-3, the other two at text-sm/px-3.5 --
@@ -87,16 +95,23 @@ const FilterPill = ({ on, accent = "sky", onClick, children, testId }) => (
 );
 
 /**
- * A labelled line of the filter block. The label carries its weight: three unlabelled
- * bands of pills, each opening with a pill called "All", left the reader to work out from
- * the words in them which question each band was asking -- and "All" against "All" against
- * "All Modes" is the same answer to three different questions.
+ * A line of the filter block, holding two groups of pills pushed to opposite ends of it.
+ *
+ * The gap between them is what separates the two questions, which is why they are not
+ * simply four bands of pills stacked: four bands cost four bands of screen above a list
+ * that is the thing anybody came here to read. On a phone there is no room to push
+ * anything anywhere, so the groups stack and the gap between them does the same job
+ * vertically.
  */
-const FilterRow = ({ label, children, testId }) => (
-  <div className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-3" data-testid={testId}>
-    <p className="w-20 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-    <div className="flex flex-wrap items-center gap-2">{children}</div>
+const FilterRow = ({ children }) => (
+  <div className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+    {children}
   </div>
+);
+
+/** One question's worth of pills, wrapping within itself rather than into its neighbour. */
+const FilterGroup = ({ children, testId }) => (
+  <div className="flex flex-wrap items-center gap-2" data-testid={testId}>{children}</div>
 );
 
 /**
@@ -261,8 +276,13 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
   // because it is the one filter that means the same thing on either side -- a day's
   // collections and a day's spending are the same day -- so it is asked once, above the
   // ledger switch, and both /finance/approvals and /finance/expenses take it from here.
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [preset, setPreset] = useState("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [startDate, endDate] = useMemo(
+    () => rangeFor(preset, customFrom, customTo),
+    [preset, customFrom, customTo],
+  );
   const [view, setView] = useState("pending"); // "pending" | "approved"
   const [ledger, setLedger] = useState("income"); // "income" | "expenses"
   const [data, setData] = useState({ transactions: [], summary: {} });
@@ -278,6 +298,10 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
   useEffect(() => { if (!controlled) getBranches().then(setBranches).catch(() => {}); }, [controlled]);
 
   const load = useCallback(async () => {
+    // A half-typed custom range would ask for everything from one date to nothing, which
+    // reads as an empty ledger rather than as an unfinished question. The list stays on
+    // what it was showing until both ends are picked -- same rule Expense's row follows.
+    if (preset === "custom" && (!customFrom || !customTo)) return;
     setLoading(true);
     try {
       const params = { approved: view === "approved" };
@@ -294,7 +318,7 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
       setSelected(new Set());
     } catch { /* silent */ }
     setLoading(false);
-  }, [branchId, mode, category, paymentMode, startDate, endDate, view]);
+  }, [branchId, mode, category, paymentMode, startDate, endDate, preset, customFrom, customTo, view]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -367,103 +391,120 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
       </div>
 
       {/* One filter block for both ledgers, above the switch's two sides rather than
-          inside one of them. What is on it follows the ledger: the window and the vertical
-          narrow money going either way and stay put, while Category and Paid by describe a
-          collection and have nothing to say about an expense — /finance/expenses does not
-          take them — so they are not offered against one.
+          inside one of them. What is on it follows the ledger: the vertical and the window
+          narrow money going either way and stay put, while what it was for and how it was
+          paid describe a collection and have nothing to say about an expense —
+          /finance/expenses does not take them — so they are not offered against one.
 
-          Three loose bands of pills stood here before, unlabelled, in two sizes, each
-          opening with a pill called "All". Now it is one card, one pill size, and every
-          line says which question it is asking. */}
+          Four loose bands of pills stood here before, in two sizes, each opening with a
+          pill called "All". Two lines now, each holding two groups at opposite ends: same
+          four questions, half the screen, and the gap in the middle of a line is what says
+          the pills either side of it are answering different things. */}
       <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="finance-approvals-filters">
-        <FilterRow label="Window" testId="finance-approvals-date-filter">
-          <MilkDateInput
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            max={endDate || undefined}
-            className="rounded-md border-slate-200 px-2 text-xs"
-            data-testid="finance-approvals-start-date"
-          />
-          <span className="text-xs text-slate-400">to</span>
-          <MilkDateInput
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            min={startDate || undefined}
-            className="rounded-md border-slate-200 px-2 text-xs"
-            data-testid="finance-approvals-end-date"
-          />
-          {/* Only once there is something to clear. A permanent Clear beside two empty
-              date boxes offers to undo a filter nobody has set. */}
-          {(startDate || endDate) && (
-            <button
-              type="button"
-              onClick={() => { setStartDate(""); setEndDate(""); }}
-              className="text-xs font-medium text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
-              data-testid="finance-approvals-date-clear"
-            >
-              Clear
-            </button>
-          )}
-        </FilterRow>
-
-        <FilterRow label="Vertical" testId="finance-approvals-mode-filter">
-          {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
-            <FilterPill
-              key={key}
-              on={mode === key}
-              onClick={() => setMode(key)}
-              testId={`finance-approvals-mode-${key}`}
-            >
-              {label}
-            </FilterPill>
-          ))}
-          {/* Already picked by the branch-pill row above this board when it is embedded in
-              Super Admin's Finance screen — asking again underneath it would be a second
-              answer to a question that has one. */}
-          {!controlled && (
-            <select
-              value={branchId}
-              onChange={(e) => setBranchId(e.target.value)}
-              className="h-8 rounded-md border border-slate-200 px-2 text-xs"
-              data-testid="finance-approvals-branch"
-            >
-              <option value="">All Branches</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-            </select>
-          )}
-        </FilterRow>
-
-        {ledger === "income" && (
-          <FilterRow label="Category" testId="finance-approvals-category-filter">
-            {CATEGORIES.map(([key, label]) => (
+        {/* Which money, and from when. Two groups pushed to opposite ends of the line
+            rather than stacked on two lines of their own: they are asked together and the
+            gap between them is what says they are two questions, so the row costs one band
+            of screen instead of two and still reads as two things. */}
+        <FilterRow>
+          <FilterGroup testId="finance-approvals-mode-filter">
+            {VERTICALS.map(([key, label]) => (
               <FilterPill
                 key={key}
-                on={category === key}
-                onClick={() => setCategory(key)}
-                testId={`finance-approvals-category-${key}`}
+                on={mode === key}
+                onClick={() => setMode(key)}
+                testId={`finance-approvals-mode-${key}`}
               >
                 {label}
               </FilterPill>
             ))}
-          </FilterRow>
+            {/* Already picked by the branch-pill row above this board when it is embedded
+                in Super Admin's Finance screen — asking again underneath it would be a
+                second answer to a question that has one. */}
+            {!controlled && (
+              <select
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+                data-testid="finance-approvals-branch"
+              >
+                <option value="">All Branches</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+              </select>
+            )}
+          </FilterGroup>
+
+          <FilterGroup testId="finance-approvals-date-filter">
+            {DATE_PRESETS.map((key) => (
+              <FilterPill
+                key={key}
+                on={preset === key}
+                onClick={() => setPreset(key)}
+                testId={`finance-approvals-preset-${key}`}
+              >
+                {DATE_PRESET_LABELS[key]}
+              </FilterPill>
+            ))}
+          </FilterGroup>
+        </FilterRow>
+
+        {/* Only on Custom. Two date fields standing open under every other preset are two
+            controls saying nothing four times out of five — the same rule Expense's own
+            row follows, so the two look and behave alike. */}
+        {preset === "custom" && (
+          <div className="flex flex-wrap items-center gap-1.5 px-4 py-2.5 text-xs text-slate-500" data-testid="finance-approvals-custom-range">
+            <MilkDateInput
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              max={customTo || undefined}
+              className="rounded-md border-slate-200 px-2 text-xs"
+              data-testid="finance-approvals-start-date"
+            />
+            <span>to</span>
+            <MilkDateInput
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              min={customFrom || undefined}
+              className="rounded-md border-slate-200 px-2 text-xs"
+              data-testid="finance-approvals-end-date"
+            />
+            {(!customFrom || !customTo) && <span className="text-slate-400">Pick both ends to filter.</span>}
+          </div>
         )}
 
-        {/* Same set Branch Admin picks from when collecting the fee in the first place —
-            not a category (what was paid for) but how, so it keeps its own line and its
-            own accent rather than folding into the one above. */}
+        {/* What it was for, and how it was paid. Both describe a collection and neither is
+            a question /finance/expenses can answer, so the whole line goes when the ledger
+            switches to expenses rather than sitting there greyed. */}
         {ledger === "income" && (
-          <FilterRow label="Paid by" testId="finance-approvals-payment-mode-filter">
-            {PAYMENT_MODES.map(([key, label]) => (
-              <FilterPill
-                key={key}
-                accent="indigo"
-                on={paymentMode === key}
-                onClick={() => setPaymentMode(key)}
-                testId={`finance-approvals-payment-mode-${key}`}
-              >
-                {label}
-              </FilterPill>
-            ))}
+          <FilterRow>
+            <FilterGroup testId="finance-approvals-category-filter">
+              {CATEGORIES.map(([key, label]) => (
+                <FilterPill
+                  key={key}
+                  on={category === key}
+                  onClick={() => setCategory(key)}
+                  testId={`finance-approvals-category-${key}`}
+                >
+                  {label}
+                </FilterPill>
+              ))}
+            </FilterGroup>
+
+            {/* Same set Branch Admin picks from when collecting the fee in the first
+                place — not a category (what was paid for) but how, so it keeps the indigo
+                it has always had rather than reading as more of the row beside it. */}
+            <FilterGroup testId="finance-approvals-payment-mode-filter">
+              {PAYMENT_MODES.map(([key, label]) => (
+                <FilterPill
+                  key={key}
+                  accent="indigo"
+                  on={paymentMode === key}
+                  onClick={() => setPaymentMode(key)}
+                  testId={`finance-approvals-payment-mode-${key}`}
+                >
+                  {label}
+                </FilterPill>
+              ))}
+            </FilterGroup>
           </FilterRow>
         )}
       </div>
