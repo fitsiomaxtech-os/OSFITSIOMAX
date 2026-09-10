@@ -15,22 +15,16 @@ import { EXPENSE_PAYMENT_MODE_OPTIONS, PAYMENT_MODE_LABELS, PAYMENT_MODE_COLORS,
 import { PETTY_CASH_LIMIT, PETTY_CASH_REASON_REQUIRED, isPettyCash } from "@/lib/pettyCash";
 import { DENOMINATIONS, noteTotal, countedNotes, noteBreakdown, notesLabel } from "@/lib/denominations";
 import { PettyCashPanel } from "@/components/finance/PettyCashPanel";
+import { FinanceDateFilter } from "@/components/finance/FinanceDateFilter";
+import { todayIso, rangeFor, rangeIncomplete } from "@/lib/dateRange";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 
-// Built off the local clock rather than toISOString(), which converts to UTC first: east
-// of Greenwich that hands back yesterday's date for the whole of the early evening — so
-// Today would have filtered to yesterday every evening, and a new expense would have
-// defaulted to the wrong day.
-const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const todayIso = () => toIso(new Date());
-const fromIso = (iso) => new Date(`${iso}T00:00:00`);
-const shiftDays = (iso, n) => { const d = fromIso(iso); d.setDate(d.getDate() + n); return toIso(d); };
-// Sunday-start, the same week Accountant Manage's own This Week preset counts — two pages
-// of one book disagreeing about where a week begins is a difference nobody can see and
-// everybody has to explain.
-const startOfWeek = (iso) => { const d = fromIso(iso); d.setDate(d.getDate() - d.getDay()); return toIso(d); };
-const startOfMonth = (iso) => { const d = fromIso(iso); return toIso(new Date(d.getFullYear(), d.getMonth(), 1)); };
+// The copy this page kept of lib/dateRange's helpers is gone; it now takes them from
+// there, which is where they were extracted to and which the window's own row already
+// reads. `todayIso` is still wanted here for the date a new expense defaults to — that has
+// to be the local day, not a UTC one, or an expense entered in the evening files itself
+// under tomorrow.
 
 const blankExpense = { category: "", amount: "", branch_id: "", note: "", expense_date: todayIso(), payment_mode: "cash", reference: "" };
 
@@ -48,32 +42,6 @@ const REFERENCE_ASK = {
   card: { label: "Card Transaction ID", placeholder: "Terminal batch / txn no.", missing: "Enter the card transaction ID" },
   account_transfer: { label: "Transaction ID", placeholder: "Bank transaction ID / UTR", missing: "Enter the bank transaction ID" },
   cheque: { label: "Cheque Number", placeholder: "Cheque no.", missing: "Enter the cheque number" },
-};
-
-// "All" first and the default: this page opens on the whole book, because opening it
-// scoped to Today would hide every expense older than this morning behind a filter
-// nobody set. Today and Yesterday are the day filter — one evening's spending on its
-// own — with the wider two and Custom behind them, and they are the same presets
-// Accountant Manage and Closing Balance already offer, in the same words.
-const DATE_PRESETS = [
-  { key: "all", label: "All" },
-  { key: "today", label: "Today" },
-  { key: "yesterday", label: "Yesterday" },
-  { key: "this_week", label: "This Week" },
-  { key: "this_month", label: "This Month" },
-  { key: "custom", label: "Custom" },
-];
-
-/** The window a preset asks for, as the [start, end] the endpoint takes. Both ends
- *  inclusive, and both empty for "All" — which is the endpoint's own "no date filter". */
-const rangeFor = (preset, from, to) => {
-  const today = todayIso();
-  if (preset === "today") return [today, today];
-  if (preset === "yesterday") { const d = shiftDays(today, -1); return [d, d]; }
-  if (preset === "this_week") return [startOfWeek(today), today];
-  if (preset === "this_month") return [startOfMonth(today), today];
-  if (preset === "custom") return [from, to];
-  return ["", ""];
 };
 
 // StatTile colours its card off one hex rather than a class, so the tender colours live
@@ -177,10 +145,12 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
     [preset, customFrom, customTo],
   );
 
+  const pickDates = (key, from, to) => { setPreset(key); setCustomFrom(from); setCustomTo(to); };
+
   const load = useCallback(async () => {
     // A half-typed custom range would ask for everything from one date to nothing, which
     // reads as a filter that stopped working. Waits for both ends.
-    if (preset === "custom" && (!customFrom || !customTo)) return;
+    if (rangeIncomplete(preset, customFrom, customTo)) return;
     setLoading(true);
     try {
       const params = {};
@@ -357,43 +327,26 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
           list alone. Shared by both views: the window and the branch are the same question
           whichever book is open. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-1.5" data-testid="finance-expense-date-presets">
-          {DATE_PRESETS.map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              onClick={() => setPreset(p.key)}
-              aria-pressed={preset === p.key}
-              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                preset === p.key
-                  ? "border-sky-600 bg-sky-600 text-white shadow-sm"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-              }`}
-              data-testid={`finance-expense-preset-${p.key}`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        {/* The shared finance row, so this page and the three beside it name their windows
+            with the same words and reach them the same way. Custom Range opens the dialog
+            rather than dropping two date fields into the page underneath: fields that
+            appear on one preset and vanish on the others move every figure below them up
+            and down the screen each time the window is changed. */}
+        <FinanceDateFilter
+          preset={preset}
+          customFrom={customFrom}
+          customTo={customTo}
+          onChange={pickDates}
+          testid="finance-expense-window"
+        />
         {/* The tin has its own way in — Top Up, on the panel itself — and it is not an
             expense, so it does not belong behind this button. */}
         {view === "expenses" && (
-          <Button onClick={() => setShowAdd(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="finance-expense-add-btn">
+          <Button onClick={() => setShowAdd(true)} className="shrink-0 bg-sky-600 hover:bg-sky-700" data-testid="finance-expense-add-btn">
             <Plus className="mr-1 h-4 w-4" />Add Expense
           </Button>
         )}
       </div>
-
-      {/* Only on Custom. Two date fields standing open under every other preset are two
-          controls saying nothing, next to the pill that is actually deciding the window. */}
-      {preset === "custom" && (
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500" data-testid="finance-expense-custom-range">
-          <MilkDateInput value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-xs" data-testid="finance-expense-start" />
-          <span>to</span>
-          <MilkDateInput value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-xs" data-testid="finance-expense-end" />
-          {(!customFrom || !customTo) && <span className="text-slate-400">Pick both ends to filter.</span>}
-        </div>
-      )}
 
       {/* Whose. Branch and vertical are already picked by the branch-pill row above this
           board when embedded there — asking again here would be a second control for the

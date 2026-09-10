@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight, Send, Undo2 } from "lucide-react";
+import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight, Send, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
 import { BranchExpensesPanel } from "@/components/branch/BranchExpensesPanel";
-import { maskDayMonthYear, manualToIso, isoToManual } from "@/components/DateFilterPopover";
+import { isoToManual } from "@/components/DateFilterPopover";
+import { FinanceDateFilter } from "@/components/finance/FinanceDateFilter";
+import { DATE_PRESET_LABELS, rangeFor } from "@/lib/dateRange";
 import { getBranches, getRevenueOverview, getFinanceExpenses, requestTransactions, unrequestTransactions } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
@@ -162,22 +164,11 @@ const receiptForTxn = (tx) => receiptFromTransaction({
 // exactly why going through it one branch at a time never adds up to the total.
 const UNPLACED = ["Unassigned", "Former branch"];
 
-// "All" first and the default — this page had no date filter before, so opening it
-// scoped to Today would silently hide every collection older than that. Today/This
-// Week/This Month/Custom are the same presets Branches & Verticals' own Overview and AC
-// Overview already use.
-const DATE_PRESETS = [
-  { key: "all", label: "All" },
-  { key: "today", label: "Today" },
-  { key: "this_week", label: "This Week" },
-  { key: "this_month", label: "This Month" },
-  { key: "custom", label: "Custom" },
-];
-
-const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
-const startOfWeek = (d) => { const x = startOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; };
-const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
-const toIso = (d) => d.toISOString().slice(0, 10);
+// The windows and the days behind them both come from lib/dateRange now — the copy this
+// page kept is the one that module was extracted from. It picked up Yesterday and Last
+// Month on the way, and lost a UTC bug with the copy: the dates went through
+// toISOString(), which east of Greenwich turns local midnight into the previous day, so
+// This Week and This Month each opened a day early.
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const countLabel = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -373,15 +364,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
   const [preset, setPreset] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  // The range is typed in a dialog rather than picked inline. Two calendar fields sat in
-  // the toolbar and each opened a month grid over the figures behind it; a range is two
-  // dates, which is quicker typed than navigated to twice.
-  const [showCustom, setShowCustom] = useState(false);
-  const [fromText, setFromText] = useState("");
-  const [toText, setToText] = useState("");
-  // What to fall back to if the dialog is dismissed without a range — leaving the screen
-  // on "Custom" with nothing set would show a filter that filters nothing.
-  const [presetBeforeCustom, setPresetBeforeCustom] = useState("all");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [viewingLeadId, setViewingLeadId] = useState(null);
@@ -396,14 +378,13 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
     getBranches().then(setBranches).catch(() => setBranches([]));
   }, [fixedBranchId, scoped]);
 
+  // Both empty on "all" — no range, every collection ever made.
   const { startDate, endDate } = useMemo(() => {
-    const today = new Date();
-    if (preset === "today") return { startDate: toIso(today), endDate: toIso(today) };
-    if (preset === "this_week") return { startDate: toIso(startOfWeek(today)), endDate: toIso(today) };
-    if (preset === "this_month") return { startDate: toIso(startOfMonth(today)), endDate: toIso(today) };
-    if (preset === "custom") return { startDate: customFrom, endDate: customTo };
-    return { startDate: "", endDate: "" }; // "all" — no range, every collection ever made
+    const [start, end] = rangeFor(preset, customFrom, customTo);
+    return { startDate: start, endDate: end };
   }, [preset, customFrom, customTo]);
+
+  const pickDates = (key, from, to) => { setPreset(key); setCustomFrom(from); setCustomTo(to); };
 
   // "online" | "offline", owned by whichever caller wants the filter (Accountant's own
   // Summary tab) — undefined everywhere else, which getRevenueOverview reads as no filter
@@ -440,36 +421,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
   }, [branchId]);
 
   useEffect(() => { loadExpenseTotals(); }, [loadExpenseTotals]);
-
-  const openCustom = () => {
-    if (preset !== "custom") setPresetBeforeCustom(preset);
-    setFromText(isoToManual(customFrom));
-    setToText(isoToManual(customTo));
-    setShowCustom(true);
-  };
-
-  // Named for the boxes they come from, not "fromIso/toIso": a local toIso shadowed the
-  // module-level date formatter of that name across this whole component, and the range
-  // memo above — which runs at the line it is written on, well before these — reached the
-  // local's temporal dead zone. Picking Today or This Week crashed the board outright.
-  const customFromIso = manualToIso(fromText);
-  const customToIso = manualToIso(toText);
-  // Both must parse, and they must be the right way round — a reversed range returns
-  // nothing and reads as an empty month rather than as a mistake in the dialog.
-  const rangeValid = !!customFromIso && !!customToIso && customFromIso <= customToIso;
-
-  const applyCustom = () => {
-    if (!rangeValid) return;
-    setCustomFrom(customFromIso);
-    setCustomTo(customToIso);
-    setPreset("custom");
-    setShowCustom(false);
-  };
-
-  const dismissCustom = () => {
-    setShowCustom(false);
-    if (!customFrom || !customTo) setPreset(presetBeforeCustom);
-  };
 
   const k = data?.kpis || {};
   // `data?.x || []` builds a fresh array on every render, so every memo keyed on one was
@@ -619,7 +570,11 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
       ? "closed books"
       : preset === "custom" && customFrom && customTo
       ? `${isoToManual(customFrom)} to ${isoToManual(customTo)}`
-      : (DATE_PRESETS.find((d) => d.key === preset)?.label || "All") + " to date",
+      // "to date" belongs only to the two windows that run up to today. Yesterday and Last
+      // Month are closed periods, and "Last Month to date" names a window that does not
+      // exist; Today and All say what they mean on their own.
+      : (DATE_PRESET_LABELS[preset] || "All")
+        + (preset === "this_week" || preset === "this_month" ? " to date" : ""),
   ].join(" \u00b7 ");
 
   return (
@@ -688,33 +643,17 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
             -- that the range governs everything except the panel below it -- is not one a
             toolbar can say. */}
         {tab !== "closing" && tab !== "closebooks" && (
-        <div className="ml-auto flex flex-wrap items-center gap-3" data-testid="accountant-manage-date-filter">
-          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-            {DATE_PRESETS.map((p) => (
-              <button
-                key={p.key}
-                onClick={() => (p.key === "custom" ? openCustom() : setPreset(p.key))}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${preset === p.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
-                data-testid={`accountant-manage-preset-${p.key}`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          {/* The range that is actually in force, and the way back into the dialog to
-              change it — the figures are filtered by it, so it has to be readable without
-              opening anything. */}
-          {preset === "custom" && customFrom && customTo && (
-            <button
-              type="button"
-              onClick={openCustom}
-              className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-sky-300 hover:text-sky-600"
-              data-testid="accountant-manage-custom-chip"
-            >
-              <CalendarDays className="h-3.5 w-3.5" />
-              {isoToManual(customFrom)} to {isoToManual(customTo)}
-            </button>
-          )}
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-3" data-testid="accountant-manage-date-filter">
+          {/* The shared finance row, so this page and the three beside it are one control
+              in four places rather than four that have to be kept in step by hand. It
+              carries the range in force and the way back into the dialog itself. */}
+          <FinanceDateFilter
+            preset={preset}
+            customFrom={customFrom}
+            customTo={customTo}
+            onChange={pickDates}
+            testid="accountant-manage-window"
+          />
           <Button
             onClick={load}
             disabled={loading}
@@ -994,71 +933,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
         <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} onReceipt={(tx) => setReceipt(receiptForTxn(tx))} />
       )}
 
-      {showCustom && (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) dismissCustom(); }}
-          data-testid="accountant-manage-custom-modal"
-        >
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <p className="text-base font-semibold text-slate-900">Custom Range</p>
-              <button
-                type="button"
-                onClick={dismissCustom}
-                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
-                aria-label="Close"
-                data-testid="accountant-manage-custom-close"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {[
-                { label: "From", text: fromText, set: setFromText, iso: customFromIso, tid: "from" },
-                { label: "To", text: toText, set: setToText, iso: customToIso, tid: "to" },
-              ].map((f) => (
-                <div key={f.tid}>
-                  <label className="text-xs font-medium text-slate-500">{f.label}</label>
-                  <input
-                    value={f.text}
-                    onChange={(e) => f.set(maskDayMonthYear(e.target.value, f.text))}
-                    onKeyDown={(e) => { if (e.key === "Enter") applyCustom(); }}
-                    inputMode="numeric"
-                    maxLength={10}
-                    placeholder="DD-MM-YYYY"
-                    className={`h-9 w-full rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 ${
-                      f.text && !f.iso
-                        ? "border-red-300 focus:border-red-400 focus:ring-red-400"
-                        : "border-slate-200 focus:border-sky-400 focus:ring-sky-400"
-                    }`}
-                    data-testid={`accountant-manage-custom-${f.tid}`}
-                  />
-                </div>
-              ))}
-              {/* Says which of the two ways it is wrong, rather than only refusing to apply. */}
-              <p className="text-[11px] text-slate-400" data-testid="accountant-manage-custom-hint">
-                {customFromIso && customToIso && customFromIso > customToIso
-                  ? "The From date is after the To date."
-                  : "Type both dates as DD-MM-YYYY, e.g. 04-08-2026."}
-              </p>
-            </div>
-
-            <div className="mt-5 flex gap-2">
-              <Button variant="outline" onClick={dismissCustom} className="flex-1" data-testid="accountant-manage-custom-cancel">Cancel</Button>
-              <Button
-                onClick={applyCustom}
-                disabled={!rangeValid}
-                className="flex-1 bg-sky-600 hover:bg-sky-700"
-                data-testid="accountant-manage-custom-apply"
-              >
-                Apply
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The Custom Range dialog moved into FinanceDateFilter, which opens it from the row
+          above — one dialog for the four finance pages instead of a copy per page. */}
 
       {viewingLeadId && <ClientHistoryModal leadId={viewingLeadId} onClose={() => setViewingLeadId(null)} onChanged={load} />}
       <ReceiptDialog receipt={receipt} onClose={() => setReceipt(null)} testid="accountant-receipt" />

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Wallet } from "lucide-react";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { FinanceDateFilter } from "@/components/finance/FinanceDateFilter";
+import { rangeFor, rangeIncomplete } from "@/lib/dateRange";
 import { getBranches, getFinanceProfit } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
@@ -12,8 +13,12 @@ const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
  * counts as money in.
  *
  * `branchId`/`mode`/`scoped` are optional — see the same note on ExpenseBoard. Passed by
- * Super Admin's Finance screen (its Overview tab), whose branch-pill row already picked
- * a scope; left off, this keeps picking its own on the Accountant's own dashboard.
+ * Super Admin's Finance screen, whose branch-pill row already picked a scope; left off,
+ * this keeps picking its own on the Accountant's own dashboard.
+ *
+ * The window is the shared finance row — All through Custom Range — rather than the pair of
+ * bare date fields this board used to carry. Two fields reading "Select date" say nothing
+ * about what is in force and take four taps to say Today; the row says both.
  */
 export const ProfitBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = false } = {}) => {
   const controlled = scoped;
@@ -22,14 +27,27 @@ export const ProfitBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = f
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
   const effectiveBranchId = controlled ? (branchIdProp || "") : branchId;
   const effectiveMode = controlled ? (modeProp || "all") : mode;
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  // "all" is the resting state: this board opens on the whole book, and did before there
+  // was a row to say so — two empty date fields were the same window with nothing lit.
+  const [preset, setPreset] = useState("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [data, setData] = useState({ revenue: 0, expense: 0, profit: 0, expense_by_category: [] });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { if (!controlled) getBranches().then(setBranches).catch(() => {}); }, [controlled]);
 
+  const [startDate, endDate] = useMemo(
+    () => rangeFor(preset, customFrom, customTo),
+    [preset, customFrom, customTo],
+  );
+
+  const pickDates = (key, from, to) => { setPreset(key); setCustomFrom(from); setCustomTo(to); };
+
   const load = useCallback(async () => {
+    // A half-typed custom range would ask for everything from one date to nothing, which
+    // reads as a filter that stopped working. Waits for both ends.
+    if (rangeIncomplete(preset, customFrom, customTo)) return;
     setLoading(true);
     try {
       const params = {};
@@ -40,7 +58,7 @@ export const ProfitBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = f
       setData(await getFinanceProfit(params));
     } catch { /* silent */ }
     setLoading(false);
-  }, [effectiveBranchId, effectiveMode, startDate, endDate]);
+  }, [effectiveBranchId, effectiveMode, startDate, endDate, preset, customFrom, customTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -75,11 +93,15 @@ export const ProfitBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = f
             {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
           </select>
         )}
-        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-          <MilkDateInput value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-xs" data-testid="finance-profit-start" />
-          <span>to</span>
-          <MilkDateInput value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-xs" data-testid="finance-profit-end" />
-        </div>
+        {/* The window governs all three cards below it, so it sits with the other things
+            that scope them rather than under the figures it changes. */}
+        <FinanceDateFilter
+          preset={preset}
+          customFrom={customFrom}
+          customTo={customTo}
+          onChange={pickDates}
+          testid="finance-profit-window"
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, CheckCircle2, Minus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { toast } from "@/components/ui/sonner";
-import { DATE_PRESET_LABELS, rangeFor } from "@/lib/dateRange";
+import { FinanceDateFilter } from "@/components/finance/FinanceDateFilter";
+import { rangeFor, rangeIncomplete } from "@/lib/dateRange";
 import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransaction, bulkApproveTransactions } from "@/lib/api";
 import { ExpenseApprovalsPanel } from "@/components/finance/ExpenseApprovalsPanel";
 
@@ -64,9 +64,10 @@ const PAYMENT_MODES = [
 
 const VERTICALS = [["all", "All"], ["offline", "Offline"], ["online", "Online"]];
 
-// Yesterday is left off, though rangeFor knows it: this desk signs off a batch rather than
-// closing an evening, and five pills fit beside the vertical row where six start pushing
-// it. Custom stays last, where a preset row ends everywhere else in the OS.
+// Yesterday and Last Month are left off, though rangeFor knows both: this desk signs off a
+// batch rather than reading a closed period back, and the row shares its line with the
+// vertical filter beside it. Custom Range stays last, where a preset row ends everywhere
+// else in the OS.
 const DATE_PRESETS = ["all", "today", "this_week", "this_month", "custom"];
 
 /**
@@ -283,6 +284,7 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
     () => rangeFor(preset, customFrom, customTo),
     [preset, customFrom, customTo],
   );
+  const pickDates = (key, from, to) => { setPreset(key); setCustomFrom(from); setCustomTo(to); };
   const [view, setView] = useState("pending"); // "pending" | "approved"
   const [ledger, setLedger] = useState("income"); // "income" | "expenses"
   const [data, setData] = useState({ transactions: [], summary: {} });
@@ -301,7 +303,7 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
     // A half-typed custom range would ask for everything from one date to nothing, which
     // reads as an empty ledger rather than as an unfinished question. The list stays on
     // what it was showing until both ends are picked -- same rule Expense's row follows.
-    if (preset === "custom" && (!customFrom || !customTo)) return;
+    if (rangeIncomplete(preset, customFrom, customTo)) return;
     setLoading(true);
     try {
       const params = { approved: view === "approved" };
@@ -433,43 +435,18 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
             )}
           </FilterGroup>
 
-          <FilterGroup testId="finance-approvals-date-filter">
-            {DATE_PRESETS.map((key) => (
-              <FilterPill
-                key={key}
-                on={preset === key}
-                onClick={() => setPreset(key)}
-                testId={`finance-approvals-preset-${key}`}
-              >
-                {DATE_PRESET_LABELS[key]}
-              </FilterPill>
-            ))}
-          </FilterGroup>
+          {/* The shared finance row, so this desk and the three pages beside it name their
+              windows with the same words and reach them the same way. Custom Range opens
+              the dialog rather than dropping two date fields into the block underneath. */}
+          <FinanceDateFilter
+            preset={preset}
+            customFrom={customFrom}
+            customTo={customTo}
+            onChange={pickDates}
+            presets={DATE_PRESETS}
+            testid="finance-approvals-window"
+          />
         </FilterRow>
-
-        {/* Only on Custom. Two date fields standing open under every other preset are two
-            controls saying nothing four times out of five — the same rule Expense's own
-            row follows, so the two look and behave alike. */}
-        {preset === "custom" && (
-          <div className="flex flex-wrap items-center gap-1.5 px-4 py-2.5 text-xs text-slate-500" data-testid="finance-approvals-custom-range">
-            <MilkDateInput
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              max={customTo || undefined}
-              className="rounded-md border-slate-200 px-2 text-xs"
-              data-testid="finance-approvals-start-date"
-            />
-            <span>to</span>
-            <MilkDateInput
-              value={customTo}
-              onChange={(e) => setCustomTo(e.target.value)}
-              min={customFrom || undefined}
-              className="rounded-md border-slate-200 px-2 text-xs"
-              data-testid="finance-approvals-end-date"
-            />
-            {(!customFrom || !customTo) && <span className="text-slate-400">Pick both ends to filter.</span>}
-          </div>
-        )}
 
         {/* What it was for, and how it was paid. Both describe a collection and neither is
             a question /finance/expenses can answer, so the whole line goes when the ledger
