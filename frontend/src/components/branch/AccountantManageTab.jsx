@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight, Send, Undo2, CheckCircle2, Clock } from "lucide-react";
+import { Eye, Receipt, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell, ChevronDown, ChevronRight, Send, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -68,10 +68,17 @@ const LEDGER_VIEWS = [
  * `all` is not one of them on purpose. Every row is in exactly one of these three, so a
  * fourth pill showing all of them at once would be a total that no one is responsible for.
  */
+// Tones are the ones the expense pills already wear for the same three states -- amber
+// for waiting on somebody, emerald for signed off -- so a branch reading Income after
+// Expenses is reading the same colours for the same thing. Collected is the pile nobody
+// is waiting on yet, and takes the sky the stage row was already picked out in.
 const INCOME_STAGES = [
-  { key: "collected", label: "Collected", icon: Wallet, hint: "Taken at the desk, not sent up yet" },
-  { key: "requested", label: "Income Request", icon: Clock, hint: "Sent to the accountant, waiting to be signed off" },
-  { key: "approved", label: "Income Approved", icon: CheckCircle2, hint: "Signed off by the accountant" },
+  { key: "collected", label: "Collected", hint: "Taken at the desk, not sent up yet",
+    tone: { dot: "bg-sky-500", border: "border-sky-200", bg: "bg-sky-50/70", text: "text-sky-700", sub: "text-sky-600/80", ring: "#0284c7" } },
+  { key: "requested", label: "Income Request", hint: "Sent to the accountant, waiting to be signed off",
+    tone: { dot: "bg-amber-500", border: "border-amber-200", bg: "bg-amber-50/70", text: "text-amber-700", sub: "text-amber-600/80", ring: "#d97706" } },
+  { key: "approved", label: "Income Approved", hint: "Signed off by the accountant",
+    tone: { dot: "bg-emerald-500", border: "border-emerald-200", bg: "bg-emerald-50/70", text: "text-emerald-700", sub: "text-emerald-600/80", ring: "#059669" } },
 ];
 
 /** Which of the three one collection is in. Approved wins over requested: a row that has
@@ -436,11 +443,22 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
     [transactions, incomeStage],
   );
 
-  // How many are in each pile, for the count on each pill. Off the whole set rather than
-  // the staged one, which is the pile currently being looked at.
-  const stageCounts = useMemo(() => {
-    const out = { collected: 0, requested: 0, approved: 0 };
-    transactions.forEach((t) => { out[stageOf(t)] += 1; });
+  // What each pile holds and how many rows it holds it in, for the figure on each pill.
+  // Off the whole set rather than the staged one, which is the pile currently being looked
+  // at -- and deliberately before the payment-mode cut too: a pill saying what is still
+  // waiting to be sent up has to say all of it, not the cash half of it, or pressing Cash
+  // would make money look like it had already gone.
+  const stagePiles = useMemo(() => {
+    const out = {
+      collected: { count: 0, total: 0 },
+      requested: { count: 0, total: 0 },
+      approved: { count: 0, total: 0 },
+    };
+    transactions.forEach((t) => {
+      const pile = out[stageOf(t)];
+      pile.count += 1;
+      pile.total += Number(t.gross) || 0;
+    });
     return out;
   }, [transactions]);
 
@@ -725,24 +743,35 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
               the revenue tiles because it scopes them: the eight figures below are this
               pile's, not the day's. */}
           <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-income-stages">
-            <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
+            {/* Each pile says what it holds, not just how many rows it holds it in -- the
+                same pills the expense side shows, and for the same reason: what is still
+                sitting at the desk and what has been signed off are figures, and a branch
+                had to press through all three to add them up.
+
+                Still the filter it always was, so the picked one is ringed and the other
+                two step back rather than switching off -- the shape the Income/Expenses
+                cards above already use for a choice that carries its own number. */}
+            <div className="flex flex-wrap items-center gap-2">
               {INCOME_STAGES.map((st) => {
-                const Icon = st.icon;
                 const active = incomeStage === st.key;
+                const pile = stagePiles[st.key];
                 return (
                   <button
                     key={st.key}
                     type="button"
                     title={st.hint}
                     onClick={() => setIncomeStage(st.key)}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                      active ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                    aria-pressed={active}
+                    className={`inline-flex items-center gap-2 rounded-full border ${st.tone.border} ${st.tone.bg} py-1.5 pl-3 pr-4 transition ${
+                      active ? "" : "opacity-60 hover:opacity-100"
                     }`}
+                    style={active ? { boxShadow: `0 0 0 2px ${st.tone.ring}` } : undefined}
                     data-testid={`accountant-manage-income-stage-${st.key}`}
                   >
-                    <Icon className="h-3.5 w-3.5" />
-                    {st.label}
-                    <span className={active ? "text-white/70" : "text-slate-400"}>({stageCounts[st.key]})</span>
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${st.tone.dot}`} />
+                    <span className={`text-[11px] font-bold uppercase tracking-wider ${st.tone.text}`}>{st.label}</span>
+                    <span className={`text-sm font-bold tabular-nums ${st.tone.text}`}>{fmt(pile.total)}</span>
+                    <span className={`text-[11px] ${st.tone.sub}`}>· {countLabel(pile.count, "payment")}</span>
                   </button>
                 );
               })}
