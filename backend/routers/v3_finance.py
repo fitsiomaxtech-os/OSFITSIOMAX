@@ -2935,14 +2935,24 @@ def _is_petty_cash_expense(amount: float, payment_mode: str, branch_id) -> bool:
     return bool(branch_id) and (payment_mode or "").strip().lower() == "cash" and 0 < amount <= PETTY_CASH_LIMIT
 
 
-async def _petty_cash_balance(branch_id: str) -> float:
+async def _petty_cash_balance(scope=None) -> float:
     """What the tin holds now: every movement ever made on it, added up.
 
     `delta` is signed at the point it is written -- a top-up is positive, an expense
     negative -- so the balance is one sum rather than a subtraction between two queries
     that could each be filtered slightly differently.
+
+    `scope` is one branch id, a list of them, or None for every tin there is. The list and
+    the None are what the Accountant's own Petty Cash tab reads, where the branch filter
+    sits on "All Branches" by default and the honest answer is the sum of the tins rather
+    than an error -- see get_petty_cash.
     """
-    rows = await v3_col("petty_cash_movements").find({"branch_id": branch_id}, {"_id": 0, "delta": 1}).to_list(20000)
+    query = {}
+    if isinstance(scope, str) and scope:
+        query["branch_id"] = scope
+    elif isinstance(scope, (list, tuple, set)):
+        query["branch_id"] = {"$in": list(scope)}
+    rows = await v3_col("petty_cash_movements").find(query, {"_id": 0, "delta": 1}).to_list(20000)
     return round(sum(float(r.get("delta") or 0) for r in rows), 2)
 
 
@@ -2979,6 +2989,7 @@ class PettyCashTopUp(BaseModel):
 @router.get("/finance/petty-cash")
 async def get_petty_cash(
     branch_id: Optional[str] = None,
+    mode: Optional[str] = None,  # "online" | "offline", off each branch's own vertical
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
@@ -2989,13 +3000,37 @@ async def get_petty_cash(
     The listed movements are the window asked for, which is a different question -- a
     branch looking at last month still needs to know what it holds now, or the page would
     tell it to top up a tin that is full.
+
+    No branch means every tin, for the two roles that keep more than one: this reads
+    alongside the expense list on the Accountant's own Expense page, whose branch filter
+    sits on "All Branches" until somebody moves it, and refusing that with "pick one" made
+    the tab open on an error every time. A Branch Admin still gets only their own -- their
+    branch is not a filter they set, it is the one they have.
+
+    Money is only ever counted per tin, so `balance` across several is their sum: what all
+    of them hold between them, which is the figure a head office is actually asking for.
     """
     if is_branch_admin_role(user.role):
         branch_id = user.branch_id
-    if not branch_id:
-        raise HTTPException(status_code=400, detail="Petty cash belongs to a branch — pick one")
+        if not branch_id:
+            raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
 
-    query = {"branch_id": branch_id}
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
+    branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+
+    # Which tins are in scope: one named branch, or the branches of one vertical, or all
+    # of them. None means no branch clause at all rather than a list of every id.
+    scope = None
+    if branch_id:
+        scope = branch_id
+    elif mode in ("online", "offline"):
+        scope = [b["id"] for b in branch_docs if _is_online_vertical(b.get("vertical")) == (mode == "online")]
+
+    query = {}
+    if isinstance(scope, str):
+        query["branch_id"] = scope
+    elif isinstance(scope, list):
+        query["branch_id"] = {"$in": scope}
     date_query = {}
     if start_date:
         date_query["$gte"] = start_date
@@ -3004,10 +3039,15 @@ async def get_petty_cash(
     if date_query:
         query["on"] = date_query
     rows = await v3_col("petty_cash_movements").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    # Named here rather than looked up by every reader: a movement carries the branch id it
+    # belongs to, and a list covering several tins has to say which one each line came out
+    # of or it is a column of figures with nothing to attach them to.
+    for r in rows:
+        r["branch_name"] = branch_name_map.get(r.get("branch_id"), "")
     return {
         "branch_id": branch_id,
         "limit": PETTY_CASH_LIMIT,
-        "balance": await _petty_cash_balance(branch_id),
+        "balance": await _petty_cash_balance(scope),
         "topped_up": round(sum(r["amount"] for r in rows if r.get("delta", 0) > 0), 2),
         "spent": round(sum(r["amount"] for r in rows if r.get("delta", 0) < 0), 2),
         "movements": rows,

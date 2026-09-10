@@ -14,6 +14,7 @@ import {
 import { EXPENSE_PAYMENT_MODE_OPTIONS, PAYMENT_MODE_LABELS, PAYMENT_MODE_COLORS, orderedPaymentModeEntries } from "@/lib/paymentModes";
 import { PETTY_CASH_LIMIT, PETTY_CASH_REASON_REQUIRED, isPettyCash } from "@/lib/pettyCash";
 import { DENOMINATIONS, noteTotal, countedNotes, noteBreakdown, notesLabel } from "@/lib/denominations";
+import { PettyCashPanel } from "@/components/finance/PettyCashPanel";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 
@@ -147,6 +148,10 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
   const effectiveBranchId = controlled ? (branchIdProp || "") : branchId;
   const effectiveMode = controlled ? (modeProp || "all") : mode;
+  // Which book is being read: what was spent, or the tin most of the small cash spending
+  // comes out of. Two views of overlapping money — see PettyCashPanel — so they share this
+  // page's window and branch rather than each asking again.
+  const [view, setView] = useState("expenses"); // "expenses" | "petty"
   const [preset, setPreset] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -325,10 +330,32 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
 
   return (
     <div className="space-y-4" data-testid="finance-expense-root">
+      {/* Which of the two books. The tin is not a separate subject from the expense list —
+          nearly every line in it is a small cash expense on the list beside it — so it
+          belongs here as a view of this page rather than as a fifth tab up on the finance
+          row, where it would read as a fourth thing the desk keeps. */}
+      <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="finance-expense-views">
+        {[["expenses", "Expenses"], ["petty", "Petty Cash"]].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setView(key)}
+            aria-pressed={view === key}
+            className={`flex-1 rounded-md px-4 py-2 text-xs font-semibold transition ${
+              view === key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
+            }`}
+            data-testid={`finance-expense-view-${key}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* When, and the one thing on this page that adds to it rather than narrowing it.
           The window sits at the top because it governs every figure below it — the tiles
           included — and a filter under the numbers it changes reads as a filter on the
-          list alone. */}
+          list alone. Shared by both views: the window and the branch are the same question
+          whichever book is open. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5" data-testid="finance-expense-date-presets">
           {DATE_PRESETS.map((p) => (
@@ -348,9 +375,13 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
             </button>
           ))}
         </div>
-        <Button onClick={() => setShowAdd(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="finance-expense-add-btn">
-          <Plus className="mr-1 h-4 w-4" />Add Expense
-        </Button>
+        {/* The tin has its own way in — Top Up, on the panel itself — and it is not an
+            expense, so it does not belong behind this button. */}
+        {view === "expenses" && (
+          <Button onClick={() => setShowAdd(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="finance-expense-add-btn">
+            <Plus className="mr-1 h-4 w-4" />Add Expense
+          </Button>
+        )}
       </div>
 
       {/* Only on Custom. Two date fields standing open under every other preset are two
@@ -364,6 +395,51 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
         </div>
       )}
 
+      {/* Whose. Branch and vertical are already picked by the branch-pill row above this
+          board when embedded there — asking again here would be a second control for the
+          same scope. The Accountant's own dashboard has no such row, so it keeps both.
+          Above the figures rather than between them and the list, because both views put
+          their own figures under it and a filter that sat in a different place on each
+          would read as a different filter. */}
+      {!controlled && (
+        <div className="flex flex-wrap items-center gap-2">
+          {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setMode(key)}
+              aria-pressed={mode === key}
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                mode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+              }`}
+              data-testid={`finance-expense-mode-${key}`}
+            >
+              {label}
+            </button>
+          ))}
+          <select
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-600"
+            data-testid="finance-expense-branch"
+          >
+            <option value="">All Branches</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {view === "petty" && (
+        <PettyCashPanel
+          branchId={effectiveBranchId}
+          mode={effectiveMode}
+          startDate={startDate}
+          endDate={endDate}
+        />
+      )}
+
+      {view === "expenses" && (
+      <>
       {/* The window's money, split by tender, and the filter for the list below in the
           same row of cards — the house tile draws itself as a button when it is given
           something to do. Total is the "all tenders" tile: it is lit when no other is,
@@ -398,37 +474,6 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
           );
         })}
       </div>
-
-      {/* Whose. Branch and vertical are already picked by the branch-pill row above this
-          board when embedded there — asking again here would be a second control for the
-          same scope. The Accountant's own dashboard has no such row, so it keeps both. */}
-      {!controlled && (
-        <div className="flex flex-wrap items-center gap-2">
-          {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setMode(key)}
-              aria-pressed={mode === key}
-              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                mode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-              }`}
-              data-testid={`finance-expense-mode-${key}`}
-            >
-              {label}
-            </button>
-          ))}
-          <select
-            value={branchId}
-            onChange={(e) => setBranchId(e.target.value)}
-            className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-600"
-            data-testid="finance-expense-branch"
-          >
-            <option value="">All Branches</option>
-            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-          </select>
-        </div>
-      )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="finance-expense-list">
         {/* What is actually on the table under the filters, counted and totalled. The
@@ -569,6 +614,8 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
           </>
         )}
       </div>
+      </>
+      )}
 
       {showAdd && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="finance-expense-add-dialog">
