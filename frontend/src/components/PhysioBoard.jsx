@@ -176,6 +176,29 @@ export const PhysioBoard = ({ physioId } = {}) => {
 };
 
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// A treatment day's date, and only its date.
+//
+// A day of a course is not an appointment. The package is a count of days of treatment,
+// the days are worked in order, and a day is worked on the date the Branch Admin put it
+// on — the clock time on that date is where the branch fitted the patient in, not a second
+// gate the day has to clear. The date is already the whole rule: canWork compares
+// slot_time sliced to ten characters, and the server checks day order and the review hold
+// and nothing else.
+//
+// Printing "Wed, Sep 9 at 8:00 AM" on the rows said otherwise. A patient seen at eleven
+// read as a patient who had missed something, and a physio working the list in the
+// afternoon had every remaining row quoting an hour that had already gone by — an hour
+// that decides nothing.
+//
+// So the slot's time stays on the record and on the Branch Admin's calendar, where booking
+// needs it, and stops being shown as part of what the day is. The physio's own diary — the
+// Calendar tab, and the day table on the board — still shows times, because that is a
+// schedule and reading it is the whole point of it.
+const dayDate = (slot) =>
+  slot
+    ? new Date(`${slot.slice(0, 10)}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" })
+    : null;
 const shiftIso = (iso, days) => {
   const d = new Date(`${iso}T00:00:00`);
   d.setDate(d.getDate() + days);
@@ -1865,7 +1888,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   const reviewedWeeks = assessments.filter((a) => a.status === "reviewed").length;
   const allReviewed = totalWeeks > 0 && reviewedWeeks >= totalWeeks;
 
-  const fmtDate = (iso) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" }) : null);
+  const fmtDate = dayDate;
 
   const Stat = ({ label, children }) => (
     <p className="text-sm">
@@ -2018,7 +2041,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
           </p>
           <p className={`text-[10px] ${awaiting ? "font-semibold text-amber-700" : "text-slate-400"}`}>
             {s.slot_time
-              ? `${fmtDate(s.slot_time)} at ${slotTo12h(s.slot_time)}`
+              ? fmtDate(s.slot_time)
               : awaiting
                 ? "Missed class — Branch Admin to give this day a date"
                 : "—"}
@@ -2271,7 +2294,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
               <Stat label="Upcoming">
                 {upcomingSession ? (
                   <span className="font-semibold text-sky-700">
-                    {fmtDate(upcomingSession.slot_time)} · {slotTo12h(upcomingSession.slot_time)}
+                    {fmtDate(upcomingSession.slot_time)}
                   </span>
                 ) : (
                   <span className="text-slate-400">No future session booked</span>
@@ -3106,7 +3129,7 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
                             ? `Rehab Day ${s.session_number} of ${s.total_sessions}`
                             : `Session #${s.session_number}${s.week_number ? ` · Week ${s.week_number}` : ""}`}
                         </p>
-                        <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
+                        <p className="text-[10px] text-slate-400">{dayDate(s.slot_time) || "—"}</p>
                         {done && (s.physio_treatments || []).length > 0 && (
                           <p className="mt-0.5 truncate text-[10px] font-medium text-sky-700" data-testid={`physio-session-treatments-${s.id}`}>
                             {s.physio_treatments.join(" · ")}
@@ -3541,7 +3564,7 @@ function CompleteSessionModal({ session, onClose, onDone, sessions }) {
               ? `${isRehab ? "Rehab Day" : "Session"} ${session.session_number} Summary`
               : `Complete ${isRehab ? "Rehab Day" : "Session"} ${session.session_number}`}
           </h3>
-          <p className="text-[10px] text-slate-400">{session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}</p>
+          <p className="text-[10px] text-slate-400">{session.lead_name} · {dayDate(session.slot_time) || "—"}</p>
         </div>
         {/* Scrolls, and the header and footer do not. The tick-list expands inside this
             popup, so on a phone the Mark Complete button used to walk off the bottom of
@@ -3732,7 +3755,7 @@ function MarkAbsentModal({ session, lastDated, onClose, onDone }) {
         <div className="border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">Mark {dayLabel} Absent</h3>
           <p className="text-[10px] text-slate-400">
-            {session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}
+            {session.lead_name} · {dayDate(session.slot_time) || "—"}
           </p>
         </div>
         <div className="space-y-3 p-5">
