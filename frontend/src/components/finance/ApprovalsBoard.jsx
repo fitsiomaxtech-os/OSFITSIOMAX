@@ -274,9 +274,9 @@ export const ApprovalsBoard = () => {
 
   return (
     <div className="space-y-4" data-testid="finance-approvals-root">
-      {/* Which of the two is being signed off. Above the cards rather than beside the
-          Pending/Approved toggle, because it changes what those cards are counting —
-          the toggle underneath cuts one ledger, this picks which ledger. */}
+      {/* Which of the two is being signed off. Above the cards rather than among them,
+          because it changes what those cards are counting — the cards underneath cut one
+          ledger into pending and approved, this picks which ledger. */}
       <div className="flex w-full items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="finance-approvals-ledger">
         {LEDGERS.map((l) => (
           <button
@@ -295,58 +295,58 @@ export const ApprovalsBoard = () => {
 
       {ledger === "income" && (
       <>
+      {/* The cards are the switch. A Pending/Approved toggle underneath them said the
+          same two words a second time, in a smaller font, directly below the pair already
+          naming each side and totalling it — so the pair does the picking now, the chosen
+          one carrying its colour and the other falling back to plain white. */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4" data-testid="finance-approvals-pending-card">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-amber-700">Pending Approval</p>
-          <p className="text-2xl font-bold text-amber-700">{fmt(s.pending_total)}</p>
-          <p className="text-[10px] text-amber-600">{s.pending_count || 0} payments</p>
-        </div>
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4" data-testid="finance-approvals-approved-card">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-700">Approved</p>
-          <p className="text-2xl font-bold text-emerald-700">{fmt(s.approved_total)}</p>
-          <p className="text-[10px] text-emerald-600">{s.approved_count || 0} payments</p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setView("pending")}
+          aria-pressed={view === "pending"}
+          className={`rounded-xl border p-4 text-left transition ${view === "pending" ? "border-amber-300 bg-amber-50 ring-2 ring-amber-400" : "border-slate-200 bg-white hover:border-amber-200"}`}
+          data-testid="finance-approvals-pending-card"
+        >
+          <p className={`text-[11px] font-medium uppercase tracking-wide ${view === "pending" ? "text-amber-700" : "text-slate-500"}`}>Pending Approval</p>
+          <p className={`text-2xl font-bold ${view === "pending" ? "text-amber-700" : "text-slate-700"}`}>{fmt(s.pending_total)}</p>
+          <p className={`text-[10px] ${view === "pending" ? "text-amber-600" : "text-slate-400"}`}>{s.pending_count || 0} payments</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("approved")}
+          aria-pressed={view === "approved"}
+          className={`rounded-xl border p-4 text-left transition ${view === "approved" ? "border-emerald-300 bg-emerald-50 ring-2 ring-emerald-400" : "border-slate-200 bg-white hover:border-emerald-200"}`}
+          data-testid="finance-approvals-approved-card"
+        >
+          <p className={`text-[11px] font-medium uppercase tracking-wide ${view === "approved" ? "text-emerald-700" : "text-slate-500"}`}>Approved</p>
+          <p className={`text-2xl font-bold ${view === "approved" ? "text-emerald-700" : "text-slate-700"}`}>{fmt(s.approved_total)}</p>
+          <p className={`text-[10px] ${view === "approved" ? "text-emerald-600" : "text-slate-400"}`}>{s.approved_count || 0} payments</p>
+        </button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
-          {[["pending", "Pending"], ["approved", "Approved"]].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setView(key)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
-              data-testid={`finance-approvals-view-${key}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setMode(key)}
-              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                mode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-              }`}
-              data-testid={`finance-approvals-mode-${key}`}
-            >
-              {label}
-            </button>
-          ))}
-          <select
-            value={branchId}
-            onChange={(e) => setBranchId(e.target.value)}
-            className="h-8 rounded-md border border-slate-200 px-2 text-xs"
-            data-testid="finance-approvals-branch"
+      <div className="flex flex-wrap items-center gap-2">
+        {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setMode(key)}
+            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+              mode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+            }`}
+            data-testid={`finance-approvals-mode-${key}`}
           >
-            <option value="">All Branches</option>
-            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-          </select>
-        </div>
+            {label}
+          </button>
+        ))}
+        <select
+          value={branchId}
+          onChange={(e) => setBranchId(e.target.value)}
+          className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+          data-testid="finance-approvals-branch"
+        >
+          <option value="">All Branches</option>
+          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+        </select>
       </div>
 
       <div className="flex flex-wrap items-center gap-2" data-testid="finance-approvals-category-filter">

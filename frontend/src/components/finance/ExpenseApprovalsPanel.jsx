@@ -80,45 +80,42 @@ export const ExpenseApprovalsPanel = () => {
   return (
     <div className="space-y-4" data-testid="finance-expense-approvals">
       {/* The same two cards the income side wears, so the tab reads the same whichever
-          way the money is going. */}
+          way the money is going — and, as there, they are the switch: the toggle that
+          used to sit under them only repeated their two headings in a smaller font. */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4" data-testid="finance-expense-approvals-pending-card">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-amber-700">Pending Approval</p>
-          <p className="text-2xl font-bold text-amber-700">{fmt(totals.pending_total)}</p>
-          <p className="text-[10px] text-amber-600">{totals.pending_count} {totals.pending_count === 1 ? "request" : "requests"}</p>
-        </div>
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4" data-testid="finance-expense-approvals-approved-card">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-700">Approved</p>
-          <p className="text-2xl font-bold text-emerald-700">{fmt(totals.approved_total)}</p>
-          <p className="text-[10px] text-emerald-600">{totals.approved_count} {totals.approved_count === 1 ? "expense" : "expenses"}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
-          {[["pending", "Pending"], ["approved", "Approved"]].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setView(key)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
-              data-testid={`finance-expense-approvals-view-${key}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <select
-          value={branchId}
-          onChange={(e) => setBranchId(e.target.value)}
-          className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600"
-          data-testid="finance-expense-approvals-branch"
+        <button
+          type="button"
+          onClick={() => setView("pending")}
+          aria-pressed={view === "pending"}
+          className={`rounded-xl border p-4 text-left transition ${view === "pending" ? "border-amber-300 bg-amber-50 ring-2 ring-amber-400" : "border-slate-200 bg-white hover:border-amber-200"}`}
+          data-testid="finance-expense-approvals-pending-card"
         >
-          <option value="">All Branches</option>
-          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-        </select>
+          <p className={`text-[11px] font-medium uppercase tracking-wide ${view === "pending" ? "text-amber-700" : "text-slate-500"}`}>Pending Approval</p>
+          <p className={`text-2xl font-bold ${view === "pending" ? "text-amber-700" : "text-slate-700"}`}>{fmt(totals.pending_total)}</p>
+          <p className={`text-[10px] ${view === "pending" ? "text-amber-600" : "text-slate-400"}`}>{totals.pending_count} {totals.pending_count === 1 ? "request" : "requests"}</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("approved")}
+          aria-pressed={view === "approved"}
+          className={`rounded-xl border p-4 text-left transition ${view === "approved" ? "border-emerald-300 bg-emerald-50 ring-2 ring-emerald-400" : "border-slate-200 bg-white hover:border-emerald-200"}`}
+          data-testid="finance-expense-approvals-approved-card"
+        >
+          <p className={`text-[11px] font-medium uppercase tracking-wide ${view === "approved" ? "text-emerald-700" : "text-slate-500"}`}>Approved</p>
+          <p className={`text-2xl font-bold ${view === "approved" ? "text-emerald-700" : "text-slate-700"}`}>{fmt(totals.approved_total)}</p>
+          <p className={`text-[10px] ${view === "approved" ? "text-emerald-600" : "text-slate-400"}`}>{totals.approved_count} {totals.approved_count === 1 ? "expense" : "expenses"}</p>
+        </button>
       </div>
+
+      <select
+        value={branchId}
+        onChange={(e) => setBranchId(e.target.value)}
+        className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600"
+        data-testid="finance-expense-approvals-branch"
+      >
+        <option value="">All Branches</option>
+        {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+      </select>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="divide-y divide-slate-50">
