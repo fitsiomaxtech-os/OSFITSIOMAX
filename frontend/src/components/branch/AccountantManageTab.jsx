@@ -245,7 +245,7 @@ const RevenueTile = ({ label, value, sub, icon: Icon, color, active, headline, m
             nothing greys its figure: Rs.0 is worth showing -- it says the desk was open
             and sold nothing -- but not worth reading before the money that came in. */}
         <p className={`font-semibold tabular-nums tracking-tight ${
-          headline ? "mt-1.5 text-2xl sm:text-[30px] sm:leading-9" : "mt-1 text-lg sm:text-[21px] sm:leading-7"
+          headline ? "mt-1.5 text-xl sm:text-2xl sm:leading-8" : "mt-1 text-base sm:text-[18px] sm:leading-6"
         } ${muted && !active ? "text-slate-400" : "text-slate-900"}`}>{value}</p>
         <p className={`mt-0.5 truncate leading-tight text-slate-400 ${headline ? "text-[11px] sm:text-xs" : "text-[10px] sm:text-[11px]"}`}>{sub}</p>
       </div>
