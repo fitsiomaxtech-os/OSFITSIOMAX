@@ -20,7 +20,7 @@ const MODE_LABELS = {
  * against a patient, and the filters that matter on the income side (which fee, which
  * patient) mean nothing here.
  */
-export const ExpenseApprovalsPanel = () => {
+export const ExpenseApprovalsPanel = ({ onChanged = () => {} }) => {
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({ approved_total: 0, approved_count: 0, pending_total: 0, pending_count: 0 });
   const [branches, setBranches] = useState([]);
@@ -70,6 +70,7 @@ export const ExpenseApprovalsPanel = () => {
       else await rejectFinanceExpense(exp.id, reason.trim());
       toast.success(approve ? "Approved" : "Rejected");
       load();
+      onChanged();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not save that");
     } finally {

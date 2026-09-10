@@ -16,6 +16,21 @@ const LEDGERS = [
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 
+/**
+ * The red count in a tab's top-right corner that says something is waiting on this desk.
+ * Same badge PhysioBoard and DietBoard put on their tabs, so a number in that corner
+ * means the same thing wherever it turns up. Nothing at all at zero -- a "0" in red is an
+ * alarm about nothing.
+ */
+export const PendingBadge = ({ count, testId }) => (count > 0 ? (
+  <span
+    className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-white"
+    data-testid={testId}
+  >
+    {count > 99 ? "99+" : count}
+  </span>
+) : null);
+
 // Every category the backend can return, which is not what this list held: Rehab and
 // Zumba were both missing, so a rehab course fee or a class fee could be seen only
 // under "All" and vanished the moment any pill was picked. Zumba could not be seen at
@@ -190,7 +205,7 @@ const BulkApproveModal = ({ count, total, saving, onClose, onConfirm }) => (
  * than whoever collected it looked the payment over, plus whatever the popup asked them
  * to confirm against the payment mode.
  */
-export const ApprovalsBoard = () => {
+export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged = () => {} }) => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState("");
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
@@ -235,6 +250,7 @@ export const ApprovalsBoard = () => {
       await unapproveTransaction(tx.id);
       toast.success("Approval removed");
       await load();
+      onChanged();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
     setBusyId(null);
   };
@@ -266,6 +282,7 @@ export const ApprovalsBoard = () => {
       toast.success(res?.message || "Approved");
       setBulkOpen(false);
       await load();
+      onChanged();
     } catch (e) { toast.error(e?.response?.data?.detail || "Approve failed"); }
     setBulkSaving(false);
   };
@@ -283,15 +300,19 @@ export const ApprovalsBoard = () => {
             key={l.key}
             type="button"
             onClick={() => setLedger(l.key)}
-            className={`flex-1 rounded-md px-4 py-2 text-xs font-semibold transition ${ledger === l.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
+            className={`relative flex-1 rounded-md px-4 py-2 text-xs font-semibold transition ${ledger === l.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
             data-testid={`finance-approvals-ledger-${l.key}`}
           >
             {l.label}
+            {/* Which ledger the waiting items are in. Every branch, unfiltered -- see
+                AccountantBoard's pending -- so picking a branch below does not make the
+                other ledger's count look like it went away. */}
+            <PendingBadge count={pending[l.key]} testId={`finance-approvals-ledger-badge-${l.key}`} />
           </button>
         ))}
       </div>
 
-      {ledger === "expenses" && <ExpenseApprovalsPanel />}
+      {ledger === "expenses" && <ExpenseApprovalsPanel onChanged={onChanged} />}
 
       {ledger === "income" && (
       <>
@@ -505,7 +526,7 @@ export const ApprovalsBoard = () => {
         <ApproveModal
           tx={approving}
           onClose={() => setApproving(null)}
-          onApproved={() => { setApproving(null); load(); }}
+          onApproved={() => { setApproving(null); load(); onChanged(); }}
         />
       )}
     </div>
