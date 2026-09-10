@@ -2,11 +2,12 @@
 // (see _parse_payment_mode in v3_finance.py), plus "unknown" for the rows that carry
 // none — package_sold, and any Expense logged before payment_mode existed.
 //
-// Shared between Income (FinanceBoard), Expense (ExpenseBoard) and Overview
-// (FinanceOverviewBoard) rather than copied three times: the four tiles the branch reads
-// as "Cash, Cheque, Bank, UPI" have to say the same thing in the same order wherever
-// they appear, and a label changed in one place and not the other two is how a bank
-// transfer starts reading as "Account_transfer" on one tab and "Bank" on the next.
+// Shared by every board that splits money by tender — Expense (ExpenseBoard), Accountant
+// Manage's own payment-mode row, and FinanceBoard/FinanceOverviewBoard, which no board
+// renders any more — rather than copied into each: the four tiles the branch reads as
+// "Cash, Cheque, Bank, UPI" have to say the same thing in the same order wherever they
+// appear, and a label changed in one place and not the others is how a bank transfer
+// starts reading as "Account_transfer" on one tab and "Bank" on the next.
 export const PAYMENT_MODE_ORDER = ["cash", "cheque", "account_transfer", "upi", "card", "unknown"];
 
 export const PAYMENT_MODE_LABELS = {

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { BadgeIndianRupee, Building2, CheckSquare, Layers, Receipt, TrendingUp, Wallet } from "lucide-react";
+import { BadgeIndianRupee, Building2, CheckSquare, Layers, Receipt, Wallet } from "lucide-react";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { ApprovalsBoard, PendingBadge } from "@/components/finance/ApprovalsBoard";
 import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
-import { FinanceBoard } from "@/components/FinanceBoard";
-import { FinanceOverviewBoard } from "@/components/finance/FinanceOverviewBoard";
 import { ProfitBoard } from "@/components/finance/ProfitBoard";
 import { getFinanceApprovals, getFinanceExpenses } from "@/lib/api";
 
@@ -60,67 +58,66 @@ const SummaryTab = ({ branchId, scoped }) => {
 };
 
 /**
- * Every page of the finance book, one definition each. Both desks that keep that book —
- * the Accountant's own login board and Super Admin > Finance — pick their tab row out of
- * this map rather than each holding a copy of the pages, so a change to what a page shows
- * lands on both at once and the two cannot drift apart again.
+ * The finance book, one page at a time, in the order the desk works them: the ledger
+ * itself, what is waiting on a signature, what went out, and what is left of it.
  *
- * Every one of these reads a /finance endpoint that already treats super_admin and
- * accountant identically (only branch_admin is narrowed, to its own branch), so the two
- * boards are the same figures out of the same source: a sign-off, an expense or a closed
- * book entered on either shows on the other the next time it loads.
+ * One list, not one per board. Both desks that keep this book — the Accountant's own login
+ * board and Super Admin > Finance — show these four, so neither what a page shows nor
+ * which pages there are can drift between the two screens: there is nowhere for them to
+ * drift apart to.
+ *
+ * Super Admin used to carry an Overview and an Income page besides these. Both are gone.
+ * Overview asked /finance/profit for income, expense and the subtraction between them,
+ * which is Profit's own page; Income was the narrower ledger of the two on this board,
+ * reading only consultation and package fees where Summary reads every category of
+ * collection there is.
+ *
+ * Every page reads a /finance endpoint that already treats super_admin and accountant
+ * identically (only branch_admin is narrowed, to its own branch), so the two boards are
+ * the same figures out of the same source: a sign-off, an expense or a closed book
+ * entered on either shows on the other the next time it loads.
  */
-const TAB_DEFS = {
-  overview: {
-    label: "Overview",
-    icon: BadgeIndianRupee,
-    render: ({ branchId }) => <FinanceOverviewBoard branchId={branchId} />,
-  },
-  summary: {
+const TABS = [
+  {
+    key: "summary",
     label: "Summary",
     icon: BadgeIndianRupee,
     render: ({ branchId, scoped }) => <SummaryTab branchId={branchId} scoped={scoped} />,
   },
-  income: {
-    label: "Income",
-    icon: TrendingUp,
-    render: ({ branchId }) => <FinanceBoard branchId={branchId} />,
-  },
-  approvals: {
+  {
+    key: "approvals",
     label: "Approvals",
     icon: CheckSquare,
     render: ({ branchId, scoped, pending, onChanged }) => (
       <ApprovalsBoard branchId={branchId} scoped={scoped} pending={pending} onChanged={onChanged} />
     ),
   },
-  expense: {
+  {
+    key: "expense",
     label: "Expense",
     icon: Receipt,
     render: ({ branchId, scoped }) => <ExpenseBoard branchId={branchId} scoped={scoped} />,
   },
-  profit: {
+  {
+    key: "profit",
     label: "Profit",
     icon: Wallet,
     render: ({ branchId, scoped }) => <ProfitBoard branchId={branchId} scoped={scoped} />,
   },
-};
+];
 
 /**
- * The finance book itself, with no role attached to it.
+ * The finance book itself, with no role attached to it. Both desks that keep it render
+ * this and open on the same page of it; the only thing either one says about itself is
+ * whether the branch is picked above the tabs.
  *
- * @param tabs  Which pages of the book, in the order they sit in the row. Named by the
- *              caller rather than fixed here: the two desks came to this board from
- *              different screens and each has a row its people already know. Whichever
- *              page either one names, it is the same component underneath.
- * @param branches  Present only where the branch is picked above the tabs — Super Admin's
- *              pill row. Given it, every page is scoped by that row and drops its own
- *              branch control; left off, each page picks its own branch as it always did.
- * @param defaultTab  Which page the board opens on. The Accountant opens on the ledger
- *              they work in; Super Admin opens on the three-figure summary of it.
+ * @param branches  Present only where it is — Super Admin's pill row. Given it, every page
+ *              is scoped by that row and drops its own branch control; left off, as on the
+ *              Accountant's own board, each page picks its own branch as it always did.
  */
-export const FinanceWorkspace = ({ tabs, branches, defaultTab, testId = "finance-workspace" }) => {
+export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => {
   const scoped = !!branches;
-  const [tab, setTab] = useState(defaultTab || tabs[0]);
+  const [tab, setTab] = useState(TABS[0].key);
   const [selectedId, setSelectedId] = useState(ALL_KEY);
   const branchId = scoped && selectedId !== ALL_KEY ? selectedId : undefined;
 
@@ -136,9 +133,7 @@ export const FinanceWorkspace = ({ tabs, branches, defaultTab, testId = "finance
   // had been opened -- which is the one thing the badge is there to prompt. Counted the
   // way the backend counts: a rejected expense is back with the branch, not waiting here.
   const [pending, setPending] = useState({ income: 0, expenses: 0 });
-  const wantsPending = tabs.includes("approvals");
   const refreshPending = useCallback(async () => {
-    if (!wantsPending) return;
     const [income, expenses] = await Promise.all([
       getFinanceApprovals({ approved: false }).catch(() => null),
       getFinanceExpenses({}).catch(() => null),
@@ -149,7 +144,7 @@ export const FinanceWorkspace = ({ tabs, branches, defaultTab, testId = "finance
       income: income ? income.summary?.pending_count || 0 : prev.income,
       expenses: expenses ? expenses.pending_count || 0 : prev.expenses,
     }));
-  }, [wantsPending]);
+  }, []);
 
   useEffect(() => {
     refreshPending();
@@ -157,7 +152,7 @@ export const FinanceWorkspace = ({ tabs, branches, defaultTab, testId = "finance
     return () => clearInterval(id);
   }, [refreshPending]);
 
-  const active = TAB_DEFS[tab] || TAB_DEFS[tabs[0]];
+  const active = TABS.find((t) => t.key === tab) || TABS[0];
 
   return (
     <div className="space-y-4" data-testid={`${testId}-root`}>
@@ -207,21 +202,19 @@ export const FinanceWorkspace = ({ tabs, branches, defaultTab, testId = "finance
       {/* Which page of it. No heading over this row: "Finance" above a row that already
           names its pages costs a band of screen to say where you are. */}
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid={`${testId}-tabs`}>
-        {tabs.map((key) => {
-          const def = TAB_DEFS[key];
-          if (!def) return null;
-          const Icon = def.icon;
-          const count = key === "approvals" ? pending.income + pending.expenses : 0;
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          const count = t.key === "approvals" ? pending.income + pending.expenses : 0;
           return (
             <button
-              key={key}
+              key={t.key}
               type="button"
-              onClick={() => setTab(key)}
-              className={`relative inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${tab === key ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
-              data-testid={`${testId}-tab-${key}`}
+              onClick={() => setTab(t.key)}
+              className={`relative inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${tab === t.key ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
+              data-testid={`${testId}-tab-${t.key}`}
             >
-              <Icon className="h-4 w-4" />{def.label}
-              <PendingBadge count={count} testId={`${testId}-tab-badge-${key}`} />
+              <Icon className="h-4 w-4" />{t.label}
+              <PendingBadge count={count} testId={`${testId}-tab-badge-${t.key}`} />
             </button>
           );
         })}
