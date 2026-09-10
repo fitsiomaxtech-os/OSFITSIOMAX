@@ -8,8 +8,73 @@ import {
   getBranchCash, createCashHandover, listCashHandovers, cancelCashHandover,
 } from "@/lib/api";
 import { BRANCH_EXPENSE_CATEGORIES } from "@/lib/expenseCategories";
+import { DENOMINATIONS, noteTotal, countedNotes, noteBreakdown, notesLabel } from "@/lib/denominations";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+
+/**
+ * Count a cash pile out by note. Optional — a busy desk records the figure alone — but a
+ * count that is entered has to agree with the amount, the same rule every cash fee
+ * follows. `amount` is what it is checked against; `onChange` gets { notes, coins,
+ * counted }.
+ */
+const DenominationFields = ({ amount, notes, coins, onNotes, onCoins, testPrefix }) => {
+  const counted = noteTotal(notes) + (Number(coins) || 0);
+  const target = Number(amount) || 0;
+  const diff = counted - target;
+  const matches = target > 0 && Math.abs(diff) < 0.01;
+  return (
+    <div data-testid={`${testPrefix}-denominations`}>
+      <div className="mb-1 flex items-center justify-between">
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Denominations (optional)</label>
+        <button
+          type="button"
+          onClick={() => { onNotes(noteBreakdown(target)); onCoins(""); }}
+          disabled={!(target > 0)}
+          className="text-[11px] font-semibold text-sky-600 hover:text-sky-700 disabled:text-slate-300"
+          data-testid={`${testPrefix}-fill-notes`}
+        >
+          Fill to amount
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {DENOMINATIONS.map((d) => (
+          <div key={d}>
+            <label className="mb-0.5 block text-[10px] text-slate-500">Rs.{d}</label>
+            <Input
+              type="number"
+              min="0"
+              value={notes[d] ?? ""}
+              onChange={(e) => onNotes({ ...notes, [d]: e.target.value })}
+              className="h-9 tabular-nums"
+              data-testid={`${testPrefix}-note-${d}`}
+            />
+          </div>
+        ))}
+      </div>
+      <label className="mb-0.5 mt-2 block text-[10px] text-slate-500">Coins and change (Rs.)</label>
+      <Input
+        type="number"
+        min="0"
+        value={coins}
+        onChange={(e) => onCoins(e.target.value)}
+        className="h-9 tabular-nums"
+        data-testid={`${testPrefix}-coins`}
+      />
+      <div className="mt-2 flex items-center justify-between text-xs">
+        <span className="text-slate-500">Counted</span>
+        <span className={`font-bold tabular-nums ${matches ? "text-emerald-600" : "text-slate-700"}`} data-testid={`${testPrefix}-counted`}>
+          {fmt(counted)}
+        </span>
+      </div>
+      {target > 0 && counted > 0 && Math.abs(diff) >= 0.01 && (
+        <p className="mt-1 text-[11px] text-amber-700" data-testid={`${testPrefix}-count-mismatch`}>
+          {diff > 0 ? `${fmt(diff)} more than the amount above.` : `${fmt(-diff)} short of the amount above.`}
+        </p>
+      )}
+    </div>
+  );
+};
 
 // For reading back old rows only — a branch expense logged before this screen was
 // cash-only may carry any of these. The form no longer offers the choice.
@@ -59,11 +124,15 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand }) => {
     category: BRANCH_EXPENSE_CATEGORIES[0], amount: "", expense_date: todayIso(),
     paid_to: "", reference: "", note: "",
   });
+  const [notes, setNotes] = useState({});
+  const [coins, setCoins] = useState("");
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const amountNum = Number(form.amount);
   const overDrawer = cashInHand != null && amountNum > 0 && amountNum > cashInHand;
+  const counted = noteTotal(notes) + (Number(coins) || 0);
+  const countEntered = counted > 0;
 
   const submit = async () => {
     if (!(amountNum > 0)) { toast.error("Enter how much was spent"); return; }
@@ -71,9 +140,19 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand }) => {
     // Every branch expense is cash out of the drawer, and cash leaves no invoice behind
     // it — this sentence is the whole of what the accountant approves it on.
     if (!form.note.trim()) { toast.error("Say what the cash was spent on — the accountant approves it on that"); return; }
+    if (countEntered && Math.abs(counted - amountNum) >= 0.01) {
+      toast.error("The notes counted do not add up to the amount");
+      return;
+    }
     setSaving(true);
     try {
-      await createFinanceExpense({ ...form, amount: amountNum, payment_mode: "cash" });
+      await createFinanceExpense({
+        ...form,
+        amount: amountNum,
+        payment_mode: "cash",
+        cash_denominations: countEntered ? (countedNotes(notes) || {}) : undefined,
+        cash_coins: Number(coins) || 0,
+      });
       toast.success("Sent to the accountant — and taken out of the drawer");
       onSaved();
     } catch (e) {
@@ -172,6 +251,15 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand }) => {
             </span>
           </div>
 
+          <DenominationFields
+            amount={form.amount}
+            notes={notes}
+            coins={coins}
+            onNotes={setNotes}
+            onCoins={setCoins}
+            testPrefix="branch-expense"
+          />
+
           <div>
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               What the cash was spent on *
@@ -208,17 +296,30 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand }) => {
 
 const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
   const [form, setForm] = useState({ amount: "", handed_to: "", on: todayIso(), note: "" });
+  const [notes, setNotes] = useState({});
+  const [coins, setCoins] = useState("");
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const amountNum = Number(form.amount);
   const overDrawer = cashInHand != null && amountNum > 0 && amountNum > cashInHand;
+  const counted = noteTotal(notes) + (Number(coins) || 0);
+  const countEntered = counted > 0;
 
   const submit = async () => {
     if (!(amountNum > 0)) { toast.error("Enter how much is being handed over"); return; }
     if (!form.handed_to.trim()) { toast.error("Name who is carrying the cash"); return; }
+    if (countEntered && Math.abs(counted - amountNum) >= 0.01) {
+      toast.error("The notes counted do not add up to the amount");
+      return;
+    }
     setSaving(true);
     try {
-      await createCashHandover({ ...form, amount: amountNum });
+      await createCashHandover({
+        ...form,
+        amount: amountNum,
+        cash_denominations: countEntered ? (countedNotes(notes) || {}) : undefined,
+        cash_coins: Number(coins) || 0,
+      });
       toast.success("Cash handed over — waiting for the accountant to receive it");
       onSaved();
     } catch (e) {
@@ -234,8 +335,8 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       data-testid="branch-handover-dialog"
     >
-      <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/60 px-5 py-4">
+      <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50/60 px-5 py-4">
           <div>
             <h3 className="text-base font-semibold text-slate-800">Hand over cash</h3>
             <p className="text-[11px] text-slate-500">Settle the drawer to the person carrying it to the accountant.</p>
@@ -244,7 +345,7 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="space-y-3 p-5">
+        <div className="flex-1 space-y-3 overflow-y-auto p-5">
           <div>
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Amount *</label>
             <Input type="number" min="0" value={form.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" data-testid="branch-handover-amount" />
@@ -262,12 +363,20 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Date</label>
             <Input type="date" value={form.on} onChange={(e) => set("on", e.target.value)} data-testid="branch-handover-date" />
           </div>
+          <DenominationFields
+            amount={form.amount}
+            notes={notes}
+            coins={coins}
+            onNotes={setNotes}
+            onCoins={setCoins}
+            testPrefix="branch-handover"
+          />
           <div>
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Note</label>
             <Input value={form.note} onChange={(e) => set("note", e.target.value)} placeholder="Optional" data-testid="branch-handover-note" />
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button className="bg-amber-600 text-white hover:bg-amber-700" disabled={saving} onClick={submit} data-testid="branch-handover-submit">
             {saving ? "Recording…" : "Hand over"}
@@ -357,7 +466,7 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
 
   const pendingHandovers = handovers.filter((h) => h.status === "pending");
   const openingSet = cash ? cash.opening_set : true;
-  const cashInHand = cash && openingSet ? cash.cash_in_hand : null;
+  const cashInHand = cash ? cash.cash_in_hand : null;
 
   return (
     <div className="space-y-4" data-testid="branch-expenses-panel">
@@ -388,57 +497,51 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
 
       {/* The drawer. What a branch holds in cash right now — the day's collections, less
           what it has spent, less what it has handed over. Governs whether the next expense
-          can actually be paid. */}
+          can actually be paid. Shown whether or not the accountant has set the opening
+          count; without it the figure is only "since tracking began", said so on the row. */}
       {branchId && cash && (
         <div
           className={`rounded-xl border p-3.5 ${
-            !openingSet ? "border-slate-200 bg-slate-50" : cash.cash_in_hand < 0 ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"
+            cash.cash_in_hand < 0 ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"
           }`}
           data-testid="branch-cash-box"
         >
-          {!openingSet ? (
-            <div className="flex items-start gap-2.5">
-              <span className="rounded-lg bg-slate-100 p-2"><Coins className="h-4 w-4 text-slate-400" /></span>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div className="flex items-center gap-2.5">
+              <span className={`rounded-lg p-2 ${cash.cash_in_hand < 0 ? "bg-rose-100" : "bg-emerald-50"}`}>
+                <Coins className={`h-4 w-4 ${cash.cash_in_hand < 0 ? "text-rose-600" : "text-emerald-600"}`} />
+              </span>
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cash in hand</p>
-                <p className="text-sm text-slate-500" data-testid="branch-cash-not-set">
-                  Waiting for the accountant to count and set this branch&apos;s opening cash.
+                <p
+                  className={`text-xl font-bold tabular-nums ${cash.cash_in_hand < 0 ? "text-rose-700" : "text-slate-800"}`}
+                  data-testid="branch-cash-in-hand"
+                >
+                  {fmt(cash.cash_in_hand)}
                 </p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              <div className="flex items-center gap-2.5">
-                <span className={`rounded-lg p-2 ${cash.cash_in_hand < 0 ? "bg-rose-100" : "bg-emerald-50"}`}>
-                  <Coins className={`h-4 w-4 ${cash.cash_in_hand < 0 ? "text-rose-600" : "text-emerald-600"}`} />
-                </span>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cash in hand</p>
-                  <p
-                    className={`text-xl font-bold tabular-nums ${cash.cash_in_hand < 0 ? "text-rose-700" : "text-slate-800"}`}
-                    data-testid="branch-cash-in-hand"
-                  >
-                    {fmt(cash.cash_in_hand)}
+                {!openingSet && (
+                  <p className="text-[10px] text-amber-700" data-testid="branch-cash-not-set">
+                    Opening cash not set by the accountant — this is collections less spending since tracking began.
                   </p>
-                </div>
+                )}
               </div>
-
-              <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-500">
-                <span>Collected (cash) <b className="text-slate-700 tabular-nums">{fmt(cash.collected_cash)}</b></span>
-                <span>Spent <b className="text-slate-700 tabular-nums">{fmt(cash.cash_spent)}</b></span>
-                <span>Handed over <b className="text-slate-700 tabular-nums">{fmt(cash.handed_over)}</b></span>
-                {cash.in_transit > 0 && <span>In transit <b className="text-amber-700 tabular-nums">{fmt(cash.in_transit)}</b></span>}
-              </div>
-
-              <Button
-                onClick={() => setHandingOver(true)}
-                className="ml-auto h-9 bg-amber-600 text-xs text-white hover:bg-amber-700"
-                data-testid="branch-handover-open"
-              >
-                <HandCoins className="mr-1.5 h-3.5 w-3.5" /> Hand over cash
-              </Button>
             </div>
-          )}
+
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-500">
+              <span>Collected (cash) <b className="text-slate-700 tabular-nums">{fmt(cash.collected_cash)}</b></span>
+              <span>Spent <b className="text-slate-700 tabular-nums">{fmt(cash.cash_spent)}</b></span>
+              <span>Handed over <b className="text-slate-700 tabular-nums">{fmt(cash.handed_over)}</b></span>
+              {cash.in_transit > 0 && <span>In transit <b className="text-amber-700 tabular-nums">{fmt(cash.in_transit)}</b></span>}
+            </div>
+
+            <Button
+              onClick={() => setHandingOver(true)}
+              className="ml-auto h-9 bg-amber-600 text-xs text-white hover:bg-amber-700"
+              data-testid="branch-handover-open"
+            >
+              <HandCoins className="mr-1.5 h-3.5 w-3.5" /> Hand over cash
+            </Button>
+          </div>
 
           {pendingHandovers.length > 0 && (
             <div className="mt-3 space-y-1 border-t border-slate-100 pt-2" data-testid="branch-handovers-pending">
@@ -447,6 +550,9 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
                   <Send className="h-3 w-3 text-amber-500" />
                   <span className="font-semibold tabular-nums text-slate-700">{fmt(h.amount)}</span>
                   <span className="text-slate-500">to {h.handed_to} · {h.on}</span>
+                  {notesLabel(h.cash_denominations) ? (
+                    <span className="text-slate-400">({notesLabel(h.cash_denominations)})</span>
+                  ) : null}
                   <span className="rounded-full bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-700">Waiting to be received</span>
                   <button
                     type="button"
@@ -534,7 +640,14 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
                 </td>
                 <td className="break-words px-3 py-2.5 text-slate-600">{r.paid_to || "—"}</td>
                 <td className="break-words px-3 py-2.5 text-slate-500">{r.reference || "—"}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-slate-800">{fmt(r.amount)}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-slate-800">
+                  {fmt(r.amount)}
+                  {notesLabel(r.cash_denominations) ? (
+                    <span className="mt-0.5 block text-[10px] font-normal text-slate-400" data-testid={`branch-expense-notes-${r.id}`}>
+                      {notesLabel(r.cash_denominations)}{Number(r.cash_coins) > 0 ? ` + Rs.${r.cash_coins} coins` : ""}
+                    </span>
+                  ) : null}
+                </td>
                 <td className="px-3 py-2.5">
                   <StatusChip row={r} />
                   {r.rejected && r.rejection_reason ? (

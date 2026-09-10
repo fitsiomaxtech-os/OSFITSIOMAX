@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { getBranches, getBranchCash, setBranchCashAdjustment, receiveCashHandover } from "@/lib/api";
+import { notesLabel } from "@/lib/denominations";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const ALL = "all";
@@ -97,6 +98,9 @@ const ReceiveHandoverRow = ({ handover, onReceived }) => {
         <HandCoins className="h-3.5 w-3.5 text-amber-600" />
         <span className="font-bold tabular-nums text-slate-800">{fmt(handover.amount)}</span>
         <span className="text-slate-500">from {handover.branch_name || "branch"} · carried by {handover.handed_to} · {handover.on}</span>
+        {notesLabel(handover.cash_denominations) ? (
+          <span className="text-slate-400">({notesLabel(handover.cash_denominations)}{Number(handover.cash_coins) > 0 ? ` + Rs.${handover.cash_coins} coins` : ""})</span>
+        ) : null}
         {handover.note ? <span className="text-slate-400">— {handover.note}</span> : null}
         {!open && (
           <Button size="sm" className="ml-auto h-7 bg-amber-600 text-[11px] text-white hover:bg-amber-700" onClick={() => setOpen(true)} data-testid={`branch-cash-handover-open-${handover.id}`}>

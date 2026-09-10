@@ -3251,6 +3251,8 @@ def _handover_public(row: Optional[dict]) -> Optional[dict]:
         "branch_id": row.get("branch_id"),
         "branch_name": row.get("branch_name") or "",
         "amount": round(float(row.get("amount") or 0), 2),
+        "cash_denominations": row.get("cash_denominations") or {},
+        "cash_coins": round(float(row.get("cash_coins") or 0), 2),
         "status": row.get("status") or "pending",
         "handed_to": row.get("handed_to") or "",
         "on": row.get("on") or "",
