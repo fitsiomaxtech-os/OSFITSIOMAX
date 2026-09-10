@@ -240,12 +240,11 @@ class TestClockState:
         day = _day(clock_in="09:00", breaks=[_brk("11:00", "Tea break", back="11:15"), _brk("13:00")])
         assert _state(day) == ON_BREAK
 
-    def test_every_state_offers_something_to_press(self):
+    def test_every_state_offers_something_to_press_except_the_finished_one(self):
         assert ACTIONS[OUT] == ["clock_in"]
         assert ACTIONS[ON_BREAK] == ["break_in"]      # not clock_out -- the break must close first
         assert "break_out" in ACTIONS[WORKING] and "clock_out" in ACTIONS[WORKING]
-        # A finished day is not final any more -- Clock In reopens it after a stray press.
-        assert ACTIONS[DONE] == ["clock_in"]
+        assert ACTIONS[DONE] == []
 
 
 class TestClockArithmetic:

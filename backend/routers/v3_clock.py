@@ -3,8 +3,7 @@
 Four marks, all of them made by the person they are about, from the button in the header:
 
     Clock In  ->  Break Out  ->  Break In  ->  Clock Out
-                     (why?)                        |
-                     Clock In again <--------------+  (clocked out by mistake)
+                     (why?)
 
 Nobody types anybody else's day in here. HR's register (routers/v3_hr_ops.py) is still
 where a month is decided -- a day can be marked absent, half, leave -- but the times on it
@@ -62,10 +61,7 @@ ACTIONS = {
     # Only one. Clocking out from a break would leave the break open forever, and the
     # honest fix is the button that ends it -- see clock_out, which says so.
     ON_BREAK: ["break_in"],
-    # Clock In again, because the button that got here sits one tap from Clock Out and a
-    # stray press should not end a shift for good. It reopens the same day rather than
-    # starting a new one -- see clock_in.
-    DONE: ["clock_in"],
+    DONE: [],
 }
 
 
@@ -186,15 +182,6 @@ def _public(day: Optional[Dict[str, Any]], on: str) -> Dict[str, Any]:
         "actions": ACTIONS[totals["state"]],
         "clock_in": day.get("clock_in") or "",
         "clock_out": day.get("clock_out") or "",
-        # Present only on a day that was clocked out and then picked back up. The header
-        # and the register both read this so a reopened day does not look untouched.
-        "reopens": [
-            {
-                "closed": r.get("closed") or "",
-                "reopened": r.get("reopened") or "",
-            }
-            for r in (day.get("reopens") or [])
-        ],
         "breaks": breaks,
         "break_minutes": totals["break_minutes"],
         "worked_minutes": totals["worked_minutes"],
@@ -289,35 +276,20 @@ class BreakOut(BaseModel):
 
 @router.post("/in")
 async def clock_in(user: V3UserOut = Depends(v3_current_user)):
-    """Start the day -- or pick it back up after a stray Clock Out.
-
-    Clocked out by mistake is the common case here: Clock Out sits one tap from Clock In
-    in the same bar, and a wrong press should not close a shift for good. So a day that is
-    already clocked out reopens on the next Clock In -- same day, same clock-in time, the
-    clock-out lifted. What was lifted is kept in `reopens` so the register still shows it
-    happened rather than the clock-out just vanishing.
+    """Start the day.
 
     The refusals name what the day already looks like rather than saying "not allowed":
-    they are reached by a double tap or a second tab, and the person pressing needs to
-    know which of the two happened.
+    every one of these is reached by a double tap or a second tab, and the person pressing
+    needs to know which of the two happened.
     """
     on = clinic_today()
-    day = await _day_doc(user.id, on)
-    state = _state(day)
-    if state in (WORKING, ON_BREAK):
-        raise HTTPException(status_code=400, detail="You are already clocked in")
+    state = _state(await _day_doc(user.id, on))
+    if state != OUT:
+        raise HTTPException(
+            status_code=400,
+            detail="You have already clocked out for today" if state == DONE else "You are already clocked in",
+        )
     now = _clinic_now()
-    if state == DONE:
-        # Reopen the day. The clock-out goes, but a line in `reopens` records that it was
-        # there and when it was undone -- the gap between the two counts as worked, which
-        # is right for the double tap this exists for and is HR's register to correct on
-        # the rare day somebody genuinely left and came back.
-        return await _save(user, on, {"clock_out": "", "clock_out_at": ""}, push={"reopens": {
-            "closed": (day or {}).get("clock_out") or "",
-            "closed_at": (day or {}).get("clock_out_at") or "",
-            "reopened": now["hhmm"],
-            "reopened_at": now["at"],
-        }})
     return await _save(user, on, {
         "clock_in": now["hhmm"],
         "clock_in_at": now["at"],
@@ -369,7 +341,7 @@ async def break_in(user: V3UserOut = Depends(v3_current_user)):
 
 @router.post("/out")
 async def clock_out(user: V3UserOut = Depends(v3_current_user)):
-    """End the day. Not final -- a stray press reopens on the next Clock In (see clock_in).
+    """End the day. Final: today cannot be clocked into again.
 
     A break has to be closed first. Clocking out of one would leave a break with no end on
     it, and the arithmetic would then be guessing whether the rest of the day was a break
