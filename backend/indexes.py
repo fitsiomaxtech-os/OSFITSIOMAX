@@ -90,6 +90,14 @@ CORE_INDEXES = [
     # both fields, so the compound key answers either — and the documents tab's own
     # {lead_id} / {lead_id, kind} listings read through its prefix.
     ("lead_documents", [("lead_id", 1), ("kind", 1)], "lead_kind"),
+    # Client Portal feedback. Every /patient-portal/me load now reads a patient's threads
+    # by lead_id to count unread replies for the Feedback tab's badge, and the tab's own
+    # list sorts them newest-first; the branch and head-office boards read by branch_id the
+    # same way; a reply reaches one thread by its own id. Grows with every message ever
+    # sent, so unindexed each of those was a full scan of the lot.
+    ("patient_feedback", [("lead_id", 1), ("created_at", -1)], "lead_recent"),
+    ("patient_feedback", [("branch_id", 1), ("created_at", -1)], "branch_recent"),
+    ("patient_feedback", [("id", 1)], "id"),
     # HR's running month — see routers/v3_hr_ops.py. `attendance` is the one that matters:
     # saving a register upserts one row per employee on {date, employee_id}, so a clinic of
     # fifty does fifty of these in a call, against a collection that gains fifty rows a day

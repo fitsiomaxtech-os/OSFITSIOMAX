@@ -335,6 +335,26 @@ async def _build_portal_payload(lead: dict) -> dict:
     # it is the same kind of fact about this patient: who answers for their care.
     consultant = await consultant_of_lead(lead)
 
+    # A count for the Feedback tab's own badge in the bottom nav: threads where the clinic
+    # has written back since the patient last opened the tab. patient_seen_at is stamped by
+    # patient_portal_my_feedback (the GET the tab fires on open), so the badge clears the
+    # moment they look — it counts new replies, not open conversations. Rows with no staff
+    # message yet, or seen since the last one, don't count.
+    fb_rows = await v3_col("patient_feedback").find(
+        {"lead_id": lead_id},
+        {"_id": 0, "id": 1, "messages": 1, "message": 1, "reply": 1,
+         "replied_at": 1, "handled_at": 1, "patient_name": 1, "created_at": 1,
+         "patient_seen_at": 1},
+    ).to_list(200)
+    feedback_unread = 0
+    for r in fb_rows:
+        staff_times = [
+            (m.get("created_at") or "") for m in _thread(r) if m.get("author") == AUTHOR_STAFF
+        ]
+        last_staff = max(staff_times) if staff_times else ""
+        if last_staff and (r.get("patient_seen_at") or "") < last_staff:
+            feedback_unread += 1
+
     branch = {}
     if lead.get("branch_id"):
         branch = await v3_col("branches").find_one(
@@ -378,6 +398,7 @@ async def _build_portal_payload(lead: dict) -> dict:
         # that holds the patient or it arrives on a board that will not open it.
         "feedback_consultant_id": consultant["id"],
         "feedback_consultant_name": consultant["name"],
+        "feedback_unread": feedback_unread,
 
         "branch_name": branch.get("branch_name", ""),
         "branch_phone": branch.get("phone", ""),
@@ -651,6 +672,13 @@ async def patient_portal_my_feedback(lead_id: str = Depends(_current_patient_lea
         # waiting on the clinic and which is waiting on them.
         last = row["messages"][-1] if row["messages"] else None
         row["awaiting_clinic"] = bool(last and last.get("author") == AUTHOR_PATIENT)
+    # Opening this tab is reading it: stamp every thread seen now, which is what clears the
+    # bottom-nav badge feedback_unread counts (see _build_portal_payload). One write per
+    # tab-open rather than a per-thread mark — the tab shows all channels at once.
+    if rows:
+        await v3_col("patient_feedback").update_many(
+            {"lead_id": lead_id}, {"$set": {"patient_seen_at": now_iso()}}
+        )
     return {"feedback": rows}
 
 

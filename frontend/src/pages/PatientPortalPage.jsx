@@ -1301,7 +1301,7 @@ const channelMessages = (rows) => rows
  */
 const openThreadOf = (rows) => rows.find((f) => (f.status || "new") !== "resolved") || null;
 
-function FeedbackTab({ data }) {
+function FeedbackTab({ data, onSeen }) {
   const [draft, setDraft] = useState("");
   const [audience, setAudience] = useState("branch_admin");
   const [sending, setSending] = useState(false);
@@ -1313,9 +1313,14 @@ function FeedbackTab({ data }) {
 
   const loadMine = useCallback(() => {
     patientPortalMyFeedback()
-      .then((data) => setMine(data?.feedback || []))
+      .then((data) => {
+        setMine(data?.feedback || []);
+        // The GET just stamped every thread seen server-side; drop the bottom-nav badge
+        // now rather than wait for the next full /me load to catch up.
+        onSeen?.();
+      })
       .catch(() => { /* the conversation is a courtesy; sending works without it */ });
-  }, []);
+  }, [onSeen]);
   useEffect(() => { loadMine(); }, [loadMine]);
 
   const consultantName = (data?.feedback_consultant_name || "").trim();
@@ -1576,6 +1581,12 @@ function PortalDashboard({ onLogout }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Opening the Feedback tab reads its replies (the GET stamps them seen), so the
+  // bottom-nav badge should clear the moment they land there rather than lag a reload.
+  const clearFeedbackBadge = useCallback(() => {
+    setData((d) => (d && d.feedback_unread ? { ...d, feedback_unread: 0 } : d));
+  }, []);
+
   if (loading) return <div className="flex min-h-screen items-center justify-center"><p className="text-slate-400">Loading...</p></div>;
   if (error || !data) {
     return (
@@ -1610,7 +1621,7 @@ function PortalDashboard({ onLogout }) {
         {activeTab === "treatment" && <TreatmentTab data={data} />}
         {activeTab === "payment" && <PaymentTab data={data} />}
         {activeTab === "profile" && <ProfileTab data={data} />}
-        {activeTab === "feedback" && <FeedbackTab data={data} />}
+        {activeTab === "feedback" && <FeedbackTab data={data} onSeen={clearFeedbackBadge} />}
       </div>
 
       {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal
@@ -1621,6 +1632,10 @@ function PortalDashboard({ onLogout }) {
           {PORTAL_TABS.map((t) => {
             const Icon = t.icon;
             const isActive = activeTab === t.key;
+            // Only the Feedback tab carries one today: how many threads the clinic has
+            // written back on since this patient last opened it. Clears on open — see
+            // clearFeedbackBadge and patient_portal_my_feedback's seen stamp.
+            const badge = t.key === "feedback" ? (data.feedback_unread || 0) : 0;
             return (
               <button
                 key={t.key}
@@ -1629,7 +1644,17 @@ function PortalDashboard({ onLogout }) {
                 className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition ${isActive ? "text-white md:text-sky-600" : "text-slate-200 md:text-slate-400"}`}
                 data-testid={`patient-portal-tab-${t.key}`}
               >
-                <Icon className="h-5 w-5 shrink-0" />
+                <span className="relative shrink-0">
+                  <Icon className="h-5 w-5 shrink-0" />
+                  {badge > 0 && (
+                    <span
+                      className="absolute -right-2.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full border border-slate-500 bg-rose-500 px-1 text-[9px] font-bold leading-none text-white md:border-white"
+                      data-testid="patient-portal-tab-badge-feedback"
+                    >
+                      {badge > 9 ? "9+" : badge}
+                    </span>
+                  )}
+                </span>
                 {/* min-w-0 above and truncate here so a long label shortens instead of
                     forcing its tab wider and squeezing the other three. */}
                 <span className="w-full truncate px-0.5 text-center sm:hidden">{t.short}</span>
