@@ -882,6 +882,221 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     return V3LeadOut(**updated)
 
 
+# ─── Trading two patients' appointments ───
+#
+# The third way out of a clash on the booking grid, beside handing the slot to another
+# consultant and moving the patient to another time. Both of those leave the other patient
+# where they are; this one is for when the two of them should change places -- the 11:45
+# wants to be the 2:00 and the 2:00 wants to be the 11:45.
+#
+# It is deliberately an exchange and never a handover. Booking somebody into a taken slot
+# is already refused by schedule-branch-appointment's clash check, and the only way round
+# that check is to free the slot first -- which means somebody loses an appointment.
+# Nobody does here: each side lands on the slot the other has just left, so the set of
+# writes is closed and every patient in it still has a booking when it finishes.
+
+
+async def _live_consultation_appt(lead_id: str) -> Optional[dict]:
+    """The consultation this lead is holding right now, or None.
+
+    The same query schedule-branch-appointment reads `prior_appt` with, so a lead this can
+    swap is exactly a lead that endpoint could have rescheduled -- an older row without
+    `appt_kind` is invisible to both rather than to one of them.
+    """
+    return await v3_col("appointments").find_one(
+        {"lead_id": lead_id, "appt_kind": "consultation", "status": "new_appointment"},
+        {"_id": 0},
+    )
+
+
+@router.get("/branch-admin/swap-candidates/{branch_id}")
+async def v3_swap_candidates(
+    branch_id: str,
+    lead_id: str = Query(..., description="The lead holding the slot being swapped out of"),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Every other patient at this branch holding a consultation that could be traded for
+    this one.
+
+    Live bookings from today onwards only, because a swap has to give this patient
+    something they can actually attend -- offering last Tuesday would let the branch move
+    a patient into the past in one press.
+
+    The whole branch rather than the one consultant or the one day: the reason to swap is
+    usually that a patient rang about a time, and the slot that suits them is as likely to
+    be on another expert's calendar as on this one's. Which pairing makes sense is the
+    branch's call, and the row carries who and when so they can make it.
+    """
+    today = date.today().isoformat()
+    rows = await v3_col("appointments").find(
+        {
+            "branch_id": branch_id,
+            "appt_kind": "consultation",
+            "status": "new_appointment",
+            "lead_id": {"$ne": lead_id, "$exists": True},
+            "slot_time": {"$gte": f"{today}T"},
+        },
+        {
+            "_id": 0, "lead_id": 1, "lead_name": 1, "doctor_id": 1, "doctor_name": 1,
+            "appointment_date": 1, "appointment_time": 1, "slot_time": 1, "duration": 1,
+        },
+    ).sort("slot_time", 1).to_list(500)
+    return {
+        "branch_id": branch_id,
+        "lead_id": lead_id,
+        "count": len(rows),
+        "candidates": [r for r in rows if r.get("lead_id")],
+    }
+
+
+class V3BranchAppointmentSwapInput(BaseModel):
+    # The other patient in the exchange, and the only thing the caller gets to say. Where
+    # each of them ends up is read off the two live appointment rows, never off the
+    # payload -- a swap that could name a time would be a booking screen able to put a
+    # patient on a slot no consultant ever published.
+    with_lead_id: str
+
+
+def _swap_moving_fields(appt: dict) -> dict:
+    """The half of an appointment row that changes hands: when it is, how long it runs,
+    and whose calendar it sits on.
+
+    The room travels with the consultant. It is frozen onto the appointment at booking
+    time (see schedule-branch-appointment) so that an expert changing their room next
+    month cannot move a meeting already arranged -- but this is not the expert changing
+    anything, it is the patient being sent to a different expert, and carrying the old
+    link across would send them to a room their new consultant never opens.
+
+    Everything else on the row -- the patient's name, the notes taken about them, the
+    reference number printed on the confirmation they were sent -- stays with the patient,
+    because the row is their appointment and only its place in the day is being traded.
+    """
+    return {
+        "doctor_id": appt.get("doctor_id"),
+        "doctor_name": appt.get("doctor_name"),
+        "slot_time": appt.get("slot_time"),
+        "appointment_date": appt.get("appointment_date"),
+        "appointment_time": appt.get("appointment_time"),
+        "duration": appt.get("duration") or 30,
+        "meet_link": (appt.get("meet_link") or "").strip(),
+    }
+
+
+@router.post("/leads/{lead_id}/swap-branch-appointment")
+async def v3_swap_branch_appointment(
+    lead_id: str,
+    payload: V3BranchAppointmentSwapInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Exchange this lead's consultation with another lead's. Both keep an appointment."""
+    if payload.with_lead_id == lead_id:
+        raise HTTPException(status_code=400, detail="Pick a different patient to swap with")
+    lead_a = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    lead_b = await v3_col("leads").find_one({"id": payload.with_lead_id}, {"_id": 0})
+    if not lead_a or not lead_b:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    # Branch Admin owns the calendars at their own branch and no others. Two patients at
+    # different branches trading slots would move one of them to a building they were
+    # never offered, so the pairing is refused rather than half-applied.
+    if lead_a.get("branch_id") != lead_b.get("branch_id"):
+        raise HTTPException(status_code=400, detail="Both patients must be at the same branch")
+
+    appt_a = await _live_consultation_appt(lead_id)
+    appt_b = await _live_consultation_appt(payload.with_lead_id)
+    # Named in the refusal. "No appointment to swap" on a dialog showing two names is a
+    # message the branch cannot act on without guessing which of them it means.
+    if not appt_a:
+        raise HTTPException(status_code=409, detail=f"{lead_a.get('name') or 'This patient'} has no live appointment to swap")
+    if not appt_b:
+        raise HTTPException(status_code=409, detail=f"{lead_b.get('name') or 'That patient'} has no live appointment to swap")
+    if appt_a.get("slot_time") == appt_b.get("slot_time") and appt_a.get("doctor_id") == appt_b.get("doctor_id"):
+        raise HTTPException(status_code=400, detail="Both appointments are already on the same slot")
+
+    a_gets = _swap_moving_fields(appt_b)
+    b_gets = _swap_moving_fields(appt_a)
+    # Whether this counts as a reschedule, by the same rule the booking endpoint applies:
+    # only a change of slot is a move. Two patients trading the same time between two
+    # consultants have not been moved, and tagging them as rescheduled would tell their
+    # consultants a story about the patient that never happened. One flag serves both
+    # sides -- if either slot changed then both did, since each takes the other's.
+    moved = appt_a.get("slot_time") != appt_b.get("slot_time")
+    stamp = now_iso()
+
+    def lead_updates(lead: dict, gets: dict, left: dict) -> dict:
+        u = {
+            "appointment_date": gets["appointment_date"],
+            "appointment_time": gets["appointment_time"],
+            "appointment_datetime": f"{gets['appointment_date']}T{gets['appointment_time']}:00",
+            "assigned_physio_id": gets["doctor_id"],
+            "assigned_physio_name": gets["doctor_name"],
+            "physio_assigned_at": stamp,
+            "updated_at": stamp,
+        }
+        if moved:
+            # Counted rather than merely flagged, the same way the booking endpoint counts
+            # it: a patient moved three times is a different conversation from one moved
+            # once, and the flag alone cannot tell them apart.
+            u["appointment_rescheduled"] = True
+            u["appointment_reschedule_count"] = int(lead.get("appointment_reschedule_count") or 0) + 1
+            u["appointment_rescheduled_at"] = stamp
+            u["appointment_rescheduled_from"] = left.get("slot_time")
+        return u
+
+    def appt_updates(gets: dict, left: dict) -> dict:
+        u = {**gets, "updated_at": stamp}
+        if moved:
+            # On the appointment row as well as on the lead: the Head Physio calendar
+            # draws its day straight out of this collection and never joins back to the
+            # lead, so without this the one screen where a moved appointment matters most
+            # could not know it had moved.
+            u["rescheduled"] = True
+            u["rescheduled_from"] = left.get("slot_time")
+            u["rescheduled_at"] = stamp
+        return u
+
+    # Four writes with no transaction behind them, in the order that fails safest. The
+    # appointment rows go first, and A's before B's: between those two writes the pair
+    # briefly reads as both holding B's old slot, which shows as a double-booking to a
+    # calendar refreshed inside that window and corrects itself on the next refresh. The
+    # other order leaves A's old slot held by nobody, which is worse -- a free slot is one
+    # a second branch admin can book over, and that damage does not correct itself.
+    await v3_col("appointments").update_one({"id": appt_a["id"]}, {"$set": appt_updates(a_gets, appt_a)})
+    await v3_col("appointments").update_one({"id": appt_b["id"]}, {"$set": appt_updates(b_gets, appt_b)})
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": lead_updates(lead_a, a_gets, appt_a)})
+    await v3_col("leads").update_one({"id": payload.with_lead_id}, {"$set": lead_updates(lead_b, b_gets, appt_b)})
+
+    name_a = lead_a.get("name") or "Patient"
+    name_b = lead_b.get("name") or "Patient"
+    # One entry on each patient's own timeline, written from that patient's side. A single
+    # shared line would read correctly on one card and backwards on the other.
+    for lid, gets, left, other in (
+        (lead_id, a_gets, appt_a, name_b),
+        (payload.with_lead_id, b_gets, appt_b, name_a),
+    ):
+        await v3_col("lead_activity").insert_one({
+            "id": str(uuid.uuid4()),
+            "lead_id": lid,
+            "action": "branch_appointment_swapped",
+            "details": (
+                f"Appointment swapped with {other} — "
+                f"{(left.get('slot_time') or '').replace('T', ' ')} with {left.get('doctor_name') or 'their consultant'}"
+                f" → {(gets.get('slot_time') or '').replace('T', ' ')} with {gets.get('doctor_name') or 'their consultant'}"
+            ),
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "created_at": stamp,
+        })
+
+    return {
+        "swapped": True,
+        "moved": moved,
+        "a": {"lead_id": lead_id, "name": name_a, **a_gets},
+        "b": {"lead_id": payload.with_lead_id, "name": name_b, **b_gets},
+    }
+
+
+
+
 
 async def _expert_photos(experts: list) -> Dict[str, str]:
     """{ doctors.id: headshot URL } for the experts given, empty string where there is none.

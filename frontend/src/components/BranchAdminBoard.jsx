@@ -36,6 +36,7 @@ import {
   HeartPulse,
   IdCard,
   Pencil,
+  Repeat,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -53,6 +54,8 @@ import {
   getArmBoard,
   getAvailableExperts,
   getAvailableDates,
+  getSwapCandidates,
+  swapBranchAppointment,
   getLeadActivity,
   getLeadRemarks,
   moveBranchStage,
@@ -2620,11 +2623,17 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   /** The booking sitting on one taken slot, opened from the pencil on its tile.
    *
    * A slot the grid shows as gone is not dead space — it is somebody's appointment, and
-   * the two reasons a branch is ringing about it are the two ways out offered here: the
-   * CONSULTANT cannot make it (hand the same time to another one) or the PATIENT cannot
-   * (keep the consultant, move the time). Both are the one POST that books anything;
-   * rebooking IS the reschedule, and the endpoint tags a genuine move on its own by
-   * comparing the new slot against the one the lead already sits on.
+   * the three reasons a branch is ringing about it are the three ways out offered here:
+   * the CONSULTANT cannot make it (hand the same time to another one), the PATIENT cannot
+   * (keep the consultant, move the time), or two patients want each other's slots (SWAP).
+   * The first two are the one POST that books anything; rebooking IS the reschedule, and
+   * the endpoint tags a genuine move on its own by comparing the new slot against the one
+   * the lead already sits on.
+   *
+   * SWAP is its own endpoint because it cannot be a booking. Booking one patient onto a
+   * taken slot is refused by the clash check, and freeing the slot first is how a patient
+   * ends up with no appointment — so the exchange is made server-side as one closed set
+   * of writes, each side landing on what the other just left.
    *
    * The booking belongs to a different patient than the one whose card is open — this
    * lead's own slot never appears as taken. That is deliberate: Branch Admin owns every
@@ -2633,7 +2642,8 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
    *
    * null | { date, time, duration, leadId, leadName, physioId, physioName, mode,
    *          options, pickedPhysioId, loading, saving,
-   *          moveDate, moveTime, moveDuration, dayLoading, daySlots }
+   *          moveDate, moveTime, moveDuration, dayLoading, daySlots,
+   *          swapLoading, swapOptions, swapLeadId, swapQuery }
    */
   const [slotEdit, setSlotEdit] = useState(null);
 
@@ -2793,6 +2803,10 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
       moveDuration: s.duration,
       dayLoading: false,
       daySlots: [],
+      swapLoading: false,
+      swapOptions: [],
+      swapLeadId: "",
+      swapQuery: "",
     });
     try {
       // Asked with the time, which is the form that answers "who is not already booked
@@ -2867,14 +2881,74 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
     });
   };
 
-  /** Apply whichever tab is open. One POST either way — CONSULTANT changes who holds the
-   *  slot, PATIENT changes when it is; the endpoint works out which of those happened.
+  /** Every other patient at this branch who is holding a consultation, for the SWAP tab.
+   *  Asked only when that tab is first opened — it is the third of three and the branch
+   *  reaches for it rarely, so loading it with the dialog would be a request per pencil
+   *  press for a list most of them never see. */
+  const loadSwapCandidates = async (leadId) => {
+    setSlotEdit((p) => (p ? { ...p, swapLoading: true } : p));
+    try {
+      const res = await getSwapCandidates(branchId, leadId);
+      setSlotEdit((p) => (p ? { ...p, swapOptions: res.candidates || [], swapLoading: false } : p));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not load the other appointments");
+      setSlotEdit((p) => (p ? { ...p, swapOptions: [], swapLoading: false } : p));
+    }
+  };
+
+  /** The SWAP tab's list, narrowed by its search box. Name, consultant, date and time
+   *  all match on: a branch hunting for "Monisha" wants that consultant's patients and
+   *  one hunting for "2:00" wants the two o'clock, and which of those they have in hand
+   *  is whatever the patient on the phone happened to say. */
+  const swapCandidates = useMemo(() => {
+    const all = slotEdit?.swapOptions || [];
+    const q = (slotEdit?.swapQuery || "").trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((c) => (
+      `${c.lead_name || ""} ${c.doctor_name || ""} ${c.appointment_date || ""} ${to12h(c.appointment_time || "")}`
+        .toLowerCase().includes(q)
+    ));
+  }, [slotEdit?.swapOptions, slotEdit?.swapQuery]);
+
+  // The row currently picked, read back off the unfiltered list — typing in the search
+  // box after choosing somebody must not quietly unpick them.
+  const swapPicked = useMemo(
+    () => (slotEdit?.swapLeadId ? (slotEdit.swapOptions || []).find((c) => c.lead_id === slotEdit.swapLeadId) : null) || null,
+    [slotEdit?.swapOptions, slotEdit?.swapLeadId],
+  );
+
+  /** Trade the two appointments. Only the pair of leads is sent: what each of them ends
+   *  up holding is read off their live bookings server-side, so this cannot post a
+   *  patient to a slot that was not already published and booked by somebody. */
+  const submitSlotSwap = async () => {
+    const other = (slotEdit.swapOptions || []).find((c) => c.lead_id === slotEdit.swapLeadId);
+    if (!other) { toast.error("Pick the patient to swap with"); return; }
+    setSlotEdit((p) => ({ ...p, saving: true }));
+    try {
+      await swapBranchAppointment(slotEdit.leadId, other.lead_id);
+      toast.success(`${slotEdit.leadName} ↔ ${other.lead_name || "the other patient"} — slots swapped`);
+      setSlotEdit(null);
+      // Both sides of the swap can be on the day behind this dialog, so the grid is
+      // re-asked rather than patched — the same call that feeds the CONSULTANT column.
+      await fetchAvailableExperts(branchId, apptDraft?.appointment_date, lead.id);
+      await onUpdate?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not swap the appointments");
+      setSlotEdit((p) => (p ? { ...p, saving: false } : p));
+    }
+  };
+
+  /** Apply whichever tab is open. CONSULTANT and PATIENT are the one POST that books
+   *  anything — the first changes who holds the slot, the second changes when it is, and
+   *  the endpoint works out which of those happened. SWAP is the other endpoint, because
+   *  an exchange is two appointments moving at once and a booking can only move one.
    *
    *  final_stage is this board's Appointment stage. A lead booked under a different
    *  vertical's pipeline is refused by name there rather than moved onto the wrong
    *  stage, and the refusal is what the toast shows. */
   const submitSlotEdit = async () => {
     if (!slotEdit || slotEdit.saving) return;
+    if (slotEdit.mode === "swap") { await submitSlotSwap(); return; }
     const swappingConsultant = slotEdit.mode === "consultant";
     const physioId = swappingConsultant ? slotEdit.pickedPhysioId : slotEdit.physioId;
     const date = swappingConsultant ? slotEdit.date : slotEdit.moveDate;
@@ -3838,12 +3912,15 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               </p>
             </div>
 
-            {/* The two ways out of a clash. Which one is right depends on who cannot make
-                it, which is the thing the branch already knows and the system cannot. */}
-            <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-slate-200 bg-slate-50 p-1.5">
+            {/* The three ways out of a clash. Which one is right depends on who cannot
+                make it, which is the thing the branch already knows and the system
+                cannot. Uppercase labels on a narrow dialog, so the third one is "Swap"
+                rather than a sentence — the line under the tab says what it swaps. */}
+            <div className="grid shrink-0 grid-cols-3 gap-1 border-b border-slate-200 bg-slate-50 p-1.5">
               {[
                 ["consultant", "Consultant", ArrowLeftRight],
                 ["patient", "Patient", Clock],
+                ["swap", "Swap", Repeat],
               ].map(([m, label, Icon]) => (
                 <button
                   key={m}
@@ -3854,15 +3931,18 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     if (m === "patient" && slotEdit.daySlots.length === 0 && !slotEdit.dayLoading) {
                       loadSlotEditDay(slotEdit.moveDate, slotEdit.physioId, slotEdit.leadId);
                     }
+                    if (m === "swap" && slotEdit.swapOptions.length === 0 && !slotEdit.swapLoading) {
+                      loadSwapCandidates(slotEdit.leadId);
+                    }
                   }}
-                  className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition ${
+                  className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider transition sm:px-3 sm:text-xs ${
                     slotEdit.mode === m
                       ? "bg-white text-teal-700 shadow-sm ring-1 ring-teal-200"
                       : "text-slate-500 hover:text-slate-700"
                   }`}
                   data-testid={`branch-slot-edit-tab-${m}`}
                 >
-                  <Icon className="h-3.5 w-3.5" /> {label}
+                  <Icon className="h-3.5 w-3.5 shrink-0" /> {label}
                 </button>
               ))}
             </div>
@@ -3910,7 +3990,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     );
                   })}
                 </>
-              ) : (
+              ) : slotEdit.mode === "patient" ? (
                 <>
                   <p className="mb-2 text-xs text-slate-500">
                     Same consultant{slotEdit.physioName ? <> — <b className="font-semibold text-slate-700">{slotEdit.physioName}</b></> : null}, a different time.
@@ -3960,13 +4040,97 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     </div>
                   )}
                 </>
+              ) : (
+                <>
+                  {/* An exchange, never a handover. Both patients keep an appointment —
+                      each lands on the slot the other has just left — so this tab is
+                      offered without the warning a "give the slot away" tab would need,
+                      and the endpoint behind it refuses anything that isn't a clean
+                      trade rather than freeing a slot to make one. */}
+                  <p className="mb-2 text-xs text-slate-500">
+                    Two patients change places. <b className="font-semibold text-slate-700">{slotEdit.leadName}</b> takes the appointment below, and that patient takes {to12h(slotEdit.time)}.
+                  </p>
+                  {slotEdit.swapLoading && <p className="py-8 text-center text-sm text-slate-400">Reading the branch's other appointments…</p>}
+                  {!slotEdit.swapLoading && slotEdit.swapOptions.length === 0 && (
+                    <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
+                      Nobody else at this branch has a consultation booked, so there is nothing to trade for. Move the patient instead.
+                    </p>
+                  )}
+                  {!slotEdit.swapLoading && slotEdit.swapOptions.length > 0 && (
+                    <>
+                      {/* A branch runs more consultations than fit a scroll, and the one
+                          being looked for is named on the phone rather than spotted. */}
+                      <div className="relative mb-2">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                        <Input
+                          value={slotEdit.swapQuery}
+                          onChange={(e) => setSlotEdit((p) => (p ? { ...p, swapQuery: e.target.value } : p))}
+                          placeholder="Find a patient, consultant or time…"
+                          className="h-9 pl-8 text-sm"
+                          data-testid="branch-slot-edit-swap-search"
+                        />
+                      </div>
+                      {swapCandidates.length === 0 ? (
+                        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
+                          No appointment matches that.
+                        </p>
+                      ) : swapCandidates.map((c) => {
+                        const picked = c.lead_id === slotEdit.swapLeadId;
+                        // The day is only worth printing when it is not the one already
+                        // named in the header two lines up.
+                        const sameDay = c.appointment_date === slotEdit.date;
+                        return (
+                          <button
+                            key={c.lead_id}
+                            type="button"
+                            disabled={slotEdit.saving}
+                            onClick={() => setSlotEdit((p) => (p ? { ...p, swapLeadId: c.lead_id } : p))}
+                            className={`mb-1.5 flex w-full items-center gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition disabled:opacity-60 ${
+                              picked ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"
+                            }`}
+                            data-testid={`branch-slot-edit-swap-${c.lead_id}`}
+                          >
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500">
+                              {(c.lead_name || "?").trim().charAt(0).toUpperCase()}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium text-slate-800">{c.lead_name || "Unnamed patient"}</span>
+                              <span className="block truncate text-[11px] text-slate-500">
+                                {sameDay ? to12h(c.appointment_time) : `${weekdayLabel(c.appointment_date)} ${to12h(c.appointment_time)}`}
+                                {c.doctor_name ? ` · ${c.doctor_name}` : ""}
+                              </span>
+                            </span>
+                            {picked && <CheckCircle2 className="h-5 w-5 shrink-0 text-teal-600" />}
+                          </button>
+                        );
+                      })}
+                      {/* Both halves spelled out before it is pressed. A swap moves a
+                          patient who is not on screen and not the one whose card is
+                          open, and reading it back is the only chance to catch the
+                          wrong row having been picked. */}
+                      {swapPicked && (
+                        <div className="mt-2 rounded-lg border border-teal-200 bg-teal-50/70 p-3 text-xs text-teal-900" data-testid="branch-slot-edit-swap-summary">
+                          <p className="mb-1 font-bold uppercase tracking-wider text-teal-700">After the swap</p>
+                          <p className="truncate">
+                            <b className="font-semibold">{slotEdit.leadName}</b> → {weekdayLabel(swapPicked.appointment_date)} {to12h(swapPicked.appointment_time)}
+                            {swapPicked.doctor_name ? ` · ${swapPicked.doctor_name}` : ""}
+                          </p>
+                          <p className="truncate">
+                            <b className="font-semibold">{swapPicked.lead_name || "The other patient"}</b> → {weekdayLabel(slotEdit.date)} {to12h(slotEdit.time)}
+                            {slotEdit.physioName ? ` · ${slotEdit.physioName}` : ""}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
               )}
             </div>
 
             {/* Both halves of the swap, on the row that performs it. The freed time is
                 the same one either tab empties, so the offer reads the same on both. */}
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-4 py-2.5">
-              {slotEdit.canTake ? (
+              {slotEdit.canTake && slotEdit.mode !== "swap" ? (
                 <label className="flex min-w-0 cursor-pointer items-center gap-2 text-xs text-slate-600" title={`Book ${lead.name || "this patient"} into ${to12h(slotEdit.time)} as soon as it is free`}>
                   <input
                     type="checkbox"
@@ -3981,7 +4145,10 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   </span>
                 </label>
               ) : (
-                // Nothing to swap with — the booking in the way is this card's own.
+                // Nothing to offer. Either the booking in the way is this card's own, or
+                // SWAP is the open tab — that one does not free the slot at all, it hands
+                // it to the patient picked in the list, so there is nothing left over for
+                // this card's patient to be given.
                 <span />
               )}
               <div className="flex shrink-0 items-center gap-2">
@@ -3991,13 +4158,19 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                 <Button
                   size="sm"
                   className="bg-teal-600 text-white hover:bg-teal-700"
-                  disabled={slotEdit.saving || (slotEdit.mode === "consultant" ? !slotEdit.pickedPhysioId : !slotEdit.moveTime)}
+                  disabled={slotEdit.saving || (
+                    slotEdit.mode === "consultant" ? !slotEdit.pickedPhysioId
+                      : slotEdit.mode === "patient" ? !slotEdit.moveTime
+                        : !slotEdit.swapLeadId
+                  )}
                   onClick={submitSlotEdit}
                   data-testid="branch-slot-edit-save"
                 >
-                  {slotEdit.saving
-                    ? (slotEdit.canTake && slotEdit.takeSlot ? "Swapping…" : "Moving…")
-                    : (slotEdit.canTake && slotEdit.takeSlot ? "Reschedule & book" : "Reschedule")}
+                  {slotEdit.mode === "swap"
+                    ? (slotEdit.saving ? "Swapping…" : "Swap")
+                    : slotEdit.saving
+                      ? (slotEdit.canTake && slotEdit.takeSlot ? "Swapping…" : "Moving…")
+                      : (slotEdit.canTake && slotEdit.takeSlot ? "Reschedule & book" : "Reschedule")}
                 </Button>
               </div>
             </div>

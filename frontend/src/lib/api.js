@@ -230,6 +230,13 @@ export const updateConsultAppointment = async (apptId, payload) => (await api.pa
 export const cancelConsultAppointment = async (apptId) => (await api.post(`/branch-admin/consult-appointments/${apptId}/cancel`)).data;
 export const getAvailableExperts = async (branchId, date, time, leadId) => (await api.get(`/branch-admin/available-experts/${branchId}`, { params: { date, ...(time ? { time } : {}), ...(leadId ? { lead_id: leadId } : {}) } })).data;
 export const getAvailableDates = async (branchId, month, leadId) => (await api.get(`/branch-admin/available-dates/${branchId}`, { params: { month, ...(leadId ? { lead_id: leadId } : {}) } })).data;
+// The other patients at this branch holding a consultation, for the Reschedule dialog's
+// SWAP tab. `leadId` is the one being swapped out of, and is left out of the answer.
+export const getSwapCandidates = async (branchId, leadId) => (await api.get(`/branch-admin/swap-candidates/${branchId}`, { params: { lead_id: leadId } })).data;
+// Two patients change places. Only the pair is sent — where each lands is read off their
+// live appointments server-side, so this can never name a slot that was not already
+// published and booked. Neither of them comes out of it without an appointment.
+export const swapBranchAppointment = async (leadId, withLeadId) => (await api.post(`/leads/${leadId}/swap-branch-appointment`, { with_lead_id: withLeadId })).data;
 
 // ---- Post-treatment Review: Physio raises -> Branch Admin sends -> Head Physio writes it
 export const physioReviews = async (physioId) => (await api.get("/physio/reviews", { params: physioId ? { physio_id: physioId } : {} })).data;
