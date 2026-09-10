@@ -205,24 +205,31 @@ const RevenueTile = ({ label, value, sub, icon: Icon, color, active, onClick, te
       className={`absolute inset-x-0 bottom-0 h-0.5 transition-opacity duration-150 ${active ? "opacity-100" : "opacity-0"}`}
       style={{ background: color }}
     />
-    {/* Tinted while it waits, solid once picked. The chip is the only thing on the card
-        that changes colour, which is what keeps the change quiet enough to sit in a row
-        of eight. */}
-    <span
-      aria-hidden
-      className="mb-2.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-150"
-      style={active ? { background: color, color: "#fff" } : { background: `${color}14`, color }}
-    >
-      {Icon && <Icon className="h-3.5 w-3.5" />}
-    </span>
-    {/* Sentence case at a normal weight rather than bold small caps: eight headings
-        shouting is what made the old row hard to read past. The picked one darkens
-        instead of changing colour. */}
-    <p className={`truncate text-[11px] transition-colors sm:text-xs ${active ? "font-semibold text-slate-900" : "font-medium text-slate-500"}`}>{label}</p>
-    {/* tabular-nums so eight figures standing side by side line up on their digits
-        instead of jittering with whatever numerals each one happens to hold. */}
-    <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-[21px] sm:leading-7">{value}</p>
-    <p className="mt-0.5 truncate text-[10px] leading-tight text-slate-400 sm:text-[11px]">{sub}</p>
+    {/* Name and figure start at the top edge, with the chip parked in the corner beside
+        them: read down the card it is label then figure then count, and the icon is a
+        mark to find the card by rather than a step on the way into it. */}
+    <div className="flex w-full items-start gap-2">
+      <div className="min-w-0 flex-1">
+        {/* Sentence case at a normal weight rather than bold small caps: eight headings
+            shouting is what made the old row hard to read past. The picked one darkens
+            instead of changing colour. */}
+        <p className={`truncate text-[11px] transition-colors sm:text-xs ${active ? "font-semibold text-slate-900" : "font-medium text-slate-500"}`}>{label}</p>
+        {/* tabular-nums so eight figures standing side by side line up on their digits
+            instead of jittering with whatever numerals each one happens to hold. */}
+        <p className="mt-1 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-[21px] sm:leading-7">{value}</p>
+        <p className="mt-0.5 truncate text-[10px] leading-tight text-slate-400 sm:text-[11px]">{sub}</p>
+      </div>
+      {/* Tinted while it waits, solid once picked. The chip is the only thing on the card
+          that changes colour, which is what keeps the change quiet enough to sit in a row
+          of eight. */}
+      <span
+        aria-hidden
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-150"
+        style={active ? { background: color, color: "#fff" } : { background: `${color}14`, color }}
+      >
+        {Icon && <Icon className="h-3.5 w-3.5" />}
+      </span>
+    </div>
   </button>
 );
 
