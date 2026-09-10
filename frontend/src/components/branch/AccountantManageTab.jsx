@@ -122,11 +122,11 @@ const REVENUE_VIEWS = [
   { key: "fitness", label: "Fitness Revenue", short: "Fitness", color: "#65a30d", icon: Dumbbell },
 ];
 
-// The sum and its parts. Total is not one of the seven categories -- it is what they add
-// up to -- so the row stops standing it in line with them and hands it its own card; see
-// the row's own comment for what that buys. Split off the one list rather than written out
-// twice, so a ninth category still only has to be added in one place.
-const [TOTAL_VIEW, ...CATEGORY_VIEWS] = REVENUE_VIEWS;
+// The seven the total is made of, which is the set the branch breakdown's columns are cut
+// from: a column of totals beside seven columns that add up to it would be the same number
+// written twice. Split off the one list rather than written out again, so a ninth category
+// still only has to be added in one place.
+const [, ...CATEGORY_VIEWS] = REVENUE_VIEWS;
 
 // What each source's rows are called under its figure. Store sells, Zumba and Fitness
 // register, everything else is paid.
@@ -198,8 +198,11 @@ const countLabel = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
  * a neutral ring. A coloured ring drawn all the way round turns the card into a box with
  * a border, and eight cards with one of them boxed is a form control, not a dashboard.
  *
- * `headline` is the one card that is not one of the eight in a line: the total, printed
- * a size up with its chip pinned to the corner so the figure has the card's full width.
+ * All eight are the same card at the same size, the total included. It was drawn larger
+ * for a while, on the reasoning that a sum is not a category; what that actually did was
+ * break the row into a headline and seven footnotes, when what a branch reads here is one
+ * line of figures across. Rank is carried by the total standing first, which is enough.
+ *
  * `muted` greys a figure of nothing -- Rs.0 still says the desk was open and took
  * nothing, which is worth showing and not worth reading first.
  *
@@ -207,15 +210,13 @@ const countLabel = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
  * Tailwind reads class names out of the source, so a class name assembled at runtime
  * compiles to nothing.
  */
-const RevenueTile = ({ label, value, sub, icon: Icon, color, active, headline, muted, onClick, testid }) => (
+const RevenueTile = ({ label, value, sub, icon: Icon, color, active, muted, onClick, testid }) => (
   <button
     type="button"
     onClick={onClick}
     aria-pressed={active}
     data-testid={testid}
-    className={`group relative flex h-full w-full flex-col overflow-hidden rounded-xl border bg-white text-left transition-all duration-150 ${
-      headline ? "p-4 sm:p-5" : "p-3 sm:p-3.5"
-    } ${
+    className={`group relative flex h-full w-full flex-col overflow-hidden rounded-xl border bg-white p-3 text-left transition-all duration-150 sm:p-3.5 ${
       active
         ? "border-slate-300 shadow-[0_4px_14px_-4px_rgba(16,24,40,0.16)]"
         : "border-slate-200 shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:border-slate-300 hover:bg-slate-50/60"
@@ -237,34 +238,23 @@ const RevenueTile = ({ label, value, sub, icon: Icon, color, active, headline, m
         {/* Sentence case at a normal weight rather than bold small caps: eight headings
             shouting is what made the old row hard to read past. The picked one darkens
             instead of changing colour. */}
-        <p className={`truncate transition-colors ${headline ? "pr-10 text-xs sm:text-sm" : "text-[11px] sm:text-xs"} ${
-          active ? "font-semibold text-slate-900" : "font-medium text-slate-500"
-        }`}>{label}</p>
-        {/* tabular-nums so figures standing side by side line up on their digits instead
-            of jittering with whatever numerals each one happens to hold. A till that took
-            nothing greys its figure: Rs.0 is worth showing -- it says the desk was open
-            and sold nothing -- but not worth reading before the money that came in. */}
-        <p className={`font-semibold tabular-nums tracking-tight ${
-          headline ? "mt-1.5 text-xl sm:text-2xl sm:leading-8" : "mt-1 text-base sm:text-[18px] sm:leading-6"
-        } ${muted && !active ? "text-slate-400" : "text-slate-900"}`}>{value}</p>
-        <p className={`mt-0.5 truncate leading-tight text-slate-400 ${headline ? "text-[11px] sm:text-xs" : "text-[10px] sm:text-[11px]"}`}>{sub}</p>
+        <p className={`truncate text-[11px] transition-colors sm:text-xs ${active ? "font-semibold text-slate-900" : "font-medium text-slate-500"}`}>{label}</p>
+        {/* tabular-nums so eight figures standing side by side line up on their digits
+            instead of jittering with whatever numerals each one happens to hold. */}
+        <p className={`mt-1 text-base font-semibold tabular-nums tracking-tight sm:text-[18px] sm:leading-6 ${
+          muted && !active ? "text-slate-400" : "text-slate-900"
+        }`}>{value}</p>
+        <p className="mt-0.5 truncate text-[10px] leading-tight text-slate-400 sm:text-[11px]">{sub}</p>
       </div>
       {/* Tinted while it waits, solid once picked. The chip is the only thing on the card
           that changes colour, which is what keeps the change quiet enough to sit in a row
-          of eight.
-
-          On the headline card it is lifted out of the line and pinned to the corner, so
-          the total gets the whole width of the card to be printed across: a branch whose
-          month runs to eight digits would otherwise have its own headline figure cut off
-          by the icon sitting beside it. The label keeps clear of it on its own. */}
+          of eight. */}
       <span
         aria-hidden
-        className={`flex shrink-0 items-center justify-center transition-colors duration-150 ${
-          headline ? "absolute right-4 top-4 h-9 w-9 rounded-xl sm:right-5 sm:top-5" : "h-7 w-7 rounded-lg"
-        }`}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-150"
         style={active ? { background: color, color: "#fff" } : { background: `${color}14`, color }}
       >
-        {Icon && <Icon className={headline ? "h-[18px] w-[18px]" : "h-3.5 w-3.5"} />}
+        {Icon && <Icon className="h-3.5 w-3.5" />}
       </span>
     </div>
   </button>
@@ -845,48 +835,29 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, canSend = t
             </p>
           </div>
 
-          {/* Eight cards standing in one straight line said the total was a category like
-              any other, and eight equal figures gave the eye nowhere to land: the one
-              number a branch opens this tab for was the same size as Store's Rs.0.
+          {/* All eight on one line where there is room for eight, stepping down to four
+              and then two rather than squeezing: at lg an eighth of the width is narrower
+              than the card's own text column.
 
-              So the sum is pulled out of the line and given a card of its own -- a wider
-              one, with the figure a size up -- and the seven it is made of sit beside it
-              as a block. Reading it goes total first, then the breakdown, which is the
-              order the question is actually asked in.
-
-              The seven step 7 -> 4 -> 2 across as the width goes, and below xl the total
-              lifts to a full-width line above them rather than being squeezed into a
-              column narrower than the figure it holds. */}
-          <div className="flex flex-col gap-2.5 sm:gap-3 xl:flex-row">
-            <div className="xl:w-[16.5rem] xl:shrink-0">
+              Total stands in the line rather than above it. It is the sum of the seven
+              beside it and could be argued into a card of its own -- it had one for a
+              while -- but a row read across wants one card repeated, and drawing one of
+              them bigger turned the other seven into its footnotes. */}
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3 xl:grid-cols-8">
+            {REVENUE_VIEWS.map((v) => (
               <RevenueTile
-                headline
-                label={TOTAL_VIEW.short}
-                value={fmt(sums.totals[TOTAL_VIEW.key])}
-                sub={countLabel(sums.counts[TOTAL_VIEW.key], revenueNoun(TOTAL_VIEW.key))}
-                icon={TOTAL_VIEW.icon}
-                color={TOTAL_VIEW.color}
-                active={revenueView === TOTAL_VIEW.key}
-                onClick={() => setRevenueView(TOTAL_VIEW.key)}
-                testid={`revenue-kpi-${TOTAL_VIEW.label.toLowerCase().replace(/\s+/g, "-")}`}
+                key={v.key}
+                label={v.short}
+                value={fmt(sums.totals[v.key])}
+                sub={countLabel(sums.counts[v.key], revenueNoun(v.key))}
+                icon={v.icon}
+                color={v.color}
+                active={revenueView === v.key}
+                muted={!sums.totals[v.key]}
+                onClick={() => setRevenueView(v.key)}
+                testid={`revenue-kpi-${v.label.toLowerCase().replace(/\s+/g, "-")}`}
               />
-            </div>
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3 xl:grid-cols-7">
-              {CATEGORY_VIEWS.map((v) => (
-                <RevenueTile
-                  key={v.key}
-                  label={v.short}
-                  value={fmt(sums.totals[v.key])}
-                  sub={countLabel(sums.counts[v.key], revenueNoun(v.key))}
-                  icon={v.icon}
-                  color={v.color}
-                  active={revenueView === v.key}
-                  muted={!sums.totals[v.key]}
-                  onClick={() => setRevenueView(v.key)}
-                  testid={`revenue-kpi-${v.label.toLowerCase().replace(/\s+/g, "-")}`}
-                />
-              ))}
-            </div>
+            ))}
           </div>
 
           {/* Under the cards, because it cuts them. On the top line it sat beside Income
