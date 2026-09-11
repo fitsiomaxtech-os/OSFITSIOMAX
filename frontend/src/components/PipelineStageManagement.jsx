@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, ArrowLeft, Flag, GripVertical, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, ArrowLeft, Flag, GripVertical, AlertTriangle, Lock, KeyRound } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers } from "@/lib/api";
+import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone } from "@/lib/api";
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
@@ -69,6 +69,13 @@ export const PipelineStageManagement = ({ onBack }) => {
   const [resetting, setResetting] = useState(false);
   const [resettingPayments, setResettingPayments] = useState(false);
   const [resettingUsers, setResettingUsers] = useState(false);
+  // The Danger Zone is hidden until a developer enters the developer password. The password
+  // is held here, in memory, for the resets to send -- never in storage, so leaving or
+  // refreshing the page locks it again. The server checks it on every reset regardless.
+  const [devPassword, setDevPassword] = useState(null);
+  const [askingPassword, setAskingPassword] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
 
   // The tab being looked at, resolved once: `type` is this table's tab id, and for the
   // Branch pair it is not the same string as the pipeline's API type — both tabs are
@@ -121,28 +128,65 @@ export const PipelineStageManagement = ({ onBack }) => {
     load();
   };
 
+  const lockDangerZone = () => {
+    setDevPassword(null);
+    setAskingPassword(false);
+    setPasswordInput("");
+  };
+
+  const handleUnlock = async (e) => {
+    e.preventDefault();
+    if (!passwordInput) return;
+    setUnlocking(true);
+    try {
+      await unlockDangerZone(passwordInput);
+      setDevPassword(passwordInput);
+      setAskingPassword(false);
+      setPasswordInput("");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not unlock");
+      setPasswordInput("");
+    }
+    setUnlocking(false);
+  };
+
+  // A reset refused for the password (changed on the server, or too many tries) locks the
+  // zone again rather than leaving three buttons up that can only fail.
+  const resetFailed = (e) => {
+    const status = e?.response?.status;
+    if (status === 403 || status === 429 || status === 503) lockDangerZone();
+    toast.error(e?.response?.data?.detail || "Reset failed");
+  };
+
   const handleResetAllLeads = async () => {
     const step1 = window.confirm(
       "Reset EVERY lead in the whole OS back to a fresh, unassigned New Leads state?\n\n" +
       "This keeps each lead's name/phone/contact info, but clears their stage, branch, " +
       "consultation, physio assignment, packages, fees, and follow-ups — and permanently " +
       "deletes all sessions, weekly assessments, package recommendations, appointments, " +
-      "patient view links, and activity history.\n\nThis cannot be undone."
+      "patient view links, activity history, and every Zumba and Fitness registration and " +
+      "referral.\n\nThis cannot be undone."
     );
     if (!step1) return;
-    const step2 = window.confirm("Are you absolutely sure? Type OK to confirm this final, irreversible reset.");
-    if (!step2) return;
+    // Typed, like the other two resets. This used to be a second OK box whose text asked
+    // for "OK" to be typed into a dialog that had nowhere to type.
+    const typed = window.prompt('Type RESET LEADS to confirm this final, irreversible reset.');
+    if ((typed || "").trim() !== "RESET LEADS") {
+      if (typed !== null) toast.error("Nothing was reset — the confirmation text didn't match");
+      return;
+    }
     setResetting(true);
     try {
-      const res = await resetAllLeads();
+      const res = await resetAllLeads(devPassword);
       toast.success(
         `Reset ${res.leads_reset} leads. Deleted ${res.sessions_deleted} sessions, ` +
         `${res.weekly_assessments_deleted} assessments, ${res.appointments_deleted} appointments, ` +
-        `${res.lead_activity_deleted} activity entries.`
+        `${res.lead_activity_deleted} activity entries, ${res.zumba_registrations_deleted} Zumba and ` +
+        `${res.fitness_registrations_deleted} Fitness registrations.`
       );
       load();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Reset failed");
+      resetFailed(e);
     }
     setResetting(false);
   };
@@ -166,7 +210,7 @@ export const PipelineStageManagement = ({ onBack }) => {
     }
     setResettingPayments(true);
     try {
-      const res = await resetAllPayments();
+      const res = await resetAllPayments(devPassword);
       const cashRows = Object.values(res.cash_book_deleted || {}).reduce((sum, n) => sum + n, 0);
       toast.success(
         `Cleared payments on ${res.leads_cleared} leads, ${res.zumba_registrations_cleared} Zumba and ` +
@@ -174,14 +218,14 @@ export const PipelineStageManagement = ({ onBack }) => {
         `${res.store_sales_deleted} store sales, ${cashRows} cash book entries, ${res.payslips_deleted} payslips.`
       );
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Reset failed");
+      resetFailed(e);
     }
     setResettingPayments(false);
   };
 
   const handleResetAllUsers = async () => {
     const step1 = window.confirm(
-      "Delete EVERY user login except Super Admin?\n\n" +
+      "Delete EVERY user login without Super Admin?\n\n" +
       "They are signed out and deleted, with their HR employee records, attendance, leave " +
       "requests, clock-ins, login history, and expert calendars (calendars with bookings are " +
       "switched off instead). Leads, Zumba registrations and branches that named them are " +
@@ -196,14 +240,14 @@ export const PipelineStageManagement = ({ onBack }) => {
     }
     setResettingUsers(true);
     try {
-      const res = await resetAllUsers();
+      const res = await resetAllUsers(devPassword);
       toast.success(
         `Deleted ${res.users_deleted} users, ${res.employees_deleted} employee records, ` +
         `${res.expert_profiles_deleted} expert calendars (${res.expert_profiles_switched_off} switched off), ` +
         `${res.portal_accounts_deleted} portal logins. Unlinked ${res.branches_unlinked} branch admins.`
       );
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Reset failed");
+      resetFailed(e);
     }
     setResettingUsers(false);
   };
@@ -310,11 +354,60 @@ export const PipelineStageManagement = ({ onBack }) => {
         </CardContent>
       </Card>
 
+      {/* Developers only. Nothing about the resets is on screen until the password is in:
+          a quiet button, then a password box, then the zone. */}
+      {!devPassword && !askingPassword && (
+        <div className="flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-slate-400 hover:text-slate-600"
+            onClick={() => setAskingPassword(true)}
+            data-testid="developer-access-btn"
+          >
+            <KeyRound className="mr-1 h-4 w-4" /> Developer Access
+          </Button>
+        </div>
+      )}
+
+      {!devPassword && askingPassword && (
+        <Card data-testid="developer-password-card">
+          <CardContent className="pt-5">
+            <form onSubmit={handleUnlock} className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                <Lock className="h-4 w-4" /> Developer password
+              </div>
+              <Input
+                type="password"
+                autoComplete="off"
+                autoFocus
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                className="sm:max-w-xs"
+                data-testid="developer-password-input"
+              />
+              <div className="flex gap-2">
+                <Button type="submit" disabled={unlocking || !passwordInput} data-testid="developer-unlock-btn">
+                  {unlocking ? "Checking..." : "Unlock"}
+                </Button>
+                <Button type="button" variant="outline" onClick={lockDangerZone} data-testid="developer-cancel-btn">
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {devPassword && (
       <Card className="border-red-200" data-testid="danger-zone-card">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle className="flex items-center gap-2 text-base text-red-700">
             <AlertTriangle className="h-4 w-4" /> Danger Zone
           </CardTitle>
+          <Button variant="ghost" size="sm" className="text-slate-500" onClick={lockDangerZone} data-testid="danger-zone-lock-btn">
+            <Lock className="mr-1 h-4 w-4" /> Lock
+          </Button>
         </CardHeader>
         {/* The resets side by side, one row on a wide screen and stacked below that -- three
             descriptions this long do not fit three-across on a tablet. Each box is a column
@@ -327,7 +420,8 @@ export const PipelineStageManagement = ({ onBack }) => {
               For testing only. Keeps every lead's name, phone and contact info, but resets stage,
               branch, consultation, physio assignment, packages and fees back to New Leads —
               and permanently deletes all sessions, weekly assessments, package recommendations,
-              appointments, patient view links, and activity history. Cannot be undone.
+              appointments, patient view links, activity history, and every Zumba and Fitness
+              registration and referral. Cannot be undone.
             </p>
             <Button
               variant="outline"
@@ -360,13 +454,13 @@ export const PipelineStageManagement = ({ onBack }) => {
             </Button>
           </div>
           <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
-            <p className="text-sm font-semibold text-red-800">Reset all users to a fresh state (except Super Admin)</p>
+            <p className="text-sm font-semibold text-red-800">Reset all users to a fresh state (Without Super Admin)</p>
             <p className="mt-1 flex-1 text-xs text-red-700">
-              For clearing test staff before go-live. Deletes every login except Super Admin and signs
+              For clearing test staff before go-live. Deletes every login without Super Admin and signs
               them out, with their HR employee records, attendance, leave requests, clock-ins, login
               history and expert calendars (a calendar with bookings is switched off instead). Leads,
-              Zumba registrations and branches that named them are unassigned, and every Client Portal
-              login is deleted. Super Admin accounts are never touched. Cannot be undone.
+              Zumba registrations (master) and branches that named them are unassigned, and every Client
+              Portal login is deleted. Super Admin accounts are never touched. Cannot be undone.
             </p>
             <Button
               variant="outline"
@@ -380,6 +474,7 @@ export const PipelineStageManagement = ({ onBack }) => {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {showAdd && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" data-testid="stages-dialog">

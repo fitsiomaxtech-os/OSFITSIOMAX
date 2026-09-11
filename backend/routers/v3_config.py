@@ -1,12 +1,15 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from typing import List, Optional, Dict
 from pydantic import BaseModel
+from urllib.parse import unquote
+import os
 import re
+import time
 import uuid
 
 from database import v3_col
 from utils import now_iso, normalize_slot_time, derive_branch_code, active_doctor_query, live_branch_query
-from security import hash_password
+from security import hash_password, is_hashed, verify_password
 from deps import (
     v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role,
     is_physio_role, is_diet_role, is_rehab_role, consultants_serving_branch,
@@ -1022,8 +1025,74 @@ async def v3_available_doctors(branch_id: str, slot_time: str, _: V3UserOut = De
     return {"available_doctors": available}
 
 
+# ---------- Danger Zone: developer password ----------
+#
+# The three resets are for developers, not for whoever holds Super Admin. So the screen
+# hides them behind a password, and every reset endpoint demands the same password itself --
+# the screen's lock is manners, and anyone holding a Super Admin token can call the URL.
+#
+# Only a bcrypt hash is kept, in the server's own backend/.env (gitignored, so it never
+# reaches the repo), and never in the frontend: this OS serves its frontend source publicly,
+# so anything the page knows, anyone can read. Unset means locked for everybody, not open.
+DANGER_ZONE_PASSWORD_ENV = "DANGER_ZONE_PASSWORD_HASH"
+DANGER_ZONE_MAX_FAILURES = 5
+DANGER_ZONE_LOCKOUT_SECONDS = 15 * 60
+# Wrong attempts per Super Admin, in this process. Best-effort -- a restart forgets them --
+# but it turns guessing from as-fast-as-bcrypt-allows into five tries a quarter hour.
+_danger_zone_failures: Dict[str, List[float]] = {}
+
+
+async def require_developer_password(
+    x_developer_password: Optional[str] = Header(None),
+    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+) -> V3UserOut:
+    """Super Admin AND the developer password, sent as X-Developer-Password.
+
+    URI-encoded by the page and decoded here, because a header can only carry Latin-1 and a
+    password is allowed to be anything.
+    """
+    stored = (os.environ.get(DANGER_ZONE_PASSWORD_ENV) or "").strip()
+    # A bcrypt hash or nothing. verify_password would compare a non-hash as plain text, and a
+    # plain password sitting in .env is exactly what this is meant not to need.
+    if not is_hashed(stored):
+        raise HTTPException(status_code=503, detail="The developer password has not been set on this server")
+
+    now = time.monotonic()
+    recent = [t for t in _danger_zone_failures.get(user.id, []) if now - t < DANGER_ZONE_LOCKOUT_SECONDS]
+    if len(recent) >= DANGER_ZONE_MAX_FAILURES:
+        raise HTTPException(status_code=429, detail="Too many wrong attempts — try again in 15 minutes")
+
+    typed = unquote(x_developer_password or "")
+    if not typed or not verify_password(typed, stored):
+        recent.append(now)
+        _danger_zone_failures[user.id] = recent
+        raise HTTPException(status_code=403, detail="Wrong developer password")
+    _danger_zone_failures.pop(user.id, None)
+    return user
+
+
+@router.post("/admin/danger-zone/unlock")
+async def v3_unlock_danger_zone(_: V3UserOut = Depends(require_developer_password)):
+    """Checks the developer password so the screen can reveal the resets. Unlocks nothing on
+    the server: each reset checks the password again on its own."""
+    return {"unlocked": True}
+
+
+# What a consultation's Zumba and Fitness referral leaves on a lead. Cleared with the rest of
+# the pipeline, or a reset lead goes on being read as a live referral by both tabs.
+LEAD_ZUMBA_FITNESS_RESET_FIELDS = {
+    "zumba_recommended": False,
+    "zumba_package_id": None,
+    "zumba_package_name": None,
+    "zumba_package_price": None,
+    "zumba_package_sessions": None,
+    "zumba_package_mode": None,
+    "fitness_recommended": False,
+}
+
+
 @router.post("/admin/reset-all-leads")
-async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(require_developer_password)):
     """Testing utility: resets every lead's pipeline progress back to a fresh,
     unassigned state at Pre-Sales' first stage — the lead record itself (name,
     phone, contact info, source) is kept as-is. Clears both the Consultation
@@ -1031,8 +1100,11 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_re
     so no stale balance or due date survives into Accountant Manage after a
     reset. Also clears everything tied to leads that only makes sense
     mid-pipeline: sessions, weekly assessments, package recommendations,
-    appointments, patient view tokens, and activity history. Irreversible —
-    requires confirm=true. Super Admin only."""
+    appointments, patient view tokens, and activity history.
+
+    Zumba and Fitness go entirely: the referral flags and Zumba package on every lead, every
+    registration on both tabs (walk-ins included), and every turned-away referral.
+    Irreversible — requires confirm=true. Super Admin plus the developer password."""
     if not confirm:
         raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
 
@@ -1091,6 +1163,7 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_re
         "portfolio_time": None,
         "portfolio_datetime": None,
         "expected_consultation_date": None,
+        **LEAD_ZUMBA_FITNESS_RESET_FIELDS,
         "updated_at": now_iso(),
     }
     leads_result = await v3_col("leads").update_many({}, {"$set": reset_fields})
@@ -1105,9 +1178,15 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_re
     appts_deleted = (await v3_col("appointments").delete_many({})).deleted_count
     tokens_deleted = (await v3_col("patient_tokens").delete_many({})).deleted_count
     activity_deleted = (await v3_col("lead_activity").delete_many({})).deleted_count
+    zumba_deleted = (await v3_col("zumba_registrations").delete_many({})).deleted_count
+    fitness_deleted = (await v3_col("fitness_registrations").delete_many({})).deleted_count
+    await v3_col("zumba_referral_dismissals").delete_many({})
+    await v3_col("fitness_referral_dismissals").delete_many({})
 
     return {
         "message": "All leads reset to a fresh state",
+        "zumba_registrations_deleted": zumba_deleted,
+        "fitness_registrations_deleted": fitness_deleted,
         "leads_reset": leads_result.modified_count,
         "sessions_deleted": sessions_deleted,
         "weekly_assessments_deleted": assessments_deleted,
@@ -1161,7 +1240,7 @@ REGISTRATION_APPROVAL_UNSET = {
 
 
 @router.post("/admin/reset-all-payments")
-async def v3_reset_all_payments(confirm: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_reset_all_payments(confirm: bool = False, _: V3UserOut = Depends(require_developer_password)):
     """Wipes every rupee recorded anywhere in the OS, leaving the people and plans it was
     recorded against. For clearing test money before go-live.
 
@@ -1175,7 +1254,7 @@ async def v3_reset_all_payments(confirm: bool = False, _: V3UserOut = Depends(v3
 
     Leaves alone: leads, registrations, stock items, stock deliveries and transfers, and
     every activity entry that is not a payment. Irreversible — requires confirm=true.
-    Super Admin only."""
+    Super Admin plus the developer password."""
     if not confirm:
         raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
 
@@ -1269,7 +1348,7 @@ LEAD_EXPERT_FIELDS = (
 
 
 @router.post("/admin/reset-all-users")
-async def v3_reset_all_users(confirm: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_reset_all_users(confirm: bool = False, _: V3UserOut = Depends(require_developer_password)):
     """Deletes every login except the Super Admins', and what belongs only to those people.
     For clearing test staff before go-live.
 
@@ -1285,7 +1364,7 @@ async def v3_reset_all_users(confirm: bool = False, _: V3UserOut = Depends(v3_re
 
     A Super Admin's login, employee record and expert profile are never touched. Employees
     with no login at all are not users and are left alone. Irreversible — requires
-    confirm=true. Super Admin only."""
+    confirm=true. Super Admin plus the developer password."""
     if not confirm:
         raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
 
@@ -1329,7 +1408,7 @@ async def v3_reset_all_users(confirm: bool = False, _: V3UserOut = Depends(v3_re
             {"$set": {id_field: None, name_field: None, "updated_at": now_iso()}},
         )).modified_count
     await v3_col("zumba_registrations").update_many(
-        {"assigned_master_id": {"$in": user_ids}}, {"$set": {"assigned_master_id": ""}}
+        {"assigned_master_id": {"$in": user_ids}}, {"$set": {"assigned_master_id": "", "assigned_master_name": ""}}
     )
     # Empty strings, not None: V3BranchOut declares all three as plain str, and a None here
     # would fail every read of the branch list.

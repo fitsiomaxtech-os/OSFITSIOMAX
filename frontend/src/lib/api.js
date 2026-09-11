@@ -579,9 +579,13 @@ export const stagesCreate = async (payload) => { const { data } = await api.post
 export const stagesUpdate = async (id, payload) => { const { data } = await api.patch(`/stages/${id}`, payload); invalidateStages(); return data; };
 export const stagesDelete = async (id) => { const { data } = await api.delete(`/stages/${id}`); invalidateStages(); return data; };
 export const stagesReorder = async (items) => { const { data } = await api.post("/stages/reorder", { items }); invalidateStages(); return data; };
-export const resetAllLeads = async () => (await api.post("/admin/reset-all-leads", null, { params: { confirm: true } })).data;
-export const resetAllPayments = async () => (await api.post("/admin/reset-all-payments", null, { params: { confirm: true } })).data;
-export const resetAllUsers = async () => (await api.post("/admin/reset-all-users", null, { params: { confirm: true } })).data;
+// The Danger Zone's developer password, checked by the server on every call. URI-encoded
+// because a header can only carry Latin-1; the backend decodes it.
+const developerHeaders = (password) => ({ "X-Developer-Password": encodeURIComponent(password || "") });
+export const unlockDangerZone = async (password) => (await api.post("/admin/danger-zone/unlock", null, { headers: developerHeaders(password) })).data;
+export const resetAllLeads = async (password) => (await api.post("/admin/reset-all-leads", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
+export const resetAllPayments = async (password) => (await api.post("/admin/reset-all-payments", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
+export const resetAllUsers = async (password) => (await api.post("/admin/reset-all-users", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
 
 // HR
 export const hrDashboard = async () => (await api.get("/hr/dashboard")).data;
