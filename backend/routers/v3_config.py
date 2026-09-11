@@ -1145,7 +1145,8 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
     so no stale balance or due date survives into Accountant Manage after a
     reset. Also clears everything tied to leads that only makes sense
     mid-pipeline: sessions, weekly assessments, package recommendations,
-    appointments, patient view tokens, and activity history.
+    appointments, patient view tokens, and activity history. The VIP and Need Attention
+    marks go too, so Dashboard > Clients starts empty.
 
     Every Review goes too, whichever tab it sits on (Send to Review, Pending Review, Review
     Complete). A review is a reading of treatment days this reset deletes, and one left
@@ -1212,6 +1213,15 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
         "appointment_date": None,
         "appointment_time": None,
         "appointment_datetime": None,
+        # A reschedule is a mark on the appointment this reset deletes, so it goes with it.
+        "appointment_rescheduled": False,
+        "appointment_reschedule_count": 0,
+        "appointment_rescheduled_at": None,
+        "appointment_rescheduled_from": None,
+        # The hand-put VIP and Need Attention marks. Dashboard > Clients lists leads by
+        # these two alone, so left behind they kept a reset New Lead on both lists.
+        "is_vip": False,
+        "needs_attention": False,
         "portfolio_date": None,
         "portfolio_time": None,
         "portfolio_datetime": None,

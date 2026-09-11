@@ -162,7 +162,8 @@ export const PipelineStageManagement = ({ leading = null }) => {
     const step1 = window.confirm(
       "Reset EVERY lead in the whole OS back to a fresh, unassigned New Leads state?\n\n" +
       "This keeps each lead's name/phone/contact info, but clears their stage, branch, " +
-      "consultation decision, physio assignment, packages, fees, follow-ups, and every Diet, " +
+      "consultation decision, physio assignment, packages, fees, follow-ups, VIP and Need " +
+      "Attention marks, and every Diet, " +
       "Diet Chart and Rehab referral, coach, rehab physio and report — and permanently " +
       "deletes all sessions (treatment, diet and rehab days), weekly assessments, every Review " +
       "(Send to Review, Pending Review and Review Complete), package recommendations, appointments, patient view links, activity history, and every Zumba " +
@@ -422,7 +423,8 @@ export const PipelineStageManagement = ({ leading = null }) => {
             <p className="mt-1 flex-1 text-xs text-red-700">
               For testing only. Keeps every lead's name, phone and contact info, but resets stage,
               branch, consultation, physio assignment, packages and fees back to New Leads, and
-              clears every Diet, Diet Chart and Rehab referral, coach, rehab physio and report —
+              clears every VIP and Need Attention mark and every Diet, Diet Chart and Rehab
+              referral, coach, rehab physio and report —
               and permanently deletes all sessions (treatment, diet and rehab days), weekly
               assessments, every Review (Send to Review, Pending Review and Review Complete),
               package recommendations, appointments, patient view links, activity history, and
