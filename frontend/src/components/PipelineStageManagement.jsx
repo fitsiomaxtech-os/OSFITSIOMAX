@@ -60,7 +60,7 @@ const TONE_CLASSES = {
   pink: { border: "border-pink-500", text: "text-pink-600" },
 };
 
-export const PipelineStageManagement = ({ onBack }) => {
+export const PipelineStageManagement = ({ onBack, leading = null }) => {
   const [type, setType] = useState("pre_sales");
   const [stages, setStages] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -260,9 +260,17 @@ export const PipelineStageManagement = ({ onBack }) => {
           it still reads left-to-right as "where you came from" then "what you can do". */}
       {/* One row at every width. Stacked on a phone this put the back link on a line of
           its own above a full-bleed sky button, which read as a banner rather than as
-          "where you came from" then "what you can do". */}
-      <div className="flex items-center justify-between gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack} data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4 mr-1" />Settings</Button>
+          "where you came from" then "what you can do".
+
+          `leading` is the Settings switcher (Marketing Source / CI/CD ROOTS) handed down by
+          the page, so the back arrow, the switcher and Add Stage share this one row instead
+          of the switcher sitting on a row of its own above it. The back button is the arrow
+          alone; its name is still there for screen readers and on hover. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={onBack} aria-label="Back to Settings" title="Back to Settings" data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4" /></Button>
+          {leading}
+        </div>
         <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="shrink-0 bg-sky-600 hover:bg-sky-700" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
       </div>
 

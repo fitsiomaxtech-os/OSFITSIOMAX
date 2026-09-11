@@ -1429,7 +1429,7 @@ const DialogShell = ({ title, onClose, children, testid, maxWidth = "max-w-md" }
 
 // ============ Root ============
 
-export const MarketingBoard = ({ branches = [] }) => {
+export const MarketingBoard = ({ branches = [], leading = null }) => {
   const [tab, setTab] = useState("all_leads");
   const [team, setTeam] = useState({ pre_sales: [], sales: [] });
   const reloadTeam = useCallback(() => mkGetTeam().then(setTeam).catch((e) => console.warn("[load failed]", e?.message || e)), []);
@@ -1437,11 +1437,17 @@ export const MarketingBoard = ({ branches = [] }) => {
 
   return (
     <div className="space-y-4" data-testid="marketing-board">
-      {/* No heading. The nav tab above already reads Marketing Source. */}
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2" data-testid="mk-subtabs">
-        {SUB_TABS.map((t) => (
-          <TabBtn key={t.key} active={tab === t.key} label={t.label} Icon={t.icon} onClick={() => setTab(t.key)} testid={`mk-subtab-${t.key}`} />
-        ))}
+      {/* No heading. The nav tab above already reads Marketing Source.
+          `leading` is the Settings switcher (Marketing Source / CI/CD ROOTS) handed down by
+          the page: it holds the left of this row and the sub-tabs the right, so the two
+          levels of tabs read as one bar rather than two stacked strips. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
+        {leading}
+        <div className="flex flex-wrap gap-2" data-testid="mk-subtabs">
+          {SUB_TABS.map((t) => (
+            <TabBtn key={t.key} active={tab === t.key} label={t.label} Icon={t.icon} onClick={() => setTab(t.key)} testid={`mk-subtab-${t.key}`} />
+          ))}
+        </div>
       </div>
       {tab === "lead_sources" && <SourcesTab branches={branches} />}
       {tab === "all_leads" && <AllLeadsTab team={team} />}

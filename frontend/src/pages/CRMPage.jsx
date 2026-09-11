@@ -912,6 +912,26 @@ export const CRMPage = ({ auth, onLogout }) => {
 
   const filteredAppointmentsForPhysioBoards = appointments;
 
+  // Settings' Marketing Source / CI/CD ROOTS switcher. Not a row of its own: each screen
+  // places it in its own top bar -- left of Marketing Source's sub-tabs, after CI/CD ROOTS'
+  // back arrow -- so Settings opens on one row of controls rather than two.
+  const settingsSubTabs = (
+    <div className="flex flex-wrap gap-2" data-testid="settings-subtabs">
+      {SETTINGS_SUB_TABS.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          onClick={() => setSuperAdminView(t.key)}
+          data-testid={`settings-subtab-${t.key}`}
+          className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === t.key ? "bg-sky-600 text-white shadow" : "text-slate-600 hover:bg-slate-100"}`}
+        >
+          <t.icon className="h-4 w-4" />
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-slate-50" data-testid="role-board-page">
       <Toaster richColors position="top-right" />
@@ -1292,23 +1312,9 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && SETTINGS_SUB_VIEWS.includes(superAdminView) && (
-          <div className="space-y-4" data-testid="super-admin-settings">
-            <div className="flex flex-wrap gap-2" data-testid="settings-subtabs">
-              {SETTINGS_SUB_TABS.map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setSuperAdminView(t.key)}
-                  data-testid={`settings-subtab-${t.key}`}
-                  className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === t.key ? "bg-sky-600 text-white shadow" : "text-slate-600 hover:bg-slate-100"}`}
-                >
-                  <t.icon className="h-4 w-4" />
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            {superAdminView === "marketing" && <MarketingBoard branches={branches} />}
-            {superAdminView === "stages" && <PipelineStageManagement onBack={() => setSuperAdminView("presales")} />}
+          <div data-testid="super-admin-settings">
+            {superAdminView === "marketing" && <MarketingBoard branches={branches} leading={settingsSubTabs} />}
+            {superAdminView === "stages" && <PipelineStageManagement onBack={() => setSuperAdminView("presales")} leading={settingsSubTabs} />}
           </div>
         )}
 
