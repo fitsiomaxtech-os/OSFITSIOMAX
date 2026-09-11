@@ -164,8 +164,8 @@ export const PipelineStageManagement = ({ leading = null }) => {
       "This keeps each lead's name/phone/contact info, but clears their stage, branch, " +
       "consultation decision, physio assignment, packages, fees, follow-ups, and every Diet, " +
       "Diet Chart and Rehab referral, coach, rehab physio and report — and permanently " +
-      "deletes all sessions (treatment, diet and rehab days), weekly assessments, package " +
-      "recommendations, appointments, patient view links, activity history, and every Zumba " +
+      "deletes all sessions (treatment, diet and rehab days), weekly assessments, every Review " +
+      "(Send to Review, Pending Review and Review Complete), package recommendations, appointments, patient view links, activity history, and every Zumba " +
       "and Fitness registration and referral.\n\nThis cannot be undone."
     );
     if (!step1) return;
@@ -181,7 +181,7 @@ export const PipelineStageManagement = ({ leading = null }) => {
       const res = await resetAllLeads(devPassword);
       toast.success(
         `Reset ${res.leads_reset} leads. Deleted ${res.sessions_deleted} sessions, ` +
-        `${res.weekly_assessments_deleted} assessments, ${res.appointments_deleted} appointments, ` +
+        `${res.weekly_assessments_deleted} assessments, ${res.reviews_deleted} reviews, ${res.appointments_deleted} appointments, ` +
         `${res.lead_activity_deleted} activity entries, ${res.diet_sessions_deleted} diet and ` +
         `${res.rehab_sessions_deleted} rehab days, ${res.zumba_registrations_deleted} Zumba and ` +
         `${res.fitness_registrations_deleted} Fitness registrations.`
@@ -424,8 +424,9 @@ export const PipelineStageManagement = ({ leading = null }) => {
               branch, consultation, physio assignment, packages and fees back to New Leads, and
               clears every Diet, Diet Chart and Rehab referral, coach, rehab physio and report —
               and permanently deletes all sessions (treatment, diet and rehab days), weekly
-              assessments, package recommendations, appointments, patient view links, activity
-              history, and every Zumba and Fitness registration and referral. Cannot be undone.
+              assessments, every Review (Send to Review, Pending Review and Review Complete),
+              package recommendations, appointments, patient view links, activity history, and
+              every Zumba and Fitness registration and referral. Cannot be undone.
             </p>
             <Button
               variant="outline"

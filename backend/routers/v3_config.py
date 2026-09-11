@@ -1147,6 +1147,11 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
     mid-pipeline: sessions, weekly assessments, package recommendations,
     appointments, patient view tokens, and activity history.
 
+    Every Review goes too, whichever tab it sits on (Send to Review, Pending Review, Review
+    Complete). A review is a reading of treatment days this reset deletes, and one left
+    behind would still hold its Head Physio slot and keep the Review tab counting patients
+    who are back at New Leads.
+
     Zumba and Fitness go entirely: the referral flags and Zumba package on every lead, every
     registration on both tabs (walk-ins included), and every turned-away referral. So do
     Diet, Diet Chart and Rehab: the consultation decision, referrals, coach and rehab physio,
@@ -1226,6 +1231,7 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
     # carrying lead_id; login tokens have none, so they can never match.
     sessions_deleted = (await v3_col("sessions").delete_many({"lead_id": {"$exists": True}})).deleted_count
     assessments_deleted = (await v3_col("weekly_assessments").delete_many({})).deleted_count
+    reviews_deleted = (await v3_col("reviews").delete_many({})).deleted_count
     recs_deleted = (await v3_col("package_recommendations").delete_many({})).deleted_count
     appts_deleted = (await v3_col("appointments").delete_many({})).deleted_count
     tokens_deleted = (await v3_col("patient_tokens").delete_many({})).deleted_count
@@ -1246,6 +1252,7 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
         "leads_reset": leads_result.modified_count,
         "sessions_deleted": sessions_deleted,
         "weekly_assessments_deleted": assessments_deleted,
+        "reviews_deleted": reviews_deleted,
         "package_recommendations_deleted": recs_deleted,
         "appointments_deleted": appts_deleted,
         "patient_tokens_deleted": tokens_deleted,
