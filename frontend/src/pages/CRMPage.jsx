@@ -913,8 +913,8 @@ export const CRMPage = ({ auth, onLogout }) => {
   const filteredAppointmentsForPhysioBoards = appointments;
 
   // Settings' Marketing Source / CI/CD ROOTS switcher. Not a row of its own: each screen
-  // places it in its own top bar -- left of Marketing Source's sub-tabs, after CI/CD ROOTS'
-  // back arrow -- so Settings opens on one row of controls rather than two.
+  // places it in its own top bar -- left of Marketing Source's sub-tabs, left of CI/CD
+  // ROOTS' Add Stage -- so Settings opens on one row of controls rather than two.
   const settingsSubTabs = (
     <div className="flex flex-wrap gap-2" data-testid="settings-subtabs">
       {SETTINGS_SUB_TABS.map((t) => (
@@ -1314,7 +1314,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         {showSuperAdminBoard && SETTINGS_SUB_VIEWS.includes(superAdminView) && (
           <div data-testid="super-admin-settings">
             {superAdminView === "marketing" && <MarketingBoard branches={branches} leading={settingsSubTabs} />}
-            {superAdminView === "stages" && <PipelineStageManagement onBack={() => setSuperAdminView("presales")} leading={settingsSubTabs} />}
+            {superAdminView === "stages" && <PipelineStageManagement leading={settingsSubTabs} />}
           </div>
         )}
 
