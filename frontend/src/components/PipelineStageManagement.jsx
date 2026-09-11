@@ -167,7 +167,9 @@ export const PipelineStageManagement = ({ leading = null }) => {
       "Diet Chart and Rehab referral, coach, rehab physio and report — and permanently " +
       "deletes all sessions (treatment, diet and rehab days), weekly assessments, every Review " +
       "(Send to Review, Pending Review and Review Complete), package recommendations, appointments, patient view links, activity history, and every Zumba " +
-      "and Fitness registration and referral.\n\nThis cannot be undone."
+      "and Fitness registration and referral.\n\nThe Management calendars start empty too: every slot published on a " +
+      "Consultant, Physiotherapist or Nutritionist calendar, their one-day shift changes, every Zumba master's class, " +
+      "and every Missed Class.\n\nThis cannot be undone."
     );
     if (!step1) return;
     // Typed, like the other two resets. This used to be a second OK box whose text asked
@@ -185,7 +187,8 @@ export const PipelineStageManagement = ({ leading = null }) => {
         `${res.weekly_assessments_deleted} assessments, ${res.reviews_deleted} reviews, ${res.appointments_deleted} appointments, ` +
         `${res.lead_activity_deleted} activity entries, ${res.diet_sessions_deleted} diet and ` +
         `${res.rehab_sessions_deleted} rehab days, ${res.zumba_registrations_deleted} Zumba and ` +
-        `${res.fitness_registrations_deleted} Fitness registrations.`
+        `${res.fitness_registrations_deleted} Fitness registrations. Cleared ${res.calendars_cleared} calendars ` +
+        `and ${res.zumba_classes_cleared} Zumba classes.`
       );
       load();
     } catch (e) {
@@ -428,7 +431,9 @@ export const PipelineStageManagement = ({ leading = null }) => {
               and permanently deletes all sessions (treatment, diet and rehab days), weekly
               assessments, every Review (Send to Review, Pending Review and Review Complete),
               package recommendations, appointments, patient view links, activity history, and
-              every Zumba and Fitness registration and referral. Cannot be undone.
+              every Zumba and Fitness registration and referral. Management's Consultant,
+              Physiotherapist, Zumba and Nutritionists calendars and Missed Classes start empty.
+              Cannot be undone.
             </p>
             <Button
               variant="outline"

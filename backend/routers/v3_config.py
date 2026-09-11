@@ -21,6 +21,7 @@ import lead_control
 from seed import create_default_lead_source, sync_lead_source_branch_name
 from routers.v3_finance import REVENUE_ACTIONS
 from routers.v3_inventory import _add_to_stock
+from routers.v3_zumba import MASTER_SLOT_FIELD
 from schemas.v3 import (
     V3UserOut, V3VerticalCreate, V3VerticalOut,
     V3BranchCreate, V3BranchOut, V3BranchUpdate,
@@ -1158,6 +1159,12 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
     Diet, Diet Chart and Rehab: the consultation decision, referrals, coach and rehab physio,
     packages, fees, stages, the coach's report and chart pointer, and every diet and rehab
     session day. Uploaded documents are left alone.
+
+    The Management calendars start over as well: every slot published on a Consultant's,
+    Physiotherapist's or Nutritionist's calendar, and the one-day shift changes made from
+    them, and every Zumba master's class. Their bookings are the appointments and session
+    days deleted above, and Missed Classes is read off those, so it empties with them. What
+    an expert is set up as stays -- usual shift, patients per slot, service, meeting link.
     Irreversible — requires confirm=true. Super Admin plus the developer password."""
     if not confirm:
         raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
@@ -1253,8 +1260,25 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
     diet_days_deleted = (await v3_col("diet_sessions").delete_many({})).deleted_count
     rehab_days_deleted = (await v3_col("rehab_sessions").delete_many({})).deleted_count
 
+    # Management's calendars. Only experts with something published are counted, so the
+    # figure reads as calendars cleared rather than every doctor record on the install.
+    calendars_result = await v3_col("doctors").update_many(
+        {"$or": [
+            {"slots.0": {"$exists": True}},
+            {"slot_details.0": {"$exists": True}},
+            {"shift_overrides": {"$nin": [None, {}]}},
+        ]},
+        {"$set": {"slots": [], "slot_details": [], "shift_overrides": {}, "updated_at": now_iso()}},
+    )
+    zumba_classes_result = await v3_col("users").update_many(
+        {MASTER_SLOT_FIELD: {"$nin": ["", None]}},
+        {"$set": {MASTER_SLOT_FIELD: ""}},
+    )
+
     return {
         "message": "All leads reset to a fresh state",
+        "calendars_cleared": calendars_result.modified_count,
+        "zumba_classes_cleared": zumba_classes_result.modified_count,
         "diet_sessions_deleted": diet_days_deleted,
         "rehab_sessions_deleted": rehab_days_deleted,
         "zumba_registrations_deleted": zumba_deleted,
