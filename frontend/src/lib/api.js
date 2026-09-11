@@ -227,6 +227,8 @@ export const getConsultationsBoard = async (branchId, pipeline, mine) => (await 
 export const listConsultAppointments = async (branchId) => (await api.get(`/branch-admin/${branchId}/consult-appointments`)).data;
 export const getConsultAvailability = async (branchId, date, doctorId) => (await api.get(`/branch-admin/${branchId}/consult-availability`, { params: { date, doctor_id: doctorId } })).data;
 export const getConsultDay = async (branchId, date) => (await api.get(`/branch-admin/${branchId}/consult-day`, { params: { date } })).data;
+// One consultant's day, slot by slot, with the patients in each and their VIP / attention marks.
+export const getConsultantSlots = async (branchId, doctorId, date) => (await api.get(`/branch-admin/${branchId || "all"}/consultant-slots`, { params: { doctor_id: doctorId, date } })).data;
 export const createConsultAppointment = async (branchId, payload) => (await api.post(`/branch-admin/${branchId}/consult-appointments`, payload)).data;
 export const updateConsultAppointment = async (apptId, payload) => (await api.patch(`/branch-admin/consult-appointments/${apptId}`, payload)).data;
 export const cancelConsultAppointment = async (apptId) => (await api.post(`/branch-admin/consult-appointments/${apptId}/cancel`)).data;

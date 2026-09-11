@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from pydantic import BaseModel
 from datetime import datetime
+import re
 import uuid
 
 from database import v3_col
@@ -182,6 +183,105 @@ async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_requi
             "booked_slots": sorted(booked),
         })
     return {"open": True, "reason": None, "open_time": open_t, "close_time": close_t, "head_physios": head_physios}
+
+
+@router.get("/branch-admin/{branch_id}/consultant-slots")
+async def consultant_slots(branch_id: str, doctor_id: str, date: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+    """One CONSULTANT's day, hour by hour, with who is sitting in each hour.
+
+    Drives the consultant popup on My Consultation: every slot the consultant published for
+    the date, plus any hour something was booked into without one, each carrying the
+    patients in it and the two marks a branch puts on a patient — VIP and needs attention —
+    so the desk sees who to treat especially well before opening anyone.
+
+    Bookings at every branch are returned, not only `branch_id`'s. A consultant is org-wide
+    and an hour taken at another branch is still an hour they are not free; each booking
+    names its branch so the caller can say where it is.
+    """
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date or ""):
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    doctor = await _get_doctor(doctor_id)
+    prefix = {"$regex": f"^{re.escape(date)}T"}
+
+    appt_rows = await v3_col("appointments").find(
+        {"doctor_id": doctor_id, "status": "new_appointment", "slot_time": prefix},
+        {"_id": 0, "id": 1, "slot_time": 1, "lead_id": 1, "lead_name": 1, "patient_name": 1,
+         "branch_id": 1, "rescheduled": 1, "rescheduled_from": 1},
+    ).to_list(500)
+    # A review dispatched into one of the consultant's slots holds that hour exactly as a
+    # consultation does; one sent without a time was never placed and has no hour to show.
+    review_rows = await v3_col("reviews").find(
+        {"head_physio_id": doctor_id, "review_date": date, "review_time": {"$nin": ["", None]}},
+        {"_id": 0, "id": 1, "lead_id": 1, "lead_name": 1, "review_time": 1, "status": 1, "branch_id": 1},
+    ).to_list(500)
+
+    lead_ids = list({r["lead_id"] for r in (*appt_rows, *review_rows) if r.get("lead_id")})
+    leads = await v3_col("leads").find(
+        {"id": {"$in": lead_ids}},
+        {"_id": 0, "id": 1, "name": 1, "phone": 1, "patient_number": 1, "branch_id": 1,
+         "is_vip": 1, "needs_attention": 1},
+    ).to_list(len(lead_ids) or 1)
+    lead_map = {l["id"]: l for l in leads}
+
+    branch_ids = {r.get("branch_id") or lead_map.get(r.get("lead_id"), {}).get("branch_id") for r in (*appt_rows, *review_rows)}
+    branch_ids.discard(None)
+    branches = await v3_col("branches").find(
+        {"id": {"$in": list(branch_ids)}}, {"_id": 0, "id": 1, "branch_name": 1},
+    ).to_list(len(branch_ids) or 1)
+    branch_names = {b["id"]: b.get("branch_name", "") for b in branches}
+
+    def booking(row, kind, time_str):
+        lead = lead_map.get(row.get("lead_id"), {})
+        b_id = row.get("branch_id") or lead.get("branch_id") or ""
+        return {
+            "id": row.get("id"),
+            "kind": kind,
+            "time": time_str,
+            "lead_id": row.get("lead_id"),
+            "patient_name": lead.get("name") or row.get("patient_name") or row.get("lead_name") or "Unknown",
+            "phone": lead.get("phone", ""),
+            "patient_number": lead.get("patient_number", ""),
+            "is_vip": bool(lead.get("is_vip")),
+            "needs_attention": bool(lead.get("needs_attention")),
+            "branch_id": b_id,
+            "branch_name": branch_names.get(b_id, ""),
+            "rescheduled": bool(row.get("rescheduled")),
+            "rescheduled_from": row.get("rescheduled_from") or "",
+            "status": row.get("status", ""),
+        }
+
+    by_time: dict = {}
+    for r in appt_rows:
+        t = (r.get("slot_time") or "").split("T")[1] if "T" in (r.get("slot_time") or "") else ""
+        if t:
+            by_time.setdefault(t, []).append(booking(r, "consultation", t))
+    for r in review_rows:
+        t = r["review_time"]
+        by_time.setdefault(t, []).append(booking(r, "review", t))
+
+    published = {
+        s.split("T")[1] for s in (doctor.get("slots") or [])
+        if isinstance(s, str) and s.startswith(f"{date}T")
+    }
+    slots = [
+        {"time": t, "published": t in published, "bookings": by_time.get(t, [])}
+        for t in sorted(published | set(by_time.keys()))
+    ]
+    all_bookings = [b for s in slots for b in s["bookings"]]
+    return {
+        "doctor_id": doctor["id"],
+        "doctor_name": doctor.get("full_name", ""),
+        "specialization": doctor.get("specialization", ""),
+        "date": date,
+        "slots": slots,
+        "summary": {
+            "slots": len(slots),
+            "booked": sum(1 for s in slots if s["bookings"]),
+            "free": sum(1 for s in slots if not s["bookings"]),
+            "vip": sum(1 for b in all_bookings if b["is_vip"]),
+            "attention": sum(1 for b in all_bookings if b["needs_attention"]),
+        },
+    }
 
 
 @router.post("/branch-admin/{branch_id}/consult-appointments")

@@ -1,9 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
-import { ArrowLeftRight, Building2, ChevronDown, Check, AlertTriangle, UserRound, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, AlertTriangle, Building2, Check, ChevronDown, Clock, Phone, RefreshCw, Star, Stethoscope, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { toast } from "@/components/ui/sonner";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
-import { ConsultationReassignModal } from "@/components/ConsultationReassignModal";
-import { hpResolvedConsultant } from "@/lib/api";
+import { WeekStrip, todayIso } from "@/components/WeekStrip";
+import { LeadMarks, RescheduledTag } from "@/components/ui/lead-marks";
+import { getConsultantSlots, getDoctors, hpResolvedConsultant, listBranchConsultants } from "@/lib/api";
+import { to12h } from "@/lib/time";
 
 const ALL = "all";
 
@@ -100,11 +111,331 @@ const BranchPicker = ({ value, branches, onPick }) => {
 };
 
 /**
+ * The consultants who work the branch picked beside it.
+ *
+ * A menu of people rather than a filter: picking one opens their day, it does not narrow
+ * the board underneath. Under All Branches it lists every consultant, since a consultant
+ * is org-wide and the question "whose day" still has an answer there.
+ */
+const ConsultantPicker = ({ branchId, onPick }) => {
+  const [consultants, setConsultants] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    // A branch asks who is posted there — the same list Reassign reads, Super Admin first.
+    // All Branches has no posting to ask about, so it lists every consultant by name.
+    const req = branchId === ALL
+      ? getDoctors().then((rows) => (rows || [])
+        .filter((d) => d.profile_type === "head_physio")
+        .sort((a, b) => String(a.full_name || "").localeCompare(String(b.full_name || ""))))
+      : listBranchConsultants(branchId).then((res) => res?.consultants || []);
+    req
+      .then((rows) => { if (live) setConsultants(rows); })
+      .catch(() => { if (live) setConsultants([]); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [branchId]);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button className="h-10 justify-between gap-2 bg-sky-600 text-white hover:bg-sky-700 sm:w-64" data-testid="my-consultation-consultant-trigger">
+          <span className="flex min-w-0 items-center gap-2">
+            <Stethoscope className="h-4 w-4 shrink-0" />
+            <span className="truncate">Consultants{consultants.length ? ` (${consultants.length})` : ""}</span>
+          </span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto" data-testid="my-consultation-consultant-menu">
+        <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-slate-400">
+          {branchId === ALL ? "All consultants" : "Consultants at this branch"}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {loading ? (
+          <p className="px-2 py-4 text-center text-xs text-slate-400">Loading…</p>
+        ) : consultants.length === 0 ? (
+          <p className="px-2 py-4 text-center text-xs text-slate-400">No consultants for this branch.</p>
+        ) : consultants.map((c) => (
+          <DropdownMenuItem
+            key={c.id}
+            onSelect={() => onPick(c)}
+            className="cursor-pointer flex-col items-start gap-0"
+            data-testid={`my-consultation-consultant-${c.id}`}
+          >
+            <span className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+              {c.full_name}
+              {c.is_me && <span className="rounded-[4px] bg-teal-100 px-1 py-px text-[9px] font-bold uppercase text-teal-700">You</span>}
+              {c.is_super_admin && !c.is_me && <span className="rounded-[4px] bg-slate-100 px-1 py-px text-[9px] font-bold uppercase text-slate-600">Super Admin</span>}
+            </span>
+            {c.specialization && <span className="text-[11px] text-slate-400">{c.specialization}</span>}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
+// The marks spelled out, for the detail panel where there is room for words. The slot
+// cards use the bare icons from LeadMarks, the same ones every other list shows.
+const MarkBadges = ({ booking }) => (
+  <>
+    {booking.is_vip && (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200">
+        <Star className="h-3 w-3 fill-amber-400 text-amber-500" /> VIP
+      </span>
+    )}
+    {booking.needs_attention && (
+      <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 ring-1 ring-rose-200">
+        <AlertCircle className="h-3 w-3 fill-rose-500 text-white" /> Needs attention
+      </span>
+    )}
+  </>
+);
+
+const KIND_TONE = {
+  consultation: "border-sky-200 bg-sky-50 text-sky-700",
+  review: "border-violet-200 bg-violet-50 text-violet-700",
+};
+
+const SLOT_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "booked", label: "Booked" },
+  { key: "free", label: "Available" },
+  { key: "vip", label: "VIP" },
+  { key: "attention", label: "Attention" },
+];
+
+const slotMatches = (slot, filter) => {
+  const b = slot.bookings || [];
+  if (filter === "booked") return b.length > 0;
+  if (filter === "free") return b.length === 0;
+  if (filter === "vip") return b.some((x) => x.is_vip);
+  if (filter === "attention") return b.some((x) => x.needs_attention);
+  return true;
+};
+
+/**
+ * One consultant's day: every time slot, who is in it, and which of those patients is a
+ * VIP or needs attention. Pick a time to see the patients booked into it.
+ */
+const ConsultantSlotsModal = ({ branchId, consultant, onClose }) => {
+  const [date, setDate] = useState(todayIso());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [selectedTime, setSelectedTime] = useState(null);
+  // Paging the week quickly fires several requests; only the latest may land.
+  const reqId = useRef(0);
+
+  const load = useCallback(async () => {
+    const id = ++reqId.current;
+    setLoading(true);
+    try {
+      const res = await getConsultantSlots(branchId, consultant.id, date);
+      if (id === reqId.current) setData(res);
+    } catch (err) {
+      if (id === reqId.current) {
+        setData(null);
+        toast.error(err?.response?.data?.detail || "Could not load this consultant's slots");
+      }
+    } finally {
+      if (id === reqId.current) setLoading(false);
+    }
+  }, [branchId, consultant.id, date]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setSelectedTime(null); }, [date]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const slots = useMemo(() => data?.slots || [], [data]);
+  const visible = useMemo(() => slots.filter((s) => slotMatches(s, filter)), [slots, filter]);
+  const selected = useMemo(() => slots.find((s) => s.time === selectedTime) || null, [slots, selectedTime]);
+  const summary = data?.summary || {};
+
+  const filterCount = (key) => (key === "all" ? slots.length : slots.filter((s) => slotMatches(s, key)).length);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-testid="consultant-slots-modal"
+    >
+      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 bg-slate-900 px-5 py-4 text-white">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 truncate text-lg font-bold">
+              <Stethoscope className="h-5 w-5 shrink-0" />
+              {consultant.full_name}
+            </p>
+            <p className="mt-0.5 truncate text-[11px] text-slate-300">
+              {[consultant.specialization, "Time slots & patients"].filter(Boolean).join(" · ")}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={load}
+              disabled={loading}
+              className="rounded-lg border border-slate-600 p-2 text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              aria-label="Refresh"
+              data-testid="consultant-slots-refresh"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200"
+              aria-label="Close"
+              data-testid="consultant-slots-close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+          <WeekStrip value={date} onChange={setDate} testid="consultant-slots-week" />
+
+          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="consultant-slots-filter">
+            {SLOT_FILTERS.map((f) => {
+              const on = filter === f.key;
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setFilter(f.key)}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${on ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                  data-testid={`consultant-slots-filter-${f.key}`}
+                >
+                  {f.key === "vip" && <Star className={`h-3 w-3 ${on ? "fill-amber-300 text-amber-300" : "fill-amber-400 text-amber-500"}`} />}
+                  {f.key === "attention" && <AlertCircle className={`h-3 w-3 ${on ? "fill-rose-400 text-slate-900" : "fill-rose-500 text-white"}`} />}
+                  {f.label}
+                  <span className={on ? "text-white/70" : "text-slate-400"}>{filterCount(f.key)}</span>
+                </button>
+              );
+            })}
+            {(summary.vip > 0 || summary.attention > 0) && (
+              <span className="ml-auto px-2 text-[11px] text-slate-500">
+                {summary.vip || 0} VIP · {summary.attention || 0} need attention
+              </span>
+            )}
+          </div>
+
+          {loading && !data ? (
+            <p className="py-12 text-center text-sm text-slate-400">Loading slots…</p>
+          ) : slots.length === 0 ? (
+            <div className="py-12 text-center" data-testid="consultant-slots-empty">
+              <Clock className="mx-auto mb-2 h-9 w-9 text-slate-200" />
+              <p className="text-sm text-slate-400">No time slots for {consultant.full_name} on this day.</p>
+            </div>
+          ) : visible.length === 0 ? (
+            <p className="py-12 text-center text-sm text-slate-400">No slots match this filter.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="consultant-slots-grid">
+              {visible.map((s) => {
+                const b = s.bookings || [];
+                const first = b[0];
+                const vip = b.some((x) => x.is_vip);
+                const attention = b.some((x) => x.needs_attention);
+                const on = s.time === selectedTime;
+                // The mark colours the card's edge so a VIP or flagged hour reads across the
+                // grid before any name is; attention wins where both apply.
+                const edge = attention ? "border-l-rose-500" : vip ? "border-l-amber-400" : b.length ? "border-l-sky-500" : "border-l-slate-200";
+                return (
+                  <button
+                    key={s.time}
+                    type="button"
+                    onClick={() => setSelectedTime(on ? null : s.time)}
+                    aria-pressed={on}
+                    className={`rounded-lg border border-l-4 p-2.5 text-left transition ${edge} ${
+                      on ? "border-teal-500 bg-teal-50 ring-2 ring-teal-400" : b.length ? "border-slate-200 bg-white hover:bg-slate-50" : "border-dashed border-slate-200 bg-slate-50/60 hover:bg-slate-100"
+                    }`}
+                    data-testid={`consultant-slot-${s.time}`}
+                  >
+                    <p className="flex items-center justify-between gap-1 text-xs font-bold text-slate-800">
+                      <span className="flex items-center gap-1"><Clock className="h-3 w-3 text-slate-400" />{to12h(s.time)}</span>
+                      {first && <LeadMarks lead={{ is_vip: vip, needs_attention: attention }} />}
+                    </p>
+                    {first ? (
+                      <p className="mt-1 truncate text-[12px] font-medium text-slate-700">
+                        {first.patient_name}
+                        {b.length > 1 && <span className="ml-1 text-[10px] font-bold text-slate-400">+{b.length - 1}</span>}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[12px] text-slate-400">Available</p>
+                    )}
+                    {first && (
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                        {first.kind === "review" ? "Review" : "Consultation"}
+                      </p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {selected && (
+            <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-4" data-testid="consultant-slot-detail">
+              <p className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-800">
+                <Clock className="h-4 w-4 text-teal-600" />
+                {to12h(selected.time)}
+                <span className="text-xs font-normal text-slate-500">
+                  {selected.bookings.length ? `${selected.bookings.length} patient${selected.bookings.length === 1 ? "" : "s"}` : "Available"}
+                </span>
+              </p>
+              {selected.bookings.length === 0 ? (
+                <p className="text-xs text-slate-500">Nobody is booked into this time yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {selected.bookings.map((bk) => (
+                    <div key={`${bk.kind}-${bk.id}`} className="rounded-lg border border-slate-200 bg-white p-3" data-testid={`consultant-slot-booking-${bk.id}`}>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-sm font-bold text-slate-800">{bk.patient_name}</span>
+                        <MarkBadges booking={bk} />
+                        <RescheduledTag
+                          lead={{ appointment_rescheduled: bk.rescheduled, appointment_rescheduled_from: bk.rescheduled_from }}
+                        />
+                        <span className={`ml-auto rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${KIND_TONE[bk.kind] || KIND_TONE.consultation}`}>
+                          {bk.kind === "review" ? `Review${bk.status === "completed" ? " · Completed" : ""}` : "Consultation"}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                        {bk.patient_number && <span className="font-mono">{bk.patient_number}</span>}
+                        {bk.phone && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />{bk.phone}</span>}
+                        {bk.branch_name && (
+                          <span className={bk.branch_id && branchId !== ALL && bk.branch_id !== branchId ? "font-semibold text-amber-700" : ""}>
+                            <Building2 className="mr-0.5 inline h-3 w-3" />{bk.branch_name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
  * A Super Admin's own consultation board.
  *
  * The same board a CONSULTANT signs in to, opened from the Master View, with a branch
  * picker in front of it — a consultant covers the whole organisation, so which branch's
  * appointments are being read is the first question and there was nowhere to answer it.
+ * Beside it, the branch's consultants: pick one to open their day slot by slot.
  *
  * This page used to be about somebody else. A Super Admin is hired as a Super Admin, so
  * HR never minted them a consultant record, and with nothing to match on the board fell
@@ -124,10 +455,7 @@ const BranchPicker = ({ value, branches, onPick }) => {
 export const MyConsultationBoard = ({ user, search = "", onSearchChange, branches = [] }) => {
   const [branchId, setBranchId] = useState(ALL);
   const [resolved, setResolved] = useState(null);
-  const [assigning, setAssigning] = useState(false);
-  // Bumped after patients are moved so the board underneath reads the new owners. The board
-  // fetches on mount, and a remount is the one refresh it already answers to from outside.
-  const [boardKey, setBoardKey] = useState(0);
+  const [slotsFor, setSlotsFor] = useState(null);
 
   const load = useCallback(() => {
     hpResolvedConsultant()
@@ -136,6 +464,7 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const closeSlots = useCallback(() => setSlotsFor(null), []);
   const notMine = resolved && !resolved.is_mine;
 
   return (
@@ -143,18 +472,9 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
       <div className="flex flex-wrap items-center gap-2">
         <BranchPicker value={branchId} branches={branches} onPick={setBranchId} />
 
-        {/* The way patients get onto this page: pick them at a branch and take them, or
-            hand them to a consultant of your choosing. Beside the branch picker because it
-            answers the same first question — which branch. */}
-        {resolved?.is_super_admin && (
-          <Button
-            className="h-10 gap-2 bg-sky-600 text-white hover:bg-sky-700"
-            onClick={() => setAssigning(true)}
-            data-testid="my-consultation-assign-btn"
-          >
-            <ArrowLeftRight className="h-4 w-4" /> Assign Consultations
-          </Button>
-        )}
+        {/* Beside the branch picker because it answers the same first question — which
+            branch — and then whose day at it. Replaced Assign Consultations here. */}
+        <ConsultantPicker branchId={branchId} onPick={setSlotsFor} />
 
         {/* Whose book this is, said once at the top. The page is named after the reader
             and lists only their patients now, so the name is confirmation rather than a
@@ -188,7 +508,6 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
       {/* branchId, never branchIds: the board collapses a list to its first entry, so
           handing it several would show one and imply all of them. */}
       <HeadPhysioBoard
-        key={boardKey}
         branchId={branchId}
         user={user}
         // The whole difference between this page and Operations > Consultant. Without it
@@ -198,13 +517,8 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
         onSearchChange={onSearchChange}
       />
 
-      {assigning && (
-        <ConsultationReassignModal
-          branches={branches}
-          defaultBranchId={branchId}
-          onClose={() => setAssigning(false)}
-          onDone={() => setBoardKey((k) => k + 1)}
-        />
+      {slotsFor && (
+        <ConsultantSlotsModal branchId={branchId} consultant={slotsFor} onClose={closeSlots} />
       )}
     </div>
   );
