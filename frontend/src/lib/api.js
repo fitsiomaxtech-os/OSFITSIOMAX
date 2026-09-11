@@ -456,6 +456,12 @@ export const markInstallmentPaid = async (leadId, installmentNumber, payload) =>
 // Whose consultant book the board will show, and whether it belongs to the caller. My
 // Consultation reads it so it can never present somebody else's appointments as your own.
 export const hpResolvedConsultant = async () => (await api.get("/head-physio/resolved")).data;
+// Who can be handed a consultation at this branch. Not available-experts: that one takes a
+// date and hides anyone with no open slot on it, which is the question for a NEW booking.
+// A reassignment keeps the slot the patient already holds.
+export const listBranchConsultants = async (branchId) => (await api.get(`/consultations/${branchId}/consultants`)).data;
+// Move patients onto another consultant, keeping their slot. Empty consultantId means "to me".
+export const reassignConsultant = async (leadIds, consultantId, reason) => (await api.post("/consultations/reassign-consultant", { lead_ids: leadIds, ...(consultantId ? { consultant_id: consultantId } : {}), ...(reason ? { reason } : {}) })).data;
 export const getHPMyCalendar = async (branchId) => (await api.get("/head-physio/my-calendar", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const getHPMyPatients = async (branchId) => (await api.get("/head-physio/my-patients", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const hpRecommendPackage = async (payload) => (await api.post("/head-physio/recommend-package", payload)).data;

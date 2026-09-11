@@ -1352,8 +1352,13 @@ async def v3_consultations_board(
             # An empty answer here has to stay empty rather than fall through to the whole
             # branch. A consultant with nothing booked yet reading an empty page is correct;
             # the same consultant reading everybody else's patients is the bug this fixes.
+            # Not diet check-ins: those live in the same collection against a Nutrition
+            # Coach record. A consultant id cannot currently collide with one, but the
+            # narrowing this drives is "which consultations are mine", and a query that
+            # answers it by accident is one rename away from answering it wrongly.
             my_lead_ids = await v3_col("appointments").distinct(
-                "lead_id", {"doctor_id": {"$in": my_doctor_ids}},
+                "lead_id",
+                {"doctor_id": {"$in": my_doctor_ids}, "appt_kind": {"$ne": "diet"}},
             ) if my_doctor_ids else []
             query["id"] = {"$in": my_lead_ids}
         leads_docs = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)

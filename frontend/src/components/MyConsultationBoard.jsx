@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Building2, ChevronDown, Check, AlertTriangle, UserRound, X } from "lucide-react";
+import { ArrowLeftRight, Building2, ChevronDown, Check, AlertTriangle, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
+import { ConsultationReassignModal } from "@/components/ConsultationReassignModal";
 import { hpResolvedConsultant } from "@/lib/api";
 
 const ALL = "all";
@@ -123,6 +124,10 @@ const BranchPicker = ({ value, branches, onPick }) => {
 export const MyConsultationBoard = ({ user, search = "", onSearchChange, branches = [] }) => {
   const [branchId, setBranchId] = useState(ALL);
   const [resolved, setResolved] = useState(null);
+  const [assigning, setAssigning] = useState(false);
+  // Bumped after patients are moved so the board underneath reads the new owners. The board
+  // fetches on mount, and a remount is the one refresh it already answers to from outside.
+  const [boardKey, setBoardKey] = useState(0);
 
   const load = useCallback(() => {
     hpResolvedConsultant()
@@ -137,6 +142,19 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
     <div className="space-y-4" data-testid="my-consultation-board">
       <div className="flex flex-wrap items-center gap-2">
         <BranchPicker value={branchId} branches={branches} onPick={setBranchId} />
+
+        {/* The way patients get onto this page: pick them at a branch and take them, or
+            hand them to a consultant of your choosing. Beside the branch picker because it
+            answers the same first question — which branch. */}
+        {resolved?.is_super_admin && (
+          <Button
+            className="h-10 gap-2 bg-sky-600 text-white hover:bg-sky-700"
+            onClick={() => setAssigning(true)}
+            data-testid="my-consultation-assign-btn"
+          >
+            <ArrowLeftRight className="h-4 w-4" /> Assign Consultations
+          </Button>
+        )}
 
         {/* Whose book this is, said once at the top. The page is named after the reader
             and lists only their patients now, so the name is confirmation rather than a
@@ -170,6 +188,7 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
       {/* branchId, never branchIds: the board collapses a list to its first entry, so
           handing it several would show one and imply all of them. */}
       <HeadPhysioBoard
+        key={boardKey}
         branchId={branchId}
         user={user}
         // The whole difference between this page and Operations > Consultant. Without it
@@ -178,6 +197,15 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
         search={search}
         onSearchChange={onSearchChange}
       />
+
+      {assigning && (
+        <ConsultationReassignModal
+          branches={branches}
+          defaultBranchId={branchId}
+          onClose={() => setAssigning(false)}
+          onDone={() => setBoardKey((k) => k + 1)}
+        />
+      )}
     </div>
   );
 };

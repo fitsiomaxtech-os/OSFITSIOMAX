@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel
 from datetime import date
 import uuid
 
 from database import v3_col
-from utils import now_iso, physio_slot_load, slot_capacity_of
-from deps import v3_current_user, v3_require_roles
+from utils import now_iso, physio_slot_load, slot_capacity_of, active_doctor_query
+from deps import v3_current_user, v3_require_roles, consultants_serving_branch
 from constants import V3_HEAD_CONSULTATION_STAGES
 from stage_utils import get_closing_stage_name, get_stage_name_at
 from schemas.v3 import (
@@ -1016,4 +1016,192 @@ async def hp_lead_physio_progress(
         "reassigned": len(previous) > 0,
         "current": current,
         "previous": previous,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Handing a consultation to somebody else
+#
+# A Super Admin can now take consultations (see ensure_super_admin_consultant), which
+# raises the question the booking screens cannot answer: a patient is already booked with
+# one consultant and should be seen by another. Rescheduling is the only existing way to
+# change that, and it asks for a new date, a new time and a reason -- the whole
+# appointment -- when the only thing actually changing is who takes it. A patient happy
+# with their Tuesday 11:45 should not have to be moved off it to be seen by someone else.
+# ---------------------------------------------------------------------------
+
+
+class ReassignConsultantInput(BaseModel):
+    lead_ids: List[str]
+    # Left empty means "to me" -- the common case, and the one that must not require the
+    # caller to first go and look up their own consultant id.
+    consultant_id: Optional[str] = None
+    reason: Optional[str] = ""
+
+
+async def _live_consultation_appt(lead_id: str) -> Optional[dict]:
+    """The consultation booking a lead is actually sitting on.
+
+    Newest first: a rescheduled patient can have older rows behind them, and the one that
+    matters is the one their consultant is about to work.
+    """
+    return await v3_col("appointments").find_one(
+        {"lead_id": lead_id, "appt_kind": "consultation", "status": "new_appointment"},
+        {"_id": 0},
+        sort=[("slot_time", -1)],
+    )
+
+
+@router.get("/consultations/{branch_id}/consultants")
+async def list_branch_consultants(
+    branch_id: str,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+):
+    """Who can be handed a consultation at this branch.
+
+    Not available-experts: that one takes a date and drops anyone with no open slot on it,
+    which is the right question when booking a NEW appointment and the wrong one here. A
+    reassignment keeps the slot the patient already has, so what matters is who is allowed
+    to work this branch, not who published hours on some particular day.
+
+    The caller's own record is minted if they have none, so a Super Admin can hand a
+    patient to themselves on the first try rather than on the second.
+    """
+    if user.role == "super_admin":
+        await ensure_super_admin_consultant(user)
+    rows = await v3_col("doctors").find(
+        active_doctor_query({"profile_type": "head_physio"}),
+        {"_id": 0, "id": 1, "full_name": 1, "user_id": 1, "profile_type": 1,
+         "branch_id": 1, "is_super_admin": 1, "specialization": 1},
+    ).to_list(500)
+    rows = await consultants_serving_branch(rows, branch_id)
+    # The Super Admin first, then everyone alphabetically. Whoever reads this list is
+    # usually reaching for themselves, and a name that moves around as staff are hired is
+    # a name that has to be hunted for every time.
+    rows.sort(key=lambda d: (not d.get("is_super_admin"), (d.get("full_name") or "").lower()))
+    return {
+        "consultants": [
+            {
+                "id": d.get("id", ""),
+                "full_name": d.get("full_name") or "",
+                "specialization": d.get("specialization") or "",
+                "is_super_admin": bool(d.get("is_super_admin")),
+                "is_me": d.get("user_id") == user.id,
+            }
+            for d in rows
+        ]
+    }
+
+
+@router.post("/consultations/reassign-consultant")
+async def reassign_consultant(
+    payload: ReassignConsultantInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Move the chosen patients onto another consultant, keeping the slot they are on.
+
+    Super Admin only, and deliberately so: this overrides a booking somebody else made,
+    across branches, in bulk. A Branch Admin moving a patient between consultants still
+    goes through Reschedule, where the time is on the table too.
+
+    The target does NOT have to have published the slot. Requiring it would make this
+    useless for exactly the person it was built for -- a Super Admin publishes no hours --
+    and a reassignment is an instruction from the top of the building, not a booking
+    request. What is still refused is a genuine clash: a consultant already seeing another
+    patient at that minute is not free, however senior the person asking. Those come back
+    named rather than silently dropped, so the caller can see what did not move and why.
+
+    `meet_link` moves with it. The room is copied onto the appointment at booking and
+    frozen on purpose -- an expert changing rooms does not move meetings already arranged
+    -- but this is the case that reasoning does not cover: the expert themselves changed,
+    and leaving the old link would send the patient to a room where nobody expects them.
+    """
+    if not payload.lead_ids:
+        raise HTTPException(status_code=400, detail="Pick at least one patient")
+
+    if payload.consultant_id:
+        target = await v3_col("doctors").find_one(
+            {"id": payload.consultant_id, "profile_type": "head_physio"}, {"_id": 0},
+        )
+        if not target:
+            raise HTTPException(status_code=404, detail="CONSULTANT not found")
+    else:
+        target = await ensure_super_admin_consultant(user)
+        if not target:
+            raise HTTPException(status_code=400, detail="No consultant record for this login")
+
+    target_name = target.get("full_name") or ""
+    capacity = slot_capacity_of(target)
+    stamp = now_iso()
+    moved, skipped = [], []
+
+    for lead_id in payload.lead_ids:
+        lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+        if not lead:
+            skipped.append({"lead_id": lead_id, "name": "", "reason": "Patient not found"})
+            continue
+        name = lead.get("name") or ""
+        appt = await _live_consultation_appt(lead_id)
+        if not appt:
+            skipped.append({"lead_id": lead_id, "name": name,
+                            "reason": "No live consultation booking to move"})
+            continue
+        if appt.get("doctor_id") == target["id"]:
+            skipped.append({"lead_id": lead_id, "name": name,
+                            "reason": "Already with " + target_name})
+            continue
+
+        # Is the target already seeing somebody else at that minute? Counted rather than
+        # merely looked for, because slot_capacity_of is what decides how many one desk
+        # holds in a slot -- 1 for a consultation, which is a conversation, not a floor.
+        clash = await v3_col("appointments").count_documents({
+            "doctor_id": target["id"],
+            "slot_time": appt.get("slot_time"),
+            "appt_kind": "consultation",
+            "status": "new_appointment",
+            "lead_id": {"$ne": lead_id},
+        })
+        if clash >= capacity:
+            when = appt.get("appointment_time") or appt.get("slot_time") or ""
+            skipped.append({
+                "lead_id": lead_id,
+                "name": name,
+                "reason": target_name + " is already booked at " + str(when),
+            })
+            continue
+
+        await v3_col("appointments").update_one({"id": appt["id"]}, {"$set": {
+            "doctor_id": target["id"],
+            "doctor_name": target_name,
+            "meet_link": (target.get("meet_link") or "").strip(),
+            "updated_at": stamp,
+        }})
+        await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+            "assigned_physio_id": target["id"],
+            "assigned_physio_name": target_name,
+            "updated_at": stamp,
+        }})
+        was = appt.get("doctor_name") or "nobody"
+        note = "Consultation moved from " + was + " to " + target_name
+        if (payload.reason or "").strip():
+            note += ". Reason: " + payload.reason.strip()
+        await v3_col("lead_activity").insert_one({
+            "id": str(uuid.uuid4()),
+            "lead_id": lead_id,
+            "action": "consultant_reassigned",
+            "details": note,
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "created_at": stamp,
+        })
+        moved.append({"lead_id": lead_id, "name": name, "from": was})
+
+    return {
+        "moved": moved,
+        "skipped": skipped,
+        "consultant": {
+            "id": target["id"],
+            "full_name": target_name,
+            "is_super_admin": bool(target.get("is_super_admin")),
+        },
     }
