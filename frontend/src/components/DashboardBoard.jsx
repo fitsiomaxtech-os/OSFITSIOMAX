@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Users, CalendarCheck, Activity, IndianRupee, X, RefreshCw,
   Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad, Clock,
-  AlertCircle, CalendarClock, CheckCircle2, XCircle, Star, AlertTriangle, Music, HeartPulse,
+  AlertCircle, CalendarClock, CheckCircle2, XCircle, Star, AlertTriangle, Music, HeartPulse, Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -168,22 +168,36 @@ const ModeBranchFilter = ({ branches, group, onGroup, branchId, onBranch, testid
           </button>
         ))}
       </div>
+      {/* Finance's branch row, class for class: one bordered box of square chips from sm up,
+          a dropdown on a phone. Seven branch names wrap to three rows of chips on a phone,
+          and a select holds them in one. */}
       {visible.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {visible.map((b) => (
-            <button
-              key={b.branch_id}
-              type="button"
-              onClick={() => onBranch(branchId === b.branch_id ? "" : b.branch_id)}
-              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
-                branchId === b.branch_id ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-sky-300 hover:text-sky-600"
-              }`}
-              data-testid={`${testid}-branch-${b.branch_id}`}
-            >
-              {b.branch_name}
-            </button>
-          ))}
-        </div>
+        <>
+          <select
+            value={branchId}
+            onChange={(e) => onBranch(e.target.value)}
+            className="h-10 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 sm:hidden"
+            data-testid={`${testid}-branch-select`}
+          >
+            <option value="">{group === "all" ? "All Branches" : `All ${group === "online" ? "Online" : "Offline"} Branches`}</option>
+            {visible.map((b) => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
+          </select>
+          <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:flex">
+            {visible.map((b) => (
+              <button
+                key={b.branch_id}
+                type="button"
+                onClick={() => onBranch(branchId === b.branch_id ? "" : b.branch_id)}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  branchId === b.branch_id ? "bg-sky-600 text-white shadow-sm" : "bg-slate-50 text-slate-600 hover:bg-slate-100"
+                }`}
+                data-testid={`${testid}-branch-${b.branch_id}`}
+              >
+                <Building2 className="h-3.5 w-3.5" /> {b.branch_name}
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
