@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
-import { Settings, X, Trash2, Pencil } from "lucide-react";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import {
-  createManualLead, getBranches,
-  leadFieldsList, leadFieldsCreate, leadFieldsUpdate, leadFieldsDelete,
-} from "@/lib/api";
+import { createManualLead, getBranches } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { loadSession } from "@/lib/session";
 
@@ -72,7 +69,7 @@ const blank = {
  *   lead typed in here and one that arrived off the sheet then land in the same place.
  *   Empty for every board that has none, and the section is then not drawn at all.
  */
-export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchId = null, lockedDepartment = null, formQuestions = [] }) => {
+export const CreateLeadModal = ({ onClose, onSaved, branchId = null, lockedDepartment = null, formQuestions = [] }) => {
   const [form, setForm] = useState({
     ...blank,
     ...(branchId ? { branch_id: branchId } : {}),
@@ -81,14 +78,9 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
   const [leadData, setLeadData] = useState(blankLeadData);
   const [tab, setTab] = useState("details");
   const [extraFields, setExtraFields] = useState({});
-  const [customFields, setCustomFields] = useState([]);
   const [branches, setBranches] = useState([]);
-  const [showManage, setShowManage] = useState(false);
-
-  const loadFields = () => leadFieldsList().then(setCustomFields).catch((e) => console.warn("[load failed]", e?.message || e));
 
   useEffect(() => {
-    loadFields();
     getBranches().then(setBranches).catch((e) => console.warn("[load failed]", e?.message || e));
   }, []);
 
@@ -96,9 +88,9 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
   const setExtra = (k, v) => setExtraFields((p) => ({ ...p, [k]: v }));
   const setLD = (k, v) => setLeadData((p) => ({ ...p, [k]: v }));
 
-  // Read off the session rather than the isSuperAdmin prop: that prop says which board
-  // opened this form — Branch Admin's board passes false even when a Super Admin is the
-  // one looking at it through Operations — and this tab is about who is looking. The
+  // Read off the session rather than from whichever board opened this form — Branch
+  // Admin's board can be opened by a Super Admin through Operations — because this tab is
+  // about who is looking. The
   // server withholds the same block from everybody else on the way back out (see
   // reads_lead_data in backend/deps.py), so hiding it here is the courtesy, not the lock.
   const isSuperAdminUser = String(loadSession()?.user?.role || "").trim().toLowerCase() === "super_admin";
@@ -153,7 +145,7 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
         <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
           <div>
             <h3 className="text-xl font-bold text-slate-900">Add New Lead</h3>
-            <p className="mt-0.5 text-xs text-slate-500">Enter lead details. Custom fields appear below.</p>
+            <p className="mt-0.5 text-xs text-slate-500">Enter lead details.</p>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="lead-create-close"><X className="h-5 w-5" /></button>
@@ -248,8 +240,7 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
             )}
           </div>
 
-          {/* This board's own form questions, above the custom fields because they are
-              this board's and those are every board's. Free text rather than a dropdown:
+          {/* This board's own form questions. Free text rather than a dropdown:
               the answers arrive off a Meta form whose options are set there, not here, and
               a fixed list would quietly refuse whatever the form is changed to ask next. */}
           {formQuestions.length > 0 && (
@@ -270,24 +261,6 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
             </div>
           )}
 
-          {/* Custom Fields */}
-          <div className="rounded-lg border border-slate-200 p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="flex items-center gap-2 text-sm font-semibold text-indigo-600"><Settings className="h-4 w-4" />Custom Fields</p>
-              {isSuperAdmin && (
-                <button onClick={() => setShowManage(true)} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700" data-testid="lead-manage-fields-btn">
-                  <Pencil className="h-3 w-3" />Manage
-                </button>
-              )}
-            </div>
-            {customFields.length === 0 ? (
-              <p className="text-xs text-slate-400">No custom fields yet.</p>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
-                {customFields.map((f) => <CustomFieldInput key={f.id} field={f} value={extraFields[f.key]} onChange={(v) => setExtra(f.key, v)} />)}
-              </div>
-            )}
-          </div>
         </div>
 
         {isSuperAdminUser && (
@@ -329,94 +302,6 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
           <Button onClick={submit} className="bg-indigo-600 hover:bg-indigo-700" data-testid="lead-create-submit">Create Lead</Button>
         </div>
       </div>
-
-      {showManage && <ManageCustomFieldsDialog onClose={() => { setShowManage(false); loadFields(); }} />}
-    </div>
-  );
-};
-
-const CustomFieldInput = ({ field, value, onChange }) => {
-  const testid = `lead-custom-${field.key}`;
-  const common = { value: value ?? "", onChange: (e) => onChange(e.target.value), "data-testid": testid, placeholder: field.placeholder || `Enter ${field.label}` };
-  return (
-    <Field label={field.label + (field.required ? " *" : "")}>
-      {field.type === "textarea" && <textarea {...common} className="h-20 w-full rounded-md border border-slate-200 p-2 text-sm" />}
-      {field.type === "select" && (
-        <select {...common} className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm">
-          <option value="">{`Select ${field.label}`}</option>
-          {(field.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
-      )}
-      {field.type === "date" && <MilkDateInput  {...common} />}
-      {field.type === "number" && <Input type="number" {...common} />}
-      {(field.type === "text" || field.type === "email" || field.type === "phone") && <Input type={field.type === "email" ? "email" : "text"} {...common} />}
-    </Field>
-  );
-};
-
-const AddCustomFieldDialog = ({ onClose, onSaved, existing = null }) => {
-  const [form, setForm] = useState(existing ? {
-    label: existing.label, type: existing.type, options: (existing.options || []).join(","), placeholder: existing.placeholder || "", required: !!existing.required,
-  } : { label: "", type: "text", options: "", placeholder: "", required: false });
-
-  const save = async () => {
-    if (!form.label.trim()) { toast.error("Label required"); return; }
-    const payload = {
-      label: form.label, type: form.type, placeholder: form.placeholder, required: form.required,
-      options: form.type === "select" ? form.options.split(",").map((o) => o.trim()).filter(Boolean) : [],
-    };
-    try {
-      if (existing) { await leadFieldsUpdate(existing.id, payload); toast.success("Field updated"); }
-      else { await leadFieldsCreate(payload); toast.success("Field created"); }
-      onSaved();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Save failed"); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="add-custom-field-dialog">
-      <div className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl">
-        <h3 className="text-base font-semibold">{existing ? "Edit Custom Field" : "Add Custom Field"}</h3>
-        <Field label="Label *"><Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Insurance Provider" data-testid="add-field-label" /></Field>
-        <Field label="Type">
-          <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} data-testid="add-field-type">
-            {["text", "textarea", "number", "date", "email", "phone", "select"].map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </Field>
-        {form.type === "select" && (
-          <Field label="Options (comma separated)"><Input value={form.options} onChange={(e) => setForm({ ...form, options: e.target.value })} placeholder="Option A, Option B, Option C" data-testid="add-field-options" /></Field>
-        )}
-        <Field label="Placeholder"><Input value={form.placeholder} onChange={(e) => setForm({ ...form, placeholder: e.target.value })} data-testid="add-field-placeholder" /></Field>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.required} onChange={(e) => setForm({ ...form, required: e.target.checked })} data-testid="add-field-required" />Required</label>
-        <div className="flex gap-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="add-field-cancel">Cancel</Button><Button onClick={save} className="flex-1" data-testid="add-field-submit">{existing ? "Save" : "Add Field"}</Button></div>
-      </div>
-    </div>
-  );
-};
-
-const ManageCustomFieldsDialog = ({ onClose }) => {
-  const [fields, setFields] = useState([]);
-  const [editing, setEditing] = useState(null);
-  const load = () => leadFieldsList().then(setFields).catch((e) => console.warn("[load failed]", e?.message || e));
-  useEffect(() => { load(); }, []);
-
-  const remove = async (f) => {
-    if (!window.confirm(`Delete field "${f.label}"?`)) return;
-    try { await leadFieldsDelete(f.id); toast.success("Deleted"); load(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="manage-fields-dialog">
-      <div className="w-full max-w-lg space-y-3 rounded-lg bg-white p-5 shadow-xl">
-        <div className="flex items-center justify-between"><h3 className="text-base font-semibold">Manage Custom Fields</h3><button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="manage-fields-close"><X className="h-4 w-4" /></button></div>
-        {fields.length === 0 ? <p className="text-sm text-slate-400">No custom fields yet.</p> : fields.map((f) => (
-          <div key={f.id} className="flex items-center justify-between rounded-md border border-slate-200 p-2" data-testid={`manage-field-row-${f.id}`}>
-            <div><p className="text-sm font-medium">{f.label}{f.required && <span className="text-red-500"> *</span>}</p><p className="text-xs text-slate-500">{f.type} · key: {f.key}</p></div>
-            <div className="flex gap-2"><button onClick={() => setEditing(f)} className="text-blue-500" data-testid={`manage-field-edit-${f.id}`}><Pencil className="h-4 w-4" /></button><button onClick={() => remove(f)} className="text-red-500" data-testid={`manage-field-delete-${f.id}`}><Trash2 className="h-4 w-4" /></button></div>
-          </div>
-        ))}
-      </div>
-      {editing && <AddCustomFieldDialog existing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );
 };
