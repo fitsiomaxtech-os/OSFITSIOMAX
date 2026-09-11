@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, Building2, Check, ChevronDown, Clock, Phone, RefreshCw, Star, Stethoscope, UserRound, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Building2, Check, ChevronDown, Clock, Loader2, Phone, RefreshCw, Star, Stethoscope, UserCheck, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,7 +13,7 @@ import { toast } from "@/components/ui/sonner";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { WeekStrip, todayIso } from "@/components/WeekStrip";
 import { LeadMarks, RescheduledTag } from "@/components/ui/lead-marks";
-import { getConsultantSlots, getDoctors, hpResolvedConsultant, listBranchConsultants } from "@/lib/api";
+import { getConsultantSlots, getDoctors, hpResolvedConsultant, listBranchConsultants, reassignConsultant } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
 const ALL = "all";
@@ -226,7 +226,7 @@ const slotMatches = (slot, filter) => {
  * One consultant's day: every time slot, who is in it, and which of those patients is a
  * VIP or needs attention. Pick a time to see the patients booked into it.
  */
-const ConsultantSlotsModal = ({ branchId, consultant, onClose }) => {
+const ConsultantSlotsModal = ({ branchId, consultant, canAssignToMe = false, onAssigned, onClose }) => {
   const [date, setDate] = useState(todayIso());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -253,6 +253,27 @@ const ConsultantSlotsModal = ({ branchId, consultant, onClose }) => {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setSelectedTime(null); }, [date]);
+
+  // Takes this patient's consultation off the consultant whose day this is and onto the
+  // reader, keeping the slot — the same move Reassign makes, for one patient at a time.
+  const [assigningId, setAssigningId] = useState(null);
+  const assignToMe = async (bk) => {
+    setAssigningId(bk.id);
+    try {
+      const res = await reassignConsultant([bk.lead_id]);
+      if (res?.moved?.length) {
+        toast.success(`${bk.patient_name} moved to ${res.consultant?.full_name || "you"}`);
+        load();
+        if (onAssigned) onAssigned();
+      } else {
+        toast.error(res?.skipped?.[0]?.reason || "Could not assign this patient to you");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not assign this patient to you");
+    } finally {
+      setAssigningId(null);
+    }
+  };
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -402,24 +423,48 @@ const ConsultantSlotsModal = ({ branchId, consultant, onClose }) => {
               ) : (
                 <div className="space-y-2">
                   {selected.bookings.map((bk) => (
-                    <div key={`${bk.kind}-${bk.id}`} className="rounded-lg border border-slate-200 bg-white p-3" data-testid={`consultant-slot-booking-${bk.id}`}>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-sm font-bold text-slate-800">{bk.patient_name}</span>
-                        <MarkBadges booking={bk} />
-                        <RescheduledTag
-                          lead={{ appointment_rescheduled: bk.rescheduled, appointment_rescheduled_from: bk.rescheduled_from }}
-                        />
-                        <span className={`ml-auto rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${KIND_TONE[bk.kind] || KIND_TONE.consultation}`}>
+                    <div
+                      key={`${bk.kind}-${bk.id}`}
+                      className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-start sm:justify-between"
+                      data-testid={`consultant-slot-booking-${bk.id}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-bold text-slate-800">{bk.patient_name}</span>
+                          <MarkBadges booking={bk} />
+                          <RescheduledTag
+                            lead={{ appointment_rescheduled: bk.rescheduled, appointment_rescheduled_from: bk.rescheduled_from }}
+                          />
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                          {bk.patient_number && <span className="font-mono">{bk.patient_number}</span>}
+                          {bk.phone && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />{bk.phone}</span>}
+                          {bk.branch_name && (
+                            <span className={bk.branch_id && branchId !== ALL && bk.branch_id !== branchId ? "font-semibold text-amber-700" : ""}>
+                              <Building2 className="mr-0.5 inline h-3 w-3" />{bk.branch_name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {/* The tag, and under it the one thing to do about it. Only a consultation
+                          can be moved — a review is dispatched to a consultant, not booked. */}
+                      <div className="flex shrink-0 flex-row items-center gap-2 sm:flex-col sm:items-end">
+                        <span className={`rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${KIND_TONE[bk.kind] || KIND_TONE.consultation}`}>
                           {bk.kind === "review" ? `Review${bk.status === "completed" ? " · Completed" : ""}` : "Consultation"}
                         </span>
-                      </div>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                        {bk.patient_number && <span className="font-mono">{bk.patient_number}</span>}
-                        {bk.phone && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />{bk.phone}</span>}
-                        {bk.branch_name && (
-                          <span className={bk.branch_id && branchId !== ALL && bk.branch_id !== branchId ? "font-semibold text-amber-700" : ""}>
-                            <Building2 className="mr-0.5 inline h-3 w-3" />{bk.branch_name}
-                          </span>
+                        {canAssignToMe && bk.kind === "consultation" && bk.lead_id && (
+                          <Button
+                            size="sm"
+                            onClick={() => assignToMe(bk)}
+                            disabled={assigningId !== null}
+                            className="h-8 gap-1.5 bg-sky-600 px-3 text-xs text-white hover:bg-sky-700"
+                            data-testid={`consultant-slot-assign-me-${bk.id}`}
+                          >
+                            {assigningId === bk.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <UserCheck className="h-3.5 w-3.5" />}
+                            Assign to me
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -461,6 +506,10 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
   const [branchId, setBranchId] = useState(ALL);
   const [resolved, setResolved] = useState(null);
   const [slotsFor, setSlotsFor] = useState(null);
+  // Bumped after a patient is assigned to the reader so the board underneath reads them in.
+  // The board fetches on mount, and a remount is the one refresh it answers to from outside.
+  const [boardKey, setBoardKey] = useState(0);
+  const bumpBoard = useCallback(() => setBoardKey((k) => k + 1), []);
 
   const load = useCallback(() => {
     hpResolvedConsultant()
@@ -517,6 +566,7 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
       {/* branchId, never branchIds: the board collapses a list to its first entry, so
           handing it several would show one and imply all of them. */}
       <HeadPhysioBoard
+        key={boardKey}
         branchId={branchId}
         user={user}
         // The whole difference between this page and Operations > Consultant. Without it
@@ -527,7 +577,14 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
       />
 
       {slotsFor && (
-        <ConsultantSlotsModal branchId={branchId} consultant={slotsFor} onClose={closeSlots} />
+        <ConsultantSlotsModal
+          branchId={branchId}
+          consultant={slotsFor}
+          // The move is Super Admin only server-side, so the button is offered only there.
+          canAssignToMe={!!resolved?.is_super_admin}
+          onAssigned={bumpBoard}
+          onClose={closeSlots}
+        />
       )}
     </div>
   );
