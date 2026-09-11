@@ -547,7 +547,7 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
             <span className="text-xs font-semibold text-slate-700">{resolved.consultant_name}</span>
             {resolved.is_super_admin && (
               <span className="rounded-[4px] border border-slate-300 bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-600">
-                Super Admin
+                Head Chief
               </span>
             )}
           </div>

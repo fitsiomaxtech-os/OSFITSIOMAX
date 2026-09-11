@@ -209,7 +209,7 @@ export const ConsultationReassignModal = ({ branches = [], defaultBranchId, onCl
                           <span className="inline-flex items-center gap-1.5">
                             {l.assigned_physio_name || "—"}
                             {saIds.has(l.assigned_physio_id) && (
-                              <span className="rounded-[4px] border border-slate-300 bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-600">Super Admin</span>
+                              <span className="rounded-[4px] border border-slate-300 bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-600">Head Chief</span>
                             )}
                             {alreadyThere && <span className="text-[10px] font-medium text-sky-600">· already with them</span>}
                           </span>

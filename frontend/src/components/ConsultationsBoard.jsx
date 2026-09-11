@@ -1900,10 +1900,10 @@ const buildRehabProgress = (rows, lead) => {
 const SuperAdminTag = ({ className = "" }) => (
   <span
     className={`ml-1.5 shrink-0 whitespace-nowrap rounded-[4px] border border-slate-300 bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-600 ${className}`}
-    title="Consultation taken by the Super Admin"
+    title="Consultation taken by the Head Chief"
     data-testid="super-admin-tag"
   >
-    Super Admin
+    Head Chief
   </span>
 );
 
