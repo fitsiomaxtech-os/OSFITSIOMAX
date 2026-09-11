@@ -286,10 +286,13 @@ export const PipelineStageManagement = ({ onBack }) => {
             <AlertTriangle className="h-4 w-4" /> Danger Zone
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+        {/* The two resets side by side, one row on desktop and stacked on a phone. Each box is a
+            column whose description takes the slack, so both buttons sit on the same line
+            however much longer one description runs than the other. */}
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
             <p className="text-sm font-semibold text-red-800">Reset all leads to a fresh state</p>
-            <p className="mt-1 text-xs text-red-700">
+            <p className="mt-1 flex-1 text-xs text-red-700">
               For testing only. Keeps every lead's name, phone and contact info, but resets stage,
               branch, consultation, physio assignment, packages and fees back to New Leads —
               and permanently deletes all sessions, weekly assessments, package recommendations,
@@ -297,7 +300,7 @@ export const PipelineStageManagement = ({ onBack }) => {
             </p>
             <Button
               variant="outline"
-              className="mt-3 border-red-300 text-red-700 hover:bg-red-100"
+              className="mt-3 self-start border-red-300 text-red-700 hover:bg-red-100"
               onClick={handleResetAllLeads}
               disabled={resetting}
               data-testid="reset-all-leads-btn"
@@ -305,9 +308,9 @@ export const PipelineStageManagement = ({ onBack }) => {
               <Trash2 className="mr-1 h-4 w-4" /> {resetting ? "Resetting..." : "Reset All Leads"}
             </Button>
           </div>
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
             <p className="text-sm font-semibold text-red-800">Reset all payments to a fresh state</p>
-            <p className="mt-1 text-xs text-red-700">
+            <p className="mt-1 flex-1 text-xs text-red-700">
               For clearing test money before go-live. Keeps every lead, registration, stage, package
               and price, but clears every fee paid (Consultation, Treatment, Diet, Diet Chart, Rehab,
               installments, Zumba, Fitness) so it reads as owed again. Deletes store sales and puts their
@@ -317,7 +320,7 @@ export const PipelineStageManagement = ({ onBack }) => {
             </p>
             <Button
               variant="outline"
-              className="mt-3 border-red-300 text-red-700 hover:bg-red-100"
+              className="mt-3 self-start border-red-300 text-red-700 hover:bg-red-100"
               onClick={handleResetAllPayments}
               disabled={resettingPayments}
               data-testid="reset-all-payments-btn"
