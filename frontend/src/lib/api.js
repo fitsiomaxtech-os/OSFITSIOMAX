@@ -580,6 +580,7 @@ export const stagesUpdate = async (id, payload) => { const { data } = await api.
 export const stagesDelete = async (id) => { const { data } = await api.delete(`/stages/${id}`); invalidateStages(); return data; };
 export const stagesReorder = async (items) => { const { data } = await api.post("/stages/reorder", { items }); invalidateStages(); return data; };
 export const resetAllLeads = async () => (await api.post("/admin/reset-all-leads", null, { params: { confirm: true } })).data;
+export const resetAllPayments = async () => (await api.post("/admin/reset-all-payments", null, { params: { confirm: true } })).data;
 
 // HR
 export const hrDashboard = async () => (await api.get("/hr/dashboard")).data;

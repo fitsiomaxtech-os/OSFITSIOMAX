@@ -16,6 +16,8 @@ from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
 import lead_control
 from seed import create_default_lead_source, sync_lead_source_branch_name
+from routers.v3_finance import REVENUE_ACTIONS
+from routers.v3_inventory import _add_to_stock
 from schemas.v3 import (
     V3UserOut, V3VerticalCreate, V3VerticalOut,
     V3BranchCreate, V3BranchOut, V3BranchUpdate,
@@ -1113,4 +1115,132 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_re
         "appointments_deleted": appts_deleted,
         "patient_tokens_deleted": tokens_deleted,
         "lead_activity_deleted": activity_deleted,
+    }
+
+
+# Every field a fee collection writes onto a lead: what came in, how, and any schedule it
+# left behind. The plan the money was for -- consultation package, session package, the
+# rehab course, the diet item and their prices -- is deliberately not here, so a reset
+# patient still owes the same fees and every Collect button finds them where it did.
+#
+# None rather than 0, because None is what "not collected" means to the code that reads
+# these: the collect endpoints test `*_paid is not None` to tell a first collection from a
+# correction, and the Treatment Summary unlocks on the same test.
+LEAD_PAYMENT_RESET_FIELDS = {
+    "consultation_fee": None,
+    "consultation_payment_mode": None,
+    # The legacy collect-fee endpoint's package figure — money taken, not a price.
+    "package_amount": None,
+    "package_paid": None,
+    "package_payment_mode": None,
+    "package_payment_details": None,
+    "treatment_fee_paid": None,
+    "treatment_fee_payment_mode": None,
+    "treatment_fee_payment_details": None,
+    "diet_fee_paid": None,
+    "diet_fee_payment_mode": None,
+    "diet_fee_payment_details": None,
+    "diet_chart_fee_paid": None,
+    "diet_chart_fee_payment_mode": None,
+    "diet_chart_fee_payment_details": None,
+    "rehab_fee_paid": None,
+    "rehab_fee_payment_mode": None,
+    "rehab_fee_payment_details": None,
+    # Running totals of the above as they stood at each branch transfer. Left in place they
+    # would credit the old branch with money that no longer exists anywhere else.
+    "revenue_branch_splits": [],
+}
+
+# What approving or sending up a Zumba/Fitness payment stamps on the registration — the
+# same fields unapprove_transaction and unrequest_transactions take off.
+REGISTRATION_APPROVAL_UNSET = {
+    "approved_by": "", "approved_at": "",
+    "approval_confirmed_amount": "", "approval_transaction_ref": "", "approval_cheque_number": "",
+    "income_requested_by": "", "income_requested_at": "",
+}
+
+
+@router.post("/admin/reset-all-payments")
+async def v3_reset_all_payments(confirm: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Wipes every rupee recorded anywhere in the OS, leaving the people and plans it was
+    recorded against. For clearing test money before go-live.
+
+    Patients keep their stage, branch, packages and prices; only what was paid is cleared,
+    so every fee reads as owed again. Zumba and Fitness registrations keep their fee and
+    term with nothing paid against it. Store sales are deleted and their quantity is put
+    back on the shelf, so a branch's stock count still agrees with its ledger of adds and
+    transfers. The cash book (expenses, petty cash, handovers, adjustments including the
+    opening cash, closing counts and closed books), payroll, and HR's advance and expense
+    claims are deleted outright. Receipt numbering restarts.
+
+    Leaves alone: leads, registrations, stock items, stock deliveries and transfers, and
+    every activity entry that is not a payment. Irreversible — requires confirm=true.
+    Super Admin only."""
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
+
+    leads_result = await v3_col("leads").update_many({}, {"$set": {**LEAD_PAYMENT_RESET_FIELDS, "updated_at": now_iso()}})
+    # Payment rows only. Approval state lives on these rows too, so it goes with them; the
+    # rest of each patient's history (stage moves, diagnoses, remarks) is kept.
+    payments_deleted = (await v3_col("lead_activity").delete_many({"action": {"$in": REVENUE_ACTIONS}})).deleted_count
+
+    registration_set = {"fee_paid": 0.0, "payment_mode": "", "payment_reference": "", "payment_lines": [], "approved": False, "income_requested": False}
+    zumba_result = await v3_col("zumba_registrations").update_many(
+        {}, {"$set": registration_set, "$unset": REGISTRATION_APPROVAL_UNSET}
+    )
+    # Each renewal keeps a copy of what was paid for that term. Rewritten row by row rather
+    # than with `$[]`, which refuses any document where the array does not exist.
+    renewed = await v3_col("zumba_registrations").find(
+        {"renewals.0": {"$exists": True}}, {"_id": 0, "id": 1, "renewals": 1}
+    ).to_list(None)
+    for reg in renewed:
+        renewals = [{**r, "fee_paid": 0.0, "lines": []} for r in reg["renewals"]]
+        await v3_col("zumba_registrations").update_one({"id": reg["id"]}, {"$set": {"renewals": renewals}})
+    fitness_result = await v3_col("fitness_registrations").update_many(
+        {}, {"$set": {**registration_set, "payments": []}, "$unset": REGISTRATION_APPROVAL_UNSET}
+    )
+
+    # Put sold stock back before the sales go, one increment per item per branch. Skipped for
+    # an item since deleted from the catalogue: its stock rows went with it, and restoring
+    # them would recreate a count for something no screen can show.
+    sales = await v3_col("inventory_movements").find(
+        {"kind": "sale"}, {"_id": 0, "item_id": 1, "branch_id": 1, "qty": 1}
+    ).to_list(None)
+    sold = {}
+    for sale in sales:
+        key = (sale.get("item_id"), sale.get("branch_id"))
+        sold[key] = sold.get(key, 0) + int(sale.get("qty") or 0)
+    live_items = {
+        row["id"] for row in await v3_col("inventory_items").find(
+            {"id": {"$in": list({item_id for item_id, _ in sold})}}, {"_id": 0, "id": 1}
+        ).to_list(None)
+    }
+    for (item_id, branch_id), qty in sold.items():
+        if item_id in live_items and branch_id and qty > 0:
+            await _add_to_stock(item_id, branch_id, qty)
+    store_sales_deleted = (await v3_col("inventory_movements").delete_many({"kind": "sale"})).deleted_count
+
+    cash_book = ("expenses", "petty_cash_movements", "cash_handovers", "cash_adjustments", "closing_balances", "closed_books")
+    cash_book_deleted = {name: (await v3_col(name).delete_many({})).deleted_count for name in cash_book}
+
+    payslips_deleted = (await v3_col("payslips").delete_many({})).deleted_count
+    payroll_runs_deleted = (await v3_col("payroll_runs").delete_many({})).deleted_count
+    # Money claims only; leave, permission and comp-off requests share this collection.
+    hr_claims_deleted = (await v3_col("approvals").delete_many({"kind": {"$in": ["advance", "expense"]}})).deleted_count
+
+    # Receipt numbers are TXN-<branch>-<day>-<seq>, counted per branch per day. Patient
+    # numbers share the collection under their own prefix and are not touched.
+    await v3_col("counters").delete_many({"_id": {"$regex": "^transaction_id:"}})
+
+    return {
+        "message": "All payments reset to a fresh state",
+        "leads_cleared": leads_result.modified_count,
+        "payments_deleted": payments_deleted,
+        "zumba_registrations_cleared": zumba_result.modified_count,
+        "fitness_registrations_cleared": fitness_result.modified_count,
+        "store_sales_deleted": store_sales_deleted,
+        "cash_book_deleted": cash_book_deleted,
+        "payslips_deleted": payslips_deleted,
+        "payroll_runs_deleted": payroll_runs_deleted,
+        "hr_money_claims_deleted": hr_claims_deleted,
     }

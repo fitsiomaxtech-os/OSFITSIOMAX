@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads } from "@/lib/api";
+import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments } from "@/lib/api";
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
@@ -67,6 +67,7 @@ export const PipelineStageManagement = ({ onBack }) => {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", color: "#6366f1", is_final: false });
   const [resetting, setResetting] = useState(false);
+  const [resettingPayments, setResettingPayments] = useState(false);
 
   // The tab being looked at, resolved once: `type` is this table's tab id, and for the
   // Branch pair it is not the same string as the pipeline's API type — both tabs are
@@ -143,6 +144,38 @@ export const PipelineStageManagement = ({ onBack }) => {
       toast.error(e?.response?.data?.detail || "Reset failed");
     }
     setResetting(false);
+  };
+
+  const handleResetAllPayments = async () => {
+    const step1 = window.confirm(
+      "Wipe EVERY payment recorded anywhere in the OS?\n\n" +
+      "Patients keep their stage, branch, packages and prices, but every fee paid is cleared " +
+      "and reads as owed again. Zumba and Fitness payments are cleared. Store sales are deleted " +
+      "and their stock put back. Expenses, petty cash, cash handovers, opening cash, closing " +
+      "balances, closed books, payslips, payroll runs, and HR advance/expense claims are " +
+      "permanently deleted. Receipt numbers restart.\n\nThis cannot be undone."
+    );
+    if (!step1) return;
+    // Typed rather than a second OK: two confirm boxes in a row are clicked through on
+    // reflex, and this one erases the books.
+    const typed = window.prompt('Type RESET PAYMENTS to confirm this final, irreversible reset.');
+    if ((typed || "").trim() !== "RESET PAYMENTS") {
+      if (typed !== null) toast.error("Nothing was reset — the confirmation text didn't match");
+      return;
+    }
+    setResettingPayments(true);
+    try {
+      const res = await resetAllPayments();
+      const cashRows = Object.values(res.cash_book_deleted || {}).reduce((sum, n) => sum + n, 0);
+      toast.success(
+        `Cleared payments on ${res.leads_cleared} leads, ${res.zumba_registrations_cleared} Zumba and ` +
+        `${res.fitness_registrations_cleared} Fitness registrations. Deleted ${res.payments_deleted} collections, ` +
+        `${res.store_sales_deleted} store sales, ${cashRows} cash book entries, ${res.payslips_deleted} payslips.`
+      );
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Reset failed");
+    }
+    setResettingPayments(false);
   };
 
   return (
@@ -270,6 +303,26 @@ export const PipelineStageManagement = ({ onBack }) => {
               data-testid="reset-all-leads-btn"
             >
               <Trash2 className="mr-1 h-4 w-4" /> {resetting ? "Resetting..." : "Reset All Leads"}
+            </Button>
+          </div>
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm font-semibold text-red-800">Reset all payments to a fresh state</p>
+            <p className="mt-1 text-xs text-red-700">
+              For clearing test money before go-live. Keeps every lead, registration, stage, package
+              and price, but clears every fee paid (Consultation, Treatment, Diet, Diet Chart, Rehab,
+              installments, Zumba, Fitness) so it reads as owed again. Deletes store sales and puts their
+              stock back, and permanently deletes expenses, petty cash, cash handovers, opening cash,
+              closing balances, closed books, payslips, payroll runs, and HR advance/expense claims.
+              Receipt numbers restart. Cannot be undone.
+            </p>
+            <Button
+              variant="outline"
+              className="mt-3 border-red-300 text-red-700 hover:bg-red-100"
+              onClick={handleResetAllPayments}
+              disabled={resettingPayments}
+              data-testid="reset-all-payments-btn"
+            >
+              <Trash2 className="mr-1 h-4 w-4" /> {resettingPayments ? "Resetting..." : "Reset All Payments"}
             </Button>
           </div>
         </CardContent>
