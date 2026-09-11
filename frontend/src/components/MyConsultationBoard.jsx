@@ -117,8 +117,14 @@ const BranchPicker = ({ value, branches, onPick }) => {
  * the board underneath. Under All Branches it lists every consultant, since a consultant
  * is org-wide and the question "whose day" still has an answer there.
  */
-const ConsultantPicker = ({ branchId, onPick }) => {
-  const [consultants, setConsultants] = useState([]);
+const ConsultantPicker = ({ branchId, excludeId, onPick }) => {
+  const [rows, setRows] = useState([]);
+  // The reader is never on their own list — this menu is for opening somebody else's day,
+  // and their own is the board already underneath it.
+  const consultants = useMemo(
+    () => rows.filter((c) => !c.is_me && (!excludeId || c.id !== excludeId)),
+    [rows, excludeId],
+  );
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -132,8 +138,8 @@ const ConsultantPicker = ({ branchId, onPick }) => {
         .sort((a, b) => String(a.full_name || "").localeCompare(String(b.full_name || ""))))
       : listBranchConsultants(branchId).then((res) => res?.consultants || []);
     req
-      .then((rows) => { if (live) setConsultants(rows); })
-      .catch(() => { if (live) setConsultants([]); })
+      .then((list) => { if (live) setRows(list); })
+      .catch(() => { if (live) setRows([]); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
   }, [branchId]);
@@ -167,8 +173,7 @@ const ConsultantPicker = ({ branchId, onPick }) => {
           >
             <span className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
               {c.full_name}
-              {c.is_me && <span className="rounded-[4px] bg-teal-100 px-1 py-px text-[9px] font-bold uppercase text-teal-700">You</span>}
-              {c.is_super_admin && !c.is_me && <span className="rounded-[4px] bg-slate-100 px-1 py-px text-[9px] font-bold uppercase text-slate-600">Super Admin</span>}
+              {c.is_super_admin && <span className="rounded-[4px] bg-slate-100 px-1 py-px text-[9px] font-bold uppercase text-slate-600">Super Admin</span>}
             </span>
             {c.specialization && <span className="text-[11px] text-slate-400">{c.specialization}</span>}
           </DropdownMenuItem>
@@ -474,7 +479,11 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
 
         {/* Beside the branch picker because it answers the same first question — which
             branch — and then whose day at it. Replaced Assign Consultations here. */}
-        <ConsultantPicker branchId={branchId} onPick={setSlotsFor} />
+        <ConsultantPicker
+          branchId={branchId}
+          excludeId={resolved?.is_mine ? resolved.consultant_id : null}
+          onPick={setSlotsFor}
+        />
 
         {/* Whose book this is, said once at the top. The page is named after the reader
             and lists only their patients now, so the name is confirmation rather than a
