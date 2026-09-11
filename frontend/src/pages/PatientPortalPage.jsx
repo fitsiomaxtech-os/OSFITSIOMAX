@@ -54,8 +54,8 @@ export const PatientPortalPage = () => {
     };
 
     setLink("manifest", "/portal-manifest.json");
-    setLink("apple-touch-icon", "/portal-icon.svg");
-    setLink("icon", "/portal-icon.svg", { type: "image/svg+xml" });
+    setLink("apple-touch-icon", "/apple-touch-icon.png");
+    setLink("icon", "/logo-icon-192.png", { type: "image/png" });
     setMeta("theme-color", "#0284c7");
     setMeta("apple-mobile-web-app-capable", "yes");
     setMeta("apple-mobile-web-app-status-bar-style", "black-translucent");
