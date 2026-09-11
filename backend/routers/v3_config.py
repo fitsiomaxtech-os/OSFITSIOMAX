@@ -1090,6 +1090,51 @@ LEAD_ZUMBA_FITNESS_RESET_FIELDS = {
     "fitness_recommended": False,
 }
 
+# Diet, Diet Chart and Rehab, as the consultation and the branch leave them on a lead: the
+# decision and referral flags, who was put on it, what was chosen, where it stands, and what
+# the coach wrote. Left behind, a reset New Lead stayed in the Nutrition Coach's and the
+# rehab physio's queues. Their fees go too, through LEAD_PAYMENT_RESET_FIELDS.
+LEAD_DIET_REHAB_RESET_FIELDS = {
+    "consultation_decision": None,
+    "diet_recommended": False,
+    "diet_consultation": False,
+    "diet_chart": False,
+    "diet_coach_id": None,
+    "diet_coach_name": None,
+    "diet_assigned_at": None,
+    "diet_appointment_at": None,
+    "diet_stage": None,
+    "diet_package_id": None,
+    "diet_package_name": None,
+    "diet_package_price": None,
+    "diet_package_mode": None,
+    "diet_chart_package_id": None,
+    "diet_chart_package_name": None,
+    "diet_chart_package_price": None,
+    "diet_chart_package_mode": None,
+    "diet_chart_document_id": None,
+    "diet_chart_sent_at": None,
+    "diet_chart_sent_by": None,
+    "diet_consultation_report": None,
+    "diet_consultation_report_at": None,
+    "diet_consultation_report_by": None,
+    "rehab_referred": False,
+    "rehab_package_id": None,
+    "rehab_package_name": None,
+    "rehab_package_price": None,
+    "rehab_package_sessions": None,
+    "rehab_package_mode": None,
+    "rehab_physio_id": None,
+    "rehab_physio_name": None,
+    "rehab_assigned_at": None,
+    "rehab_stage": None,
+    # The histories go with the activity trail they sit beside: a lead with no branch and no
+    # physio has no hand-overs or transfers to account for.
+    "rehab_assignment_history": [],
+    "physio_assignment_history": [],
+    "branch_transfer_history": [],
+}
+
 
 @router.post("/admin/reset-all-leads")
 async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(require_developer_password)):
@@ -1103,7 +1148,10 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
     appointments, patient view tokens, and activity history.
 
     Zumba and Fitness go entirely: the referral flags and Zumba package on every lead, every
-    registration on both tabs (walk-ins included), and every turned-away referral.
+    registration on both tabs (walk-ins included), and every turned-away referral. So do
+    Diet, Diet Chart and Rehab: the consultation decision, referrals, coach and rehab physio,
+    packages, fees, stages, the coach's report and chart pointer, and every diet and rehab
+    session day. Uploaded documents are left alone.
     Irreversible — requires confirm=true. Super Admin plus the developer password."""
     if not confirm:
         raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
@@ -1164,6 +1212,10 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
         "portfolio_datetime": None,
         "expected_consultation_date": None,
         **LEAD_ZUMBA_FITNESS_RESET_FIELDS,
+        **LEAD_DIET_REHAB_RESET_FIELDS,
+        # Every fee field, Diet/Diet Chart/Rehab included -- the same set the payments reset
+        # clears, so the two resets can never disagree about what counts as money on a lead.
+        **LEAD_PAYMENT_RESET_FIELDS,
         "updated_at": now_iso(),
     }
     leads_result = await v3_col("leads").update_many({}, {"$set": reset_fields})
@@ -1182,9 +1234,13 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
     fitness_deleted = (await v3_col("fitness_registrations").delete_many({})).deleted_count
     await v3_col("zumba_referral_dismissals").delete_many({})
     await v3_col("fitness_referral_dismissals").delete_many({})
+    diet_days_deleted = (await v3_col("diet_sessions").delete_many({})).deleted_count
+    rehab_days_deleted = (await v3_col("rehab_sessions").delete_many({})).deleted_count
 
     return {
         "message": "All leads reset to a fresh state",
+        "diet_sessions_deleted": diet_days_deleted,
+        "rehab_sessions_deleted": rehab_days_deleted,
         "zumba_registrations_deleted": zumba_deleted,
         "fitness_registrations_deleted": fitness_deleted,
         "leads_reset": leads_result.modified_count,

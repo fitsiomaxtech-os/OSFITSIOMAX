@@ -162,10 +162,11 @@ export const PipelineStageManagement = ({ onBack }) => {
     const step1 = window.confirm(
       "Reset EVERY lead in the whole OS back to a fresh, unassigned New Leads state?\n\n" +
       "This keeps each lead's name/phone/contact info, but clears their stage, branch, " +
-      "consultation, physio assignment, packages, fees, and follow-ups — and permanently " +
-      "deletes all sessions, weekly assessments, package recommendations, appointments, " +
-      "patient view links, activity history, and every Zumba and Fitness registration and " +
-      "referral.\n\nThis cannot be undone."
+      "consultation decision, physio assignment, packages, fees, follow-ups, and every Diet, " +
+      "Diet Chart and Rehab referral, coach, rehab physio and report — and permanently " +
+      "deletes all sessions (treatment, diet and rehab days), weekly assessments, package " +
+      "recommendations, appointments, patient view links, activity history, and every Zumba " +
+      "and Fitness registration and referral.\n\nThis cannot be undone."
     );
     if (!step1) return;
     // Typed, like the other two resets. This used to be a second OK box whose text asked
@@ -181,7 +182,8 @@ export const PipelineStageManagement = ({ onBack }) => {
       toast.success(
         `Reset ${res.leads_reset} leads. Deleted ${res.sessions_deleted} sessions, ` +
         `${res.weekly_assessments_deleted} assessments, ${res.appointments_deleted} appointments, ` +
-        `${res.lead_activity_deleted} activity entries, ${res.zumba_registrations_deleted} Zumba and ` +
+        `${res.lead_activity_deleted} activity entries, ${res.diet_sessions_deleted} diet and ` +
+        `${res.rehab_sessions_deleted} rehab days, ${res.zumba_registrations_deleted} Zumba and ` +
         `${res.fitness_registrations_deleted} Fitness registrations.`
       );
       load();
@@ -418,10 +420,11 @@ export const PipelineStageManagement = ({ onBack }) => {
             <p className="text-sm font-semibold text-red-800">Reset all leads to a fresh state</p>
             <p className="mt-1 flex-1 text-xs text-red-700">
               For testing only. Keeps every lead's name, phone and contact info, but resets stage,
-              branch, consultation, physio assignment, packages and fees back to New Leads —
-              and permanently deletes all sessions, weekly assessments, package recommendations,
-              appointments, patient view links, activity history, and every Zumba and Fitness
-              registration and referral. Cannot be undone.
+              branch, consultation, physio assignment, packages and fees back to New Leads, and
+              clears every Diet, Diet Chart and Rehab referral, coach, rehab physio and report —
+              and permanently deletes all sessions (treatment, diet and rehab days), weekly
+              assessments, package recommendations, appointments, patient view links, activity
+              history, and every Zumba and Fitness registration and referral. Cannot be undone.
             </p>
             <Button
               variant="outline"
