@@ -581,6 +581,7 @@ export const stagesDelete = async (id) => { const { data } = await api.delete(`/
 export const stagesReorder = async (items) => { const { data } = await api.post("/stages/reorder", { items }); invalidateStages(); return data; };
 export const resetAllLeads = async () => (await api.post("/admin/reset-all-leads", null, { params: { confirm: true } })).data;
 export const resetAllPayments = async () => (await api.post("/admin/reset-all-payments", null, { params: { confirm: true } })).data;
+export const resetAllUsers = async () => (await api.post("/admin/reset-all-users", null, { params: { confirm: true } })).data;
 
 // HR
 export const hrDashboard = async () => (await api.get("/hr/dashboard")).data;

@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments } from "@/lib/api";
+import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers } from "@/lib/api";
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
@@ -68,6 +68,7 @@ export const PipelineStageManagement = ({ onBack }) => {
   const [form, setForm] = useState({ name: "", color: "#6366f1", is_final: false });
   const [resetting, setResetting] = useState(false);
   const [resettingPayments, setResettingPayments] = useState(false);
+  const [resettingUsers, setResettingUsers] = useState(false);
 
   // The tab being looked at, resolved once: `type` is this table's tab id, and for the
   // Branch pair it is not the same string as the pipeline's API type — both tabs are
@@ -178,6 +179,35 @@ export const PipelineStageManagement = ({ onBack }) => {
     setResettingPayments(false);
   };
 
+  const handleResetAllUsers = async () => {
+    const step1 = window.confirm(
+      "Delete EVERY user login except Super Admin?\n\n" +
+      "They are signed out and deleted, with their HR employee records, attendance, leave " +
+      "requests, clock-ins, login history, and expert calendars (calendars with bookings are " +
+      "switched off instead). Leads, Zumba registrations and branches that named them are " +
+      "unassigned. Every Client Portal login is deleted too.\n\nThis cannot be undone."
+    );
+    if (!step1) return;
+    // Typed for the same reason as the payments reset: this one removes people's access.
+    const typed = window.prompt('Type RESET USERS to confirm this final, irreversible reset.');
+    if ((typed || "").trim() !== "RESET USERS") {
+      if (typed !== null) toast.error("Nothing was reset — the confirmation text didn't match");
+      return;
+    }
+    setResettingUsers(true);
+    try {
+      const res = await resetAllUsers();
+      toast.success(
+        `Deleted ${res.users_deleted} users, ${res.employees_deleted} employee records, ` +
+        `${res.expert_profiles_deleted} expert calendars (${res.expert_profiles_switched_off} switched off), ` +
+        `${res.portal_accounts_deleted} portal logins. Unlinked ${res.branches_unlinked} branch admins.`
+      );
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Reset failed");
+    }
+    setResettingUsers(false);
+  };
+
   return (
     <div className="space-y-5" data-testid="pipeline-stages-page">
       {/* Heading removed with the others. The back link and Add Stage keep the row, so
@@ -286,10 +316,11 @@ export const PipelineStageManagement = ({ onBack }) => {
             <AlertTriangle className="h-4 w-4" /> Danger Zone
           </CardTitle>
         </CardHeader>
-        {/* The two resets side by side, one row on desktop and stacked on a phone. Each box is a
-            column whose description takes the slack, so both buttons sit on the same line
-            however much longer one description runs than the other. */}
-        <CardContent className="grid gap-3 md:grid-cols-2">
+        {/* The resets side by side, one row on a wide screen and stacked below that -- three
+            descriptions this long do not fit three-across on a tablet. Each box is a column
+            whose description takes the slack, so every button sits on the same line however
+            much longer one description runs than another. */}
+        <CardContent className="grid gap-3 lg:grid-cols-3">
           <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
             <p className="text-sm font-semibold text-red-800">Reset all leads to a fresh state</p>
             <p className="mt-1 flex-1 text-xs text-red-700">
@@ -326,6 +357,25 @@ export const PipelineStageManagement = ({ onBack }) => {
               data-testid="reset-all-payments-btn"
             >
               <Trash2 className="mr-1 h-4 w-4" /> {resettingPayments ? "Resetting..." : "Reset All Payments"}
+            </Button>
+          </div>
+          <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm font-semibold text-red-800">Reset all users to a fresh state (except Super Admin)</p>
+            <p className="mt-1 flex-1 text-xs text-red-700">
+              For clearing test staff before go-live. Deletes every login except Super Admin and signs
+              them out, with their HR employee records, attendance, leave requests, clock-ins, login
+              history and expert calendars (a calendar with bookings is switched off instead). Leads,
+              Zumba registrations and branches that named them are unassigned, and every Client Portal
+              login is deleted. Super Admin accounts are never touched. Cannot be undone.
+            </p>
+            <Button
+              variant="outline"
+              className="mt-3 self-start border-red-300 text-red-700 hover:bg-red-100"
+              onClick={handleResetAllUsers}
+              disabled={resettingUsers}
+              data-testid="reset-all-users-btn"
+            >
+              <Trash2 className="mr-1 h-4 w-4" /> {resettingUsers ? "Resetting..." : "Reset All Users"}
             </Button>
           </div>
         </CardContent>

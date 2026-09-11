@@ -1244,3 +1244,122 @@ async def v3_reset_all_payments(confirm: bool = False, _: V3UserOut = Depends(v3
         "payroll_runs_deleted": payroll_runs_deleted,
         "hr_money_claims_deleted": hr_claims_deleted,
     }
+
+
+# Every (collection, field) that books a patient against an expert profile. A profile named
+# in any of them has history, and is switched off rather than deleted -- the same rule
+# delete_user_permanent follows, for the same reason: removing the row orphans the record.
+EXPERT_HISTORY_REFS = (
+    ("appointments", "doctor_id"),
+    ("sessions", "physio_id"),
+    ("rehab_sessions", "physio_id"),
+    ("diet_sessions", "coach_id"),
+    ("weekly_assessments", "physio_id"),
+    ("package_recommendations", "head_physio_id"),
+    ("reviews", "head_physio_id"),
+    ("reviews", "physio_id"),
+)
+
+# The lead fields that name an expert profile, each with the name stored beside it.
+LEAD_EXPERT_FIELDS = (
+    ("assigned_physio_id", "assigned_physio_name"),
+    ("rehab_physio_id", "rehab_physio_name"),
+    ("diet_coach_id", "diet_coach_name"),
+)
+
+
+@router.post("/admin/reset-all-users")
+async def v3_reset_all_users(confirm: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Deletes every login except the Super Admins', and what belongs only to those people.
+    For clearing test staff before go-live.
+
+    With each deleted login go: its signed-in sessions, clock-in days, login history and
+    password-reset requests; the HR employee record it is linked to, with that employee's
+    attendance register and leave/permission requests; and its expert calendar profiles
+    (matched by login or by employee). A profile nothing was ever booked against is
+    deleted; one that appointments or sessions still point at is switched off instead.
+
+    Whatever named those people is unassigned: leads' Pre-Sales, physio, rehab physio and
+    diet coach; Zumba registrations' master; each branch's admin. Every Client Portal login
+    and portal session is deleted too. Leads, branches and registrations themselves stay.
+
+    A Super Admin's login, employee record and expert profile are never touched. Employees
+    with no login at all are not users and are left alone. Irreversible — requires
+    confirm=true. Super Admin only."""
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
+
+    doomed = await v3_col("users").find(
+        {"role": {"$ne": "super_admin"}}, {"_id": 0, "id": 1, "employee_id": 1}
+    ).to_list(None)
+    user_ids = [u["id"] for u in doomed]
+    kept_employee_ids = {
+        u["employee_id"] for u in await v3_col("users").find(
+            {"role": "super_admin"}, {"_id": 0, "employee_id": 1}
+        ).to_list(None) if u.get("employee_id")
+    }
+    employee_ids = list({u["employee_id"] for u in doomed if u.get("employee_id")} - kept_employee_ids)
+    kept_user_ids = [u["id"] for u in await v3_col("users").find({"role": "super_admin"}, {"_id": 0, "id": 1}).to_list(None)]
+
+    # Their expert profiles, by either link, never one a Super Admin holds.
+    expert_query = {
+        "$or": [{"user_id": {"$in": user_ids}}, {"employee_id": {"$in": employee_ids}}],
+        "user_id": {"$nin": kept_user_ids},
+    }
+    experts = await v3_col("doctors").find(expert_query, {"_id": 0, "id": 1}).to_list(None)
+    expert_ids = [d["id"] for d in experts]
+    booked = set()
+    for collection, field in EXPERT_HISTORY_REFS:
+        booked.update(await v3_col(collection).distinct(field, {field: {"$in": expert_ids}}))
+    to_delete = [i for i in expert_ids if i not in booked]
+    to_switch_off = [i for i in expert_ids if i in booked]
+    experts_deleted = (await v3_col("doctors").delete_many({"id": {"$in": to_delete}})).deleted_count
+    await v3_col("doctors").update_many(
+        {"id": {"$in": to_switch_off}}, {"$set": {"is_active": False, "updated_at": now_iso()}}
+    )
+
+    # Unassign before the people go, while the ids still say who they were.
+    lead_assignments_cleared = (await v3_col("leads").update_many(
+        {"assigned_user_id": {"$in": user_ids}},
+        {"$set": {"assigned_user_id": None, "assigned_user_name": None, "assigned_user_role": None, "updated_at": now_iso()}},
+    )).modified_count
+    for id_field, name_field in LEAD_EXPERT_FIELDS:
+        lead_assignments_cleared += (await v3_col("leads").update_many(
+            {id_field: {"$in": expert_ids}},
+            {"$set": {id_field: None, name_field: None, "updated_at": now_iso()}},
+        )).modified_count
+    await v3_col("zumba_registrations").update_many(
+        {"assigned_master_id": {"$in": user_ids}}, {"$set": {"assigned_master_id": ""}}
+    )
+    # Empty strings, not None: V3BranchOut declares all three as plain str, and a None here
+    # would fail every read of the branch list.
+    branches_unlinked = (await v3_col("branches").update_many(
+        {"admin_user_id": {"$in": user_ids}},
+        {"$set": {"admin_user_id": "", "admin_name": "", "admin_email": "", "admin_phone": ""}},
+    )).modified_count
+
+    # Login tokens only: treatment sessions share this collection and carry no user_id.
+    await v3_col("sessions").delete_many({"user_id": {"$in": user_ids}})
+    await v3_col("clock_days").delete_many({"user_id": {"$in": user_ids}})
+    await v3_col("login_history").delete_many({"user_id": {"$in": user_ids}})
+    await v3_col("password_reset_requests").delete_many({"user_id": {"$in": user_ids}})
+
+    employees_deleted = (await v3_col("employees").delete_many({"id": {"$in": employee_ids}})).deleted_count
+    await v3_col("attendance").delete_many({"employee_id": {"$in": employee_ids}})
+    await v3_col("approvals").delete_many({"employee_id": {"$in": employee_ids}})
+
+    portal_accounts_deleted = (await v3_col("patient_portal_accounts").delete_many({})).deleted_count
+    await v3_col("patient_portal_sessions").delete_many({})
+
+    users_deleted = (await v3_col("users").delete_many({"id": {"$in": user_ids}})).deleted_count
+
+    return {
+        "message": "All users except Super Admin reset to a fresh state",
+        "users_deleted": users_deleted,
+        "employees_deleted": employees_deleted,
+        "expert_profiles_deleted": experts_deleted,
+        "expert_profiles_switched_off": len(to_switch_off),
+        "lead_assignments_cleared": lead_assignments_cleared,
+        "branches_unlinked": branches_unlinked,
+        "portal_accounts_deleted": portal_accounts_deleted,
+    }
