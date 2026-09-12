@@ -29,7 +29,7 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException
 
 from database import v3_col
-from email_utils import send_email
+from email_utils import SmtpNotConfigured, send_email, smtp_configured
 from utils import now_iso, now_utc
 
 OTP_TTL_MINUTES = 5
@@ -84,11 +84,17 @@ def _expired(row: Dict[str, Any]) -> bool:
 
 
 def _deliver(user: Dict[str, Any], purpose: str, code: str) -> None:
-    """Mail the code, and turn a dead SMTP configuration into an answer the screen can use.
+    """Mail the code, and turn a failure into an answer the screen can act on.
 
-    send_email raises when SMTP_USER/SMTP_PASSWORD are unset, and on a login challenge that
-    would otherwise surface as a 500 on the sign-in screen of somebody who typed the right
-    password. 503 with the reason said plainly is the honest version of that.
+    The two failures are told apart because the reader can do something different about
+    each. A server with no SMTP credentials will never send this code, however many times
+    the button is pressed, and saying so is the difference between an administrator fixing
+    a .env and a user retrying all afternoon. A configured server that failed once is worth
+    trying again.
+
+    Either way the real SMTP error is in the log by the time this runs — email_utils puts
+    it there — because the sentence a user gets can never carry "535 Username and Password
+    not accepted", and that is the sentence that fixes the problem.
     """
     try:
         send_email(
@@ -102,10 +108,19 @@ def _deliver(user: Dict[str, Any], purpose: str, code: str) -> None:
                 f"{_WARNINGS[purpose]}"
             ),
         )
-    except Exception as exc:  # SMTP down, or never configured
+    except SmtpNotConfigured as exc:
         raise HTTPException(
             status_code=503,
-            detail="Could not send the verification code by email. Contact your administrator.",
+            detail=(
+                "This server cannot send email yet, so the code could not go out. An "
+                "administrator needs to set SMTP_USER and SMTP_PASSWORD in backend/.env, "
+                "then restart the backend."
+            ),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The verification code could not be emailed just now. Please try again in a moment.",
         ) from exc
 
 
@@ -120,6 +135,17 @@ async def issue_challenge(user: Dict[str, Any], purpose: str) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="Unknown verification purpose")
     if not user.get("email"):
         raise HTTPException(status_code=400, detail="This account has no email address to send a code to")
+    # Asked before the row is written, not after. _deliver would refuse this anyway, but by
+    # then a challenge nobody can ever answer is already in the collection — and on the
+    # login path that is a challenge id handed to a browser for a code that was never sent.
+    if not smtp_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "This server cannot send email yet, so no code can be sent. An administrator "
+                "needs to set SMTP_USER and SMTP_PASSWORD in backend/.env, then restart the backend."
+            ),
+        )
 
     await v3_col("two_factor_challenges").delete_many(
         {"user_id": user["id"], "purpose": purpose, "consumed": False}

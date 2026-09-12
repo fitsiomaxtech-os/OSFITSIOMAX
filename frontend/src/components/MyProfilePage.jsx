@@ -638,7 +638,12 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
             <p className="truncate text-xs text-slate-500">Your attendance, hours, time off and record — all in one place.</p>
           </div>
         </div>
-        <div className="w-full sm:w-96" data-testid="my-profile-tabs-wrap">
+        {/* Full width on a phone, where the bar is its own row of four columns; sized to
+            its labels from sm up. It used to be pinned to w-96, which fitted three tabs
+            and cut all four down to "Atte…", "Tim…", "My …", "Sec…" — a tab clipped to
+            four characters is not a tab. shrink-0 keeps the greeting beside it from
+            squeezing it back into an ellipsis; the row wraps instead. */}
+        <div className="w-full sm:w-auto sm:shrink-0" data-testid="my-profile-tabs-wrap">
           <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={4} />
         </div>
       </div>

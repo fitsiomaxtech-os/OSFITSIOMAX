@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  AlertTriangle,
   Check,
   Eye,
   EyeOff,
@@ -215,6 +216,10 @@ const PasswordPanel = ({ changedAt, onChanged }) => {
 
 const TwoFactorPanel = ({ state, emailMasked, onChanged }) => {
   const enabled = Boolean(state?.enabled);
+  // Absent on an older backend that predates the field. Treated as configured in that
+  // case, so the panel behaves as it did rather than hiding the button on every install
+  // that has not been redeployed yet.
+  const emailConfigured = state?.email_configured !== false;
   // `null` while nothing is being confirmed; otherwise the challenge in flight, which is
   // what decides whether the code box is on screen.
   const [pending, setPending] = useState(null); // { intent, challenge_id, email_masked }
@@ -286,7 +291,25 @@ const TwoFactorPanel = ({ state, emailMasked, onChanged }) => {
           </div>
         </div>
 
-        {!pending ? (
+        {/* A server with no SMTP credentials cannot send the code this whole panel depends
+            on. Said here, with the button switched off, rather than letting somebody press
+            it and read the failure in a red toast — the fix belongs to an administrator,
+            not to the person looking at the screen, and nothing they do will change it. */}
+        {!emailConfigured ? (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5" data-testid="my-security-2fa-unavailable">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-amber-800">
+                {enabled ? "This server can't send your sign-in code" : "Not available on this server yet"}
+              </p>
+              <p className="text-xs text-amber-700">
+                {enabled
+                  ? "Two-factor is on for your account, but email sending is switched off on this server — ask your administrator to fix it before you sign out."
+                  : "Sending email isn't set up on this server, so the code can't reach you. Ask your administrator to configure it, then come back."}
+              </p>
+            </div>
+          </div>
+        ) : !pending ? (
           <div className="space-y-2">
             <Button
               onClick={() => start(enabled ? "disable" : "enable")}

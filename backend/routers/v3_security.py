@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 import two_factor
 from database import v3_col
+from email_utils import smtp_configured
 from deps import v3_current_user
 from schemas.v3 import V3UserOut
 from security import hash_password, verify_password
@@ -110,6 +111,13 @@ async def my_security(user: V3UserOut = Depends(v3_current_user), authorization:
             "enabled": two_factor.is_enabled(row),
             "method": "email" if two_factor.is_enabled(row) else None,
             "enabled_at": row.get("two_factor_enabled_at"),
+            # Whether this server can send the code at all. Email is the only delivery
+            # method, so with no SMTP credentials the button is a button that cannot work
+            # — the screen is better off saying that up front than after it is pressed.
+            #
+            # Reported even when 2FA is already on, because that is the worse case: a code
+            # will be asked for at the next sign-in and the server cannot send one.
+            "email_configured": smtp_configured(),
         },
         "sessions": {
             "total": len(sessions),

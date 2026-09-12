@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from database import v3_col
 from utils import now_iso, now_utc
 from security import hash_password
-from email_utils import send_email
+from email_utils import SmtpNotConfigured, send_email
 
 router = APIRouter(prefix="/api/v3/auth")
 
@@ -86,6 +86,31 @@ async def _log_attempt(identifier: str, method: str, user_id, ip: str, event: st
     })
 
 
+def _send_or_503(to_address: str, subject: str, body: str) -> None:
+    """Send, and turn either failure into a sentence rather than a 500.
+
+    These two sends were bare calls, so a backend with no SMTP credentials answered
+    "Forgot password?" with a 500 and an error overlay — on the one screen reached by
+    somebody who is already locked out. The real cause is logged by email_utils either
+    way; what changes here is what the person in front of the screen is told.
+    """
+    try:
+        send_email(to_address, subject, body)
+    except SmtpNotConfigured as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "This server cannot send email yet, so recovery instructions could not go out. "
+                "Ask your administrator to set SMTP_USER and SMTP_PASSWORD in backend/.env."
+            ),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not send the email just now. Please try again in a moment.",
+        ) from exc
+
+
 @router.post("/forgot-password")
 async def forgot_password(payload: ForgotPasswordRequest, request: Request):
     identifier = payload.identifier.strip()
@@ -144,7 +169,7 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request):
         doc["expires_at"] = (now_utc() + timedelta(minutes=LINK_TTL_MINUTES)).isoformat()
         await v3_col("password_reset_requests").insert_one(doc.copy())
         reset_url = f"{FRONTEND_URL}/reset-password?token={link_token}"
-        send_email(
+        _send_or_503(
             user["email"],
             "FitsiomaxOS — Reset your password",
             (
@@ -161,7 +186,7 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request):
     doc["otp_hash"] = _hash_token(otp)
     doc["expires_at"] = (now_utc() + timedelta(minutes=OTP_TTL_MINUTES)).isoformat()
     await v3_col("password_reset_requests").insert_one(doc.copy())
-    send_email(
+    _send_or_503(
         user["email"],
         "FitsiomaxOS — Password reset OTP",
         (
