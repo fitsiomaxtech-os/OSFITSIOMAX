@@ -1,19 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { X, Layers, ChevronDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { bmCreateWithExistingAdmin, updateBranch, getVerticals } from "@/lib/api";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { MilkDateInput, CenteredPicker } from "@/components/ui/milk-calendar";
 import { LeadControlSwitch, normalizeLeadControl, BRANCH_ADMIN } from "@/components/branch/LeadControlSwitch";
-
-// "offline_physiotherapy" -> "Offline Physiotherapy". The stored name stays snake_case,
-// because it is matched against elsewhere; only the label is prettied.
-const prettyVertical = (v) => String(v || "")
-  .split("_")
-  .filter(Boolean)
-  .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-  .join(" ");
+import { serviceTypeColor, serviceTypeLabel, serviceTypeChipStyle } from "@/lib/serviceTypes";
 
 // Opening Hours, Finance Summary and CONSULTANT were tabs here. Each is reachable from
 // the branch's own detail page, which is where a branch is actually read; behind a tab in
@@ -38,6 +31,87 @@ const emptyWeekly = () => Object.fromEntries(DAYS.map((d) => [d.key, { ...defaul
 // Every default vertical is named "online_..."/"offline_..." — mode is read straight
 // off that prefix rather than stored as a separate field, so the two can never disagree.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+/**
+ * The branch's service type, picked from the OS's own chips rather than a browser menu.
+ *
+ * A native <select> cannot be styled — its typography, its blue highlight and its chrome
+ * belong to the operating system, not this one — and this list in particular had somewhere
+ * to look instead: the Service Type manager, one button away on the same toolbar, already
+ * draws each type as a coloured chip. A type chosen here and the same type listed there
+ * should not be two different-looking things, so this wears the manager's clothes and both
+ * take their colour from the shared helper rather than from a position in a list.
+ */
+const VerticalPicker = ({ options, value, onChange, testid = "bf2-vertical" }) => {
+  const [open, setOpen] = useState(false);
+  const color = serviceTypeColor(value);
+  const chip = serviceTypeChipStyle(color);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-slate-200 px-3 text-left"
+        data-testid={testid}
+      >
+        {value ? (
+          <span className="flex min-w-0 items-center gap-2.5">
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={chip.glyph}>
+              <Layers className="h-3.5 w-3.5" style={chip.icon} />
+            </span>
+            {/* The OS's small-caps label, the same treatment the manager's chips carry: a
+                service type is a tag on a branch, not prose, and it reads as one here. */}
+            <span className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-600">
+              {serviceTypeLabel(value)}
+            </span>
+          </span>
+        ) : (
+          <span className="text-sm text-slate-400">Choose a service type…</span>
+        )}
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+
+      {open && (
+        <CenteredPicker title="Service Type" onClose={() => setOpen(false)} testid={`${testid}-modal`}>
+          {options.length === 0 ? (
+            <p className="px-1 py-6 text-center text-xs text-slate-400">
+              No service type matches this mode yet. Add one from Service Type on the toolbar.
+            </p>
+          ) : (
+            <div className="grid gap-2" data-testid={`${testid}-list`}>
+              {options.map((v) => {
+                const c = serviceTypeColor(v);
+                const s = serviceTypeChipStyle(c);
+                const selected = v === value;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => { onChange(v); setOpen(false); }}
+                    className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition hover:shadow-sm ${
+                      selected ? "ring-2 ring-offset-1" : ""
+                    }`}
+                    style={{ ...s.tile, ...(selected ? { "--tw-ring-color": c } : {}) }}
+                    data-testid={`${testid}-option-${v}`}
+                  >
+                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={s.glyph}>
+                      <Layers className="h-3.5 w-3.5" style={s.icon} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-left text-xs font-semibold uppercase tracking-wide text-slate-600" title={v}>
+                      {serviceTypeLabel(v)}
+                    </span>
+                    {selected && <Check className="h-4 w-4 shrink-0" style={s.icon} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </CenteredPicker>
+      )}
+    </>
+  );
+};
 
 export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
   const isEdit = !!branch;
@@ -184,11 +258,7 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
                 <p className="mt-1 text-[11px] text-slate-400">Prefixes every patient's unique Patient Number at this branch (e.g. ANN-260727-0000).</p>
               </Field>
               <Field label="Vertical">
-                <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.vertical} onChange={(e) => set("vertical", e.target.value)} data-testid="bf2-vertical">
-                  {verticals.map((v) => (
-                    <option key={v} value={v}>{prettyVertical(v)}</option>
-                  ))}
-                </select>
+                <VerticalPicker options={verticals} value={form.vertical} onChange={(v) => set("vertical", v)} />
               </Field>
               {/* Edit only, and read-only at that. Picking a Branch Admin while creating
                   a branch forced the order backwards — the admin's HR record had to exist

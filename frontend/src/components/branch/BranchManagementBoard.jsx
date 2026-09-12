@@ -12,6 +12,9 @@ import {
   getDashboardOverview, bmListArchived, bmArchiveBranch, bmRestoreBranch,
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
+// Shared with the branch form's Vertical picker, so a service type is the same colour and
+// the same wording on both screens — they open a click apart from this board's toolbar.
+import { serviceTypeColor, serviceTypeLabel, serviceTypeChipStyle } from "@/lib/serviceTypes";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
@@ -892,12 +895,6 @@ const Field = ({ label, children, className = "" }) => (
 );
 
 // ---------- Service Type (moved from Super Admin Master View "Business Verticals") ----------
-const SERVICE_TYPE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48", "#0891b2"];
-
-// "offline_physiotherapy" -> "offline physiotherapy". Only the underscores go: the casing
-// is left to CSS, so what gets read back for a match is still the stored name, and the
-// input above keeps writing whatever the user actually typed.
-const serviceTypeLabel = (name) => String(name || "").replace(/_/g, " ");
 /**
  * Add or remove a service type, and see the ones that exist. Opened from MANAGER's toolbar,
  * where a branch is created and the type it needs may not exist yet.
@@ -979,17 +976,17 @@ const ServiceTypeManager = ({ onChanged }) => {
         </Button>
       </form>
       <div className="grid gap-2 sm:grid-cols-2">
-        {items.map((item, idx) => {
-          const color = SERVICE_TYPE_COLORS[idx % SERVICE_TYPE_COLORS.length];
+        {items.map((item) => {
+          const chip = serviceTypeChipStyle(serviceTypeColor(item.name));
           return (
             <div
               key={item.id}
               className="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition hover:shadow-sm"
-              style={{ backgroundColor: `${color}0f`, borderColor: `${color}33` }}
+              style={chip.tile}
               data-testid={`service-type-row-${item.id}`}
             >
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}24` }}>
-                <Layers className="h-3.5 w-3.5" style={{ color }} />
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={chip.glyph}>
+                <Layers className="h-3.5 w-3.5" style={chip.icon} />
               </span>
               {/* The OS's small-caps label: uppercase, tracked, one step down in size. A
                   service type is a tag on a branch, not prose, and it reads as one here. */}
