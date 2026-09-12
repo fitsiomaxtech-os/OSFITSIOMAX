@@ -1,4 +1,4 @@
-import { AlertCircle, RotateCcw, Star } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, RotateCcw, Star } from "lucide-react";
 
 /**
  * The two marks a branch puts on a patient by hand, shown read-only.
@@ -74,6 +74,54 @@ export const RescheduledTag = ({ lead, className = "", compact = false }) => {
     >
       <RotateCcw className={compact ? "h-2 w-2" : "h-2.5 w-2.5"} />
       {compact ? (count > 1 ? `×${count}` : "") : <>Rescheduled{count > 1 ? ` ×${count}` : ""}</>}
+    </span>
+  );
+};
+
+/**
+ * "Transferred" — this patient came here from another branch, or has left for one.
+ *
+ * The third mark, and it belongs beside the other two rather than in the stage strip for
+ * the same reason they do: a transferred patient is not at a stage of their own. They are
+ * sitting in New Appointment or in Physio Assign exactly like everybody around them, and
+ * the one thing that is not true of the row either side of theirs is that the history
+ * behind them happened somewhere else.
+ *
+ * Which is worth a glyph on the name because of what the history costs to read otherwise.
+ * The money already collected stayed in the branch they came from (revenue_branch_splits),
+ * their booked treatment days were released and have to be booked again here, and their
+ * Patient Number was issued by the other branch. A Branch Admin who does not know that is
+ * about to wonder why a patient at Fee Collected has nothing in this branch's book.
+ *
+ * Set by nobody: unlike the star and the flag, this is not a judgement anyone makes about
+ * a patient — it is written by the transfer itself, in BranchTransferDialog, and read here.
+ *
+ * Indigo, which is the colour the transfer dialog already uses for itself, and the arrow
+ * it opens with. Renders nothing for a patient who has never moved, like the marks above
+ * it: most patients have not, and an outline on every row of them is noise.
+ *
+ * The count shows from the second move on, on the same reasoning as RescheduledTag: one
+ * transfer is ordinary, three is a patient nobody has settled, and that reads better off
+ * the row than out of the activity log.
+ */
+export const TransferredTag = ({ lead, className = "", compact = false }) => {
+  const moves = lead?.branch_transfer_history || [];
+  if (!moves.length) return null;
+  const last = moves[moves.length - 1] || {};
+  const from = last.from_branch_name || "another branch";
+  const on = last.at ? String(last.at).slice(0, 10) : "";
+  const title = `${moves.length > 1 ? `Transferred ${moves.length} times, last ` : "Transferred "}from ${from}${on ? ` on ${on}` : ""}`;
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-0.5 align-middle font-bold text-indigo-600 ${
+        compact ? "text-[8px]" : "text-[9px]"
+      } ${className}`}
+      title={title}
+      aria-label={title}
+      data-testid="lead-transferred-tag"
+    >
+      <ArrowLeftRight className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
+      {moves.length > 1 ? `×${moves.length}` : ""}
     </span>
   );
 };

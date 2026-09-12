@@ -47,7 +47,7 @@ import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { QuickDateFilterBar, intersectDateFilters, quickDatePreset } from "@/components/QuickDateFilterBar";
 import { StageTabBar } from "@/components/ui/stage-tab";
-import { RescheduledTag } from "@/components/ui/lead-marks";
+import { RescheduledTag, TransferredTag } from "@/components/ui/lead-marks";
 import {
   scheduleBranchAppointment,
   getBranches,
@@ -2146,7 +2146,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <span className="truncate font-semibold text-slate-900">{lead.name}<RescheduledTag lead={lead} className="ml-1.5" compact /></span>
+                          <span className="truncate font-semibold text-slate-900">{lead.name}<TransferredTag lead={lead} className="ml-1" compact /><RescheduledTag lead={lead} className="ml-1.5" compact /></span>
                           <span
                             className="shrink-0 rounded-[5px] border px-2 py-0.5 text-[10px] font-medium"
                             style={hex ? { background: `${hex}14`, color: hex, border: `1px solid ${hex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
@@ -2373,7 +2373,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                                   two columns over, which left the one thing this list is
                                   scanned for competing with the columns either side of it.
                                   The mobile card above already gave the name its own weight. */}
-                              <span className="block truncate font-semibold text-slate-900" title={lead.name}>{lead.name}</span>
+                              <span className="flex min-w-0 items-center gap-1">
+                                <span className="truncate font-semibold text-slate-900" title={lead.name}>{lead.name}</span>
+                                {/* Outside the truncation, not inside it. A name long
+                                    enough to be cut is exactly the row where the mark
+                                    would be the part that got cut. */}
+                                <TransferredTag lead={lead} />
+                              </span>
                               {lead.patient_number && <span className="block truncate font-mono text-[10px] text-slate-400" title={lead.patient_number}>{lead.patient_number}</span>}
                               <RescheduledTag lead={lead} className="mt-0.5" />
                             </div>
@@ -3475,7 +3481,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
             <div className="flex items-center gap-3">
               <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-base font-bold text-slate-600 ring-1 ring-slate-200">{avatarFirstChar}</span>
               <div>
-                <p className="text-base font-semibold leading-tight text-slate-900" data-testid="branch-lead-name">{lead.name}</p>
+                <p className="text-base font-semibold leading-tight text-slate-900" data-testid="branch-lead-name">{lead.name}<TransferredTag lead={lead} className="ml-1.5" /></p>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   {lead.patient_number && (
                     <span className="rounded-[5px] bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-600" data-testid="branch-lead-patient-number">{lead.patient_number}</span>
