@@ -1030,6 +1030,14 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // describing the same mode — a separate fetch would briefly disagree after a flip.
   const stages = useMemo(() => boardData.stages || [], [boardData.stages]);
 
+  // Guarded the same way, and for a sharper reason than a slow first paint: the board
+  // response is not always a board. The no-scope case sets { noScope: true } on purpose
+  // (see loadBoard), so `leads` is missing exactly when the "pick a branch" notice is the
+  // thing to draw -- and every memo below runs before that notice does. A server response
+  // that omits the key does the same. Reading this instead of the raw field is what makes
+  // a lead-less response draw the notice rather than throw on .filter.
+  const leads = useMemo(() => boardData.leads || [], [boardData.leads]);
+
   const stageColor = useCallback(
     // Both pipelines: a row's chip can now name a consultation stage, and looking only in
     // the sales list would have found no colour and painted it the grey of a stage nobody
@@ -1335,7 +1343,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   );
 
   const filteredLeads = useMemo(() => {
-    let list = boardData.leads;
+    let list = leads;
     if (effectiveDateFilter) {
       const from = effectiveDateFilter.from?.getTime();
       const to = effectiveDateFilter.to?.getTime();
@@ -1386,7 +1394,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     const arrived = (l) => new Date(l.created_at || 0).getTime() || 0;
     list = [...list].sort((a, b) => (sortOrder === "newest" ? arrived(b) - arrived(a) : arrived(a) - arrived(b)));
     return list;
-  }, [boardData.leads, searchQuery, effectiveDateFilter, markFilter, listFilters, toolbarFilters, sortOrder]);
+  }, [leads, searchQuery, effectiveDateFilter, markFilter, listFilters, toolbarFilters, sortOrder]);
 
   /**
    * What each dropdown offers: the answers this branch has actually given, not a list
@@ -1407,7 +1415,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     const out = {};
     for (const f of toolbarFilters) {
       const seen = new Map();
-      for (const lead of boardData.leads) {
+      for (const lead of leads) {
         const answer = f.answer(lead);
         if (!answer) continue;
         const k = answer.toLowerCase();
@@ -1418,7 +1426,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       out[f.key] = [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: "base" }));
     }
     return out;
-  }, [boardData.leads, toolbarFilters]);
+  }, [leads, toolbarFilters]);
 
   // The rows the table is actually showing. Hoisted out of the table body because the
   // select-all box and the delete bar have to agree with it exactly — "select all" that
@@ -1494,7 +1502,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const handleStageUpdate = async () => {
     const data = await loadBoard();
     if (selectedLead && data) {
-      const updated = data.leads.find((l) => l.id === selectedLead.id);
+      const updated = data.leads?.find((l) => l.id === selectedLead.id);
       if (updated) setSelectedLead(updated);
     }
   };
