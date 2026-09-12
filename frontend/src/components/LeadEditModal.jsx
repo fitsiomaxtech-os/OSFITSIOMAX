@@ -41,9 +41,9 @@ const isEditableAnswer = (v) => ["string", "number", "boolean"].includes(typeof 
  *
  * Opened from Pre-Sales' own card and from the Branch Leads popup, which is why the branch
  * picker is a prop rather than an assumption. It is off for the branch popup: a patient
- * moves between branches through Operations' transfer, which carries their fees and
- * sessions with them, and a radio button here would move the person and leave the money
- * behind.
+ * moves between branches through Branch Transfer -- Operations for a Super Admin, the
+ * branch's own toolbar for its Branch Admin -- which carries their fees and sessions with
+ * them, and a radio button here would move the person and leave the money behind.
  *
  * Source is deliberately not editable. It records which sheet and mapping filed the lead
  * rather than anything about the patient, and retyping it would not change where they

@@ -1295,6 +1295,66 @@ FEE_SCHEDULES = {
 }
 
 
+# Every action that records money arriving, mapped to what a receipt calls it.
+#
+# Derived from FEE_SCHEDULES rather than retyped, so a sixth fee added there appears in a
+# patient's payment history without a second edit here — plus the three collections that
+# carry no installment schedule and so have no row in that map.
+PAYMENT_ACTION_LABELS = {
+    **{cfg["action"]: cfg["label"] for cfg in FEE_SCHEDULES.values()},
+    "consultation_paid": "Consultation Fee",
+    "package_sold": "Package Sold",
+    "fee_collected": "Fee Collected",
+}
+
+
+async def lead_payment_history(lead: dict) -> list:
+    """Every payment this patient has made, newest first, each against the branch that took it.
+
+    Wider than the Summary tab's transaction list above, which reports only the three
+    collections the revenue cards are built from. This answers a different question — what
+    has this person paid us, anywhere, ever — and is read before a branch transfer, where
+    showing only some of the money would understate what the move leaves behind.
+
+    The branch on each row is where the patient was on the day it was collected, walked off
+    the transfer history by _branch_at, never the branch they sit at now: a patient moved
+    twice has receipts belonging to three different books.
+    """
+    rows = await v3_col("lead_activity").find(
+        {"lead_id": lead.get("id"), "action": {"$in": list(PAYMENT_ACTION_LABELS)}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(500)
+
+    branch_ids = {_branch_at(lead, r.get("created_at", "")) for r in rows}
+    branch_ids.discard("")
+    branch_names = {
+        b["id"]: b.get("branch_name", "")
+        for b in await v3_col("branches").find(
+            {"id": {"$in": list(branch_ids)}}, {"_id": 0, "id": 1, "branch_name": 1}
+        ).to_list(200)
+    }
+
+    history = []
+    for row in rows:
+        collected_at = row.get("created_at", "")
+        branch_id = _branch_at(lead, collected_at)
+        history.append({
+            "id": row.get("id", ""),
+            # Blank on collections taken before receipts carried one, same as the Summary
+            # tab's rows — every reader of either list has to tolerate it.
+            "transaction_id": row.get("transaction_id") or "",
+            "action": row.get("action", ""),
+            "label": PAYMENT_ACTION_LABELS.get(row.get("action", ""), "Payment"),
+            "amount": _parse_rs_amount(row.get("details", "")),
+            "payment_mode": _parse_payment_mode(row.get("details", "")),
+            "collected_by": row.get("created_by", ""),
+            "collected_at": collected_at,
+            "branch_id": branch_id,
+            "branch_name": branch_names.get(branch_id, ""),
+        })
+    return history
+
+
 def _fee_installments(lead: dict, fee: str = "treatment") -> list:
     """One fee's installment schedule, whatever put it there. A schedule exists whenever
     the record has one — from choosing 'Partial Payment' outright, from collecting for

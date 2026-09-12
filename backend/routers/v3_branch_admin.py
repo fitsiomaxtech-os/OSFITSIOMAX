@@ -11,7 +11,7 @@ from database import v3_col
 from utils import now_iso, active_doctor_query
 from deps import (
     v3_require_roles, v3_current_user, is_head_physio_role, consultants_serving_branch,
-    online_arm_practice, vertical_in_arm, lead_as_read_by,
+    online_arm_practice, vertical_in_arm, lead_as_read_by, is_branch_admin_role,
 )
 import lead_control
 from constants import (
@@ -33,6 +33,11 @@ from routers.v3_lead_documents import leads_with_prescription
 # when a course is over lives with the reviews it is waiting on, and a second copy here
 # is how the boards came to disagree about Completed in the first place.
 from routers.v3_reviews import leads_awaiting_review
+# What this patient has actually paid, and to which branch. Imported rather than re-derived
+# for the same reason as the two above: parsing an amount out of an activity row and
+# deciding which branch owns it are finance's rules, and a second copy here is how the
+# transfer dialog and the finance board would come to disagree about what a patient paid.
+from routers.v3_finance import lead_payment_history
 
 router = APIRouter(prefix="/api/v3")
 
@@ -2105,20 +2110,45 @@ class V3BranchTransferInput(BaseModel):
     reason: Optional[str] = ""
 
 
+def _transfer_scope_error(lead: dict, user: V3UserOut) -> Optional[str]:
+    """Why this user may not transfer this particular patient, or None if they may.
+
+    Transfers were Super Admin's alone until branches asked to move their own patients
+    themselves. What a Branch Admin has been given is authority over the branch they run,
+    not over transfers in general — so they may move a patient out of their own branch, and
+    may not reach into another branch's list to move one out of there. Super Admin keeps
+    both, which is why this answers None for every role that is not a Branch Admin.
+
+    Phrased as the reason rather than a boolean for the same purpose as
+    _transfer_block_reason above: the half worth reading is which of the two it was.
+    """
+    if not is_branch_admin_role(user.role):
+        return None
+    if not user.branch_id:
+        return "Your account is not attached to a branch yet, so there is nothing to transfer out of."
+    if lead.get("branch_id") != user.branch_id:
+        return "This patient is not at your branch. Only the branch a patient is at can transfer them out."
+    return None
+
+
 @router.get("/leads/{lead_id}/transfer-eligibility")
 async def v3_transfer_eligibility(
     lead_id: str,
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
 ):
     """Whether this patient can be transferred, and what moving them would cost.
 
-    Asked before the act rather than discovered during it: the days about to be released
-    and the money about to stay behind are both things the Super Admin should read before
-    they press the button, not in the toast afterwards.
+    Asked before the act rather than discovered during it: the days about to be released,
+    the money about to stay behind, and every payment the patient has made are all things
+    the person pressing the button should read first, not in the toast afterwards.
     """
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+
+    out_of_scope = _transfer_scope_error(lead, user)
+    if out_of_scope:
+        raise HTTPException(status_code=403, detail=out_of_scope)
 
     reason = _transfer_block_reason(lead)
     completed = await v3_col("sessions").count_documents({"lead_id": lead_id, "status": "completed"})
@@ -2138,6 +2168,14 @@ async def v3_transfer_eligibility(
             (lead.get("consultation_fee") or 0) + (lead.get("package_paid") or 0), 2
         ),
         "transfers_so_far": len(lead.get("branch_transfer_history") or []),
+        # Every receipt this patient holds, newest first, each against the branch that took
+        # it. The figure above is a total and a total is what gets argued about after the
+        # move — this is the itemised answer to "which of these are ours", readable before
+        # it. A patient transferred before has rows here belonging to their old branch.
+        "payment_history": await lead_payment_history(lead),
+        # Where they have been, so the reader can see that a row attributed to another
+        # branch is a previous transfer rather than an error.
+        "transfer_history": lead.get("branch_transfer_history") or [],
     }
 
 
@@ -2145,12 +2183,15 @@ async def v3_transfer_eligibility(
 async def v3_transfer_branch(
     lead_id: str,
     payload: V3BranchTransferInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
 ):
     """Move a patient to another branch.
 
-    Super Admin only. A Branch Admin moving their own patient out is not a transfer, it is
-    an exit, and the branch losing the revenue should not be the one deciding it.
+    Super Admin anywhere; a Branch Admin only out of the branch they run (see
+    _transfer_scope_error). The money already collected stays with the branch that took it
+    whoever presses the button — which is what makes a Branch Admin pressing it safe, since
+    moving a patient on cannot move that branch's own revenue with them. What it does do is
+    put the record in front of the person who already knows why the patient is leaving.
 
     Three things happen, and only one of them is the branch_id:
 
@@ -2178,6 +2219,10 @@ async def v3_transfer_branch(
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+
+    out_of_scope = _transfer_scope_error(lead, user)
+    if out_of_scope:
+        raise HTTPException(status_code=403, detail=out_of_scope)
 
     from_branch_id = lead.get("branch_id")
     if not from_branch_id:
