@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
-import { ArrowLeftRight, Search, X, ReceiptText } from "lucide-react";
+import { ArrowLeftRight, Search, X, ReceiptText, Building2, ChevronDown, Check, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import {
   getBranchBoard, getBranches, getLeadTransferEligibility, transferLeadBranch,
 } from "@/lib/api";
+// The calendar's own dialog shell — cream card, soft border, blurred ground. Exported by
+// that file precisely so a control standing beside a calendar wears the same clothes
+// instead of a second copy of them drifting away from it.
+import { CenteredPicker } from "@/components/ui/milk-calendar";
 
 // Rs.1200 rather than Rs.1200.00 when the paise are zero, which they are for almost every
 // collection — the history is a column of amounts and two dead digits on each of them is
@@ -40,7 +44,7 @@ const PaymentHistory = ({ rows, currentBranchName }) => {
   const total = list.reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
   return (
-    <div className="mt-3 rounded-lg border border-slate-200 bg-white" data-testid="branch-transfer-payments">
+    <div className="mt-3 rounded-xl border border-[#EFEAE0] bg-white/60" data-testid="branch-transfer-payments">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -50,7 +54,7 @@ const PaymentHistory = ({ rows, currentBranchName }) => {
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
           <ReceiptText className="h-3.5 w-3.5 text-slate-400" />
           Payment history
-          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+          <span className="rounded-full bg-[#F3EFE6] px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
             {list.length}
           </span>
         </span>
@@ -61,11 +65,11 @@ const PaymentHistory = ({ rows, currentBranchName }) => {
 
       {open && (
         list.length === 0 ? (
-          <p className="border-t border-slate-100 px-3 py-3 text-xs text-slate-400" data-testid="branch-transfer-payments-empty">
+          <p className="border-t border-[#EFEAE0] px-3 py-3 text-xs text-slate-400" data-testid="branch-transfer-payments-empty">
             This patient has not paid anything yet, so the move leaves no money behind.
           </p>
         ) : (
-          <div className="max-h-52 overflow-y-auto border-t border-slate-100" data-testid="branch-transfer-payments-list">
+          <div className="max-h-52 overflow-y-auto border-t border-[#EFEAE0]" data-testid="branch-transfer-payments-list">
             {list.map((p) => {
               // Only flagged when it is genuinely somebody else's, so the common case —
               // every receipt belonging to the branch on screen — stays unmarked.
@@ -73,7 +77,7 @@ const PaymentHistory = ({ rows, currentBranchName }) => {
               return (
                 <div
                   key={p.id || `${p.collected_at}-${p.label}`}
-                  className="flex items-start justify-between gap-3 border-b border-slate-50 px-3 py-2 last:border-b-0"
+                  className="flex items-start justify-between gap-3 border-b border-[#EFEAE0]/60 px-3 py-2 last:border-b-0"
                   data-testid={`branch-transfer-payment-${p.id}`}
                 >
                   <div className="min-w-0">
@@ -102,6 +106,102 @@ const PaymentHistory = ({ rows, currentBranchName }) => {
         )
       )}
     </div>
+  );
+};
+
+// Same helper OperationsBoard.jsx, BranchManagementBoard.jsx and PreSalesCRM.jsx each
+// already carry their own copy of.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+// The order every other branch list in the OS uses: offline branches first, alphabetical,
+// with the online arms trailing among themselves. The native dropdown listed them in
+// whatever order the API answered, which put Online Fitness above T Nagar — not how anyone
+// choosing a branch thinks about them.
+const sortBranches = (list) => [...(list || [])].sort((a, b) => {
+  const onlineDiff = Number(isOnlineVertical(a.vertical)) - Number(isOnlineVertical(b.vertical));
+  if (onlineDiff !== 0) return onlineDiff;
+  return (a.branch_name || "").localeCompare(b.branch_name || "");
+});
+
+/**
+ * Where the patient is going, picked from a dialog rather than a native <select>.
+ *
+ * The browser's dropdown is unstyleable — its chrome, its blue highlight, its typography
+ * are the operating system's and not this one's, which is the same reason the date fields
+ * stopped using `<input type="date">`. Inside a popup it was worse than plain: a white
+ * system menu opened over a white card with a blue bar across it, and the one irreversible
+ * choice on the screen was the only control that did not look like it belonged.
+ *
+ * So it borrows the calendar's clothes outright — CenteredPicker's cream card, the same
+ * #F3EFE6 hover the day cells use, the same rounded rows — and takes the dialog's indigo
+ * for the chosen one, since that is already the accent on the button this leads to.
+ */
+const BranchChoice = ({ branches, value, onChange, testid = "branch-choice" }) => {
+  const [open, setOpen] = useState(false);
+  const list = sortBranches(branches);
+  const chosen = list.find((b) => b.id === value);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-sm"
+        data-testid={testid}
+      >
+        <span className={`flex min-w-0 items-center gap-2 ${chosen ? "text-slate-800" : "text-muted-foreground"}`}>
+          {chosen && (isOnlineVertical(chosen.vertical)
+            ? <Globe className="h-4 w-4 shrink-0 text-slate-400" />
+            : <Building2 className="h-4 w-4 shrink-0 text-slate-400" />)}
+          <span className="truncate">{chosen ? chosen.branch_name : "Choose a branch…"}</span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+
+      {open && (
+        <CenteredPicker title="Transfer to" onClose={() => setOpen(false)} testid={`${testid}-modal`}>
+          {list.length === 0 ? (
+            <p className="px-1 py-6 text-center text-sm text-slate-400">
+              There is no other branch to transfer to yet.
+            </p>
+          ) : (
+            <div className="space-y-0.5" data-testid={`${testid}-list`}>
+              {list.map((b) => {
+                const selected = b.id === value;
+                const online = isOnlineVertical(b.vertical);
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => { onChange(b.id); setOpen(false); }}
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-semibold transition ${
+                      selected ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-[#F3EFE6]"
+                    }`}
+                    data-testid={`${testid}-option-${b.id}`}
+                  >
+                    {online
+                      ? <Globe className={`h-4 w-4 shrink-0 ${selected ? "text-white/80" : "text-slate-400"}`} />
+                      : <Building2 className={`h-4 w-4 shrink-0 ${selected ? "text-white/80" : "text-slate-400"}`} />}
+                    <span className="min-w-0 flex-1 truncate">{b.branch_name}</span>
+                    {/* Named rather than only drawn: an online arm is not a place the
+                        patient travels to, and the difference decides whether a transfer
+                        makes sense at all. */}
+                    {online && (
+                      <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                        selected ? "bg-white/20 text-white" : "bg-[#F3EFE6] text-slate-500"
+                      }`}>
+                        Online
+                      </span>
+                    )}
+                    {selected && <Check className="h-4 w-4 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </CenteredPicker>
+      )}
+    </>
   );
 };
 
@@ -197,15 +297,15 @@ export const BranchTransferDialog = ({ branches: branchesProp, fromBranchId, onC
   const toBranch = destinations.find((b) => b.id === toBranchId);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="ops-branch-transfer-dialog">
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" data-testid="ops-branch-transfer-dialog">
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-[#EFEAE0] px-5 py-3">
           <h3 className="inline-flex items-center gap-2 text-base font-semibold">
             <ArrowLeftRight className="h-4 w-4 text-indigo-600" />
             Branch Transfer
             {fromBranch && <span className="text-sm font-normal text-slate-500">from {fromBranch.branch_name}</span>}
           </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="ops-branch-transfer-close">
+          <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-[#F3EFE6] hover:text-slate-600" data-testid="ops-branch-transfer-close">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -243,7 +343,7 @@ export const BranchTransferDialog = ({ branches: branchesProp, fromBranchId, onC
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search name, phone or patient number"
-                  className="h-9 w-full rounded-md border border-slate-200 pl-8 pr-3 text-sm outline-none focus:border-indigo-400"
+                  className="h-9 w-full rounded-lg border border-[#EFEAE0] bg-white/60 pl-8 pr-3 text-sm outline-none focus:border-indigo-400"
                   data-testid="ops-branch-transfer-search"
                 />
               </div>
@@ -261,7 +361,7 @@ export const BranchTransferDialog = ({ branches: branchesProp, fromBranchId, onC
                     <button
                       key={l.id}
                       onClick={() => pick(l)}
-                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-2.5 text-left hover:border-indigo-300 hover:bg-indigo-50/40"
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-[#EFEAE0] bg-white/60 p-2.5 text-left transition hover:border-indigo-300 hover:bg-[#F3EFE6]"
                       data-testid={`ops-branch-transfer-lead-${l.id}`}
                     >
                       <div className="min-w-0">
@@ -272,7 +372,7 @@ export const BranchTransferDialog = ({ branches: branchesProp, fromBranchId, onC
                         </p>
                       </div>
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        l.consultation_stage === "Physio Assign" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"
+                        l.consultation_stage === "Physio Assign" ? "bg-violet-100 text-violet-700" : "bg-[#F3EFE6] text-slate-600"
                       }`}>
                         {l.consultation_stage === "Physio Assign" ? "In treatment" : "Lead"}
                       </span>
@@ -342,24 +442,21 @@ export const BranchTransferDialog = ({ branches: branchesProp, fromBranchId, onC
                   )}
 
                   <label className="mt-3 block text-xs font-semibold text-slate-600">Transfer to</label>
-                  <select
-                    value={toBranchId}
-                    onChange={(e) => setToBranchId(e.target.value)}
-                    className="mt-1 h-9 w-full rounded-md border border-slate-200 px-2 text-sm outline-none focus:border-indigo-400"
-                    data-testid="ops-branch-transfer-destination"
-                  >
-                    <option value="">Choose a branch…</option>
-                    {destinations.map((b) => (
-                      <option key={b.id} value={b.id}>{b.branch_name}</option>
-                    ))}
-                  </select>
+                  <div className="mt-1">
+                    <BranchChoice
+                      branches={destinations}
+                      value={toBranchId}
+                      onChange={setToBranchId}
+                      testid="ops-branch-transfer-destination"
+                    />
+                  </div>
 
                   <label className="mt-3 block text-xs font-semibold text-slate-600">Reason <span className="font-normal text-slate-400">(optional, kept on the record)</span></label>
                   <input
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
                     placeholder="e.g. patient moved house"
-                    className="mt-1 h-9 w-full rounded-md border border-slate-200 px-2 text-sm outline-none focus:border-indigo-400"
+                    className="mt-1 h-9 w-full rounded-lg border border-[#EFEAE0] bg-white/60 px-2 text-sm outline-none focus:border-indigo-400"
                     data-testid="ops-branch-transfer-reason"
                   />
 
