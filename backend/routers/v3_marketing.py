@@ -238,7 +238,7 @@ class BulkDelete(BaseModel):
 # ============ dashboard ============
 
 @router.get("/dashboard")
-async def marketing_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def marketing_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     pre_sales_count = await v3_col("leads").count_documents({"stage": {"$in": ["New Leads", "Follow Up"]}})
     sales_count = await v3_col("leads").count_documents({"stage": "Appointment"})
     completed_count = await v3_col("leads").count_documents({"branch_stage": "Assigned Physio"})
@@ -270,12 +270,12 @@ async def marketing_dashboard(_: V3UserOut = Depends(v3_require_roles("super_adm
 # ============ distribution settings ============
 
 @router.get("/distribution-settings")
-async def get_distribution_settings(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def get_distribution_settings(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     return await ensure_settings_doc()
 
 
 @router.patch("/distribution-settings")
-async def patch_distribution_settings(payload: DistributionUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def patch_distribution_settings(payload: DistributionUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     await ensure_settings_doc()
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
@@ -286,7 +286,7 @@ async def patch_distribution_settings(payload: DistributionUpdate, _: V3UserOut 
 
 
 @router.post("/distribution-settings/refresh")
-async def refresh_distribution_settings(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def refresh_distribution_settings(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     await ensure_settings_doc()
     pre_users = await v3_col("users").find({"role": "pre_sales", "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
     sales_users = await v3_col("users").find({"role": "branch_admin", "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
@@ -326,13 +326,13 @@ async def unowned_pre_sales_query() -> Dict[str, Any]:
 
 
 @router.get("/unassigned-count")
-async def unassigned_lead_count(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def unassigned_lead_count(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """How many leads carry no Pre-Sales agent — the backlog the button below clears."""
     return {"count": await v3_col("leads").count_documents(await unowned_pre_sales_query())}
 
 
 @router.post("/distribute-unassigned")
-async def distribute_unassigned_leads(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def distribute_unassigned_leads(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Share out every lead that has no Pre-Sales agent, round-robin across the team.
 
     Round-robin only ever ran at the moment a lead arrived from a source sync, and only
@@ -398,7 +398,7 @@ async def distribute_unassigned_leads(_: V3UserOut = Depends(v3_require_roles("s
 # ============ team members ============
 
 @router.get("/team-members")
-async def get_team_members(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def get_team_members(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     pre = await v3_col("users").find({"role": "pre_sales", "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
     sales = await v3_col("users").find({"role": "branch_admin", "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
 
@@ -485,7 +485,7 @@ async def get_team_members(_: V3UserOut = Depends(v3_require_roles("super_admin"
 
 
 @router.post("/team-members")
-async def create_team_member(payload: TeamMemberCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_team_member(payload: TeamMemberCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     existing = await v3_col("users").find_one({"email": payload.email}, {"_id": 0, "id": 1})
     if existing:
         raise HTTPException(status_code=409, detail="Email already in use")
@@ -514,7 +514,7 @@ async def all_leads(
     search: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     query: Dict[str, Any] = {}
     if stage_type == "pre_sales":
@@ -535,7 +535,7 @@ async def all_leads(
 
 
 @router.post("/assign-lead/{lead_id}")
-async def assign_lead(lead_id: str, assigned_to: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def assign_lead(lead_id: str, assigned_to: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     user = await v3_col("users").find_one({"id": assigned_to, "is_active": True}, {"_id": 0, "password": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -554,7 +554,7 @@ async def assign_lead(lead_id: str, assigned_to: str, _: V3UserOut = Depends(v3_
 
 
 @router.delete("/leads/{lead_id}")
-async def delete_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def delete_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     res = await v3_col("leads").delete_one({"id": lead_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -562,7 +562,7 @@ async def delete_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles("sup
 
 
 @router.post("/leads/bulk-delete")
-async def bulk_delete_leads(payload: BulkDelete, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def bulk_delete_leads(payload: BulkDelete, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     if not payload.lead_ids:
         return {"deleted": 0}
     res = await v3_col("leads").delete_many({"id": {"$in": payload.lead_ids}})
@@ -616,7 +616,7 @@ async def _validate_targets(branch_ids: Optional[List[str]], verticals: Optional
 
 
 @router.get("/lead-field-catalogue")
-async def lead_field_catalogue(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def lead_field_catalogue(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """The fields a sheet column can be mapped onto, grouped as the Create Lead form is.
 
     Served rather than hard-coded in the popup so the dropdown and the importer are the
@@ -628,13 +628,13 @@ async def lead_field_catalogue(_: V3UserOut = Depends(v3_require_roles("super_ad
 
 
 @router.get("/sources")
-async def list_sources(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def list_sources(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     rows = await v3_col("marketing_sources").find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
     return [normalize_source(r) for r in rows]
 
 
 @router.post("/sources")
-async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     await _validate_targets(payload.branch_ids, payload.verticals)
     spreadsheet_id = payload.spreadsheet_id or (extract_spreadsheet_id(payload.sheet_url) if payload.sheet_url else "")
     # A hand-made mapping wins over detection; detection is the fallback for a source
@@ -665,7 +665,7 @@ async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v
 
 
 @router.patch("/sources/{source_id}")
-async def update_source(source_id: str, payload: MarketingSourceUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def update_source(source_id: str, payload: MarketingSourceUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     await _validate_targets(payload.branch_ids, payload.verticals)
     # Name is never taken from here: a source's card is named after the branch it belongs
     # to (see seed.ensure_branch_lead_sources), and letting an edit rename it away from
@@ -691,7 +691,7 @@ async def update_source(source_id: str, payload: MarketingSourceUpdate, _: V3Use
 
 
 @router.delete("/sources/{source_id}")
-async def delete_source(source_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def delete_source(source_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     res = await v3_col("marketing_sources").delete_one({"id": source_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -699,7 +699,7 @@ async def delete_source(source_id: str, _: V3UserOut = Depends(v3_require_roles(
 
 
 @router.post("/sources/{source_id}/sync")
-async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -815,7 +815,7 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
 # ============ performance ============
 
 @router.get("/performance")
-async def performance(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def performance(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     funnel = []
     for stage in V3_STAGES:
         count = await v3_col("leads").count_documents({"stage": stage})
@@ -865,7 +865,7 @@ async def team_member_leads(
     source: Optional[str] = Query(None),
     stage: Optional[str] = Query(None),
     limit: int = 500,
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     """The leads behind one team member's card.
 

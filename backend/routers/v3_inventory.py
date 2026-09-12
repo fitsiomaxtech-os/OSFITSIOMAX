@@ -46,9 +46,12 @@ VALID_UNITS = {"Strip", "Bottle", "Tube", "Sachet", "Pack", "Piece", "Box", "Set
 
 VALID_PAYMENT_MODES = {"cash", "upi", "card", "account_transfer"}
 
-# Anyone who can be standing at the counter when a patient asks for a tablet.
-WRITE_ROLES = ("super_admin", "branch_admin")
-READ_ROLES = ("super_admin", "branch_admin", "head_physio")
+# Anyone who can be standing at the counter when a patient asks for a tablet — plus the two
+# desks that read and stock the catalogue from above rather than from behind a counter.
+# business_dev is here because its board now mounts Services and Products in full, and that
+# board's Vending Machine panel is these endpoints.
+WRITE_ROLES = ("super_admin", "business_dev", "branch_admin")
+READ_ROLES = ("super_admin", "business_dev", "branch_admin", "head_physio")
 
 
 def _err(status: int, msg: str):

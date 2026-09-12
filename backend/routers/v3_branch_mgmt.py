@@ -658,7 +658,7 @@ class UpiAccountSave(BaseModel):
 
 
 @router.post("/upload-qr-image")
-async def upload_branch_qr_image(file: UploadFile = File(...), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def upload_branch_qr_image(file: UploadFile = File(...), _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """The QR code alone, uploaded ahead of Save -- mirrors upload_store_image in
     v3_store.py exactly, including where it lands: public and unauthenticated once
     served, because a QR is meant to be shown to a patient at the counter, the same
@@ -677,7 +677,7 @@ async def upload_branch_qr_image(file: UploadFile = File(...), _: V3UserOut = De
 
 
 @router.get("/upi-accounts")
-async def list_upi_accounts(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def list_upi_accounts(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Every branch's own UPI account in one list -- Finance > UPI reads this for its
     All Branches grid rather than the plain branch list (GET /branches), which would
     silently drop upi_account: V3BranchOut declares extra="ignore" and has no field
@@ -692,7 +692,7 @@ async def list_upi_accounts(_: V3UserOut = Depends(v3_require_roles("super_admin
 
 
 @router.get("/{branch_id}/upi-account")
-async def get_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin"))):
+async def get_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "branch_admin"))):
     # Read-only for a Branch Admin on their own branch -- same rule branch_detail above
     # gives them -- so the desk that will actually stand behind this counter can at
     # least see what it says, without being able to touch it.
@@ -705,7 +705,7 @@ async def get_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_r
 
 
 @router.put("/{branch_id}/upi-account")
-async def save_upi_account(branch_id: str, payload: UpiAccountSave, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def save_upi_account(branch_id: str, payload: UpiAccountSave, user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Save this branch's own UPI collection account: the QR a patient scans to pay by
     UPI, and who that money is confirmed to be sitting with.
 
@@ -733,7 +733,7 @@ async def save_upi_account(branch_id: str, payload: UpiAccountSave, user: V3User
 
 
 @router.post("/{branch_id}/upi-account/lock")
-async def lock_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def lock_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Finalize this branch's UPI account. Refused incomplete -- a card missing its QR
     or its UPI ID is not one worth locking down, since there is nothing yet for
     Unlock-then-edit to be protecting."""
@@ -752,7 +752,7 @@ async def lock_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_
 
 
 @router.post("/{branch_id}/upi-account/unlock")
-async def unlock_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def unlock_upi_account(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Reopen a locked account for editing. Super Admin only, same as Lock and Save --
     this account has no lesser role to hand it to."""
     branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "upi_account": 1})

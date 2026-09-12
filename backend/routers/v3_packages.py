@@ -50,14 +50,14 @@ class PackageOut(PackageIn):
 
 
 @router.get("/packages", response_model=List[PackageOut])
-async def list_packages(active_only: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio", "pre_sales"))):
+async def list_packages(active_only: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio", "pre_sales", "business_dev"))):
     q = {"active": True} if active_only else {}
     docs = await v3_col("packages").find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     return docs
 
 
 @router.post("/packages", response_model=PackageOut)
-async def create_package(payload: PackageIn, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_package(payload: PackageIn, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["total_sessions"] = payload.weeks * payload.sessions_per_week
@@ -68,7 +68,7 @@ async def create_package(payload: PackageIn, _: V3UserOut = Depends(v3_require_r
 
 
 @router.put("/packages/{package_id}", response_model=PackageOut)
-async def update_package(package_id: str, payload: PackageIn, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def update_package(package_id: str, payload: PackageIn, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     update = payload.model_dump()
     update["total_sessions"] = payload.weeks * payload.sessions_per_week
     update["updated_at"] = _now()
@@ -80,7 +80,7 @@ async def update_package(package_id: str, payload: PackageIn, _: V3UserOut = Dep
 
 
 @router.delete("/packages/{package_id}")
-async def delete_package(package_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def delete_package(package_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     res = await v3_col("packages").delete_one({"id": package_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Package not found")
@@ -94,7 +94,7 @@ class SellPackageInput(BaseModel):
 
 
 @router.post("/leads/{lead_id}/sell-package", response_model=dict)
-async def sell_package(lead_id: str, payload: SellPackageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def sell_package(lead_id: str, payload: SellPackageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio", "business_dev"))):
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -124,7 +124,7 @@ async def sell_package(lead_id: str, payload: SellPackageInput, user: V3UserOut 
 
 
 @router.post("/leads/{lead_id}/diagnosis", response_model=V3LeadOut)
-async def save_diagnosis(lead_id: str, payload: V3DiagnosisInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "branch_admin", "super_admin"))):
+async def save_diagnosis(lead_id: str, payload: V3DiagnosisInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "branch_admin", "super_admin", "business_dev"))):
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -143,7 +143,7 @@ async def save_diagnosis(lead_id: str, payload: V3DiagnosisInput, user: V3UserOu
 
 
 @router.post("/leads/{lead_id}/sell-store-item", response_model=dict)
-async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Branch admin sells + collects payment for a consultation item, in one step."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -681,7 +681,7 @@ REHAB_FEE_PAYMENT_MODES = STANDARD_PAYMENT_MODES
 
 
 @router.post("/leads/{lead_id}/collect-diet-fee", response_model=dict)
-async def collect_diet_fee(lead_id: str, payload: V3CollectDietFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def collect_diet_fee(lead_id: str, payload: V3CollectDietFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Branch admin collects the Diet Consultation Fee.
 
     Collected exactly as every other fee is -- see settle_standard_payment, which settles
@@ -765,7 +765,7 @@ async def collect_diet_fee(lead_id: str, payload: V3CollectDietFeeInput, user: V
 
 
 @router.post("/leads/{lead_id}/collect-diet-chart-fee", response_model=dict)
-async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Branch admin collects the Diet Chart Fee.
 
     The second of the two things sold under the word "diet", and the one that gates what
@@ -887,7 +887,7 @@ async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInp
 
 
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
-async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Branch admin collects the Consultation Fee for the package the consultant
     already assigned.
 
@@ -968,7 +968,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
 
 
 @router.post("/leads/{lead_id}/collect-rehab-fee", response_model=dict)
-async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Branch admin collects the Rehab course fee.
 
     The course was chosen by the Consultant at the consultation decision, so it is read
@@ -1037,7 +1037,7 @@ async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user:
 
 
 @router.post("/leads/{lead_id}/collect-treatment-fee", response_model=dict)
-async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Branch admin collects the Treatment Fee for the Session package the Head
     Physio already chose during the consultation decision (Consultation + Treatment).
 
@@ -1150,7 +1150,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
 
 
 @router.post("/leads/{lead_id}/mark-consultation-completed", response_model=dict)
-async def mark_consultation_completed(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def mark_consultation_completed(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Branch Admin closes out a 'Consultation Only' patient once the Consultation
     Fee has been collected — no Treatment Fee is ever collected on this path."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -1179,7 +1179,7 @@ async def mark_consultation_completed(lead_id: str, user: V3UserOut = Depends(v3
 
 
 @router.post("/leads/{lead_id}/physio-diagnosis", response_model=V3LeadOut)
-async def save_physio_diagnosis(lead_id: str, payload: V3PhysioDiagnosisInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+async def save_physio_diagnosis(lead_id: str, payload: V3PhysioDiagnosisInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev"))):
     """Head Physio's own diagnosis report — separate from Pre-Sales' basic
     `diagnosis` field, which stays read-only reference material here."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -1206,7 +1206,7 @@ async def save_physio_diagnosis(lead_id: str, payload: V3PhysioDiagnosisInput, u
 
 
 @router.put("/leads/{lead_id}/physio-diagnosis/unlock", response_model=V3LeadOut)
-async def unlock_physio_diagnosis(lead_id: str, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+async def unlock_physio_diagnosis(lead_id: str, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev"))):
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {"physio_diagnosis_locked": False, "updated_at": _now()}})
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not updated:
@@ -1215,7 +1215,7 @@ async def unlock_physio_diagnosis(lead_id: str, user: V3UserOut = Depends(v3_req
 
 
 @router.post("/leads/{lead_id}/treatment-summary", response_model=V3LeadOut)
-async def save_treatment_summary(lead_id: str, payload: V3TreatmentSummaryInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+async def save_treatment_summary(lead_id: str, payload: V3TreatmentSummaryInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev"))):
     """Head Physio's treatment plan summary — what treatment to give the patient."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -1252,7 +1252,7 @@ async def save_treatment_summary(lead_id: str, payload: V3TreatmentSummaryInput,
 
 
 @router.put("/leads/{lead_id}/treatment-summary/unlock", response_model=V3LeadOut)
-async def unlock_treatment_summary(lead_id: str, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+async def unlock_treatment_summary(lead_id: str, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev"))):
     # The unlock is the way back into the box, so it shuts for the same reason the save
     # above does — see the note there. Refused at the door rather than by letting the
     # unlock succeed and the next save fail: a box that opens and then will not keep what

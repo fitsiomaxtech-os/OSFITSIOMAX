@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
   AlertCircle,
   ArrowLeftRight,
+  BadgeIndianRupee,
   BarChart3,
   Building2,
   CalendarCheck,
@@ -19,6 +21,7 @@ import {
   Settings,
   Sparkles,
   Star,
+  Store,
   TrendingDown,
   TrendingUp,
   UserPlus,
@@ -56,6 +59,32 @@ import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
 // chunks share rather than copying either board into each.
 import { PreSalesCRM } from "@/components/PreSalesCRM";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
+// Finance, HR Admin, Services and Products, and the two Settings screens -- the same five
+// boards Super Admin reaches, mounted here as this desk's own tabs.
+//
+// lazy() rather than the static imports above, and deliberately not the same call: these
+// five are the same lazy() targets CRMPage already names, so webpack hands both pages the
+// one chunk per board and neither pays for the other's copy. Static would have pulled the
+// whole HR org chart and the whole catalogue into the chunk that draws this board's
+// Dashboard, which is the tab it opens on and the only one most days need.
+const FinanceWiseBoard = lazy(() => import("@/components/branch/FinanceWiseBoard").then((m) => ({ default: m.FinanceWiseBoard })));
+const HRBoard = lazy(() => import("@/components/hr/HRBoard").then((m) => ({ default: m.HRBoard })));
+const PackagesBoard = lazy(() => import("@/components/PackagesBoard").then((m) => ({ default: m.PackagesBoard })));
+const MarketingBoard = lazy(() => import("@/components/marketing/MarketingBoard").then((m) => ({ default: m.MarketingBoard })));
+const PipelineStageManagement = lazy(() => import("@/components/PipelineStageManagement").then((m) => ({ default: m.PipelineStageManagement })));
+
+/**
+ * What sits under the tab strip while one of those chunks is on the wire.
+ *
+ * The same quiet spinner CRMPage puts under its own nav, and placed the same way: below
+ * the strip, not around it, so the tabs stay on screen and switching boards reads as the
+ * board loading rather than the page going away.
+ */
+const BoardFallback = () => (
+  <div className="flex items-center justify-center py-20" data-testid="bd-board-loading">
+    <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-sky-600" />
+  </div>
+);
 
 // Marketing View and Sales View are the same two boards Super Admin reaches as
 // "Marketing Master View" and "Sales Master View" -- the same PreSalesCRM mount, under the
@@ -70,10 +99,25 @@ import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard
 //
 // Lead Master is gone. It was a second leads table on a board whose Dashboard cards now
 // open the same rows, and whose Sales View works them properly.
+//
+// Finance, HR Admin and Services and Products are Super Admin's own three boards, mounted
+// unchanged and with nothing held back -- not a reduced copy cut to this desk's shape, for
+// the same reason Marketing View and Sales View are not: a figure means here what it means
+// on the board that owns it, which is the only reason a desk reading both can trust either.
+//
+// They sit between Sales View and Branch Control because that is the order the day runs
+// in: what the two lead desks did, then the money, the people and the catalogue behind it,
+// then the branches those land in. Branch Control stays last of the boards because it is
+// the one that acts on a branch rather than reads across all of them.
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "marketing_view", label: "Marketing View", icon: Megaphone },
   { key: "sales_view", label: "Sales View", icon: Headphones },
+  { key: "finance", label: "Finance", icon: BadgeIndianRupee },
+  { key: "hr", label: "HR Admin", icon: Users },
+  // Treatments and Physiotherapy Treatment are sub-tabs inside it, not peers of it --
+  // the same shape Super Admin's own copy has.
+  { key: "packages", label: "Services and Products", icon: Store },
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
   { key: "settings", label: "Settings", icon: Settings },
 ];
@@ -87,12 +131,25 @@ const TABS = [
 // a place this desk works: one is a connection to configure, the other a read-only table
 // of where leads came from. Behind Settings they stop competing with Dashboard and Sales
 // View for the eye.
-const SETTINGS_SUB_VIEWS = ["sheets", "lead_source"];
+//
+// Marketing Source and CI/CD ROOTS join them from Super Admin's own Settings, which holds
+// exactly that pair. All four are configuration rather than work, so this desk's Settings
+// is now the one place its configuration lives instead of two Settings tabs that each held
+// half of it. The keys match CRMPage's SETTINGS_SUB_VIEWS ("marketing"/"stages") so the two
+// boards name the same screens the same way.
+const SETTINGS_SUB_VIEWS = ["sheets", "lead_source", "marketing", "stages"];
 const SETTINGS_SUB_TABS = [
   { key: "sheets", label: "Google Sheet Connection", icon: FileSpreadsheet },
   { key: "lead_source", label: "Lead Source", icon: Globe },
+  { key: "marketing", label: "Marketing Source", icon: Megaphone },
+  { key: "stages", label: "CI/CD ROOTS", icon: Activity },
 ];
 const isTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.includes(view) : view === key);
+
+// Where the strip's own Refresh is not drawn -- see the note on the button itself. Dashboard
+// because its toolbar carries the same one, and the three mounted boards because each
+// carries its own and this one would not touch what they show.
+const REFRESH_WITHHELD_TABS = ["dashboard", "finance", "hr", "packages"];
 
 const PIPELINE_STAGES = [
   "New Leads",
@@ -389,9 +446,15 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
 
               Withheld on the Dashboard tab, where the toolbar under this strip now carries
               it. The two are the same `refreshAll`, and two identical grey squares an inch
-              apart on one screen is a reader asking which of them is the real one. It stays
-              here for the four tabs that have no toolbar of their own. */}
-          {activeTab !== "dashboard" && (
+              apart on one screen is a reader asking which of them is the real one.
+
+              Withheld on Finance, HR Admin and Services and Products for the same reason,
+              one step further out: this button reloads THIS board's summary, branches and
+              sheet connections, and on those three the screen under it is somebody else's
+              board with its own reload. A refresh that visibly does nothing to what is on
+              screen is worse than no refresh at all. It stays for the tabs that have
+              neither their own toolbar nor a board of their own. */}
+          {!REFRESH_WITHHELD_TABS.includes(activeTab) && (
             <Button
               onClick={refreshAll}
               disabled={loading}
@@ -443,6 +506,31 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
         <PreSalesCRM role="sales_head" currentUser={currentUser} embedded />
       )}
 
+      {/* Finance, HR Admin and Services and Products — Super Admin's own three boards, each
+          the same component that board mounts, with nothing held back and nothing passed to
+          narrow them. What this desk may actually read and write is settled by the API off
+          its token, the same as it is for Super Admin's copy: the guards in
+          backend/routers/v3_finance.py, v3_hr.py, v3_hr_ops.py, v3_packages.py,
+          v3_store.py and v3_inventory.py name business_dev beside super_admin now.
+
+          Wrapped in one Suspense rather than three: only one of them is ever mounted, so a
+          boundary each would be three copies of the same fallback waiting on the same
+          switch. It sits inside the strip, not around it, so the tabs stay put while a
+          chunk arrives. */}
+      <Suspense fallback={<BoardFallback />}>
+        {activeTab === "finance" && (
+          <FinanceWiseBoard branches={branches} />
+        )}
+
+        {activeTab === "hr" && (
+          <HRBoard />
+        )}
+
+        {activeTab === "packages" && (
+          <PackagesBoard />
+        )}
+      </Suspense>
+
       {/* Branch Control — the Branch Manager panel in full, as a tab rather than the
           dialog Operations opens it in. No `lockTab`, which is the whole point of it being
           here: that flag drops the sub-tab row, and Overview, Analytics and Branch Control
@@ -459,7 +547,8 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
         <BranchManagementBoard actingUser={currentUser} initialTab="creation" detailReadOnly />
       )}
 
-      {/* Settings — Google Sheet Connection and Lead Source, as a sub-tab pair. */}
+      {/* Settings — Google Sheet Connection and Lead Source, and Super Admin's own
+          Marketing Source and CI/CD ROOTS beside them, as one sub-tab row of four. */}
       {SETTINGS_SUB_VIEWS.includes(activeTab) && (
         <div className="space-y-4" data-testid="bd-settings">
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-settings-subtabs">
@@ -500,6 +589,20 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
           {activeTab === "lead_source" && (
             <LeadSourceTab leadSources={leadSources} loading={loading} />
           )}
+
+          {/* Marketing Source and CI/CD ROOTS. No `leading` prop, unlike CRMPage's mount of
+              these two: that prop exists to hand each board the switcher so Super Admin's
+              Settings opens on one row of controls rather than two, and here the row is
+              already above them. Passing it would draw the same four buttons twice. */}
+          <Suspense fallback={<BoardFallback />}>
+            {activeTab === "marketing" && (
+              <MarketingBoard branches={branches} />
+            )}
+
+            {activeTab === "stages" && (
+              <PipelineStageManagement />
+            )}
+          </Suspense>
         </div>
       )}
 

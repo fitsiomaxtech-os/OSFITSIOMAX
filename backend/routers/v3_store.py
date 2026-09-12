@@ -25,7 +25,7 @@ def _now():
 
 
 @router.post("/upload-image")
-async def upload_store_image(file: UploadFile = File(...), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def upload_store_image(file: UploadFile = File(...), _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Only JPG, PNG, or WEBP images are allowed")
@@ -102,7 +102,7 @@ def _normalize_legacy_prices(doc: dict) -> dict:
 
 
 @router.post("/items", response_model=StoreItemOut)
-async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     if not payload.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
     if payload.price_online < 0 or payload.price_offline < 0:
@@ -125,7 +125,7 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
 
 
 @router.put("/items/{item_id}", response_model=StoreItemOut)
-async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     if not payload.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
     if payload.price_online < 0 or payload.price_offline < 0:
@@ -149,7 +149,7 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
 
 
 @router.get("/items", response_model=List[StoreItemOut])
-async def list_store_items(category: Optional[str] = None, item_type: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio"))):
+async def list_store_items(category: Optional[str] = None, item_type: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio", "business_dev"))):
     q = {}
     if category:
         q["category"] = category
@@ -163,7 +163,7 @@ async def list_store_items(category: Optional[str] = None, item_type: Optional[s
 
 
 @router.delete("/items/{item_id}")
-async def delete_store_item(item_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def delete_store_item(item_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     res = await v3_col("store_items").delete_one({"id": item_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -243,7 +243,7 @@ async def _lead_activity_history(actions: list, limit: int) -> dict:
 @router.get("/history")
 async def store_history(
     limit: int = 200,
-    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio", "business_dev")),
 ):
     """Chronological listing of Fitsio Store sales/collections across the whole system —
     consultations sold, session packages assigned/collected — for the Super Admin
@@ -254,7 +254,7 @@ async def store_history(
 @router.get("/payment-history")
 async def payment_history(
     limit: int = 200,
-    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio", "business_dev")),
 ):
     """Money actually collected (excludes package assignment, which has no payment yet) —
     Super Admin FITSIO STORE > History > Payment History sub-tab."""
@@ -264,7 +264,7 @@ async def payment_history(
 @router.get("/follow-up-history")
 async def follow_up_history(
     limit: int = 200,
-    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio", "business_dev")),
 ):
     """Every follow-up scheduled/rescheduled across Pre-Sales, Branch Leads, and
     Consultations — Super Admin FITSIO STORE > History > Follow Up History sub-tab."""
@@ -274,7 +274,7 @@ async def follow_up_history(
 @router.get("/login-history")
 async def login_history(
     limit: int = 200,
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     """Every successful login across the OS — Super Admin FITSIO STORE > History >
     Overall Login Tracker sub-tab. Super Admin only: user activity, not store data."""

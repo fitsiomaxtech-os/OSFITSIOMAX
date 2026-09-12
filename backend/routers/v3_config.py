@@ -95,7 +95,7 @@ async def v3_get_treatment_types(_: V3UserOut = Depends(v3_current_user)):
 
 
 @router.post("/treatment-types", response_model=V3TreatmentTypeOut)
-async def v3_add_treatment_type(payload: V3TreatmentTypeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_add_treatment_type(payload: V3TreatmentTypeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Treatment name is required")
@@ -115,7 +115,7 @@ async def v3_add_treatment_type(payload: V3TreatmentTypeCreate, _: V3UserOut = D
 async def v3_update_treatment_type(
     treatment_type_id: str,
     payload: V3TreatmentTypeUpdate,
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     """Rename a treatment.
 
@@ -150,7 +150,7 @@ async def v3_update_treatment_type(
 
 
 @router.delete("/treatment-types/{treatment_type_id}")
-async def v3_delete_treatment_type(treatment_type_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_delete_treatment_type(treatment_type_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Remove a treatment from the catalogue.
 
     No in-use check, unlike service types: nothing in the OS references a treatment type
@@ -181,7 +181,7 @@ async def v3_get_physio_types(_: V3UserOut = Depends(v3_current_user)):
 
 
 @router.post("/physio-types", response_model=V3PhysioTypeOut)
-async def v3_add_physio_type(payload: V3PhysioTypeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_add_physio_type(payload: V3PhysioTypeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Service name is required")
@@ -201,7 +201,7 @@ async def v3_add_physio_type(payload: V3PhysioTypeCreate, _: V3UserOut = Depends
 async def v3_update_physio_type(
     physio_type_id: str,
     payload: V3PhysioTypeUpdate,
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     """Rename a service.
 
@@ -343,7 +343,7 @@ async def v3_set_doctor_meet_link(
 
 
 @router.delete("/physio-types/{physio_type_id}")
-async def v3_delete_physio_type(physio_type_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_delete_physio_type(physio_type_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Remove a service from the Service list.
 
     Guarded now that experts are offered under one: deleting a service still held by a
@@ -1045,9 +1045,15 @@ _danger_zone_failures: Dict[str, List[float]] = {}
 
 async def require_developer_password(
     x_developer_password: Optional[str] = Header(None),
-    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ) -> V3UserOut:
-    """Super Admin AND the developer password, sent as X-Developer-Password.
+    """Super Admin (or the Business Development Executive, whose board mounts the same
+    CI/CD ROOTS screen) AND the developer password, sent as X-Developer-Password.
+
+    The role is the lesser half of this gate and always was -- see the note above: the
+    screen's lock is manners, and the password is the control. Widening the role to the
+    second desk that reaches this screen keeps the resets behind the same bcrypt hash in
+    the server's own .env, which is the thing that actually decides who may call them.
 
     URI-encoded by the page and decoded here, because a header can only carry Latin-1 and a
     password is allowed to be anything.

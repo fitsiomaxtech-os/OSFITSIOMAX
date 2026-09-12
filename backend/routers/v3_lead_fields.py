@@ -46,7 +46,7 @@ async def list_custom_fields(_: V3UserOut = Depends(v3_current_user)):
 
 
 @router.post("")
-async def create_custom_field(payload: FieldCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_custom_field(payload: FieldCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     key = _slugify(payload.key) if payload.key else _slugify(payload.label)
     existing = await v3_col("custom_lead_fields").find_one({"key": key}, {"_id": 0, "id": 1})
     if existing:
@@ -66,7 +66,7 @@ async def create_custom_field(payload: FieldCreate, _: V3UserOut = Depends(v3_re
 
 
 @router.patch("/{field_id}")
-async def update_custom_field(field_id: str, payload: FieldUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def update_custom_field(field_id: str, payload: FieldUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No updates")
@@ -77,7 +77,7 @@ async def update_custom_field(field_id: str, payload: FieldUpdate, _: V3UserOut 
 
 
 @router.delete("/{field_id}")
-async def delete_custom_field(field_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def delete_custom_field(field_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     res = await v3_col("custom_lead_fields").delete_one({"id": field_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Field not found")

@@ -115,7 +115,7 @@ async def status(_: V3UserOut = Depends(v3_require_roles("super_admin", "busines
 
 
 @router.get("/auth")
-async def auth_start(redirect: bool = Query(False), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def auth_start(redirect: bool = Query(False), _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=REDIRECT_URI)
     state = str(uuid.uuid4())
     url, _state = flow.authorization_url(access_type="offline", prompt="consent", state=state, include_granted_scopes="true")
@@ -175,7 +175,7 @@ class DisconnectInput(BaseModel):
 
 
 @router.post("/disconnect")
-async def disconnect(payload: DisconnectInput, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def disconnect(payload: DisconnectInput, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Clear the company-wide Google Sheets connection.
 
     Super Admin is the whole check. This used to sit behind a second factor as well —
@@ -195,7 +195,7 @@ async def disconnect(payload: DisconnectInput, _: V3UserOut = Depends(v3_require
 # ID is extracted from the URL and used directly to read rows.
 
 @router.get("/spreadsheets")
-async def list_spreadsheets(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def list_spreadsheets(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     raise HTTPException(
         status_code=400,
         detail="Listing your sheets is disabled by design (no Drive access requested). Paste the Google Sheet URL in 'Add Source' instead.",
@@ -203,7 +203,7 @@ async def list_spreadsheets(_: V3UserOut = Depends(v3_require_roles("super_admin
 
 
 @router.get("/tabs")
-async def list_tabs(spreadsheet_id: str = Query(...), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def list_tabs(spreadsheet_id: str = Query(...), _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Tabs (worksheets) inside one already-known spreadsheet — unlike /spreadsheets above,
     this needs no Drive access: the caller already has the ID from a pasted URL, and
     `spreadsheets.get` only reads the one sheet it's pointed at. Used by the Add/Edit Source
@@ -228,7 +228,7 @@ async def list_tabs(spreadsheet_id: str = Query(...), _: V3UserOut = Depends(v3_
 async def list_headers(
     spreadsheet_id: str = Query(...),
     tab: str = Query(...),
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     """The column names in one tab -- its first row, and nothing else.
 

@@ -216,7 +216,7 @@ async def list_stages(
 
 
 @router.post("")
-async def create_stage(payload: StageCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_stage(payload: StageCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     await _ensure_seed()
     # Ordered within its own arm, not across both: the two Branch lists are independent, and
     # counting the offline arm's last stage would open every new online stage at an order no
@@ -244,7 +244,7 @@ async def create_stage(payload: StageCreate, _: V3UserOut = Depends(v3_require_r
 
 
 @router.patch("/{stage_id}")
-async def update_stage(stage_id: str, payload: StageUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def update_stage(stage_id: str, payload: StageUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
@@ -277,7 +277,7 @@ async def update_stage(stage_id: str, payload: StageUpdate, _: V3UserOut = Depen
 
 
 @router.delete("/{stage_id}")
-async def delete_stage(stage_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def delete_stage(stage_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     stage = await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0})
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
@@ -321,7 +321,7 @@ async def delete_stage(stage_id: str, _: V3UserOut = Depends(v3_require_roles("s
 
 
 @router.post("/reorder")
-async def reorder_stages(payload: StageReorder, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def reorder_stages(payload: StageReorder, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     for item in payload.items:
         if "id" not in item or "order" not in item:
             continue

@@ -347,9 +347,15 @@ def is_hr_role(role: str) -> bool:
 
     Lives here rather than in a router so the recruitment endpoints and anything that gates
     on HR in future share one definition instead of drifting copies.
+
+    business_dev answers True for the same reason super_admin does: the Business
+    Development Executive's board mounts Super Admin's HR Admin panel in full, and
+    Attendance, Payroll, Approvals and Quotes (routers/v3_hr_ops.py) gate on this
+    predicate rather than on a role list. Without it that desk would reach four of HR
+    Admin's eight tabs and be refused the other four.
     """
     r = (role or "").strip().lower()
-    if r == "super_admin":
+    if r in ("super_admin", "business_dev"):
         return True
     if "human_resource" in r:
         return True

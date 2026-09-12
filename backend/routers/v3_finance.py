@@ -101,7 +101,7 @@ async def get_branch_finance(
     # Approvals tab: pass False to see what still needs review, True for what's
     # cleared. Left unset for Summary, which shows every collection either way.
     approved: Optional[bool] = None,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "business_dev")),
 ):
     # Branch Admin is always locked to their own branch. Super Admin and Accountant can
     # optionally scope to one branch_id — or, if none is passed, see every branch
@@ -375,7 +375,7 @@ class TransactionRequestInput(BaseModel):
 @router.post("/finance/transactions/request")
 async def request_transactions(
     payload: TransactionRequestInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "business_dev")),
 ):
     """Send collections up for approval.
 
@@ -420,7 +420,7 @@ async def request_transactions(
 @router.post("/finance/transactions/unrequest")
 async def unrequest_transactions(
     payload: TransactionRequestInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "business_dev")),
 ):
     """Pull a collection back before it has been signed off.
 
@@ -450,7 +450,7 @@ async def unrequest_transactions(
 async def approve_transaction(
     activity_id: str,
     payload: ApproveTransactionInput = ApproveTransactionInput(),
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
 ):
     """Accountant's Approvals tab: marks one collected payment reviewed. Written onto
     the record itself (approved/approved_by/approved_at, plus whatever confirmation the
@@ -486,7 +486,7 @@ class BulkApproveInput(BaseModel):
 @router.post("/finance/transactions/bulk-approve")
 async def bulk_approve_transactions(
     payload: BulkApproveInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
 ):
     """Sign off a whole selection at once, for a queue that arrives hundreds deep.
 
@@ -534,7 +534,7 @@ async def bulk_approve_transactions(
 @router.post("/finance/transactions/{activity_id}/unapprove")
 async def unapprove_transaction(
     activity_id: str,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
 ):
     """Undoes an approval taken by mistake. Clears who/when/confirmation rather than
     leaving them on a row that is, again, unreviewed. Same collections as approve, tried in
@@ -558,7 +558,7 @@ async def finance_approvals(
     approved: Optional[bool] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "business_dev")),
 ):
     """Accountant's Approvals tab. Every kind of collection revenue_overview counts
     (REVENUE_ACTIONS, plus Store sales) rather than just get_branch_finance's narrower
@@ -823,7 +823,7 @@ async def list_expenses(
     end_date: Optional[str] = None,
     branch_id: Optional[str] = None,
     mode: Optional[str] = None,  # "online" | "offline"
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "business_dev")),
 ):
     if is_branch_admin_role(user.role):
         branch_id = user.branch_id
@@ -883,7 +883,7 @@ async def list_expenses(
 @router.post("/finance/expenses")
 async def create_expense(
     payload: ExpenseCreate,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """Raise an expense. A branch raises a request; the accountant enters a fact.
 
@@ -989,7 +989,7 @@ async def create_expense(
 @router.post("/finance/expenses/{expense_id}/approve")
 async def approve_expense(
     expense_id: str,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
 ):
     """Sign off one branch expense. Not open to Branch Admin, for the reason
     approve_transaction gives: approval is somebody other than whoever raised it saying
@@ -1011,7 +1011,7 @@ async def approve_expense(
 async def reject_expense(
     expense_id: str,
     payload: ExpenseDecision = ExpenseDecision(),
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
 ):
     """Turn one down, with the reason. Kept rather than deleted: the branch that raised it
     is owed an answer, and a row that vanishes reads as one that was never sent."""
@@ -1031,7 +1031,7 @@ async def reject_expense(
 
 
 @router.delete("/finance/expenses/{expense_id}")
-async def delete_expense(expense_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "accountant"))):
+async def delete_expense(expense_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev"))):
     res = await v3_col("expenses").delete_one({"id": expense_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Expense not found")
@@ -1051,7 +1051,7 @@ async def finance_profit(
     end_date: Optional[str] = None,
     branch_id: Optional[str] = None,
     mode: Optional[str] = None,  # "online" | "offline"
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "business_dev")),
 ):
     """Revenue for the window (every collection — same total Accountant Manage's own
     Total Revenue tile shows, not only approved ones: approval is a review step, not a
@@ -1570,7 +1570,7 @@ async def revenue_overview(
     # "online" | "offline", off each lead's own vertical — named apart from the loop's
     # own `mode` (payment mode: cash/upi/card/...) below so the two can never collide.
     vertical_mode: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """AC Overview > Total Revenue, and Accountant Manage (Super Admin's per-branch
     view and Branch Admin's own read-only tab) — date-range + branch scoped, built
@@ -2093,7 +2093,7 @@ async def revenue_overview(
 @router.get("/finance/client/{lead_id}")
 async def client_transaction_history(
     lead_id: str,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "physio")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "physio", "business_dev")),
 ):
     """Transactions History > eye icon — one client's full profile, every payment
     they've made, their current outstanding balance, and their complete activity
@@ -2266,7 +2266,7 @@ async def mark_installment_paid(
     lead_id: str,
     installment_number: int,
     payload: V3MarkInstallmentPaidInput = V3MarkInstallmentPaidInput(),
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "business_dev")),
 ):
     """Payment Schedules — mark one installment as collected.
     installment_number is 1-based (matches what the Payment Schedules table shows).
@@ -2653,7 +2653,7 @@ async def _book_for(branch_id: Optional[str], day: str) -> Optional[dict]:
 async def get_closing_balance(
     on: Optional[str] = None,
     branch_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """The day being closed, and the day before it.
 
@@ -2700,7 +2700,7 @@ async def get_closing_balance(
 @router.post("/finance/closing-balance")
 async def save_closing_balance(
     payload: ClosingBalanceInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """Record what the desk holds at the end of one day.
 
@@ -2787,7 +2787,7 @@ async def closing_balance_history(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     branch_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """Every evening this branch counted inside a window, oldest first.
 
@@ -2857,7 +2857,7 @@ async def closing_balance_history(
 @router.post("/finance/closing-balance/close-book")
 async def close_book(
     payload: CloseBookInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """Sign one day off: what was counted, what was expected, and whether they matched.
 
@@ -2951,7 +2951,7 @@ async def close_book(
 @router.post("/finance/closing-balance/reopen-book")
 async def reopen_book(
     payload: ReopenBookInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
 ):
     """Open a signed-off day again, with the reason on the record.
 
@@ -3089,7 +3089,7 @@ async def get_petty_cash(
     mode: Optional[str] = None,  # "online" | "offline", off each branch's own vertical
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """The tin: what is in it, and what moved through it.
 
@@ -3154,7 +3154,7 @@ async def get_petty_cash(
 @router.post("/finance/petty-cash/topup")
 async def top_up_petty_cash(
     payload: PettyCashTopUp,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """Move notes from the drawer into the tin.
 
@@ -3347,7 +3347,7 @@ def _handover_public(row: Optional[dict]) -> Optional[dict]:
 @router.get("/finance/branch-cash")
 async def get_branch_cash(
     branch_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """One branch's cash box — the five figures, its recent handovers, and its adjustments.
 
@@ -3401,7 +3401,7 @@ async def get_branch_cash(
 @router.post("/finance/branch-cash/adjustment")
 async def create_cash_adjustment(
     payload: CashAdjustmentCreate,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
 ):
     """Set a branch's cash box to what was actually counted.
 
@@ -3449,7 +3449,7 @@ async def create_cash_adjustment(
 @router.post("/finance/cash-handover")
 async def create_cash_handover(
     payload: CashHandoverCreate,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "business_dev")),
 ):
     """The branch settles cash to the person who carries it to the accountant.
 
@@ -3515,7 +3515,7 @@ async def create_cash_handover(
 async def list_cash_handovers(
     branch_id: Optional[str] = None,
     status: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """Handovers, newest first. A Branch Admin sees their own branch's; the accountant and
     Super Admin see every branch's, or one if they name it."""
@@ -3539,7 +3539,7 @@ async def list_cash_handovers(
 async def receive_cash_handover(
     handover_id: str,
     payload: CashHandoverReceive = CashHandoverReceive(),
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
 ):
     """The accountant counts a handover in. A figure that differs from what the branch
     said is recorded and the gap written straight onto the branch's box as a correction,
@@ -3600,7 +3600,7 @@ async def receive_cash_handover(
 @router.post("/finance/cash-handover/{handover_id}/cancel")
 async def cancel_cash_handover(
     handover_id: str,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "business_dev")),
 ):
     """Pull a handover back before the accountant has received it — the notes never left,
     or left and came back. Only while pending: once received it is the accountant's record
