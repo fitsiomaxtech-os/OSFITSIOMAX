@@ -447,9 +447,12 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
             with the same two props. `actingUser` is what its Branch tab acts as and what
             PreSalesCRM stamps activity against; `branches` is the list its six tabs all
             pick from, already loaded here for the Dashboard's own branch filter rather
-            than fetched a second time. */}
+            than fetched a second time. `compact` is this desk only: it folds the Branch
+            tab's pill row into a Branch Filter dialog on the nav bar and puts Branch
+            Transfer / Branch Manager up there beside it. Super Admin's own page mounts
+            the same board without it and keeps the pills. */}
         {activeTab === "operations" && (
-          <OperationsBoard actingUser={currentUser} branches={branches} />
+          <OperationsBoard actingUser={currentUser} branches={branches} compact />
         )}
 
         {activeTab === "finance" && (

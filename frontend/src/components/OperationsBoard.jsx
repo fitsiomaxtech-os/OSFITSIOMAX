@@ -13,6 +13,9 @@ import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard
 // Shared with a branch's own board, which offers the same transfer to its Branch Admin for
 // its own patients — see the component's own note on why there is only one of these.
 import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
+// The pill row's replacement on the compact (BDE) layout — see `compact` on
+// OperationsBoard below for why only that one desk trades the pills for a dialog.
+import { BranchFilterPopover } from "@/components/BranchFilterPopover";
 
 // Same helper BranchManagementBoard.jsx, PreSalesCRM.jsx, MarketingBoard.jsx and
 // BranchStoreBoard.jsx each already carry their own copy of.
@@ -84,17 +87,29 @@ const EmptyPrompt = ({ text, testid }) => (
 
 // ---------- Branch tab: pick a branch, see that branch admin's full board ----------
 
-const OperationsBranchTab = ({ branches, actingUser }) => {
-  const [selectedId, setSelectedId] = useState("");
-  const [showManager, setShowManager] = useState(false);
-  const [showTransfer, setShowTransfer] = useState(false);
-  useEffect(() => {
-    if (!selectedId && branches && branches.length) setSelectedId(findDefaultBranchId(branches));
-  }, [branches, selectedId]);
+// `compact` hands the branch picker and the two action buttons up to the Operations nav
+// bar, where BDE puts them (see OperationsBranchActions) — the tab then renders only the
+// board and the dialogs those buttons open. Selection and dialog state live in
+// OperationsBoard either way, so the nav bar and the tab are never arguing over which
+// branch is showing.
+const OperationsBranchTab = ({
+  branches,
+  actingUser,
+  compact = false,
+  selectedId,
+  onSelect,
+  showTransfer,
+  onCloseTransfer,
+  showManager,
+  onCloseManager,
+  onOpenTransfer,
+  onOpenManager,
+}) => {
   return (
     <div className="space-y-4" data-testid="ops-branch-tab">
+      {!compact && (
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-branch-picker" />
+        <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={onSelect} testid="ops-branch-picker" />
         {/* Opens Branches & Verticals' MANAGER page in a dialog right here rather than
             switching the top nav to Branches & Verticals — this stays "Operations" the
             whole time it's open, closed with the same click that would otherwise be a
@@ -108,14 +123,14 @@ const OperationsBranchTab = ({ branches, actingUser }) => {
             <Button
               variant="outline"
               className="h-9 gap-2 border-indigo-200 px-3 text-indigo-700 hover:bg-indigo-50"
-              onClick={() => setShowTransfer(true)}
+              onClick={onOpenTransfer}
               data-testid="ops-branch-transfer-btn"
             >
               <ArrowLeftRight className="h-4 w-4" /> Branch Transfer
             </Button>
             <Button
               className="h-9 gap-2 bg-indigo-600 px-3 text-white hover:bg-indigo-700"
-              onClick={() => setShowManager(true)}
+              onClick={onOpenManager}
               data-testid="ops-branch-goto-manager-btn"
             >
               <Users className="h-4 w-4" /> Branch Manager
@@ -123,6 +138,7 @@ const OperationsBranchTab = ({ branches, actingUser }) => {
           </div>
         )}
       </div>
+      )}
       {selectedId ? (
         <BranchAdminBoard key={selectedId} branchId={selectedId} embedded />
       ) : (
@@ -132,7 +148,7 @@ const OperationsBranchTab = ({ branches, actingUser }) => {
         <BranchTransferDialog
           branches={branches}
           fromBranchId={selectedId}
-          onClose={() => setShowTransfer(false)}
+          onClose={onCloseTransfer}
         />
       )}
       {showManager && (
@@ -140,7 +156,7 @@ const OperationsBranchTab = ({ branches, actingUser }) => {
           <div className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-lg bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
               <h3 className="inline-flex items-center gap-2 text-base font-semibold"><Users className="h-4 w-4 text-indigo-600" />Branch Manager</h3>
-              <button onClick={() => setShowManager(false)} className="text-slate-400 hover:text-slate-600" data-testid="ops-branch-manager-close"><X className="h-4 w-4" /></button>
+              <button onClick={onCloseManager} className="text-slate-400 hover:text-slate-600" data-testid="ops-branch-manager-close"><X className="h-4 w-4" /></button>
             </div>
             <div className="overflow-y-auto p-5">
               <BranchManagementBoard actingUser={actingUser} initialTab="creation" lockTab />
@@ -490,12 +506,26 @@ const OperationsClientTab = ({ branches }) => {
  * scoped rather than org-wide) an employee, and see exactly what they'd see, with full
  * control, no separate login needed.
  */
-export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_sales" }) => {
+export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_sales", compact = false }) => {
   const [tab, setTab] = useState(initialTab);
+
+  // Branch tab state, held here rather than inside the tab because on the compact layout
+  // the controls that drive it sit in the nav bar above it, outside the tab entirely.
+  const [branchTabId, setBranchTabId] = useState("");
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [showManager, setShowManager] = useState(false);
+  useEffect(() => {
+    if (!branchTabId && branches && branches.length) setBranchTabId(findDefaultBranchId(branches));
+  }, [branches, branchTabId]);
+
+  // The nav row has a whole right half doing nothing on a desktop width, and the Branch
+  // tab has three controls that were costing it two stacked rows above the board. Moving
+  // them up buys that height back for the board itself.
+  const showBranchActions = compact && tab === "branch";
 
   return (
     <div className="space-y-4" data-testid="operations-board">
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="operations-tabs">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="operations-tabs">
         {OPERATIONS_TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
@@ -511,10 +541,53 @@ export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_s
             </button>
           );
         })}
+        {/* ml-auto, not justify-between: the tabs keep their natural width so they read as
+            one group, and this lot takes whatever is left. Wraps onto its own line on a
+            phone rather than squeezing the tabs. */}
+        {showBranchActions && (
+          <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2 px-1 py-0.5" data-testid="operations-branch-actions">
+            <BranchFilterPopover
+              branches={branches}
+              selectedId={branchTabId}
+              onSelect={setBranchTabId}
+              testid="ops-branch-filter"
+            />
+            <Button
+              variant="outline"
+              className="h-9 gap-2 border-indigo-200 px-3 text-indigo-700 hover:bg-indigo-50"
+              onClick={() => setShowTransfer(true)}
+              disabled={!branchTabId}
+              data-testid="ops-branch-transfer-btn"
+            >
+              <ArrowLeftRight className="h-4 w-4" /> Branch Transfer
+            </Button>
+            <Button
+              className="h-9 gap-2 bg-indigo-600 px-3 text-white hover:bg-indigo-700"
+              onClick={() => setShowManager(true)}
+              data-testid="ops-branch-goto-manager-btn"
+            >
+              <Users className="h-4 w-4" /> Branch Manager
+            </Button>
+          </div>
+        )}
       </div>
 
       {tab === "pre_sales" && <OperationsPreSalesTab branches={branches} actingUser={actingUser} />}
-      {tab === "branch" && <OperationsBranchTab branches={branches} actingUser={actingUser} />}
+      {tab === "branch" && (
+        <OperationsBranchTab
+          branches={branches}
+          actingUser={actingUser}
+          compact={compact}
+          selectedId={branchTabId}
+          onSelect={setBranchTabId}
+          showTransfer={showTransfer}
+          onOpenTransfer={() => setShowTransfer(true)}
+          onCloseTransfer={() => setShowTransfer(false)}
+          showManager={showManager}
+          onOpenManager={() => setShowManager(true)}
+          onCloseManager={() => setShowManager(false)}
+        />
+      )}
       {tab === "consultant" && <OperationsConsultantTab branches={branches} actingUser={actingUser} />}
       {tab === "physio" && (
         <OperationsPersonTab
