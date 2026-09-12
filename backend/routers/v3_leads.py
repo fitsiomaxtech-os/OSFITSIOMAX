@@ -7,7 +7,7 @@ from database import v3_col
 from utils import now_iso, normalize_slot_time, generate_patient_number
 from deps import (
     v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role,
-    vertical_names_an_arm, lead_as_read_by,
+    vertical_names_an_arm, lead_as_read_by, works_org_wide,
 )
 from constants import V3_STAGES
 from stage_utils import first_branch_stage_for, first_branch_stage_for_branch
@@ -146,11 +146,11 @@ async def _delete_lead_cascade(lead_ids: list[str]) -> None:
 @router.delete("/leads/{lead_id}")
 async def v3_delete_lead(
     lead_id: str,
-    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     """Permanently delete a lead/patient and every record that points back at them —
     Branch Leads, the Consultant queue, Physio's board, Diet, Zumba, the client portal —
-    so nothing is left showing a patient this just erased. Super Admin only."""
+    so nothing is left showing a patient this just erased. The two org-wide desks only."""
     res = await v3_col("leads").delete_one({"id": lead_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -183,7 +183,7 @@ MAX_BULK_DELETE = 500
 @router.post("/branch/leads/bulk-delete")
 async def v3_bulk_delete_leads(
     payload: BulkDeleteLeadsInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "branch_admin")),
 ):
     """Delete several leads at once — for clearing out a bad import.
 
@@ -228,8 +228,8 @@ async def v3_bulk_delete_leads(
         if not lead:
             blocked.append({"lead_id": lead_id, "name": "", "reason": "No longer exists"})
             continue
-        # Super Admin is org-wide; everyone else is held to their own branch.
-        if not user.role == "super_admin" and lead.get("branch_id") != user.branch_id:
+        # The org-wide desks reach every branch; everyone else is held to their own.
+        if not works_org_wide(user.role) and lead.get("branch_id") != user.branch_id:
             blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Belongs to another branch"})
             continue
         if await v3_col("sessions").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1}):
@@ -265,13 +265,13 @@ class BulkHardDeleteLeadsInput(BaseModel):
 @router.post("/leads/bulk-hard-delete")
 async def v3_bulk_hard_delete_leads(
     payload: BulkHardDeleteLeadsInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     """Same permanent, no-guard delete as the single-lead DELETE above — every fee,
     session and appointment on file included — for several patients picked at once, e.g.
-    clearing everyone currently listed on one Consultations view. Super Admin only: unlike
-    the safer bulk-delete above (kept open to a Branch Admin precisely because it refuses
-    anyone with paid-for history), this one has no such refusal to fall back on.
+    clearing everyone currently listed on one Consultations view. The two org-wide desks
+    only: unlike the safer bulk-delete above (kept open to a Branch Admin precisely because
+    it refuses anyone with paid-for history), this one has no such refusal to fall back on.
     """
     if (payload.confirm or "").strip().upper() != "DELETE":
         raise HTTPException(status_code=400, detail="Type DELETE to confirm")

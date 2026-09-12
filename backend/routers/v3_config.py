@@ -235,7 +235,7 @@ async def v3_update_physio_type(
 async def v3_set_doctor_service(
     doctor_id: str,
     payload: V3DoctorServiceInput,
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Say which service an expert is offered under, from the Service picklist.
 
@@ -296,7 +296,7 @@ def _clean_meet_link(raw) -> str:
 async def v3_set_doctor_meet_link(
     doctor_id: str,
     payload: V3DoctorMeetLinkInput,
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Record the video room this expert takes appointments in.
 
@@ -846,7 +846,7 @@ async def team_roster_experts(branch_id: str, profile_type: str) -> list:
 async def v3_calendar_experts(
     branch_id: str,
     profile_type: str = "head_physio",
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Who a branch's calendar publishes days for — the Team roster for that desk.
 

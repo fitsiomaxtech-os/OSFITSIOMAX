@@ -12,6 +12,7 @@ from utils import now_iso, active_doctor_query
 from deps import (
     v3_require_roles, v3_current_user, is_head_physio_role, consultants_serving_branch,
     online_arm_practice, vertical_in_arm, lead_as_read_by, is_branch_admin_role,
+    works_org_wide,
 )
 import lead_control
 from constants import (
@@ -531,7 +532,7 @@ async def v3_arm_board(user: V3UserOut = Depends(v3_current_user)):
 
 
 @router.post("/leads/{lead_id}/branch-stage")
-async def v3_move_branch_stage(lead_id: str, payload: V3BranchStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def v3_move_branch_stage(lead_id: str, payload: V3BranchStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -687,7 +688,7 @@ class V3BranchAppointmentInput(BaseModel):
 
 
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
-async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointmentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointmentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Schedule appointment date/time, assign physio, add notes, then move to final stage."""
     # Read before the stages are resolved: which of the two Branch pipelines this booking
     # answers to is the lead's own arm, and there is no meaningful appointment stage to
@@ -918,7 +919,7 @@ async def _live_consultation_appt(lead_id: str) -> Optional[dict]:
 async def v3_swap_candidates(
     branch_id: str,
     lead_id: str = Query(..., description="The lead holding the slot being swapped out of"),
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Every other patient at this branch holding a consultation that could be traded for
     this one.
@@ -991,7 +992,7 @@ def _swap_moving_fields(appt: dict) -> dict:
 async def v3_swap_branch_appointment(
     lead_id: str,
     payload: V3BranchAppointmentSwapInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Exchange this lead's consultation with another lead's. Both keep an appointment."""
     if payload.with_lead_id == lead_id:
@@ -1144,7 +1145,7 @@ async def v3_available_experts(
     date: str,
     time: Optional[str] = None,
     lead_id: Optional[str] = None,
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Head Physios at this branch who can take a consultation on the given date
     (optionally narrowed to an exact time).
@@ -1269,7 +1270,7 @@ async def v3_available_dates(
     branch_id: str,
     month: str = Query(..., description="YYYY-MM"),
     lead_id: Optional[str] = None,
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Every date in `month` that still has a free published Head Physio slot, and how many.
 
@@ -1318,7 +1319,7 @@ async def v3_consultations_board(
     branch_id: str,
     pipeline: Optional[str] = None,
     mine: bool = False,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Return leads in the Consultations pipeline for a branch, grouped by the caller's own
     pipeline field. Head Physio has a fully independent pipeline (head_consultation_stage) from
@@ -1345,7 +1346,7 @@ async def v3_consultations_board(
         # Off the predicate, not the literal: the desk is `consultant`/`online_consultant`
         # now, and matching the retired slug exactly dropped every consultant onto the
         # Branch Admin's consultation pipeline instead of their own.
-        is_hp = is_head_physio_role(user.role) or (user.role == "super_admin" and pipeline == "head_consultation")
+        is_hp = is_head_physio_role(user.role) or (works_org_wide(user.role) and pipeline == "head_consultation")
         field = "head_consultation_stage" if is_hp else "consultation_stage"
         query = {field: {"$ne": None}}
         if branch_id and branch_id != "all":
@@ -1430,7 +1431,7 @@ _CONSULTATION_STAGE_GATED = {
 
 
 @router.post("/leads/{lead_id}/move-consultation-stage", response_model=V3LeadOut)
-async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio"))):
     stage_names = await _consultation_stage_names()
     if payload.consultation_stage not in stage_names:
         raise HTTPException(status_code=400, detail=f"Invalid consultation_stage. Allowed: {stage_names}")
@@ -1487,7 +1488,7 @@ class V3BranchFollowUpRescheduleInput(BaseModel):
 
 
 @router.post("/leads/{lead_id}/branch-follow-up", response_model=V3LeadOut)
-async def v3_schedule_branch_follow_up(lead_id: str, payload: V3BranchFollowUpInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def v3_schedule_branch_follow_up(lead_id: str, payload: V3BranchFollowUpInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Schedule a Branch Leads follow-up. Appends to follow_ups[] and moves branch_stage to 'Follow Up'.
 
     Distinct from Pre-Sales' /leads/{id}/follow-up, which instead moves the pre-sales `stage`
@@ -1523,7 +1524,7 @@ async def v3_schedule_branch_follow_up(lead_id: str, payload: V3BranchFollowUpIn
 
 
 @router.post("/leads/{lead_id}/branch-follow-up/{followup_id}/reschedule", response_model=V3LeadOut)
-async def v3_reschedule_branch_follow_up(lead_id: str, followup_id: str, payload: V3BranchFollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def v3_reschedule_branch_follow_up(lead_id: str, followup_id: str, payload: V3BranchFollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Mark an existing branch follow-up as rescheduled (with a reason) and add a new active one in its place."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -1726,7 +1727,7 @@ async def _rebook_consultation_slot(
 
 
 @router.post("/leads/{lead_id}/consultation-follow-up", response_model=V3LeadOut)
-async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3ConsultationFollowUpInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3ConsultationFollowUpInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio"))):
     """Schedule a consultation follow-up. Appends to consultation_follow_ups[] and moves consultation_stage to 'Consultation Booked'."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -1774,7 +1775,7 @@ async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3Consultati
 
 
 @router.post("/leads/{lead_id}/consultation-follow-up/{followup_id}/reschedule", response_model=V3LeadOut)
-async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, payload: V3ConsultationFollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, payload: V3ConsultationFollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio"))):
     """Mark an existing consultation follow-up as rescheduled (with a reason) and add a new active one in its place."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -2134,7 +2135,7 @@ def _transfer_scope_error(lead: dict, user: V3UserOut) -> Optional[str]:
 @router.get("/leads/{lead_id}/transfer-eligibility")
 async def v3_transfer_eligibility(
     lead_id: str,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "branch_admin")),
 ):
     """Whether this patient can be transferred, and what moving them would cost.
 
@@ -2183,7 +2184,7 @@ async def v3_transfer_eligibility(
 async def v3_transfer_branch(
     lead_id: str,
     payload: V3BranchTransferInput,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "branch_admin")),
 ):
     """Move a patient to another branch.
 

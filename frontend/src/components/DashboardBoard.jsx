@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Users, CalendarCheck, Activity, IndianRupee, X, RefreshCw,
   Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad, Clock,
@@ -23,7 +23,7 @@ import { LeadsAnalyticsDashboard } from "@/components/marketing/LeadsAnalyticsDa
 // payload (source breakdown vs stage breakdown); Revenue and Team read the two payloads
 // every other tab already fetches (getDashboardOverview, mkGetTeam); Analytics is the
 // six-month growth trend, on its own now that Executive Overview no longer exists.
-const DASH_TABS = [
+export const DASH_TABS = [
   { key: "marketing", label: "Marketing", icon: Megaphone },
   { key: "sales", label: "Sales", icon: Headphones },
   { key: "revenue", label: "Revenue", icon: IndianRupee },
@@ -411,11 +411,21 @@ const TeamTab = ({ team, loading, branches, roster, rosterLoading }) => {
   );
 };
 
-// Super Admin's default landing page — Marketing / Sales / Revenue / Team / Analytics,
-// each scoped to a date range and, below that, an All/Offline/Online + branch filter.
-export const DashboardBoard = () => {
-  const [dateFilter, setDateFilter] = useState(defaultFilter);
-  const [activeTab, setActiveTab] = useState("marketing");
+/**
+ * The three payloads the six tabs below read, and when each of them is asked for.
+ *
+ * Lifted out of the board so a second desk can mount the same six tabs without a second
+ * copy of the fetching — see BusinessLeadsDashboard's Dashboard tab, which puts them on
+ * its own strip beside OnBoarding and systematic statistics. A figure reads the same on
+ * both boards because it is literally this request answering both, which is the only
+ * reason somebody who reads both can trust either.
+ *
+ * `enabled` is for that second caller. Its strip opens on a tab of its own — OnBoarding,
+ * which reads none of this — and the overview is a wide request to pay for before anybody
+ * has asked for a tab that needs it. Super Admin's own board passes nothing and so fetches
+ * on mount, exactly as it always has.
+ */
+export const useDashboardData = (dateFilter, activeTab, enabled = true) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [team, setTeam] = useState(null);
@@ -428,7 +438,7 @@ export const DashboardBoard = () => {
   const loadOverview = useCallback(() => {
     setLoading(true);
     // No dates on All — the endpoint reads that as unfiltered.
-    const params = dateFilter.from && dateFilter.to
+    const params = dateFilter?.from && dateFilter?.to
       ? { start_date: toIso(dateFilter.from), end_date: toIso(dateFilter.to) }
       : {};
     return getDashboardOverview(params)
@@ -437,7 +447,7 @@ export const DashboardBoard = () => {
       .finally(() => setLoading(false));
   }, [dateFilter]);
 
-  useEffect(() => { loadOverview(); }, [loadOverview]);
+  useEffect(() => { if (enabled) loadOverview(); }, [enabled, loadOverview]);
 
   // Fetched once, on the first visit to Team, and not refetched when the date range
   // changes — /marketing/team-members counts a person's whole book and takes no dates.
@@ -477,7 +487,48 @@ export const DashboardBoard = () => {
   // Every branch, offline or online — the roster Marketing/Sales/Revenue/Team's filter
   // picks from. Read off the leads bucket, but any bucket would do; they all carry the
   // same branch list.
-  const branches = data?.leads?.branches || [];
+  //
+  // Memoised because four of the six tabs name it in an effect's dependency list: rebuilt
+  // as a fresh `[]` on every render, a board whose overview had not landed yet would
+  // re-ask the analytics endpoint each time its parent redrew.
+  const branches = useMemo(() => data?.leads?.branches || [], [data]);
+
+  return { data, loading, team, teamLoading, roster, rosterLoading, branches, loadOverview };
+};
+
+/**
+ * Whichever of the six is open, drawn — and nothing else: no date row, no tab strip.
+ *
+ * Those two live with whoever mounts this, because the two boards that do put them in
+ * different places. Super Admin keeps its range on a row of its own above the strip; the
+ * Business Development desk folds both into the two navigation bars its Dashboard already
+ * carries.
+ */
+export const DashboardTabPanel = ({ tab, dateFilter, dash }) => {
+  const { data, loading, team, teamLoading, roster, rosterLoading, branches } = dash;
+  return tab === "marketing" ? (
+    <MarketingTab branches={branches} dateFilter={dateFilter} />
+  ) : tab === "sales" ? (
+    <SalesTab branches={branches} dateFilter={dateFilter} />
+  ) : tab === "revenue" ? (
+    <RevenueTab data={data} loading={loading} dateFilter={dateFilter} />
+  ) : tab === "team" ? (
+    <TeamTab team={team} loading={teamLoading} branches={branches} roster={roster} rosterLoading={rosterLoading} />
+  ) : tab === "clients" ? (
+    <ClientsTab />
+  ) : (
+    <AnalyticsTab data={data} dateFilter={dateFilter} />
+  );
+};
+
+// Super Admin's default landing page — Marketing / Sales / Revenue / Team / Clients /
+// Analytics, each scoped to a date range and, below that, an All/Offline/Online + branch
+// filter.
+export const DashboardBoard = () => {
+  const [dateFilter, setDateFilter] = useState(defaultFilter);
+  const [activeTab, setActiveTab] = useState("marketing");
+  const dash = useDashboardData(dateFilter, activeTab);
+  const { loading, loadOverview } = dash;
 
   return (
     // No title block. The tab above already reads Dashboard, and the strapline named the
@@ -555,19 +606,7 @@ export const DashboardBoard = () => {
           only two. Desktop keeps the single row. */}
       <SegmentedTabs tabs={DASH_TABS} value={activeTab} onChange={setActiveTab} testid="dashboard-tab" mobileCols={3} />
 
-      {activeTab === "marketing" ? (
-        <MarketingTab branches={branches} dateFilter={dateFilter} />
-      ) : activeTab === "sales" ? (
-        <SalesTab branches={branches} dateFilter={dateFilter} />
-      ) : activeTab === "revenue" ? (
-        <RevenueTab data={data} loading={loading} dateFilter={dateFilter} />
-      ) : activeTab === "team" ? (
-        <TeamTab team={team} loading={teamLoading} branches={branches} roster={roster} rosterLoading={rosterLoading} />
-      ) : activeTab === "clients" ? (
-        <ClientsTab />
-      ) : (
-        <AnalyticsTab data={data} dateFilter={dateFilter} />
-      )}
+      <DashboardTabPanel tab={activeTab} dateFilter={dateFilter} dash={dash} />
     </div>
   );
 };

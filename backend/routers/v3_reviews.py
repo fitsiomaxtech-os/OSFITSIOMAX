@@ -23,7 +23,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, active_doctor_query
-from deps import v3_require_roles
+from deps import v3_require_roles, works_org_wide
 from schemas.v3 import V3UserOut
 
 from physio_scope import physio_lead_ids, resolve_physio_doctor
@@ -416,7 +416,7 @@ def _review_eligibility(existing_for_lead: List[dict], treatment_days: int, cour
 @router.get("/physio/reviews")
 async def physio_reviews(
     physio_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev")),
 ):
     """This physio's patients, each with how far through treatment they are and whether a
     review has already been raised — so the Physio can see who is due one."""
@@ -473,7 +473,7 @@ async def physio_raise_review(
     lead_id: str,
     payload: ReviewRaiseInput,
     physio_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev")),
 ):
     """Physio sends a patient up for review. Lands in Branch Admin > Review > Send to Review.
     Only raisable at a fresh 7-treatment-day milestone (7, 14, 21...), counted in calendar
@@ -543,7 +543,7 @@ async def physio_raise_review(
 async def branch_reviews(
     branch_id: str,
     status: Optional[str] = Query(None, description="send_to_review | sent | completed"),
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Every review on this branch, plus the counts each sub-tab shows on its pill."""
     query: dict = {"branch_id": branch_id}
@@ -578,7 +578,7 @@ async def branch_reviews(
 async def branch_send_review(
     review_id: str,
     payload: ReviewSendInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Hand the review to a named Head Physio for a date."""
     rev = await _review_or_404(review_id)
@@ -632,9 +632,9 @@ async def hp_reviews(
     branch_id: Optional[str] = Query(
         None,
         description="Supervisor view: every Consultant's dispatched reviews on this branch. "
-                    "Super Admin only; a Consultant always gets their own.",
+                    "The org-wide desks only; a Consultant always gets their own.",
     ),
-    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev")),
 ):
     """Reviews dispatched to this Head Physio, split into what's due and what's done.
 
@@ -658,7 +658,7 @@ async def hp_reviews(
     ).to_list(50)
     my_ids = [d["id"] for d in docs]
 
-    supervising = bool(branch_id) and user.role == "super_admin"
+    supervising = bool(branch_id) and works_org_wide(user.role)
     if supervising:
         query: dict = {"head_physio_id": {"$nin": ["", None]}}
         # "all" is the My Consultation picker's every-branch answer, passed straight
@@ -693,7 +693,7 @@ async def hp_reviews(
 async def hp_complete_review(
     review_id: str,
     payload: ReviewCompleteInput,
-    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev")),
 ):
     rev = await _review_or_404(review_id)
     if rev.get("status") == COMPLETED:

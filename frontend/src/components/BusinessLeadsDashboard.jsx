@@ -24,6 +24,7 @@ import {
   TrendingUp,
   UserPlus,
   Users,
+  Workflow,
   X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,14 +53,28 @@ import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
 // chunks share rather than copying either board into each.
 import { PreSalesCRM } from "@/components/PreSalesCRM";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
-// Finance, HR Admin, Services and Products, and the two Settings screens -- the same five
-// boards Super Admin reaches, mounted here as this desk's own tabs.
+// Super Admin's own six Dashboard tabs -- Marketing, Sales, Revenue, Team, Clients and
+// Analytics -- and the hook that fetches what they read. Mounted on this desk's own
+// Dashboard beside OnBoarding and systematic statistics; see DASH_SUB_TABS below.
+//
+// Static, unlike the six lazy() boards under it, and for the opposite reason: those are
+// other tabs on the nav above, and this one IS the Dashboard tab -- the tab this board
+// opens on. A lazy() could not carry useDashboardData in any case; a hook has to be
+// there when the component that calls it renders.
+import { DASH_TABS, DashboardTabPanel, useDashboardData } from "@/components/DashboardBoard";
+// Operations, Finance, HR Admin, Services and Products, and the two Settings screens --
+// the same six boards Super Admin reaches, mounted here as this desk's own tabs.
 //
 // lazy() rather than the static imports above, and deliberately not the same call: these
-// five are the same lazy() targets CRMPage already names, so webpack hands both pages the
+// six are the same lazy() targets CRMPage already names, so webpack hands both pages the
 // one chunk per board and neither pays for the other's copy. Static would have pulled the
 // whole HR org chart and the whole catalogue into the chunk that draws this board's
 // Dashboard, which is the tab it opens on and the only one most days need.
+//
+// Operations matters most of the six here: it reaches six other boards of its own -- a
+// branch's, a consultant's, a physio's, a nutritionist's, a rep's and a client's -- so
+// mounting it statically would have folded all of them into Dashboard's chunk.
+const OperationsBoard = lazy(() => import("@/components/OperationsBoard").then((m) => ({ default: m.OperationsBoard })));
 const FinanceWiseBoard = lazy(() => import("@/components/branch/FinanceWiseBoard").then((m) => ({ default: m.FinanceWiseBoard })));
 const HRBoard = lazy(() => import("@/components/hr/HRBoard").then((m) => ({ default: m.HRBoard })));
 const PackagesBoard = lazy(() => import("@/components/PackagesBoard").then((m) => ({ default: m.PackagesBoard })));
@@ -79,11 +94,24 @@ const BoardFallback = () => (
   </div>
 );
 
+// Operations is Super Admin's own Operations board in full -- every team, one designation
+// at a time, each tab opening the board that person or branch already has, with full
+// control and no separate login. It sits directly after Dashboard, where it does on Super
+// Admin's own strip and for the same reason: the figures say what happened, and this is
+// the one tab that can go and do something about it, at whichever desk it happened.
+//
+// Mounted with nothing held back and nothing passed to narrow it -- the same rule the five
+// tabs after it already follow. What this desk may actually read and write is settled by
+// the API off its token: business_dev sits beside super_admin now on every guard behind
+// the six boards Operations reaches, and on the two scoping rules that decide whether a
+// caller is reading one branch or driving somebody else's board (works_org_wide in
+// backend/deps.py, and the callers named on it).
+//
 // Marketing View and Sales View are the same two boards Super Admin reaches as
 // "Marketing Master View" and "Sales Master View" -- the same PreSalesCRM mount, under the
 // shorter names, because here they are two tabs on a strip and not two entries on a
-// top-level nav. They sit second and third, right after the figures: the desk reads the
-// day on Dashboard, then reads what the other two desks did with it.
+// top-level nav. They sit after Operations, before the money: the desk reads the day on
+// Dashboard, works it in Operations, then reads what the other two desks did with it.
 //
 // Branch Control is BranchManagementBoard in full -- the same panel Operations opens as a
 // "Branch Manager" dialog, mounted as a tab instead of a popup so it has the room its
@@ -104,6 +132,10 @@ const BoardFallback = () => (
 // the one that acts on a branch rather than reads across all of them.
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
+  // Every team, one designation at a time -- Pre Sales, Branch, Consultant, Physio,
+  // Nutritionist and Client, each reached by picking a branch and then the person, and
+  // each opening that person's own board in full.
+  { key: "operations", label: "Operations", icon: Workflow },
   { key: "marketing_view", label: "Marketing View", icon: Megaphone },
   { key: "sales_view", label: "Sales View", icon: Headphones },
   { key: "finance", label: "Finance", icon: BadgeIndianRupee },
@@ -138,9 +170,9 @@ const SETTINGS_SUB_TABS = [
 const isTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.includes(view) : view === key);
 
 // Where the strip's own Refresh is not drawn -- see the note on the button itself. Dashboard
-// because its toolbar carries the same one, and the three mounted boards because each
+// because its toolbar carries the same one, and the four mounted boards because each
 // carries its own and this one would not touch what they show.
-const REFRESH_WITHHELD_TABS = ["dashboard", "finance", "hr", "packages"];
+const REFRESH_WITHHELD_TABS = ["dashboard", "operations", "finance", "hr", "packages"];
 
 function formatMoney(v) {
   const n = Number(v || 0);
@@ -173,11 +205,12 @@ const dateParamsOf = (filter) => {
 };
 
 /**
- * @param currentUser  the signed-in Business Development Executive. Read by the three
- *                     tabs that mount another desk's board -- Marketing View, Sales View
- *                     and Branch Control. PreSalesCRM schedules and stamps activity
- *                     against whoever is looking, and BranchManagementBoard's Branch
- *                     Control sub-tab acts as them; without this those tabs would be
+ * @param currentUser  the signed-in Business Development Executive. Read by the four
+ *                     tabs that mount another desk's board -- Operations, Marketing View,
+ *                     Sales View and Branch Control. PreSalesCRM schedules and stamps
+ *                     activity against whoever is looking, and BranchManagementBoard's
+ *                     Branch Control sub-tab acts as them -- as does Operations' own Branch
+ *                     tab, which opens that same panel; without this those tabs would be
  *                     working on behalf of nobody.
  */
 export const BusinessLeadsDashboard = ({ currentUser = null }) => {
@@ -336,10 +369,10 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
               it. The two are the same `refreshAll`, and two identical grey squares an inch
               apart on one screen is a reader asking which of them is the real one.
 
-              Withheld on Finance, HR Admin and Services and Products for the same reason,
-              one step further out: this button reloads THIS board's summary, branches and
-              sheet connections, and on those three the screen under it is somebody else's
-              board with its own reload. A refresh that visibly does nothing to what is on
+              Withheld on Operations, Finance, HR Admin and Services and Products for the
+              same reason, one step further out: this button reloads THIS board's summary,
+              branches and sheet connections, and on those four the screen under it is
+              somebody else's board with its own reload. A refresh that visibly does nothing to what is on
               screen is worse than no refresh at all. It stays for the tabs that have
               neither their own toolbar nor a board of their own. */}
           {!REFRESH_WITHHELD_TABS.includes(activeTab) && (
@@ -371,6 +404,7 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
           onQuickDate={setQuickDate}
           dateFilter={dateFilter}
           onDateFilter={setDateFilter}
+          effectiveDateFilter={effectiveDateFilter}
           onRefresh={refreshAll}
           onPulled={reloadAll}
           onBranchSwap={() => setSwapPicking(true)}
@@ -394,18 +428,30 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
         <PreSalesCRM role="sales_head" currentUser={currentUser} embedded />
       )}
 
-      {/* Finance, HR Admin and Services and Products — Super Admin's own three boards, each
-          the same component that board mounts, with nothing held back and nothing passed to
-          narrow them. What this desk may actually read and write is settled by the API off
-          its token, the same as it is for Super Admin's copy: the guards in
-          backend/routers/v3_finance.py, v3_hr.py, v3_hr_ops.py, v3_packages.py,
-          v3_store.py and v3_inventory.py name business_dev beside super_admin now.
+      {/* Operations, Finance, HR Admin and Services and Products — Super Admin's own four
+          boards, each the same component that board mounts, with nothing held back and
+          nothing passed to narrow them. What this desk may actually read and write is
+          settled by the API off its token, the same as it is for Super Admin's copy: the
+          guards in backend/routers/v3_finance.py, v3_hr.py, v3_hr_ops.py, v3_packages.py,
+          v3_store.py and v3_inventory.py name business_dev beside super_admin now, and so
+          do the guards behind the six boards Operations reaches — v3_branch_admin.py,
+          v3_head_physio.py, v3_head_physio_board.py, v3_physio_board.py, v3_diet.py,
+          v3_patient_portal.py and the routers those boards work through.
 
-          Wrapped in one Suspense rather than three: only one of them is ever mounted, so a
-          boundary each would be three copies of the same fallback waiting on the same
+          Wrapped in one Suspense rather than four: only one of them is ever mounted, so a
+          boundary each would be four copies of the same fallback waiting on the same
           switch. It sits inside the strip, not around it, so the tabs stay put while a
           chunk arrives. */}
       <Suspense fallback={<BoardFallback />}>
+        {/* Operations — Super Admin's own board, mounted the way that page mounts it and
+            with the same two props. `actingUser` is what its Branch tab acts as and what
+            PreSalesCRM stamps activity against; `branches` is the list its six tabs all
+            pick from, already loaded here for the Dashboard's own branch filter rather
+            than fetched a second time. */}
+        {activeTab === "operations" && (
+          <OperationsBoard actingUser={currentUser} branches={branches} />
+        )}
+
         {activeTab === "finance" && (
           <FinanceWiseBoard branches={branches} />
         )}
@@ -906,55 +952,69 @@ function DrillList({ title, drill, loading, branches, onClose, search = "", sort
 }
 
 /* ─── Dashboard Tab ─── */
-function DashboardTab({
-  summary,
-  loading,
-  branches,
-  openMetric,
-  onOpenCard,
-  drill,
-  drillLoading,
-  quickDate,
-  onQuickDate,
-  dateFilter,
-  onDateFilter,
-  onRefresh,
-  onPulled,
-  onBranchSwap,
-}) {
-  // Which of the two rows of cards is on screen. Up here rather than beside the groups it
-  // switches, because a hook cannot sit after the two conditional returns below it.
-  const [openGroup, setOpenGroup] = useState("onboarding");
 
-  // The three toolbar controls that narrow and order the open list rather than re-asking
-  // the server for it. Held here, not in the parent, because the list they describe is
-  // rendered from this component -- see the note on DrillList's own props. The date range
-  // is the opposite case and lives upstairs, since it re-scopes the cards too.
-  const [search, setSearch] = useState("");
-  const [sortOrder, setSortOrder] = useState("newest");
-  const [markFilter, setMarkFilter] = useState("");
+// The two rows of cards this desk has always read, as tab definitions rather than as the
+// cards themselves -- the nine figures are built from `summary` inside the component, and
+// the strip has to be drawable before that has landed.
+//
+// OnBoarding is the pipeline as it stands today -- what came in and how far along it is,
+// the figures a desk acts on this morning. Systematic statistics is what the desk and the
+// group have built: money, rate, and the estate the leads arrive through. Read as one row
+// of nine they were a wall; stacked as two rows the second still pulled the eye off the
+// first. One row at a time, the desk reads what it asked for and the board answers one
+// question per screen.
+//
+// `cols` because the rows are five and four cards wide: each fills its own row rather than
+// the four holding a gap open to line up with the five.
+const CARD_GROUPS = [
+  {
+    key: "onboarding",
+    label: "OnBoarding",
+    hint: "The pipeline as it stands today",
+    icon: UserPlus,
+    cols: "lg:grid-cols-5",
+  },
+  {
+    key: "statistics",
+    label: "systematic statistics",
+    hint: "What the desk and the estate have built",
+    icon: BarChart3,
+    cols: "lg:grid-cols-4",
+  },
+];
 
-  // A name typed, or a mark pressed, with no card open has nothing to narrow -- the
-  // controls would sit there doing nothing visible and read as broken. Total Leads is the
-  // widest of the nine and every other list is a subset of it, so that is the one that
-  // opens. Clearing a mark opens nothing: an answer being put away is not a question.
-  const searchList = (v) => {
-    setSearch(v);
-    if (v.trim() && !openMetric) onOpenCard("total");
-  };
-  const toggleMark = (m) => {
-    const next = markFilter === m ? "" : m;
-    setMarkFilter(next);
-    if (next && !openMetric) onOpenCard("total");
-  };
+// The Dashboard's own strip: this desk's two card rows, then Super Admin's own six
+// Dashboard tabs -- Marketing, Sales, Revenue, Team, Clients and Analytics.
+//
+// Mounted as peers of the two rather than folded in behind one of them, because they are
+// the same kind of thing: a view of this Dashboard. They are DashboardBoard's own
+// components, through DashboardTabPanel, with nothing held back and nothing passed to
+// narrow them -- the same rule the boards on the nav above already follow. A figure means
+// here exactly what it means on Super Admin's copy because it is the same request
+// answering both, which is the only reason a desk reading both can trust either. What this
+// account may actually read is settled by the API off its token: business_dev sits beside
+// super_admin on /dashboard/overview, /dashboard/leads-analytics, /dashboard/leads-trend,
+// /dashboard/clients, /marketing/team-members, /finance/revenue-overview and the three HR
+// reads the Team roster is drawn from.
+//
+// They sit after the two card rows, not before: this desk's own nine figures are what it
+// opens for, and these six are the group-wide read behind them.
+const DASH_SUB_TABS = [...CARD_GROUPS, ...DASH_TABS];
+const CARD_GROUP_KEYS = CARD_GROUPS.map((g) => g.key);
 
-  if (!summary && loading) {
-    return <p className="py-8 text-center text-sm text-slate-400" data-testid="bd-dash-loading">Loading dashboard...</p>;
-  }
-  if (!summary) {
-    return <p className="py-8 text-center text-sm text-slate-400" data-testid="bd-dash-empty">No data yet</p>;
-  }
+// What the six imported tabs are handed when neither date control is set. They read a
+// range off `.from`/`.to` without guarding it, and this board's two controls intersect to
+// null rather than to an open range. Module-level so it is the same object on every
+// render -- four of the six name the range in an effect's dependency list.
+const ALL_DATES = { key: "all", label: "All", from: null, to: null };
 
+/**
+ * The nine figures, in the two rows they are read in.
+ *
+ * `metric` on each card is the key its rows are fetched by -- see BD_ROW_METRICS in
+ * backend/routers/v3_dashboard.py. A card with no metric opens nothing.
+ */
+const buildCardGroups = (summary) => {
   const weekTrendCounts = (summary.week_trend || []).map((d) => d.count);
   const todayCount = summary.today_leads || 0;
   const yesterdayCount = weekTrendCounts.length >= 2 ? weekTrendCounts[weekTrendCounts.length - 2] : null;
@@ -974,86 +1034,132 @@ function DashboardTab({
 
   const followUp = summary.stage_counts?.["Follow Up"] || 0;
 
-  // Two groups, on a sub-tab strip, because the nine cards answer two different
-  // questions. OnBoarding is the pipeline as it stands today -- what came in and how far
-  // along it is, the figures a desk acts on this morning. Systematic statistics is what
-  // the desk and the group have built: money, rate, and the estate the leads arrive
-  // through. Read as one row of nine they were a wall; stacked as two rows the second
-  // still pulled the eye off the first. One row at a time, the desk reads what it asked
-  // for and the board answers one question per screen.
-  //
-  // `cols` because the rows are five and four cards wide: each fills its own row rather
-  // than the four holding a gap open to line up with the five, which is what the blank
-  // card this replaced was for.
-  //
-  // `metric` on each card is the key its rows are fetched by -- see BD_ROW_METRICS in
-  // backend/routers/v3_dashboard.py. A card with no metric opens nothing.
-  const groups = [
-    {
-      key: "onboarding",
-      label: "OnBoarding",
-      hint: "The pipeline as it stands today",
-      icon: UserPlus,
-      cols: "lg:grid-cols-5",
-      cards: [
-        { key: "total", metric: "total", label: "Total Leads", value: summary.total_leads, icon: Users, trend: weekTrend, sparkline: weekTrendCounts },
-        { key: "today", metric: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, trend: todayTrend, sparkline: weekTrendCounts },
-        { key: "followup", metric: "followup", label: "Active Follow-ups", value: followUp, icon: Clock },
-        { key: "appointments", metric: "appointments", label: "Appointments", value: summary.total_appointments, icon: CalendarCheck },
-        { key: "converted", metric: "converted", label: "Converted", value: summary.completed_appointments, icon: TrendingUp },
-      ],
-    },
-    {
-      key: "statistics",
-      label: "systematic statistics",
-      hint: "What the desk and the estate have built",
-      icon: BarChart3,
-      cols: "lg:grid-cols-4",
-      cards: [
-        { key: "revenue", metric: "revenue", label: "Revenue Generated", value: formatMoney(summary.revenue_generated), icon: IndianRupee },
-        { key: "conversion", metric: "conversion", label: "Conversion Rate", value: `${summary.conversion_rate}%`, icon: Percent },
-        { key: "branches", metric: "branches", label: "Branches", value: summary.total_branches, icon: Building2 },
-        { key: "sheets", metric: "sheets", label: "Connected Sheets", value: summary.total_connections, icon: FileSpreadsheet },
-      ],
-    },
-  ];
+  const cards = {
+    onboarding: [
+      { key: "total", metric: "total", label: "Total Leads", value: summary.total_leads, icon: Users, trend: weekTrend, sparkline: weekTrendCounts },
+      { key: "today", metric: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, trend: todayTrend, sparkline: weekTrendCounts },
+      { key: "followup", metric: "followup", label: "Active Follow-ups", value: followUp, icon: Clock },
+      { key: "appointments", metric: "appointments", label: "Appointments", value: summary.total_appointments, icon: CalendarCheck },
+      { key: "converted", metric: "converted", label: "Converted", value: summary.completed_appointments, icon: TrendingUp },
+    ],
+    statistics: [
+      { key: "revenue", metric: "revenue", label: "Revenue Generated", value: formatMoney(summary.revenue_generated), icon: IndianRupee },
+      { key: "conversion", metric: "conversion", label: "Conversion Rate", value: `${summary.conversion_rate}%`, icon: Percent },
+      { key: "branches", metric: "branches", label: "Branches", value: summary.total_branches, icon: Building2 },
+      { key: "sheets", metric: "sheets", label: "Connected Sheets", value: summary.total_connections, icon: FileSpreadsheet },
+    ],
+  };
 
-  const openCardDef = groups.flatMap((g) => g.cards).find((c) => c.metric && c.metric === openMetric);
-  // A saved key naming a group that no longer exists would render nothing at all, so the
-  // first group stands in for one.
-  const activeGroup = groups.find((g) => g.key === openGroup) || groups[0];
+  return CARD_GROUPS.map((g) => ({ ...g, cards: cards[g.key] || [] }));
+};
 
-  // Leaving a row closes the list under it. Those rows were opened by a card in the row
+function DashboardTab({
+  summary,
+  loading,
+  branches,
+  openMetric,
+  onOpenCard,
+  drill,
+  drillLoading,
+  quickDate,
+  onQuickDate,
+  dateFilter,
+  onDateFilter,
+  effectiveDateFilter,
+  onRefresh,
+  onPulled,
+  onBranchSwap,
+}) {
+  // Which tab of the eight is on screen. OnBoarding, because this desk's own pipeline is
+  // what it opens the board for; the six group-wide reads after it are the question behind
+  // that one, not instead of it.
+  const [openGroup, setOpenGroup] = useState("onboarding");
+
+  // The three toolbar controls that narrow and order the open list rather than re-asking
+  // the server for it. Held here, not in the parent, because the list they describe is
+  // rendered from this component -- see the note on DrillList's own props. The date range
+  // is the opposite case and lives upstairs, since it re-scopes the cards too.
+  const [search, setSearch] = useState("");
+  const [sortOrder, setSortOrder] = useState("newest");
+  const [markFilter, setMarkFilter] = useState("");
+
+  // Whether the open tab is one of this desk's two card rows, or one of the six imported
+  // ones. Almost everything below branches on it: the card rows read `summary` and drive
+  // the drill list, and the six read their own payloads and have no list to narrow.
+  const onCards = CARD_GROUP_KEYS.includes(openGroup);
+
+  // The six imported tabs' own payloads -- the same hook Super Admin's Dashboard runs on.
+  //
+  // Gated until one of the six is first opened: the overview is a wide request, and this
+  // board opens on OnBoarding, which reads none of it. Latched rather than tracking which
+  // tab is open, because un-gating it on the way back to a card row would re-ask for the
+  // whole overview every time somebody stepped out to OnBoarding and back. Once this desk
+  // has shown it wants those figures, they stay live and follow the date range.
+  const [wantsPanels, setWantsPanels] = useState(false);
+  const panelRange = effectiveDateFilter || ALL_DATES;
+  const dash = useDashboardData(panelRange, openGroup, wantsPanels);
+
+  // A name typed, or a mark pressed, with no card open has nothing to narrow -- the
+  // controls would sit there doing nothing visible and read as broken. Total Leads is the
+  // widest of the nine and every other list is a subset of it, so that is the one that
+  // opens. Clearing a mark opens nothing: an answer being put away is not a question.
+  const searchList = (v) => {
+    setSearch(v);
+    if (v.trim() && !openMetric) onOpenCard("total");
+  };
+  const toggleMark = (m) => {
+    const next = markFilter === m ? "" : m;
+    setMarkFilter(next);
+    if (next && !openMetric) onOpenCard("total");
+  };
+
+  const cardGroups = summary ? buildCardGroups(summary) : [];
+  const activeCardGroup = cardGroups.find((g) => g.key === openGroup);
+  const openCardDef = cardGroups.flatMap((g) => g.cards).find((c) => c.metric && c.metric === openMetric);
+
+  // Leaving a tab closes the list under it. Those rows were opened by a card in the row
   // being left, and only one row is on screen, so carrying them over would leave rows
-  // headed by one figure sitting under a row of four others.
+  // headed by one figure sitting under a row of four others -- or, switching to one of the
+  // six, under a board that never opened them at all.
   const selectGroup = (key) => {
-    if (key === activeGroup.key) return;
+    if (key === openGroup) return;
     if (openMetric) onOpenCard(openMetric);
+    if (!CARD_GROUP_KEYS.includes(key)) setWantsPanels(true);
     setOpenGroup(key);
   };
 
-  return (
-    <div className="space-y-4" data-testid="bd-dashboard-content">
-      {/* The strip Settings' own two views sit on, in the same shape: a rounded row of
-          pills, the open one in sky. A sub-tab and not a sixth entry on the nav above,
-          because both rows are this desk's own figures -- the tabs up there are other
-          desks' boards. */}
-      {/* One bar, read left to right: which row of figures, then which rows of the list
-          under them, then in what order, then what to do about it. The two view pills, the
-          search and the five ranges narrow; the dropdown orders; the group on the right
-          acts.
+  // What Refresh re-asks for. This board's own summary always, and on one of the six also
+  // the overview behind Revenue, Team and Analytics -- the same reload Super Admin's own
+  // Refresh does, and the same limit: Marketing, Sales and Clients fetch on mount and on a
+  // filter change, so pressing this reloads the figures they are scoped by rather than the
+  // figures themselves.
+  const refreshOpen = () => {
+    onRefresh();
+    if (!onCards) dash.loadOverview();
+  };
 
-          It wraps rather than scrolling or hiding. Every control on here is on a full desk
-          at 2xl; below that the row folds onto a second and third line inside the same
-          bordered card, which is what `flex-wrap` on the container has always done for the
-          pills. A toolbar that overflows sideways puts Pull From Sheet past the edge of the
-          screen with nothing saying it is there, and a toolbar that hides its right-hand
-          half on a laptop is a toolbar most of this desk never sees. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-subtabs">
+  return (
+    <div className="space-y-3" data-testid="bd-dashboard-content">
+      {/* Two bars, not one. The eight tabs and the nine controls were a single wrapping
+          row, and at eight tabs that row folds onto three lines with a pill, a search
+          field and a calendar sharing each of them -- nothing on it reads as belonging to
+          anything else on it.
+
+          Split, each bar says one thing. The first is where you are: eight tabs and
+          nothing else, so the row can be read straight across. The second is what you can
+          do here: narrow, order, mark, refresh, move, pull. The two carry the same border
+          and the same height, so they read as one control block in two halves rather than
+          as two unrelated strips. */}
+
+      {/* Tabs. One wrapping row of pills, the open one in sky — the shape Settings' own
+          two views already sit on. Sub-tabs and not eight more entries on the nav above,
+          because every one of them is a view of this Dashboard; the tabs up there are
+          other desks' boards. */}
+      <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-subtabs">
         <span className="pl-2 pr-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">View</span>
-        {groups.map((g) => {
+        {DASH_SUB_TABS.map((g) => {
           const Icon = g.icon;
-          const active = g.key === activeGroup.key;
+          const active = g.key === openGroup;
           return (
             <button
               key={g.key}
@@ -1067,32 +1173,49 @@ function DashboardTab({
             </button>
           );
         })}
+      </div>
 
-        {/* Which two pills are a view of the board, and which controls are a question
-            about it. Only where the row has not wrapped -- a rule at the start of a
-            folded second line separates nothing. */}
-        <span className="hidden h-6 w-px shrink-0 bg-slate-200 2xl:block" aria-hidden="true" />
+      {/* Tools. Read left to right: what to narrow the open list to, then which dates,
+          then in what order, then what to do about it.
+
+          It wraps rather than scrolling or hiding. Every control on here fits one line on
+          a full desk at 2xl; below that the row folds onto a second and third line inside
+          the same bordered card. A toolbar that overflows sideways puts Pull From Sheet
+          past the edge of the screen with nothing saying it is there, and a toolbar that
+          hides its right-hand half on a laptop is a toolbar most of this desk never sees.
+
+          Four of the controls are drawn only on the two card rows -- the search field, the
+          order dropdown and the two marks. All four narrow or order the list a card opens,
+          and on the six imported tabs there is no such list: they would sit there doing
+          nothing visible and read as broken, which is the same reason the search field
+          opens Total Leads rather than doing nothing when nothing is open. The dates and
+          the four actions stay, because every one of them means the same thing on all
+          eight. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-tools">
+        <span className="pl-2 pr-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Tools</span>
 
         {/* The open list's own field. `flex-basis: 0` (from flex-1) is what keeps it off a
             line of its own: the row is measured as if this were zero wide and it then
             grows into whatever the other controls left, capped so a search box is not
             stretched across a 1600px board it cannot use. Full width on a phone, where it
             is the only thing on its line anyway. */}
-        <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[220px] sm:flex-1">
-          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-          <Input
-            className="h-10 pl-9"
-            placeholder="Search this list..."
-            value={search}
-            onChange={(e) => searchList(e.target.value)}
-            data-testid="bd-search"
-          />
-        </div>
+        {onCards && (
+          <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[220px] sm:flex-1">
+            <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+            <Input
+              className="h-10 pl-9"
+              placeholder="Search this list..."
+              value={search}
+              onChange={(e) => searchList(e.target.value)}
+              data-testid="bd-search"
+            />
+          </div>
+        )}
 
         {/* The five one-tap ranges, `inline` so they hold one line and tighten to about
-            330px, and without their own Custom trigger -- the calendar three controls to
-            the right opens that same popover, and two doors onto one control side by side
-            is the duplication, not the control. */}
+            330px, and without their own Custom trigger -- the calendar to the right opens
+            that same popover, and two doors onto one control side by side is the
+            duplication, not the control. */}
         {/* `w-full` below sm, and only below sm. `inline` sizes the five buttons with
             flex-1 at phone widths -- a proportion, which needs something to be a
             proportion OF. Branch Admin's copy never meets that case because it hides the
@@ -1114,53 +1237,57 @@ function DashboardTab({
             and a 375px phone is 15px short of that, so the alternative to a second line
             here is Pull From Sheet hanging off the edge of the screen. */}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-          {/* Words rather than an arrow, for the reason Branch Admin's copy gives: two
-              arrow states say which way the glyph points and never which way the list is
-              about to go. The closed control says the order the list is already in. */}
-          <Select value={sortOrder} onValueChange={setSortOrder}>
-            <SelectTrigger
-              title="Order the list by date"
-              aria-label="Sort order"
-              className="h-10 w-[112px] shrink-0 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-none transition-colors hover:bg-slate-50 focus:ring-2 focus:ring-sky-200 sm:w-[124px]"
-              data-testid="bd-sort-order"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="border-slate-200" data-testid="bd-sort-order-menu">
-              <SelectItem value="newest" className="text-xs text-slate-700">New to First</SelectItem>
-              <SelectItem value="oldest" className="text-xs text-slate-700">Old to First</SelectItem>
-            </SelectContent>
-          </Select>
+          {onCards && (
+            <>
+              {/* Words rather than an arrow, for the reason Branch Admin's copy gives: two
+                  arrow states say which way the glyph points and never which way the list
+                  is about to go. The closed control says the order the list is already in. */}
+              <Select value={sortOrder} onValueChange={setSortOrder}>
+                <SelectTrigger
+                  title="Order the list by date"
+                  aria-label="Sort order"
+                  className="h-10 w-[112px] shrink-0 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-none transition-colors hover:bg-slate-50 focus:ring-2 focus:ring-sky-200 sm:w-[124px]"
+                  data-testid="bd-sort-order"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="border-slate-200" data-testid="bd-sort-order-menu">
+                  <SelectItem value="newest" className="text-xs text-slate-700">New to First</SelectItem>
+                  <SelectItem value="oldest" className="text-xs text-slate-700">Old to First</SelectItem>
+                </SelectContent>
+              </Select>
 
-          {/* The two marks, in Branch Admin's colours so a VIP is amber on both boards.
-              Lit when active, and pressing the lit one clears it, so one control both
-              narrows and returns. */}
-          <button
-            type="button"
-            onClick={() => toggleMark("vip")}
-            title={markFilter === "vip" ? "Showing VIP clients only — click to show all" : "Show VIP clients only"}
-            aria-label="Show VIP clients only"
-            aria-pressed={markFilter === "vip"}
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
-              markFilter === "vip" ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white hover:bg-amber-50"
-            }`}
-            data-testid="bd-filter-vip"
-          >
-            <Star className={`h-4 w-4 ${markFilter === "vip" ? "fill-amber-400 text-amber-500" : "text-slate-400"}`} />
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleMark("attention")}
-            title={markFilter === "attention" ? "Showing flagged leads only — click to show all" : "Show leads needing attention only"}
-            aria-label="Show leads needing attention only"
-            aria-pressed={markFilter === "attention"}
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
-              markFilter === "attention" ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white hover:bg-rose-50"
-            }`}
-            data-testid="bd-filter-attention"
-          >
-            <AlertCircle className={`h-4 w-4 ${markFilter === "attention" ? "fill-rose-500 text-white" : "text-slate-400"}`} />
-          </button>
+              {/* The two marks, in Branch Admin's colours so a VIP is amber on both boards.
+                  Lit when active, and pressing the lit one clears it, so one control both
+                  narrows and returns. */}
+              <button
+                type="button"
+                onClick={() => toggleMark("vip")}
+                title={markFilter === "vip" ? "Showing VIP clients only — click to show all" : "Show VIP clients only"}
+                aria-label="Show VIP clients only"
+                aria-pressed={markFilter === "vip"}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                  markFilter === "vip" ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white hover:bg-amber-50"
+                }`}
+                data-testid="bd-filter-vip"
+              >
+                <Star className={`h-4 w-4 ${markFilter === "vip" ? "fill-amber-400 text-amber-500" : "text-slate-400"}`} />
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleMark("attention")}
+                title={markFilter === "attention" ? "Showing flagged leads only — click to show all" : "Show leads needing attention only"}
+                aria-label="Show leads needing attention only"
+                aria-pressed={markFilter === "attention"}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                  markFilter === "attention" ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white hover:bg-rose-50"
+                }`}
+                data-testid="bd-filter-attention"
+              >
+                <AlertCircle className={`h-4 w-4 ${markFilter === "attention" ? "fill-rose-500 text-white" : "text-slate-400"}`} />
+              </button>
+            </>
+          )}
 
           {/* Everything the five ranges are not: Yesterday, Last Month, an exact day, a
               typed range. Narrowed together with them rather than overruling them, so both
@@ -1174,14 +1301,14 @@ function DashboardTab({
           />
 
           <Button
-            onClick={onRefresh}
-            disabled={loading}
+            onClick={refreshOpen}
+            disabled={loading || dash.loading}
             title="Refresh"
             aria-label="Refresh"
             className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
             data-testid="bd-refresh-btn"
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-4 w-4 ${loading || dash.loading ? "animate-spin" : ""}`} />
           </Button>
 
           <Button
@@ -1207,39 +1334,60 @@ function DashboardTab({
         </div>
       </div>
 
-      <div className="space-y-2" data-testid={`bd-group-${activeGroup.key}`}>
-        {/* The label is the tab now; what is left to say is what the row is about. */}
-        <p className="text-[11px] text-slate-400" data-testid={`bd-group-hint-${activeGroup.key}`}>{activeGroup.hint}</p>
-        {/* The same grid HR Admin's Dashboard lays its row out on -- two up on a phone,
-            the group's own width across on a desk. */}
-        <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${activeGroup.cols}`} data-testid={`bd-metrics-${activeGroup.key}`}>
-          {activeGroup.cards.map((m) => (
-            <KpiCard
-              key={m.key}
-              label={m.label}
-              value={m.value}
-              icon={m.icon}
-              trend={m.trend}
-              sparkline={m.sparkline}
-              open={openMetric === m.metric}
-              onClick={m.metric ? () => onOpenCard(m.metric) : undefined}
-              testid={`bd-metric-${m.key}`}
-            />
-          ))}
-        </div>
-      </div>
+      {/* The two card rows. Their empty and loading states are here rather than at the top
+          of the component, where they used to be: an empty summary is a reason to say so
+          under the two bars, not a reason to take the other six tabs off the screen with
+          them. */}
+      {onCards ? (
+        !summary && loading ? (
+          <p className="py-8 text-center text-sm text-slate-400" data-testid="bd-dash-loading">Loading dashboard...</p>
+        ) : !activeCardGroup ? (
+          <p className="py-8 text-center text-sm text-slate-400" data-testid="bd-dash-empty">No data yet</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-2" data-testid={`bd-group-${activeCardGroup.key}`}>
+              {/* The label is the tab now; what is left to say is what the row is about. */}
+              <p className="text-[11px] text-slate-400" data-testid={`bd-group-hint-${activeCardGroup.key}`}>{activeCardGroup.hint}</p>
+              {/* The same grid HR Admin's Dashboard lays its row out on -- two up on a
+                  phone, the group's own width across on a desk. */}
+              <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${activeCardGroup.cols}`} data-testid={`bd-metrics-${activeCardGroup.key}`}>
+                {activeCardGroup.cards.map((m) => (
+                  <KpiCard
+                    key={m.key}
+                    label={m.label}
+                    value={m.value}
+                    icon={m.icon}
+                    trend={m.trend}
+                    sparkline={m.sparkline}
+                    open={openMetric === m.metric}
+                    onClick={m.metric ? () => onOpenCard(m.metric) : undefined}
+                    testid={`bd-metric-${m.key}`}
+                  />
+                ))}
+              </div>
+            </div>
 
-      {openMetric && (
-        <DrillList
-          title={openCardDef?.label || "Rows"}
-          drill={drill}
-          loading={drillLoading}
-          branches={branches}
-          onClose={() => onOpenCard(openMetric)}
-          search={search}
-          sortOrder={sortOrder}
-          markFilter={markFilter}
-        />
+            {openMetric && (
+              <DrillList
+                title={openCardDef?.label || "Rows"}
+                drill={drill}
+                loading={drillLoading}
+                branches={branches}
+                onClose={() => onOpenCard(openMetric)}
+                search={search}
+                sortOrder={sortOrder}
+                markFilter={markFilter}
+              />
+            )}
+          </div>
+        )
+      ) : (
+        /* Marketing, Sales, Revenue, Team, Clients or Analytics — DashboardBoard's own
+           tab, drawn from this desk's date range and its own payloads. No date row and no
+           strip come with it: both are the two bars above. */
+        <div data-testid={`bd-dash-panel-${openGroup}`}>
+          <DashboardTabPanel tab={openGroup} dateFilter={panelRange} dash={dash} />
+        </div>
       )}
     </div>
   );

@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/v3")
 
 
 @router.get("/branch/package-recommendations")
-async def get_recommendations(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def get_recommendations(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     query = {}
     if user.branch_id:
         query["branch_id"] = user.branch_id
@@ -35,7 +35,7 @@ async def get_recommendations(user: V3UserOut = Depends(v3_require_roles("branch
 @router.post("/branch/assign-sessions")
 async def assign_sessions(
     payload: V3AssignSessionsInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     lead = await v3_col("leads").find_one({"id": payload.lead_id}, {"_id": 0})
     if not lead:
@@ -170,7 +170,7 @@ class ScheduleSessionInput(BaseModel):
 
 
 @router.get("/branch/sessions/unscheduled")
-async def unscheduled_sessions(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def unscheduled_sessions(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Treatment and rehab days waiting on a date, oldest patient first."""
     query: dict = {"needs_assignment": True, "status": {"$ne": "completed"}}
     if user.branch_id:
@@ -252,7 +252,7 @@ async def unscheduled_sessions(user: V3UserOut = Depends(v3_require_roles("branc
 async def schedule_session(
     session_id: str,
     payload: ScheduleSessionInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Put a dateless treatment or rehab day onto one of its physio's published slots."""
     session = None
@@ -429,7 +429,7 @@ async def reschedule_calendar_booking(
     course: str,
     booking_id: str,
     payload: RescheduleBookingInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Move one booking onto another hour the same expert has published."""
     spec, booking = await _load_booking(course, booking_id)
@@ -539,7 +539,7 @@ async def decline_calendar_booking(
     course: str,
     booking_id: str,
     payload: DeclineBookingInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Take one booking off the hour it is holding.
 

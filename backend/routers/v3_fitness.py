@@ -390,7 +390,7 @@ async def _referred_rows(branch_id: Optional[str]) -> list:
 @router.get("/branch/fitness")
 async def list_fitness(
     branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """The gym's roll for a branch, with the counts the tab's cards read.
 
@@ -473,7 +473,7 @@ async def _row_or_404(registration_id: str, user: V3UserOut) -> dict:
 async def add_fitness(
     payload: FitnessInput,
     branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     target = await _write_branch(user, branch_id)
     if not target:
@@ -493,7 +493,7 @@ async def add_fitness(
 @router.post("/branch/fitness/accept/{lead_id}")
 async def accept_fitness_referral(
     lead_id: str,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Take a CONSULTANT's Fitness referral onto the branch's own books.
 
@@ -556,7 +556,7 @@ async def accept_fitness_referral(
 async def update_fitness(
     registration_id: str,
     payload: FitnessInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     row = await _row_or_404(registration_id, user)
     updates = _clean(payload, check_paid=False)
@@ -591,7 +591,7 @@ async def update_fitness(
 async def set_fitness_status(
     registration_id: str,
     payload: FitnessStatusInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Move a member between training, on leave, and gone.
 
@@ -662,7 +662,7 @@ async def _dismiss_referral(lead_id: str, user: V3UserOut) -> dict:
 @router.delete("/branch/fitness/{registration_id}")
 async def delete_fitness(
     registration_id: str,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     # A referral carries the lead's id behind a prefix rather than a membership's, and
     # there is no row of this collection to remove. Turning it away is recorded instead --
@@ -766,7 +766,7 @@ class FitnessRenewInput(BaseModel):
 async def renew_fitness(
     registration_id: str,
     payload: FitnessRenewInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Sell the same member another term.
 
@@ -851,7 +851,7 @@ async def renew_fitness(
 async def collect_fitness_payment(
     registration_id: str,
     payload: CollectPaymentInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Take a payment against a membership, in one mode or several.
 

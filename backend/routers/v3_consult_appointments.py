@@ -98,7 +98,7 @@ async def _validate_slot(branch: dict, date_str: str, time_str: str, doctor_id: 
 
 
 @router.get("/branch-admin/{branch_id}/consult-appointments")
-async def list_consult_appointments(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def list_consult_appointments(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     rows = await v3_col("appointments").find(
         {"branch_id": branch_id, "appt_kind": "consultation", "status": {"$ne": "cancelled"}},
         {"_id": 0},
@@ -116,7 +116,7 @@ def _slots_between(open_t: str, close_t: str) -> list:
 
 
 @router.get("/branch-admin/{branch_id}/consult-availability")
-async def consult_availability(branch_id: str, date: str, doctor_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def consult_availability(branch_id: str, date: str, doctor_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Available 30-minute start times for one Head Physio on a date, derived from the
     branch working hours minus times that Head Physio is already booked."""
     branch = await _get_branch(branch_id)
@@ -138,7 +138,7 @@ async def consult_availability(branch_id: str, date: str, doctor_id: str, _: V3U
 
 
 @router.get("/branch-admin/{branch_id}/consult-day")
-async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Drives the Consultation Calendar booking flow for a selected date:
     1) validate the date against the branch working calendar (weekly hours + holidays);
     2) if open, load every Head Physio assigned to the branch and, per physio, return
@@ -186,7 +186,7 @@ async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_requi
 
 
 @router.get("/branch-admin/{branch_id}/consultant-slots")
-async def consultant_slots(branch_id: str, doctor_id: str, date: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def consultant_slots(branch_id: str, doctor_id: str, date: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio"))):
     """One CONSULTANT's day, hour by hour, with who is sitting in each hour.
 
     Drives the consultant popup on My Consultation: every slot the consultant published for
@@ -285,7 +285,7 @@ async def consultant_slots(branch_id: str, doctor_id: str, date: str, _: V3UserO
 
 
 @router.post("/branch-admin/{branch_id}/consult-appointments")
-async def create_consult_appointment(branch_id: str, payload: ConsultApptCreate, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def create_consult_appointment(branch_id: str, payload: ConsultApptCreate, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     if not payload.patient_name.strip():
         raise HTTPException(status_code=400, detail="Patient name is required")
     branch = await _get_branch(branch_id)
@@ -318,7 +318,7 @@ async def create_consult_appointment(branch_id: str, payload: ConsultApptCreate,
 
 
 @router.patch("/branch-admin/consult-appointments/{appt_id}")
-async def update_consult_appointment(appt_id: str, payload: ConsultApptUpdate, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def update_consult_appointment(appt_id: str, payload: ConsultApptUpdate, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     appt = await v3_col("appointments").find_one({"id": appt_id, "appt_kind": "consultation"}, {"_id": 0})
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
@@ -344,7 +344,7 @@ async def update_consult_appointment(appt_id: str, payload: ConsultApptUpdate, _
 
 
 @router.post("/branch-admin/consult-appointments/{appt_id}/cancel")
-async def cancel_consult_appointment(appt_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def cancel_consult_appointment(appt_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     appt = await v3_col("appointments").find_one({"id": appt_id, "appt_kind": "consultation"}, {"_id": 0})
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")

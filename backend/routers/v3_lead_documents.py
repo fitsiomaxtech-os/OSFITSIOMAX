@@ -163,8 +163,8 @@ async def leads_with_prescription(lead_ids: list) -> set:
 # Everyone who treats the patient can read their documents; the front desk and the
 # clinicians who order them can add. A Physio can read a report without being able to
 # delete one.
-READ_ROLES = ("branch_admin", "super_admin", "head_physio", "physio", "nutrition_coach")
-WRITE_ROLES = ("branch_admin", "super_admin", "head_physio")
+READ_ROLES = ("branch_admin", "super_admin", "business_dev", "head_physio", "physio", "nutrition_coach")
+WRITE_ROLES = ("branch_admin", "super_admin", "business_dev", "head_physio")
 
 # The case sheet's four are the exception, and a narrow one. A physio still may not file or
 # remove a patient's reports — that is what WRITE_ROLES is about, and a report is ordered by
@@ -374,7 +374,7 @@ async def verify_lead_document(
     lead_id: str,
     doc_id: str,
     payload: VerifyInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Confirm that an uploaded file is what it claims to be.
 
@@ -434,7 +434,7 @@ async def set_google_review(
 async def verify_google_review(
     lead_id: str,
     payload: VerifyInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Confirm the review is real — the same second pair of eyes the uploads get."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -528,7 +528,7 @@ async def progression_status(
 @router.post("/leads/{lead_id}/close-case-sheet")
 async def close_case_sheet(
     lead_id: str,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Close the case sheet, once every mandatory upload is in and verified.
 

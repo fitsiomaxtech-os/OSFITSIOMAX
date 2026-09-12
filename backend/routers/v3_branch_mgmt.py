@@ -506,7 +506,7 @@ def _posted_to(user: dict) -> list:
 
 
 @router.get("/{branch_id}/team-candidates")
-async def team_candidates(branch_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def team_candidates(branch_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Everyone holding this desk's role who is not already at this branch.
 
     Org-wide rather than branch-scoped on purpose: the point of the picker is to bring in
@@ -543,7 +543,7 @@ async def team_candidates(branch_id: str, desk: str, _: V3UserOut = Depends(v3_r
 
 
 @router.post("/{branch_id}/team/{user_id}")
-async def team_add_member(branch_id: str, user_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def team_add_member(branch_id: str, user_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Post an existing account to this branch."""
     branch, holds = await _team_desk_or_400(branch_id, desk)
     user = await v3_col("users").find_one({"id": user_id, "is_active": True}, {"_id": 0, "password": 0})
@@ -592,7 +592,7 @@ async def team_add_member(branch_id: str, user_id: str, desk: str, _: V3UserOut 
 
 
 @router.delete("/{branch_id}/team/{user_id}")
-async def team_remove_member(branch_id: str, user_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def team_remove_member(branch_id: str, user_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Take an account off this branch. The account itself is untouched.
 
     Not a deletion and not a deactivation: they keep their login and their role and simply

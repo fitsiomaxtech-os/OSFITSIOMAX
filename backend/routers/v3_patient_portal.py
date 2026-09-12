@@ -85,7 +85,7 @@ def has_treatment(lead: dict) -> bool:
 # ------------------------------------------------------------- Branch Admin: manage access
 
 @router.get("/leads/{lead_id}/portal-account")
-async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     lead = await _lead_or_404(lead_id)
     if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -99,7 +99,7 @@ async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_
 async def create_or_reset_portal_account(
     lead_id: str,
     payload: V3PortalAccountInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Create-or-reset in one call: the first time, this creates the account; every call
     after that resets the password (freshly generated unless the caller supplies one),
@@ -749,7 +749,7 @@ async def patient_portal_feedback_reply(
 # --------------------------------------------------------------- in as them
 
 @router.get("/leads/{lead_id}/portal-preview")
-async def staff_view_patient_portal(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def staff_view_patient_portal(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Operations' Client tab reaching a patient's own board the same way it already
     reaches a Physio's or Pre Sales rep's — no separate portal login needed, and (unlike
     the patient's own session) no password or account is involved at all."""

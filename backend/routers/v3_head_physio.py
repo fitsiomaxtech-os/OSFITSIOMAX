@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/v3")
 
 
 @router.get("/doctors/{doctor_id}/calendar")
-async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio"))):
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
@@ -133,7 +133,7 @@ class SlotCapacityInput(BaseModel):
 async def set_slot_capacity(
     doctor_id: str,
     payload: SlotCapacityInput,
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """How many patients this physio takes at once. Two or three is the normal floor."""
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0, "id": 1, "profile_type": 1})
@@ -159,7 +159,7 @@ async def set_slot_capacity(
 
 
 @router.post("/doctors/{doctor_id}/calendar-slots")
-async def add_calendar_slots(doctor_id: str, payload: V3CalendarSlotsInput, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def add_calendar_slots(doctor_id: str, payload: V3CalendarSlotsInput, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
@@ -196,7 +196,7 @@ async def add_calendar_slots(doctor_id: str, payload: V3CalendarSlotsInput, _: V
 
 
 @router.post("/doctors/{doctor_id}/remove-slots")
-async def remove_calendar_slots(doctor_id: str, payload: V3RemoveSlotsInput, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+async def remove_calendar_slots(doctor_id: str, payload: V3RemoveSlotsInput, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")

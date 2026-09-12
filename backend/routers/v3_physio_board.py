@@ -159,7 +159,7 @@ async def physio_calendar(
     month: Optional[int] = None,
     year: Optional[int] = None,
     physio_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev")),
 ):
     doctor = await _resolve_doctor(user, physio_id)
 
@@ -191,7 +191,7 @@ async def physio_calendar(
 
 
 @router.get("/physio/patients")
-async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev"))):
     """Every lead ever assigned to this physio — not just ones with generated treatment
     sessions — so newly assigned/consulted patients show up here right away, with session
     stats layered on once a package is assigned and sessions exist."""
@@ -286,7 +286,7 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
 
 
 @router.get("/physio/consultations")
-async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev"))):
     """Leads/appointments assigned to this consultant by a branch manager (pre-package consultation pipeline)."""
     doctor = await _resolve_doctor(user, physio_id)
     if not doctor:
@@ -338,7 +338,7 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
 
 
 @router.get("/physio/patient/{lead_id}")
-async def physio_patient_detail(lead_id: str, physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+async def physio_patient_detail(lead_id: str, physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev"))):
     """Full record for one of this physio's own assigned patients — backs the Patient
     Detail page's Treatment and Profile tabs (diagnosis, treatment plan, payment fields).
     physio_patients/physio_consultations only ever return a hand-picked subset; this is
@@ -360,7 +360,7 @@ async def physio_patient_detail(lead_id: str, physio_id: Optional[str] = None, u
 
 
 @router.post("/physio/leads/{lead_id}/complete-consultation")
-async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev"))):
     """Physio marks their initial consultation review of an assigned lead as finished."""
     doctor = await _resolve_doctor(user, physio_id)
     if not doctor:
@@ -405,7 +405,7 @@ async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = 
 
 
 @router.get("/physio/sessions/{lead_id}")
-async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "head_physio", "branch_admin"))):
+async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev", "head_physio", "branch_admin"))):
     sessions = await v3_col("sessions").find(
         {"lead_id": lead_id}, {"_id": 0}
     ).sort("slot_time", 1).to_list(500)
@@ -545,7 +545,7 @@ async def _first_incomplete_before(session: dict):
 async def physio_mark_absent(
     session_id: str,
     payload: V3AbsentSessionInput,
-    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev")),
 ):
     """The patient did not turn up, so the day moves rather than being lost.
 
@@ -685,7 +685,7 @@ async def physio_mark_absent(
 async def physio_complete_session(
     session_id: str,
     payload: V3CompleteSessionInput,
-    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev")),
 ):
     # A rehab day is a day of its own course, in its own collection. The popup lists both
     # tracks together, so Complete is pressed on either — and this looked only in `sessions`

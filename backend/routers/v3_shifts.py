@@ -40,10 +40,11 @@ from utils import active_doctor_query, now_iso
 
 router = APIRouter(prefix="/api/v3")
 
-# Branch Admin runs their own branch's hours; Super Admin can reach any branch's. HR Admin
-# creates the experts but does not roster them — the calendars they are published onto
-# belong to the branch.
-MANAGE_ROLES = ("branch_admin", "super_admin")
+# Branch Admin runs their own branch's hours; the two org-wide desks can reach any
+# branch's — Business Development opens the same branch board through Operations > Branch.
+# HR Admin creates the experts but does not roster them — the calendars they are published
+# onto belong to the branch.
+MANAGE_ROLES = ("branch_admin", "super_admin", "business_dev")
 
 MAX_NAME_LEN = 40
 

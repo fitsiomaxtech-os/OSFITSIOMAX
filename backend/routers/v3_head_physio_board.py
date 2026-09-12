@@ -179,7 +179,7 @@ async def hp_resolved_consultant(user: V3UserOut = Depends(v3_require_roles("hea
 
 
 @router.get("/head-physio/my-calendar")
-async def hp_my_calendar(branch_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+async def hp_my_calendar(branch_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev"))):
     """Read-only view of the logged-in consultant's own booked slots (branch admin manages slot availability)."""
     doctor = await _resolve_hp_doctor(user, branch_id)
     if not doctor:
@@ -284,7 +284,7 @@ async def hp_my_patients(branch_id: Optional[str] = None, user: V3UserOut = Depe
 @router.post("/head-physio/recommend-package")
 async def hp_recommend_package(
     payload: V3PackageRecommendInput,
-    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev")),
 ):
     lead = await v3_col("leads").find_one({"id": payload.lead_id}, {"_id": 0})
     if not lead:
@@ -439,7 +439,7 @@ async def hp_move_head_consultation_stage(
 async def hp_consultation_decision(
     lead_id: str,
     payload: V3ConsultationDecisionInput,
-    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev")),
 ):
     """Head Physio's 'Save & Move' — the single action that closes out the
     consultation: requires Diagnosis Report + Treatment Summary to already be
@@ -693,7 +693,7 @@ async def hp_assign_consultation_physio(
 async def hp_assign_physio_with_sessions(
     lead_id: str,
     payload: V3AssignPhysioSessionsInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Branch Admin picks the physio AND books every one of the patient's paid
     session-package sessions against that physio's own calendar (Consultations >
@@ -872,7 +872,7 @@ def _blank_spell(physio_id: str) -> dict:
 @router.get("/leads/{lead_id}/physio-progress")
 async def hp_lead_physio_progress(
     lead_id: str,
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Every physio this patient's treatment has been through, and how far each one got.
 

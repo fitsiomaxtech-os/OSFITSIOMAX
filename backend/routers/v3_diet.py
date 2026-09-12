@@ -35,7 +35,7 @@ import uuid
 from database import v3_col
 from utils import now_iso, normalize_slot_time, slot_capacity_of, active_doctor_query, ACTIVE_DOCTOR
 from security import hash_password
-from deps import v3_require_roles, v3_require_diet, is_diet_role
+from deps import v3_require_roles, v3_require_diet, is_diet_role, works_org_wide
 from routers.v3_lead_documents import (
     ALLOWED_EXTENSIONS,
     DIET_CHART,
@@ -53,9 +53,9 @@ async def _resolve_coach(user: V3UserOut, coach_id: Optional[str] = None) -> Opt
     """The doctors record for the logged-in Nutrition Coach.
 
     Same three-step resolution the physio board uses: a coach created here is linked by
-    user_id, one hired through HR is linked only by employee_id, and Super Admin driving a
-    specific coach's board passes the id outright — a branch can have several coaches, so
-    branch_id alone would not disambiguate.
+    user_id, one hired through HR is linked only by employee_id, and a desk driving a
+    specific coach's board from Operations passes the id outright — a branch can have
+    several coaches, so branch_id alone would not disambiguate.
 
     If none of those find one, it creates it. That is a write in a read path and is
     deliberate: the record is derived — a calendar holder, not business data — and its
@@ -63,7 +63,7 @@ async def _resolve_coach(user: V3UserOut, coach_id: Optional[str] = None) -> Opt
     hired under a diet role before HR knew to create one logs in to a permanently empty
     board otherwise, which is exactly what happened to this install's diet_manage user.
     """
-    if coach_id and user.role == "super_admin":
+    if coach_id and works_org_wide(user.role):
         doctor = await v3_col("doctors").find_one({"id": coach_id, "profile_type": COACH}, {"_id": 0})
         if doctor:
             return doctor
@@ -235,7 +235,7 @@ async def create_nutrition_coach(
 
 
 @router.get("/branch/nutrition-coaches")
-async def list_nutrition_coaches(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", COACH))):
+async def list_nutrition_coaches(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", COACH))):
     query = {"profile_type": COACH}
     if user.branch_id:
         # A Nutritionist set to All Branches is stored branchless — that is how this OS
@@ -422,7 +422,7 @@ class DietAppointmentInput(BaseModel):
 @router.post("/branch/diet-appointment")
 async def book_diet_appointment(
     payload: DietAppointmentInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Book the Diet Consultation — one appointment on the coach's calendar.
 
@@ -869,7 +869,7 @@ async def send_diet_chart(
 @router.get("/diet/chart/{lead_id}/download")
 async def download_diet_chart(
     lead_id: str,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", COACH)),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", COACH)),
 ):
     """The chart's bytes, for staff.
 
@@ -1110,7 +1110,7 @@ async def diet_patients(coach_id: Optional[str] = None, user: V3UserOut = Depend
 @router.get("/diet/sessions/{lead_id}")
 async def diet_sessions_for_lead(
     lead_id: str,
-    _: V3UserOut = Depends(v3_require_roles(COACH, "branch_admin", "super_admin", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles(COACH, "branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     days = await v3_col("diet_sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(500)
     return {"days": days}

@@ -31,9 +31,9 @@ DIAGNOSIS = "diagnosis_report"
 TREATMENT = "treatment_summary"
 KINDS = (DIAGNOSIS, TREATMENT)
 
-# Head Physio writes these; Super Admin can curate them. Branch Admin reads the reports
-# but does not author them, so it has no business editing the wording either.
-ROLES = ("head_physio", "super_admin")
+# Head Physio writes these; the two org-wide desks can curate them. Branch Admin reads the
+# reports but does not author them, so it has no business editing the wording either.
+ROLES = ("head_physio", "super_admin", "business_dev")
 
 MAX_LEN = 4000
 

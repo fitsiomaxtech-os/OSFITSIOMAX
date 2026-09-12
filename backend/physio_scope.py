@@ -6,7 +6,7 @@ physio half lived here and the consultant half lived in its own board.
 from typing import Optional
 
 from database import v3_col
-from deps import collapse_duplicate_experts
+from deps import collapse_duplicate_experts, works_org_wide
 
 
 def _ids(physio_id) -> list:
@@ -75,10 +75,10 @@ async def resolve_physio_doctor(user_id: str, role: str = "", physio_id: Optiona
     slots are the calendar, and its id is what a new assessment is filed under. The whole
     set rides along on `physio_ids`, which is what the reads scope by.
     """
-    if physio_id and role == "super_admin":
-        # Super Admin driving one physio's board names the record outright, so it is taken
-        # as given rather than resolved -- a branch can have several physios and there is
-        # no login here to match on.
+    if physio_id and works_org_wide(role):
+        # A desk driving one physio's board from Operations names the record outright, so
+        # it is taken as given rather than resolved -- a branch can have several physios and
+        # there is no login here to match on.
         doctor = await v3_col("doctors").find_one(
             {"id": physio_id, "profile_type": "physio"}, {"_id": 0},
         )
@@ -224,7 +224,7 @@ async def resolve_consultant_doctor(user_id: str, role: str = "") -> Optional[di
                 str(d.get("created_at") or ""),
             ))
         return {**mine[0], "consultant_ids": list(dict.fromkeys([d["id"] for d in mine if d.get("id")]))}
-    if role == "super_admin":
+    if works_org_wide(role):
         # Driving somebody else's board. Any consultant record answers, which is right for
         # that and wrong for a page called My Consultation -- see hp_resolved_consultant,
         # which is what says so on screen.

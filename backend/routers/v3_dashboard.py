@@ -1089,7 +1089,10 @@ async def v3_dashboard_leads_analytics(
 @router.get("/dashboard/leads-trend")
 async def v3_dashboard_leads_trend(
     months: int = Query(6, ge=2, le=24),
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    # business_dev beside super_admin: the Business Development desk now mounts Super
+    # Admin's own Dashboard > Analytics tab, and the branch-by-branch growth chart at the
+    # bottom of it reads this. Group-wide and read-only, like the rest of that tab.
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
 ):
     """Leads, Appointments, Treatments and Revenue per Physiotherapy branch, by calendar
     month, most recent last. The route keeps its leads-trend name because callers and
@@ -1621,7 +1624,10 @@ CLIENT_FLAGS = {
 @router.get("/dashboard/clients")
 async def dashboard_clients(
     branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head")),
+    # business_dev beside the other two, for the same reason leads-trend names it: this
+    # desk mounts Super Admin's Dashboard > Clients tab, which is this call and nothing
+    # else. Read-only -- the marks themselves are put on from a lead, not from here.
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head", "business_dev")),
 ):
     """The starred and the flagged, with what it takes to act on either.
 

@@ -70,6 +70,26 @@ async def v3_current_user(authorization: str = Header(...)) -> V3UserOut:
     return V3UserOut(**user)
 
 
+# The two desks that read and work the whole company rather than one branch or one book:
+# Super Admin, and the Business Development Executive, whose board mounts Super Admin's own
+# boards as its tabs -- Operations among them, which is every other desk one designation at
+# a time.
+#
+# This answers reach, not privilege, and the two are deliberately different questions. Where
+# a rule is about who may act on a Super Admin's own account, or about which branch a
+# figure is narrowed to, it stays on the literal. Where it is about "is this caller looking
+# at one branch or at all of them" -- or "is this caller driving somebody else's board",
+# which is what every `physio_id`/`coach_id`/`branch_id` supervisor parameter asks -- it
+# belongs here, because the BD desk reaches those boards through the same tab Super Admin
+# does and a literal left it looking at an empty one with nothing on screen to say why.
+ORG_WIDE_ROLES = frozenset({"super_admin", "business_dev"})
+
+
+def works_org_wide(role: str) -> bool:
+    """Whether this role works every branch and every desk rather than one of each."""
+    return (role or "").strip().lower() in ORG_WIDE_ROLES
+
+
 # Roles that are a Branch Admin under another name. A branch is run by one of these whether
 # it works in the room or online — the job is the same job, over one branch's leads,
 # patients, calendars, store and accounts. So rather than a set of permissions each, this

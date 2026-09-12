@@ -86,7 +86,7 @@ class AssignRehabInput(BaseModel):
 @router.post("/branch/assign-rehab")
 async def assign_rehab(
     payload: AssignRehabInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Put a paid-up rehab patient with a physio and date every day of their course.
 
@@ -231,7 +231,7 @@ async def assign_rehab(
 @router.get("/branch/rehab-sessions/{lead_id}")
 async def rehab_sessions_for_lead(
     lead_id: str,
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "physio", "head_physio")),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "physio", "head_physio")),
 ):
     """One patient's rehab course, in date order — what the branch booked and where it is."""
     rows = await v3_col("rehab_sessions").find(

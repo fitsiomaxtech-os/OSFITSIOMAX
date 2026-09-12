@@ -37,7 +37,7 @@ async def public_testimonials():
 
 
 @router.get("/testimonials/manage")
-async def manage_testimonials(user: V3UserOut = Depends(v3_require_roles("pre_sales", "branch_admin", "super_admin"))):
+async def manage_testimonials(user: V3UserOut = Depends(v3_require_roles("pre_sales", "branch_admin", "super_admin", "business_dev"))):
     rows = await v3_col("testimonial_videos").find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return rows
 
@@ -45,7 +45,7 @@ async def manage_testimonials(user: V3UserOut = Depends(v3_require_roles("pre_sa
 @router.post("/testimonials")
 async def create_testimonial(
     payload: V3TestimonialInput,
-    user: V3UserOut = Depends(v3_require_roles("pre_sales", "branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("pre_sales", "branch_admin", "super_admin", "business_dev")),
 ):
     video_id = _extract_youtube_id(payload.youtube_url)
     doc = {
@@ -65,7 +65,7 @@ async def create_testimonial(
 @router.delete("/testimonials/{testimonial_id}")
 async def delete_testimonial(
     testimonial_id: str,
-    user: V3UserOut = Depends(v3_require_roles("pre_sales", "branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("pre_sales", "branch_admin", "super_admin", "business_dev")),
 ):
     result = await v3_col("testimonial_videos").delete_one({"id": testimonial_id})
     if result.deleted_count == 0:

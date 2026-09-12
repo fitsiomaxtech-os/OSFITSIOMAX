@@ -1223,7 +1223,7 @@ class ZumbaMasterSlotInput(BaseModel):
 async def set_zumba_master_slot(
     master_id: str,
     payload: ZumbaMasterSlotInput,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Say which class this master takes, and hand them that class.
 
