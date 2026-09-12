@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowRight,
   BarChart3,
   Building2,
   CalendarCheck,
@@ -10,7 +9,9 @@ import {
   Edit3,
   FileSpreadsheet,
   Globe,
+  Headphones,
   IndianRupee,
+  Megaphone,
   Percent,
   Plus,
   RefreshCw,
@@ -23,10 +24,6 @@ import {
   Users,
   X,
 } from "lucide-react";
-import {
-  PieChart, Pie, Cell, Tooltip as RTooltip, ResponsiveContainer,
-  AreaChart, Area, BarChart as RBarChart, Bar, XAxis, YAxis, CartesianGrid,
-} from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -48,13 +45,25 @@ import {
 } from "@/lib/api";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
+// The Marketing and Sales master views, mounted as two tabs below. Imported statically,
+// the way OperationsBoard already mounts this same board: this file is itself behind a
+// lazy() in CRMPage, so webpack lifts what the two chunks share rather than copying
+// PreSalesCRM into each.
+import { PreSalesCRM } from "@/components/PreSalesCRM";
 
+// Marketing View and Sales View are the same two boards Super Admin reaches as
+// "Marketing Master View" and "Sales Master View" — the same PreSalesCRM mount, under the
+// shorter names, because here they are two tabs on a strip and not two entries on a
+// top-level nav. They sit last: everything to their left is this desk's own work, and
+// these two are a read of what the other two desks did with it.
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "branches", label: "Branches", icon: Building2 },
   { key: "lead_master", label: "Lead Master", icon: Database },
   { key: "sheets", label: "Google Sheet Connection", icon: FileSpreadsheet },
   { key: "lead_source", label: "Lead Source", icon: Globe },
+  { key: "marketing_view", label: "Marketing View", icon: Megaphone },
+  { key: "sales_view", label: "Sales View", icon: Headphones },
 ];
 
 const PIPELINE_STAGES = [
@@ -74,8 +83,6 @@ const STAGE_HEX = {
   "Follow Up": "#f59e0b",
   "Appointment": "#059669",
 };
-
-const SOURCE_HEX = ["#2563eb", "#059669", "#f59e0b", "#7c3aed", "#e11d48", "#0891b2", "#db2777"];
 
 const defaultBranchForm = {
   branch_name: "",
@@ -112,18 +119,6 @@ const defaultSyncPayload = `{
   ]
 }`;
 
-function timeAgo(iso) {
-  if (!iso) return "";
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 function formatMoney(v) {
   const n = Number(v || 0);
   return `Rs.${n.toLocaleString("en-IN")}`;
@@ -148,7 +143,13 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
-export const BusinessLeadsDashboard = () => {
+/**
+ * @param currentUser  the signed-in Business Development Executive. Only the Marketing
+ *                     View and Sales View tabs read it — PreSalesCRM schedules and stamps
+ *                     activity against whoever is looking, and without this those two
+ *                     tabs would be working leads on behalf of nobody.
+ */
+export const BusinessLeadsDashboard = ({ currentUser = null }) => {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [loading, setLoading] = useState(false);
 
@@ -442,7 +443,19 @@ export const BusinessLeadsDashboard = () => {
           <Button size="sm" onClick={() => setShowCreateLead(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="bd-quick-add-lead-btn">
             <UserPlus className="mr-1 h-4 w-4" /> Add Lead
           </Button>
-          <Button size="sm" variant="ghost" onClick={refreshAll} data-testid="bd-refresh-all-btn">
+          {/* The same Refresh as Branch Admin > Branch Leads: grey, icon-only, square,
+              with the word on title/aria-label. It was a ghost button that read as
+              nothing at all beside Add Lead; refreshing is the least interesting control
+              on the row and is coloured accordingly, but it still has to look like a
+              button you can press. */}
+          <Button
+            onClick={refreshAll}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+            data-testid="bd-refresh-all-btn"
+          >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </div>
@@ -465,10 +478,6 @@ export const BusinessLeadsDashboard = () => {
           setLeadDateFrom={setLeadDateFrom}
           leadDateTo={leadDateTo}
           setLeadDateTo={setLeadDateTo}
-          onAddLead={() => setShowCreateLead(true)}
-          onSyncSheet={() => setActiveTab("sheets")}
-          onAssignLeads={() => setActiveTab("lead_master")}
-          onExportCsv={exportLeadsCsv}
           onRefresh={refreshAll}
         />
       )}
@@ -540,6 +549,23 @@ export const BusinessLeadsDashboard = () => {
         <LeadSourceTab leadSources={leadSources} loading={loading} />
       )}
 
+      {/* Marketing View / Sales View — the same two PreSalesCRM mounts Super Admin gets.
+          The role is hardcoded on each, not read from the signed-in user: the prop picks
+          which board PreSalesCRM draws, and a Business Development Executive passing
+          their own role would land on a rep's own filtered book rather than either
+          master view. What they may actually read is settled by the API off their token,
+          the same as it is for Super Admin's copy of these tabs.
+
+          `embedded` because this board is the host: PreSalesCRM's own phone padding is
+          for a fixed bottom nav, and there is none under this strip. */}
+      {activeTab === "marketing_view" && (
+        <PreSalesCRM role="marketing_head" currentUser={currentUser} embedded />
+      )}
+
+      {activeTab === "sales_view" && (
+        <PreSalesCRM role="sales_head" currentUser={currentUser} embedded />
+      )}
+
       {showCreateLead && (
         <CreateLeadModal
           isSuperAdmin
@@ -562,7 +588,15 @@ export const BusinessLeadsDashboard = () => {
 };
 
 /* ─── Sparkline ─── */
-function Sparkline({ data, color = "#ffffff" }) {
+/**
+ * The trend line inside a summary card.
+ *
+ * Drawn in the card's own ink rather than in white: these cards are white now (see
+ * KpiCard), and a white line on a white card is a line nobody can see. The colour a
+ * caller passes is used for the stroke and, at low opacity, for the fill under it —
+ * one hue, so the line reads as one mark and not as a chart with a legend.
+ */
+function Sparkline({ data, color = "#0284c7" }) {
   if (!data || data.length < 2) return null;
   const max = Math.max(...data, 1);
   const min = Math.min(...data, 0);
@@ -574,67 +608,54 @@ function Sparkline({ data, color = "#ffffff" }) {
   const areaPoints = `0,${h} ${points} ${w},${h}`;
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="h-6 w-full" preserveAspectRatio="none" aria-hidden="true">
-      <polyline points={areaPoints} fill={color} fillOpacity="0.18" stroke="none" />
+      <polyline points={areaPoints} fill={color} fillOpacity="0.14" stroke="none" />
       <polyline points={points} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
 /* ─── KPI Card ─── */
-function KpiCard({ label, value, icon: Icon, gradient, trend, sparkline, testid }) {
+/**
+ * A figure on this board, in the shape Super Admin > HR Admin > Dashboard uses: white,
+ * a two-pixel slate rule, the label small and capitalised above a large dark number.
+ *
+ * It was nine cards in nine different gradients — sky, cyan, amber, violet, emerald,
+ * teal, indigo, fuchsia, orange — which made the row read as nine unrelated things and
+ * put the colour where the number should be. The OS already had one answer for this row
+ * and it is HR's, so this is that one rather than a tenth invention.
+ *
+ * `trend` and `sparkline` are what HR's tiles do not carry, and they are re-inked to
+ * suit: the pill is tinted by direction (a rise is green, a fall is red) where before it
+ * leaned on the gradient behind it for contrast, and the line is drawn in sky.
+ */
+function KpiCard({ label, value, icon: Icon, trend, sparkline, testid }) {
+  // Green up, red down, slate flat — the direction is the whole point of the pill, and on
+  // a white card it has to come from the pill's own colour. On the gradients it came from
+  // an arrow on a translucent white chip, which said "changed" without saying which way.
+  const trendTone = trend?.direction === "up"
+    ? "bg-emerald-50 text-emerald-700"
+    : trend?.direction === "down"
+      ? "bg-rose-50 text-rose-700"
+      : "bg-slate-100 text-slate-500";
   return (
-    <div
-      className={`relative overflow-hidden rounded-2xl border border-white/10 p-4 shadow-md transition-transform hover:-translate-y-0.5 hover:shadow-lg ${gradient}`}
-      data-testid={testid}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-xs font-medium text-white/85">{label}</p>
-          <p className="mt-1 text-2xl font-bold text-white">{value}</p>
-        </div>
-        <div className="shrink-0 rounded-xl bg-white/20 p-2">
-          <Icon className="h-5 w-5 text-white" />
-        </div>
-      </div>
+    <div className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5" data-testid={testid}>
+      <span className="flex items-center gap-1.5 text-slate-500">
+        {Icon && <Icon className="h-4 w-4 shrink-0" />}
+        <span className="truncate text-[11px] font-bold uppercase tracking-wider">{label}</span>
+      </span>
+      <span className="mt-1 block text-3xl font-extrabold text-slate-800">{value}</span>
       {trend && (
-        <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold text-white">
+        <div className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${trendTone}`}>
           {trend.direction === "up" && <TrendingUp className="h-3 w-3" />}
           {trend.direction === "down" && <TrendingDown className="h-3 w-3" />}
           {trend.text}
         </div>
       )}
       {sparkline && (
-        <div className="mt-2">
+        <div className="mt-1.5">
           <Sparkline data={sparkline} />
         </div>
       )}
-    </div>
-  );
-}
-
-/* ─── Lead Funnel ─── */
-function LeadFunnel({ stageCounts, totalLeads }) {
-  const stages = PIPELINE_STAGES.map((name) => ({ name, count: stageCounts?.[name] || 0 }));
-  return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="bd-funnel">
-      {stages.map((s, idx) => {
-        const pct = totalLeads ? Math.round((s.count / totalLeads) * 100) : 0;
-        return (
-          <div key={s.name} className="relative" data-testid={`bd-funnel-stage-${s.name}`}>
-            <div className={`rounded-2xl border p-4 ${STAGE_COLOR[s.name]}`}>
-              <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{s.name}</p>
-              <p className="mt-1 text-2xl font-bold">{s.count}</p>
-              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10">
-                <div className="h-full rounded-full bg-current opacity-70" style={{ width: `${pct}%` }} />
-              </div>
-              <p className="mt-1 text-[11px] font-medium opacity-70">{pct}% of total leads</p>
-            </div>
-            {idx < stages.length - 1 && (
-              <ArrowRight className="absolute -right-2.5 top-1/2 hidden h-5 w-5 -translate-y-1/2 text-slate-300 lg:block" />
-            )}
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -647,7 +668,7 @@ function DashboardTab({
   leadSourceFilter, setLeadSourceFilter,
   leadDateFrom, setLeadDateFrom,
   leadDateTo, setLeadDateTo,
-  onAddLead, onSyncSheet, onAssignLeads, onExportCsv, onRefresh,
+  onRefresh,
 }) {
   if (!summary && loading) {
     return <p className="py-8 text-center text-sm text-slate-400" data-testid="bd-dash-loading">Loading dashboard...</p>;
@@ -675,29 +696,22 @@ function DashboardTab({
 
   const followUp = summary.stage_counts?.["Follow Up"] || 0;
 
+  // No colour per card any more: every one of these is the same kind of thing (a count
+  // this desk is answerable for), and nine gradients said they were nine kinds. The
+  // first two keep a trend and a line because they are the only two that read against
+  // a previous period -- the rest are a standing total, and a sparkline under one of
+  // those would be a line drawn from nothing.
   const metrics = [
-    { key: "total", label: "Total Leads", value: summary.total_leads, icon: Users, gradient: "bg-gradient-to-br from-sky-500 to-blue-600", trend: weekTrend, sparkline: weekTrendCounts },
-    { key: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, gradient: "bg-gradient-to-br from-cyan-500 to-sky-600", trend: todayTrend, sparkline: weekTrendCounts },
-    { key: "followup", label: "Active Follow-ups", value: followUp, icon: Clock, gradient: "bg-gradient-to-br from-amber-500 to-orange-600" },
-    { key: "appointments", label: "Appointments", value: summary.total_appointments, icon: CalendarCheck, gradient: "bg-gradient-to-br from-violet-500 to-purple-600" },
-    { key: "converted", label: "Converted", value: summary.completed_appointments, icon: TrendingUp, gradient: "bg-gradient-to-br from-emerald-500 to-green-600" },
-    { key: "revenue", label: "Revenue Generated", value: formatMoney(summary.revenue_generated), icon: IndianRupee, gradient: "bg-gradient-to-br from-teal-500 to-emerald-600" },
-    { key: "conversion", label: "Conversion Rate", value: `${summary.conversion_rate}%`, icon: Percent, gradient: "bg-gradient-to-br from-indigo-500 to-blue-700" },
-    { key: "branches", label: "Branches", value: summary.total_branches, icon: Building2, gradient: "bg-gradient-to-br from-fuchsia-500 to-purple-700" },
-    { key: "sheets", label: "Connected Sheets", value: summary.total_connections, icon: FileSpreadsheet, gradient: "bg-gradient-to-br from-orange-500 to-amber-600" },
+    { key: "total", label: "Total Leads", value: summary.total_leads, icon: Users, trend: weekTrend, sparkline: weekTrendCounts },
+    { key: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, trend: todayTrend, sparkline: weekTrendCounts },
+    { key: "followup", label: "Active Follow-ups", value: followUp, icon: Clock },
+    { key: "appointments", label: "Appointments", value: summary.total_appointments, icon: CalendarCheck },
+    { key: "converted", label: "Converted", value: summary.completed_appointments, icon: TrendingUp },
+    { key: "revenue", label: "Revenue Generated", value: formatMoney(summary.revenue_generated), icon: IndianRupee },
+    { key: "conversion", label: "Conversion Rate", value: `${summary.conversion_rate}%`, icon: Percent },
+    { key: "branches", label: "Branches", value: summary.total_branches, icon: Building2 },
+    { key: "sheets", label: "Connected Sheets", value: summary.total_connections, icon: FileSpreadsheet },
   ];
-
-  const sourceChartData = Object.entries(summary.source_counts || {}).map(([name, value]) => ({ name, value }));
-  const weekChartData = (summary.week_trend || []).map((d) => ({
-    label: new Date(d.date).toLocaleDateString("en-IN", { weekday: "short" }),
-    count: d.count,
-  }));
-  const monthChartData = (summary.month_trend || []).map((d) => ({
-    label: new Date(`${d.month}-01`).toLocaleDateString("en-IN", { month: "short", year: "2-digit" }),
-    count: d.count,
-  }));
-
-  const maxBranchCount = Math.max(...(summary.branch_counts || []).map((b) => b.count), 1);
 
   return (
     <div className="space-y-5" data-testid="bd-dashboard-content">
@@ -729,204 +743,31 @@ function DashboardTab({
               Clear filters
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={onRefresh} className="ml-auto" data-testid="bd-filter-refresh">
-            <RefreshCw className="mr-1 h-4 w-4" /> Refresh
+          {/* Branch Admin > Branch Leads' Refresh, the same as the one on the tab strip
+              above: grey, square, icon-only, the word on title/aria-label. h-9 rather
+              than that row's h-10 -- every other control in this toolbar is h-9, and
+              matching the row it sits in beats matching a toolbar on another screen. */}
+          <Button
+            onClick={onRefresh}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="ml-auto h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+            data-testid="bd-filter-refresh"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </CardContent>
       </Card>
 
-      {/* KPI Grid */}
+      {/* KPI Grid. The same grid HR Admin's Dashboard lays its row out on -- two up on a
+          phone, five across on a desk -- so nine cards land as 5 + 4 rather than in a
+          shape of their own. */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="bd-metrics-grid">
         {metrics.map((m) => (
-          <KpiCard key={m.key} label={m.label} value={m.value} icon={m.icon} gradient={m.gradient} trend={m.trend} sparkline={m.sparkline} testid={`bd-metric-${m.key}`} />
+          <KpiCard key={m.key} label={m.label} value={m.value} icon={m.icon} trend={m.trend} sparkline={m.sparkline} testid={`bd-metric-${m.key}`} />
         ))}
       </div>
-
-      {/* Lead Pipeline Funnel */}
-      <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-stage-pipeline-card">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <TrendingUp className="h-4 w-4 text-sky-600" />
-            Lead Pipeline
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <LeadFunnel stageCounts={summary.stage_counts} totalLeads={summary.total_leads} />
-        </CardContent>
-      </Card>
-
-      {/* Two-column analytics */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Left column */}
-        <div className="space-y-4">
-          <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-source-donut-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base"><Globe className="h-4 w-4 text-sky-600" />Lead Sources</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {sourceChartData.length === 0 ? (
-                <p className="py-6 text-center text-sm text-slate-400">No source data</p>
-              ) : (
-                <div className="flex items-center gap-4">
-                  <div className="h-44 w-44 shrink-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={sourceChartData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={70} paddingAngle={2}>
-                          {sourceChartData.map((_, i) => (<Cell key={i} fill={SOURCE_HEX[i % SOURCE_HEX.length]} />))}
-                        </Pie>
-                        <RTooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    {sourceChartData.map((s, i) => (
-                      <div key={s.name} className="flex items-center justify-between gap-2 text-xs" data-testid={`bd-source-legend-${s.name}`}>
-                        <span className="flex min-w-0 items-center gap-1.5 truncate">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: SOURCE_HEX[i % SOURCE_HEX.length] }} />
-                          <span className="truncate text-slate-600">{s.name}</span>
-                        </span>
-                        <span className="shrink-0 font-semibold text-slate-800">{s.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-week-chart-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Weekly Performance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RBarChart data={weekChartData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="label" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <RTooltip />
-                    <Bar dataKey="count" fill="#2563eb" radius={[6, 6, 0, 0]} />
-                  </RBarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-month-chart-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Monthly Lead Trend</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={monthChartData}>
-                    <defs>
-                      <linearGradient id="bdMonthGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#059669" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="#059669" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="label" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <RTooltip />
-                    <Area type="monotone" dataKey="count" stroke="#059669" strokeWidth={2} fill="url(#bdMonthGradient)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Right column */}
-        <div className="space-y-4">
-          <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-pipeline-health-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Pipeline Health</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">Conversion Rate</p>
-                <p className="text-lg font-bold text-emerald-600">{summary.conversion_rate}%</p>
-              </div>
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">Pending Follow-ups</p>
-                <p className="text-lg font-bold text-amber-600">{followUp}</p>
-              </div>
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">Week-over-Week</p>
-                <p className={`text-lg font-bold ${weekChangePct === null ? "text-slate-400" : weekChangePct >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                  {weekChangePct === null ? "—" : `${weekChangePct >= 0 ? "+" : ""}${weekChangePct}%`}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-branch-performance-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base"><Building2 className="h-4 w-4 text-violet-600" />Branch Performance</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5">
-              {(summary.branch_counts || []).length === 0 ? (
-                <p className="text-sm text-slate-400">No branch data</p>
-              ) : (
-                summary.branch_counts.map((b) => (
-                  <div key={b.branch_id} data-testid={`bd-branch-perf-${b.branch_id}`}>
-                    <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="font-medium text-slate-700">{b.branch_name}</span>
-                      <span className="font-semibold text-violet-700">{b.count}</span>
-                    </div>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                      <div className="h-full rounded-full bg-violet-500" style={{ width: `${(b.count / maxBranchCount) * 100}%` }} />
-                    </div>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-recent-activity-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Recent Activity</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {(summary.recent_leads || []).length === 0 ? (
-                <p className="text-sm text-slate-400">No activity yet</p>
-              ) : (
-                summary.recent_leads.map((lead) => (
-                  <div key={lead.id} className="flex items-start gap-2.5 text-sm" data-testid={`bd-activity-${lead.id}`}>
-                    <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-sky-500" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-slate-700">
-                        <span className="font-semibold">{lead.name}</span> came in via {lead.source_tab || lead.source_type}
-                      </p>
-                      <p className="text-xs text-slate-400">{timeAgo(lead.created_at)}</p>
-                    </div>
-                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${STAGE_COLOR[lead.stage] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
-                      {lead.stage}
-                    </span>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <Card className="rounded-2xl border-slate-200 bg-gradient-to-r from-slate-50 to-white shadow-sm" data-testid="bd-quick-actions-card">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Quick Actions</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button onClick={onAddLead} className="bg-sky-600 hover:bg-sky-700" data-testid="bd-qa-add-lead"><UserPlus className="mr-1.5 h-4 w-4" />Add Lead</Button>
-          <Button variant="outline" onClick={onSyncSheet} data-testid="bd-qa-sync-sheet"><FileSpreadsheet className="mr-1.5 h-4 w-4" />Sync Google Sheet</Button>
-          <Button variant="outline" onClick={onAssignLeads} data-testid="bd-qa-assign-leads"><Users className="mr-1.5 h-4 w-4" />Assign Leads</Button>
-          <Button variant="outline" onClick={onExportCsv} data-testid="bd-qa-export"><Download className="mr-1.5 h-4 w-4" />Export Leads</Button>
-          <Button variant="outline" onClick={onRefresh} data-testid="bd-qa-refresh"><RefreshCw className="mr-1.5 h-4 w-4" />Refresh Dashboard</Button>
-        </CardContent>
-      </Card>
     </div>
   );
 }

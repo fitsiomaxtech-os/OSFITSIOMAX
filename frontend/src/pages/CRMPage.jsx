@@ -506,15 +506,19 @@ export const CRMPage = ({ auth, onLogout }) => {
   const roleLabel = ROLE_META[role]?.label
     || (isDietRole(role) ? "Nutritionist" : null)
     || (isHumanResourceRole(role) ? "Human Resource" : titleFromSlug(role));
-  // Consultant, Nutritionist and Branch Admin stand alone, with no "Master View" after
-  // them. The first two are named for the clinician rather than for a desk that
-  // administers something, so the suffix was describing a view they do not have. Branch
-  // Admin does run a desk, but one branch of it — "Master View" claims a reach across the
-  // organisation that the role does not have, and the plain name is what the person is.
+  // Consultant, Nutritionist, Branch Admin and the Business Development desk stand alone,
+  // with no "Master View" after them. The first two are named for the clinician rather
+  // than for a desk that administers something, so the suffix was describing a view they
+  // do not have. Branch Admin does run a desk, but one branch of it — "Master View"
+  // claims a reach across the organisation that the role does not have, and the plain
+  // name is what the person is. Business Development Executive is already the full name
+  // of the desk, and its board now carries the Marketing and Sales master views as two
+  // tabs inside it — a title claiming one master view over the lot would name the
+  // smaller part of what is on screen.
   //
-  // All three are printed as they are written — a board title in full caps reads as
+  // All four are printed as they are written — a board title in full caps reads as
   // shouting where every other board is sentence case.
-  const isPlainTitle = isHeadPhysioRole(role) || isDietRole(role) || isBranchAdminRole(role);
+  const isPlainTitle = isHeadPhysioRole(role) || isDietRole(role) || isBranchAdminRole(role) || role === "business_dev";
   const boardTitle = isPlainTitle
     ? roleLabel
     // Sales Head gets the same title as Pre-Sales, not "Sales Head Master View" — it's the
@@ -1344,7 +1348,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showBusinessDevBoard && (
-          <BusinessLeadsDashboard />
+          <BusinessLeadsDashboard currentUser={auth?.user} />
         )}
 
         {showBranchBoard && (

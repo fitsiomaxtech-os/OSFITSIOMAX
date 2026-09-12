@@ -513,7 +513,11 @@ async def v3_dashboard_overview(
     # View's Analytics pane — that board offers it to all three (isSuperAdminMasterView),
     # and while this admitted only Super Admin the other two were served a 403 that the
     # panel rendered as a row of zeros.
-    _: V3UserOut = Depends(v3_require_roles("super_admin", "sales_head", "marketing_head")),
+    #
+    # Business Development Executive for the same reason: their board carries the
+    # Marketing View and Sales View tabs, which are that same PreSalesCRM master view,
+    # so leaving them out here would print the zeros on a fourth board.
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "sales_head", "marketing_head", "business_dev")),
 ):
     """Super Admin's new Dashboard (the default landing view), and the Branches &
     Verticals Overview tab — Leads / Appointments / Consultations / Treatments /
@@ -799,7 +803,10 @@ async def v3_dashboard_leads_analytics(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     branch_ids: Optional[str] = Query(None, description="Comma-separated; omit for every branch"),
-    _: V3UserOut = Depends(v3_require_roles("super_admin", "sales_head", "marketing_head")),
+    # Same four as /dashboard/overview above, and for the same reason: this is what the
+    # Marketing master view's Analytics pane charts, and the Business Development
+    # Executive's board now mounts that view as one of its tabs.
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "sales_head", "marketing_head", "business_dev")),
 ):
     """Leads, four ways: over time, by pipeline stage, by source, by branch.
 

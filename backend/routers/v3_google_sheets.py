@@ -578,8 +578,13 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     }
 
 
+# business_dev alongside the other three: it already holds every other half of this
+# import (create the connection, save its field map, run the sync, and list the
+# auto-sync sources this pulls from -- /auto-sync-sources above admits it), so its
+# absence here was an oversight rather than a decision. It showed as a Pull from Sheet
+# button that 403s, on the Marketing View and Sales View tabs of that desk's own board.
 @router.post("/pull/{source_id}")
-async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), user: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "branch_admin"))):
+async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), user: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "branch_admin", "business_dev"))):
     if is_branch_admin_role(user.role):
         source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0, "branch_id": 1, "branch_ids": 1})
         if not source:
