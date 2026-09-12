@@ -149,9 +149,12 @@ class V3BranchOut(BaseModel):
     code: Optional[str] = None
     branch_name: str
     address: str
-    admin_user_id: str
-    admin_name: str
-    admin_email: str
+    # Empty on a branch nobody runs yet — branches are created unassigned and given their
+    # admin afterwards (see v3_branch_mgmt.create_branch_with_existing_admin), and
+    # v3_config blanks all three when an admin's user record is deleted.
+    admin_user_id: str = ""
+    admin_name: str = ""
+    admin_email: str = ""
     admin_phone: Optional[str] = ""
     vertical: str
     opened_date: Optional[str] = ""

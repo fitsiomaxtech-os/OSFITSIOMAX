@@ -603,10 +603,19 @@ const CreationTab = ({ onDrillIn, actionSlot, onNavigateToOperations }) => {
             <CardContent className="space-y-3">
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Branch Admin</p>
-                <p className="mt-1 text-sm font-medium text-slate-800">{b.admin_name || "—"}</p>
-                <p className="text-xs text-slate-500"><Mail className="inline h-3 w-3 mr-1" />{b.admin_email || "—"}</p>
-                {b.admin_phone && <p className="text-xs text-slate-500"><Phone className="inline h-3 w-3 mr-1" />{b.admin_phone}</p>}
-                <button onClick={(e) => { e.stopPropagation(); setReassigning(b); }} className="mt-2 text-xs font-medium text-sky-600 hover:underline" data-testid={`bm-branch-reassign-${b.id}`}>Reassign Manager →</button>
+                {/* A branch is created without one now, so the empty desk has to read as a
+                    step still to take rather than as a missing value: an em dash under
+                    "Branch Admin" gave no clue that the link below it is what fills it. */}
+                {b.admin_name ? (
+                  <>
+                    <p className="mt-1 text-sm font-medium text-slate-800">{b.admin_name}</p>
+                    <p className="text-xs text-slate-500"><Mail className="inline h-3 w-3 mr-1" />{b.admin_email || "—"}</p>
+                    {b.admin_phone && <p className="text-xs text-slate-500"><Phone className="inline h-3 w-3 mr-1" />{b.admin_phone}</p>}
+                  </>
+                ) : (
+                  <p className="mt-1 text-sm font-medium text-amber-600" data-testid={`bm-branch-unassigned-${b.id}`}>Not assigned yet</p>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); setReassigning(b); }} className="mt-2 text-xs font-medium text-sky-600 hover:underline" data-testid={`bm-branch-reassign-${b.id}`}>{b.admin_name ? "Reassign Manager →" : "Assign Branch Admin →"}</button>
               </div>
               <div className="grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
                 <Stat label="Leads" value={b.leads_total || 0} color="#0ea5e9" />
@@ -849,15 +858,19 @@ const ReassignAdminDialog = ({ branch, candidates, onClose, onSaved }) => {
     try { await bmReassignAdmin(branch.id, pick); toast.success("Manager reassigned"); onSaved(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
   };
+  // Reads as "Assign" on a branch that has never had one — which, since the create form
+  // stopped asking for an admin, is every branch on the day it is made.
+  const assigned = !!branch.admin_user_id;
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="bm-reassign-dialog">
       <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl space-y-3">
-        <h3 className="text-base font-semibold">Reassign Manager — {branch.branch_name}</h3>
+        <h3 className="text-base font-semibold">{assigned ? "Reassign Manager" : "Assign Branch Admin"} — {branch.branch_name}</h3>
         <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={pick} onChange={(e) => setPick(e.target.value)} data-testid="bm-reassign-select">
           <option value="">— Pick branch admin —</option>
+          {candidates.length === 0 && <option disabled>No unassigned Branch Admin — add the employee in HR → Credentials first</option>}
           {candidates.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {c.email}</option>)}
         </select>
-        <p className="text-[11px] text-slate-400">Reassigning will unlink the previous manager from this branch.</p>
+        <p className="text-[11px] text-slate-400">{assigned ? "Reassigning will unlink the previous manager from this branch." : "Shows every Branch Admin from HR → Credentials who does not already run a branch."}</p>
         <div className="flex gap-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="bm-reassign-cancel">Cancel</Button><Button onClick={save} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="bm-reassign-submit">Save</Button></div>
       </div>
     </div>

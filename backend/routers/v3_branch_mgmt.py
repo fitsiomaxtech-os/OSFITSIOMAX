@@ -23,7 +23,11 @@ router = APIRouter(prefix="/api/v3/branch-mgmt")
 class BranchAssignedCreate(BaseModel):
     branch_name: str
     address: Optional[str] = ""  # online-vertical branches have no physical address
-    admin_user_id: str = Field(..., description="Existing user with a Branch Admin role")
+    # Optional: a branch is created first and staffed after. Asking for its Branch Admin
+    # on the create form meant the admin's HR record had to exist before the branch did,
+    # which is backwards — the employee is hired into a branch. Left blank here, the
+    # branch is created unassigned and PATCH /{branch_id}/admin fills the desk later.
+    admin_user_id: Optional[str] = Field(None, description="Existing user with a Branch Admin role; blank to create the branch unassigned")
     admin_phone: Optional[str] = ""
     vertical: Optional[str] = "offline_physiotherapy"
     opened_date: Optional[str] = ""
@@ -104,15 +108,21 @@ async def restore_branch(branch_id: str, _: V3UserOut = Depends(v3_require_roles
 
 @router.post("/with-existing-admin")
 async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    user = await v3_col("users").find_one({"id": payload.admin_user_id, "is_active": True}, {"_id": 0, "password": 0})
-    if not user:
-        raise HTTPException(status_code=404, detail="Branch admin user not found")
-    if not is_branch_admin_role(user.get("role")):
-        raise HTTPException(status_code=400, detail=f"User role is '{user.get('role')}', must be a Branch Admin role")
-    # Soft check: warn if user already assigned to another branch
-    already = await v3_col("branches").find_one({"admin_user_id": payload.admin_user_id}, {"_id": 0, "id": 1, "branch_name": 1})
-    if already:
-        raise HTTPException(status_code=409, detail=f"User already assigned to branch '{already.get('branch_name')}'")
+    # An admin is only looked up when one was named. Every check below still runs in that
+    # case, so an admin passed by an older client (or by the reassign dialog's own path)
+    # is validated exactly as before.
+    admin_user_id = (payload.admin_user_id or "").strip()
+    user = None
+    if admin_user_id:
+        user = await v3_col("users").find_one({"id": admin_user_id, "is_active": True}, {"_id": 0, "password": 0})
+        if not user:
+            raise HTTPException(status_code=404, detail="Branch admin user not found")
+        if not is_branch_admin_role(user.get("role")):
+            raise HTTPException(status_code=400, detail=f"User role is '{user.get('role')}', must be a Branch Admin role")
+        # Soft check: warn if user already assigned to another branch
+        already = await v3_col("branches").find_one({"admin_user_id": admin_user_id}, {"_id": 0, "id": 1, "branch_name": 1})
+        if already:
+            raise HTTPException(status_code=409, detail=f"User already assigned to branch '{already.get('branch_name')}'")
 
     branch_id = str(uuid.uuid4())
     existing_codes = set(await v3_col("branches").distinct("code"))
@@ -127,9 +137,9 @@ async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3
         "code": code,
         "branch_name": payload.branch_name,
         "address": payload.address,
-        "admin_user_id": payload.admin_user_id,
-        "admin_name": user.get("full_name", ""),
-        "admin_email": user.get("email", ""),
+        "admin_user_id": admin_user_id,
+        "admin_name": (user or {}).get("full_name", ""),
+        "admin_email": (user or {}).get("email", ""),
         "admin_phone": payload.admin_phone or "",
         "vertical": payload.vertical or "offline_physiotherapy",
         "opened_date": payload.opened_date or "",
@@ -144,7 +154,8 @@ async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3
     }
     await v3_col("branches").insert_one(branch.copy())
     # Update user.branch_id
-    await v3_col("users").update_one({"id": payload.admin_user_id}, {"$set": {"branch_id": branch_id}})
+    if admin_user_id:
+        await v3_col("users").update_one({"id": admin_user_id}, {"$set": {"branch_id": branch_id}})
     # Every branch gets its own Lead Source card the moment it exists — see
     # seed.ensure_branch_lead_sources for why Marketing > Lead Sources no longer has its
     # own Add Source button.

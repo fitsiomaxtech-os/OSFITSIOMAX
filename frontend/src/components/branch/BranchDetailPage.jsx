@@ -146,7 +146,7 @@ const SummaryTab = ({ data, branchId, onChanged, readOnly = false }) => {
           <CardTitle className="text-base">Branch Admin</CardTitle>
           <div className="flex gap-1">
             {!readOnly && <button onClick={() => setShowEditAdmin(true)} className="text-blue-500 hover:text-blue-700 p-1" title="Edit admin contact" data-testid="branch-admin-edit-btn"><Pencil className="h-4 w-4" /></button>}
-            {!readOnly && <button onClick={() => setShowReassign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Reassign admin" data-testid="branch-admin-reassign-btn"><UserCog className="h-4 w-4" /></button>}
+            {!readOnly && <button onClick={() => setShowReassign(true)} className="text-sky-600 hover:text-sky-700 p-1" title={b.admin_name ? "Reassign admin" : "Assign admin"} data-testid="branch-admin-reassign-btn"><UserCog className="h-4 w-4" /></button>}
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -155,7 +155,7 @@ const SummaryTab = ({ data, branchId, onChanged, readOnly = false }) => {
               {(b.admin_name || "?").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?"}
             </div>
             <div>
-              <p className="font-semibold text-slate-900">{b.admin_name || "Unassigned"}</p>
+              <p className={`font-semibold ${b.admin_name ? "text-slate-900" : "text-amber-600"}`}>{b.admin_name || "Not assigned yet"}</p>
               <p className="text-xs text-slate-500">{adm?.role || "branch_admin"}</p>
             </div>
           </div>
@@ -163,6 +163,10 @@ const SummaryTab = ({ data, branchId, onChanged, readOnly = false }) => {
             {b.admin_email && <p className="flex items-center gap-2 text-slate-600"><Mail className="h-3.5 w-3.5" />{b.admin_email}</p>}
             {b.admin_phone && <p className="flex items-center gap-2 text-slate-600"><Phone className="h-3.5 w-3.5" />{b.admin_phone}</p>}
             {adm?.created_at && <p className="text-xs text-slate-400">Joined {(adm.created_at).slice(0, 10)}</p>}
+            {/* The one step left on a branch that has just been created. */}
+            {!b.admin_name && !readOnly && (
+              <button onClick={() => setShowReassign(true)} className="text-xs font-medium text-sky-600 hover:underline" data-testid="branch-admin-assign-link">Assign Branch Admin →</button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1191,10 +1195,12 @@ const ReassignAdminDialog = ({ branchId, currentAdminId, onClose, onSaved }) => 
   useEffect(() => { hrBranchAdminCandidates().then(setCandidates).catch((e) => console.warn("[load candidates]", e?.message || e)); }, []);
   const available = candidates.filter((c) => !c.assigned_branch || c.id === currentAdminId);
 
+  const assigned = !!currentAdminId;
+
   const save = async () => {
     if (!pick) { toast.error("Pick a manager"); return; }
     if (pick === currentAdminId) { toast.error("Already assigned to this branch"); return; }
-    try { await bmReassignAdmin(branchId, pick); toast.success("Manager reassigned"); onSaved(); }
+    try { await bmReassignAdmin(branchId, pick); toast.success(assigned ? "Manager reassigned" : "Branch Admin assigned"); onSaved(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Reassign failed"); }
   };
 
@@ -1202,16 +1208,16 @@ const ReassignAdminDialog = ({ branchId, currentAdminId, onClose, onSaved }) => 
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="branch-admin-reassign-dialog">
       <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold">Reassign Branch Admin</h3>
+          <h3 className="text-base font-semibold">{assigned ? "Reassign Branch Admin" : "Assign Branch Admin"}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="branch-admin-reassign-close"><X className="h-4 w-4" /></button>
         </div>
         <p className="text-xs text-slate-500">Only users with role <span className="font-semibold">branch_admin</span> who aren't already running another branch can be picked. Create more in HR → Credentials.</p>
         <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={pick} onChange={(e) => setPick(e.target.value)} data-testid="branch-admin-reassign-select">
           <option value="">— Select branch admin —</option>
-          {available.length === 0 && <option disabled>No available branch_admin users</option>}
+          {available.length === 0 && <option disabled>No unassigned Branch Admin — add the employee in HR → Credentials first</option>}
           {available.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {c.email}{c.id === currentAdminId ? " (current)" : ""}</option>)}
         </select>
-        <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="branch-admin-reassign-cancel">Cancel</Button><Button onClick={save} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="branch-admin-reassign-submit">Reassign</Button></div>
+        <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="branch-admin-reassign-cancel">Cancel</Button><Button onClick={save} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="branch-admin-reassign-submit">{assigned ? "Reassign" : "Assign"}</Button></div>
       </div>
     </div>
   );

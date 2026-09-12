@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmCreateWithExistingAdmin, updateBranch, hrBranchAdminCandidates, getVerticals } from "@/lib/api";
+import { bmCreateWithExistingAdmin, updateBranch, getVerticals } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { LeadControlSwitch, normalizeLeadControl, BRANCH_ADMIN } from "@/components/branch/LeadControlSwitch";
 
@@ -41,13 +41,11 @@ const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
 export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
   const isEdit = !!branch;
-  const [candidates, setCandidates] = useState([]);
   const [mode, setMode] = useState(() => (isOnlineVertical(branch?.vertical) ? "online" : "offline"));
   const [form, setForm] = useState({
     branch_name: branch?.branch_name || "",
     code: branch?.code || "",
     address: branch?.address || "",
-    admin_user_id: branch?.admin_user_id || "",
     admin_phone: branch?.admin_phone || "",
     phone: branch?.phone || "",
     email: branch?.email || "",
@@ -64,12 +62,6 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
    * reason to add one. The three remain as the fallback for a failed or empty fetch.
    */
   const [verticalOptions, setVerticalOptions] = useState([]);
-
-  // The performance and consultant-candidate fetches went with their tabs. Both fired on
-  // every open of this dialog to fill panels nobody had asked for yet.
-  useEffect(() => {
-    if (!isEdit) hrBranchAdminCandidates().then(setCandidates).catch((e) => console.warn("[candidates]", e?.message || e));
-  }, [isEdit]);
 
   useEffect(() => {
     let alive = true;
@@ -105,8 +97,6 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
     }
   };
 
-  const available = useMemo(() => candidates.filter((c) => !c.assigned_branch || c.id === branch?.admin_user_id), [candidates, branch?.admin_user_id]);
-
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   const submit = async () => {
@@ -115,7 +105,6 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
       // panel now, so the field the message names is already on screen.
       toast.error(mode === "offline" ? "Branch name + address required" : "Branch name required"); return;
     }
-    if (!isEdit && !form.admin_user_id) { toast.error("Select a Branch Admin"); return; }
     try {
       if (isEdit) {
         // Opening hours and holidays are deliberately absent. This form no longer shows
@@ -133,15 +122,16 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
         // A new branch still opens on the standard week, exactly as before — there is
         // nothing to preserve on a branch that does not exist yet, and a branch with no
         // hours at all reads as closed on the calendar.
+        // No admin, no phones, no email: a branch that does not exist yet has nobody
+        // running it and no front desk to ring. Those four are set on the branch itself
+        // once it is on the board — see the note on the create form below.
         await bmCreateWithExistingAdmin({
-          branch_name: form.branch_name, code: form.code || undefined, address: form.address, admin_user_id: form.admin_user_id, admin_phone: form.admin_phone,
-          phone: form.phone, email: form.email, map_location: form.map_location,
+          branch_name: form.branch_name, code: form.code || undefined, address: form.address,
+          map_location: form.map_location,
           opened_date: form.opened_date, vertical: form.vertical, lead_control: form.lead_control,
           weekly_hours: emptyWeekly(), holidays: [],
         });
-        // Points at the branch's own page, since that is where its figures live now rather
-        // than behind a tab in this dialog.
-        toast.success("Branch created — open its detail page for figures once leads are assigned.");
+        toast.success("Branch created — open it to assign its Branch Admin.");
       }
       onSaved();
     } catch (e) { toast.error(e?.response?.data?.detail || "Save failed"); }
@@ -155,7 +145,7 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
             <h3 className="text-base font-semibold text-slate-900">{isEdit ? `Edit Branch — ${branch.branch_name}` : "Create New Branch"}</h3>
             {/* Named what this form now does. It promised opening hours and financials,
                 which were the three tabs that have gone. */}
-            <p className="text-xs text-slate-500">{isEdit ? "Update this branch's details." : "Fill in the branch's details and pick its Branch Admin."}</p>
+            <p className="text-xs text-slate-500">{isEdit ? "Update this branch's details." : "Fill in the branch's details. Its Branch Admin and contact numbers are set on the branch once it exists."}</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="bf2-close"><X className="h-4 w-4" /></button>
         </div>
@@ -200,24 +190,21 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
                   ))}
                 </select>
               </Field>
-              <Field label={isEdit ? "Branch Admin" : "Branch Admin *"}>
-                {isEdit ? (
-                  <div className="h-10 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm flex items-center text-slate-600">{branch.admin_name || "Unassigned"} <span className="ml-2 text-[10px] text-slate-400">(reassign via Detail page)</span></div>
-                ) : (
-                  <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.admin_user_id} onChange={(e) => set("admin_user_id", e.target.value)} data-testid="bf2-admin">
-                    <option value="">— Select a Branch Admin —</option>
-                    {available.length === 0 && <option disabled>No available Branch Admins — create one in HR</option>}
-                    {available.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {prettyVertical(c.role)} · {c.email}</option>)}
-                  </select>
-                )}
-                {/* Any Admins-department role (Physio-only, Fitness-only, both, or either
-                    online arm), not just the plain branch_admin slug — see
-                    deps.BRANCH_ADMIN_ROLES for the full set. */}
-                <p className="mt-1 text-[11px] text-slate-400">Shows every unassigned Branch Admin role from HR → Credentials.</p>
-              </Field>
-              <Field label="Admin Phone"><Input value={form.admin_phone} onChange={(e) => set("admin_phone", e.target.value)} placeholder="+91 …" data-testid="bf2-admin-phone" /></Field>
-              <Field label="Branch Phone"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Front-desk phone" data-testid="bf2-phone" /></Field>
-              <Field label="Branch Email"><Input value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="branch@example.com" data-testid="bf2-email" /></Field>
+              {/* Edit only, and read-only at that. Picking a Branch Admin while creating
+                  a branch forced the order backwards — the admin's HR record had to exist
+                  before the branch they run. The branch is created unassigned now, and its
+                  admin is set from the branch card ("Assign Branch Admin →") or its detail
+                  page after the employee has been added and given credentials. */}
+              {isEdit && (
+                <>
+                  <Field label="Branch Admin">
+                    <div className="h-10 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm flex items-center text-slate-600">{branch.admin_name || "Unassigned"} <span className="ml-2 text-[10px] text-slate-400">(assign via Detail page)</span></div>
+                  </Field>
+                  <Field label="Admin Phone"><Input value={form.admin_phone} onChange={(e) => set("admin_phone", e.target.value)} placeholder="+91 …" data-testid="bf2-admin-phone" /></Field>
+                  <Field label="Branch Phone"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Front-desk phone" data-testid="bf2-phone" /></Field>
+                  <Field label="Branch Email"><Input value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="branch@example.com" data-testid="bf2-email" /></Field>
+                </>
+              )}
               {mode === "offline" && (
                 <Field label="Address *" className="sm:col-span-2"><Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, City, PIN" data-testid="bf2-address" /></Field>
               )}
