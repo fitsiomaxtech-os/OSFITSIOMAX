@@ -773,6 +773,12 @@ export const hrUsers = async (params = {}) => {
 export const hrCreateUser = async (payload) => (await api.post("/hr/users", payload)).data;
 export const hrUpdateUser = async (id, payload) => (await api.patch(`/hr/users/${id}`, payload)).data;
 export const hrUpdateUserRole = async (id, role) => (await api.patch(`/hr/users/${id}/role?role=${role}`)).data;
+// Email delivery, Super Admin only. Every code this OS sends leaves through one SMTP
+// account; these two say what it is set to and prove whether it works. A 403 here means
+// the caller is not Super Admin, which is how the panel decides whether to draw itself.
+export const hrEmailStatus = async () => (await api.get("/hr/email/status")).data;
+export const hrEmailTest = async () => (await api.post("/hr/email/test")).data;
+
 export const hrResetPassword = async (id, password) => (await api.patch(`/hr/users/${id}/reset-password?password=${encodeURIComponent(password)}`)).data;
 export const hrDeactivateUser = async (id) => (await api.delete(`/hr/users/${id}`)).data;
 export const hrActivateUser = async (id) => (await api.patch(`/hr/users/${id}/activate`)).data;

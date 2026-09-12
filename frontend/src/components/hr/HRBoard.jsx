@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, Quote } from "lucide-react";
+import { Users, ShieldCheck, AlertTriangle, MailCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, Quote } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee, uploadEmployeePhoto,
-  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrMeta, hrAddCustomRole,
+  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrEmailStatus, hrEmailTest, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrMeta, hrAddCustomRole,
   hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrDeleteDesignation, hrReorderDesignations,
   getBranches, getVerticals,
 } from "@/lib/api";
@@ -3312,6 +3312,110 @@ const DesignationEmployeesModal = ({ designation, employees, departmentNames, on
   );
 };
 
+/** Whether this server can send email, and proof either way.
+ *
+ *  Sits above the user list because this is the Credentials screen and email is what
+ *  Credentials depends on: a sign-in code, a password reset link, a reset OTP all leave
+ *  through one SMTP account. When that account is wrong, every one of those fails, and
+ *  what a user sees is "we couldn't send it" while the actual cause sits in a log on the
+ *  VPS that nobody looking at this screen can open.
+ *
+ *  Draws nothing at all unless the caller is Super Admin — the endpoint answers 403 to
+ *  everyone else, and that 403 is what this reads as "not for me" rather than as an error
+ *  worth a toast. Nothing here is broken for an HR user who cannot see it.
+ *
+ *  Quiet when it is working: one green line. The whole panel only earns its space on the
+ *  day it is red.
+ */
+const EmailDeliveryPanel = () => {
+  const [status, setStatus] = useState(null);
+  const [hidden, setHidden] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null); // { ok, text }
+
+  const load = useCallback(() => {
+    hrEmailStatus()
+      .then(setStatus)
+      .catch((e) => {
+        // 403 is the expected answer for anyone but a Super Admin, and means "do not draw
+        // this", not "something went wrong". Any other failure also hides it rather than
+        // putting an error where a status was meant to go.
+        setHidden(true);
+        if (e?.response?.status !== 403) console.warn("[email status]", e?.message || e);
+      });
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const sendTest = async () => {
+    try {
+      setBusy(true);
+      setResult(null);
+      const data = await hrEmailTest();
+      setResult({ ok: true, text: data.message });
+      load();
+    } catch (e) {
+      // Shown in full and left on screen rather than sent to a toast that disappears in
+      // four seconds. This string is the thing being read — "535 Username and Password
+      // not accepted" is what tells an admin the App Password is wrong — and it is worth
+      // copying into a search box, which a toast does not survive long enough for.
+      setResult({ ok: false, text: e?.response?.data?.detail || e?.message || "The test failed" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (hidden || !status) return null;
+
+  const ok = status.configured;
+
+  return (
+    <div
+      className={`rounded-xl border p-3 ${ok ? "border-emerald-200 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}
+      data-testid="hr-email-panel"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          {ok
+            ? <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />}
+          <div className="min-w-0">
+            <p className={`text-sm font-semibold ${ok ? "text-emerald-800" : "text-amber-900"}`} data-testid="hr-email-headline">
+              {ok ? "Email delivery is configured" : "This server cannot send email"}
+            </p>
+            <p className={`text-xs ${ok ? "text-emerald-700" : "text-amber-800"}`} data-testid="hr-email-detail">
+              {ok
+                ? `Sending as ${status.user} via ${status.host}:${status.port}.`
+                : "Sign-in codes, password resets and two-factor all need this. Nobody can receive one until it is set."}
+            </p>
+            {!ok && status.hint && (
+              <p className="mt-1.5 text-xs text-amber-800" data-testid="hr-email-hint">{status.hint}</p>
+            )}
+          </div>
+        </div>
+        <Button
+          onClick={sendTest}
+          disabled={busy}
+          variant="outline"
+          className="shrink-0 bg-white"
+          data-testid="hr-email-test-btn"
+        >
+          {busy ? "Sending…" : "Send test email"}
+        </Button>
+      </div>
+
+      {result && (
+        <p
+          className={`mt-2.5 break-words rounded-md px-2.5 py-2 text-xs ${result.ok ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}
+          data-testid="hr-email-test-result"
+        >
+          {result.text}
+        </p>
+      )}
+    </div>
+  );
+};
+
 const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
@@ -3423,6 +3527,12 @@ const RolesTab = ({ meta, reloadMeta }) => {
   // each hidden by class depending on breakpoint, not the hidden attribute.
   return (
     <div className="flex flex-col gap-4" data-testid="hr-roles-tab">
+      {/* First on the screen that depends on it. Everything below this line — creating an
+          account, resetting a password — hands somebody a way in, and two of those ways
+          travel by email. Draws nothing when email is working and nothing at all for a
+          non-Super-Admin. */}
+      <EmailDeliveryPanel />
+
       {/* Department then Designation, two dropdowns of the same shape on one row, reading
           off each row's linked employee.
 

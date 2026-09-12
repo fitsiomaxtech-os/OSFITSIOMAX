@@ -9,6 +9,7 @@ from database import v3_col
 from utils import now_iso, live_branch_query
 from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES, HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES, LEGACY_BRANCH_ADMIN_ROLES
 from security import hash_password
+from email_utils import SmtpNotConfigured, send_email, smtp_status
 from schemas.v3 import V3UserOut
 
 
@@ -1351,6 +1352,83 @@ async def update_user_role(user_id: str, role: str, caller: V3UserOut = Depends(
                     "created_at": now_iso(),
                 })
     return {"message": "Role updated"}
+
+
+# ---------- email delivery ----------
+#
+# Every code this OS sends — a sign-in code, a password reset link, a reset OTP — leaves
+# through one SMTP account, configured by four environment variables and nothing else.
+# When that account is wrong, the symptom reaches users as "we couldn't send it" and the
+# cause is a line in a log on the VPS that nobody on this side of the screen can read.
+#
+# So: two endpoints, Super Admin only. One says what the server thinks it is configured
+# with, the other proves it by sending a real message and hands back whatever SMTP said if
+# it fails. Between them they turn "email is broken" into a specific sentence.
+
+
+@router.get("/email/status")
+async def email_status(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """What this backend is configured to send email with.
+
+    The password is never returned, only whether one is set. The two questions an admin
+    actually has are "did my .env get read" and "which account is it using", and neither
+    needs the secret. Super Admin only even so — the sending address and host are not
+    worth handing to every role.
+    """
+    status = smtp_status()
+    return {
+        **status,
+        # Carried with the diagnosis rather than assembled in the browser, so the fix does
+        # not have to be remembered by whoever happens to read the screen.
+        "hint": (
+            None
+            if status["configured"]
+            else (
+                "Set SMTP_USER and SMTP_PASSWORD in backend/.env on the server, then restart "
+                "the backend. For Gmail, SMTP_PASSWORD must be a 16-character App Password, "
+                "not the account password."
+            )
+        ),
+    }
+
+
+@router.post("/email/test")
+async def email_test(caller: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Send a real email to the caller's own address and report exactly what happened.
+
+    To the caller's own address, never to one named in the request: an endpoint that mails
+    arbitrary text to an arbitrary address is an open relay wearing a test button.
+
+    The SMTP error comes back verbatim on failure, which is the whole point — "535
+    Username and Password not accepted" is the sentence that fixes a Gmail App Password,
+    and it is worth nothing in a log the person debugging cannot open. Super Admin only,
+    and the text is the server's own error about the server's own account.
+    """
+    if not caller.email:
+        raise HTTPException(status_code=400, detail="Your account has no email address to send to")
+
+    body = "\n".join([
+        f"Hi {caller.full_name},",
+        "",
+        "This is a test from FitsiomaxOS. If you are reading it, this server can send email,",
+        "so sign-in codes and password resets will reach people.",
+        "",
+        "Sent because you pressed Send test email under HR - Credentials.",
+    ])
+    try:
+        send_email(caller.email, "FitsiomaxOS — email test", body)
+    except SmtpNotConfigured as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No SMTP credentials on this server. Set SMTP_USER and SMTP_PASSWORD in "
+                "backend/.env, then restart the backend."
+            ),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SMTP refused it: {exc}") from exc
+
+    return {"message": f"Test email sent to {caller.email}. If it does not arrive, check the spam folder."}
 
 
 @router.patch("/users/{user_id}/reset-password")
