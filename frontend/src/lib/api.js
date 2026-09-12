@@ -204,6 +204,14 @@ export const getTeamMembers = async (params) => (await api.get("/team-members", 
 export const addTeamMember = async (payload) => (await api.post("/team-members", payload)).data;
 
 export const getBdSummary = async (params = {}) => (await api.get("/dashboard/bd-summary", { params })).data;
+// The rows behind one Business Development summary card. `metric` names the card that was
+// opened; the response carries `kind` ("lead" | "appointment" | "branch" | "connection")
+// so the caller knows which column set to draw, plus the unclipped `total` behind a
+// capped `rows`. Same collections and filters as getBdSummary, so the count on a card and
+// the length of this list cannot disagree.
+export const getBdSummaryRows = async (metric, params = {}) => (
+  await api.get("/dashboard/bd-summary/rows", { params: { ...params, metric } })
+).data;
 export const getLeadSources = async () => (await api.get("/lead-sources")).data;
 
 export const getLeadRemarks = async (leadId) => (await api.get(`/leads/${leadId}/remarks`)).data;

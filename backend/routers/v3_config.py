@@ -42,7 +42,7 @@ async def v3_get_verticals(_: V3UserOut = Depends(v3_current_user)):
 
 
 @router.post("/verticals", response_model=V3VerticalOut)
-async def v3_add_vertical(payload: V3VerticalCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_add_vertical(payload: V3VerticalCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     doc = {
         "id": str(uuid.uuid4()),
         "name": payload.name,
@@ -54,7 +54,7 @@ async def v3_add_vertical(payload: V3VerticalCreate, _: V3UserOut = Depends(v3_r
 
 
 @router.delete("/verticals/{vertical_id}")
-async def v3_delete_vertical(vertical_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def v3_delete_vertical(vertical_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     """Remove a service type.
 
     Refused while a branch still carries it. A branch's `vertical` holds the type's *name*,

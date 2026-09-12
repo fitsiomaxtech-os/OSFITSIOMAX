@@ -1,23 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   Building2,
   CalendarCheck,
   Clock,
-  Database,
-  Download,
-  Edit3,
   FileSpreadsheet,
   Globe,
   Headphones,
   IndianRupee,
+  LayoutDashboard,
   Megaphone,
   Percent,
-  Plus,
   RefreshCw,
-  Search,
+  Settings,
   Sparkles,
-  Trash2,
   TrendingDown,
   TrendingUp,
   UserPlus,
@@ -29,70 +25,65 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import {
-  assignLeadBranch,
-  createBranch,
   createSheetConnection,
-  deleteBranch,
   getBdSummary,
+  getBdSummaryRows,
   getBranches,
   getLeadSources,
-  getLeads,
   getSheetConnections,
-  qualifyLead,
   saveSheetMapping,
   syncSheetConnection,
-  updateBranch,
 } from "@/lib/api";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
-// The Marketing and Sales master views, mounted as two tabs below. Imported statically,
-// the way OperationsBoard already mounts this same board: this file is itself behind a
-// lazy() in CRMPage, so webpack lifts what the two chunks share rather than copying
-// PreSalesCRM into each.
+// The Marketing and Sales master views and the Branch Control panel, mounted as three
+// tabs below. Imported statically, the way OperationsBoard already mounts these same two
+// boards: this file is itself behind a lazy() in CRMPage, so webpack lifts what the
+// chunks share rather than copying either board into each.
 import { PreSalesCRM } from "@/components/PreSalesCRM";
+import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
 
 // Marketing View and Sales View are the same two boards Super Admin reaches as
-// "Marketing Master View" and "Sales Master View" — the same PreSalesCRM mount, under the
+// "Marketing Master View" and "Sales Master View" -- the same PreSalesCRM mount, under the
 // shorter names, because here they are two tabs on a strip and not two entries on a
-// top-level nav. They sit last: everything to their left is this desk's own work, and
-// these two are a read of what the other two desks did with it.
+// top-level nav. They sit second and third, right after the figures: the desk reads the
+// day on Dashboard, then reads what the other two desks did with it.
+//
+// Branch Control is BranchManagementBoard in full -- the same panel Operations opens as a
+// "Branch Manager" dialog, mounted as a tab instead of a popup so it has the room its
+// four sub-tabs need. It replaced a "Branches" tab that held a create form and a card
+// list, both of which that panel does better.
+//
+// Lead Master is gone. It was a second leads table on a board whose Dashboard cards now
+// open the same rows, and whose Sales View works them properly.
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
-  { key: "branches", label: "Branches", icon: Building2 },
-  { key: "lead_master", label: "Lead Master", icon: Database },
-  { key: "sheets", label: "Google Sheet Connection", icon: FileSpreadsheet },
-  { key: "lead_source", label: "Lead Source", icon: Globe },
   { key: "marketing_view", label: "Marketing View", icon: Megaphone },
   { key: "sales_view", label: "Sales View", icon: Headphones },
+  { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
+  { key: "settings", label: "Settings", icon: Settings },
 ];
+
+// Settings is a second name for this pair of views rather than a view of its own -- the
+// same shape CRMPage's own SETTINGS_SUB_VIEWS uses for Super Admin. `activeTab` holds one
+// of these directly when Settings is open, so nothing has to track both a tab and a
+// sub-tab and keep the two agreeing.
+//
+// Google Sheet Connection and Lead Source were two entries on the main strip. Neither is
+// a place this desk works: one is a connection to configure, the other a read-only table
+// of where leads came from. Behind Settings they stop competing with Dashboard and Sales
+// View for the eye.
+const SETTINGS_SUB_VIEWS = ["sheets", "lead_source"];
+const SETTINGS_SUB_TABS = [
+  { key: "sheets", label: "Google Sheet Connection", icon: FileSpreadsheet },
+  { key: "lead_source", label: "Lead Source", icon: Globe },
+];
+const isTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.includes(view) : view === key);
 
 const PIPELINE_STAGES = [
   "New Leads",
   "Follow Up",
   "Appointment",
 ];
-
-const STAGE_COLOR = {
-  "New Leads": "bg-blue-50 text-blue-700 border-blue-200",
-  "Follow Up": "bg-amber-50 text-amber-700 border-amber-200",
-  "Appointment": "bg-emerald-50 text-emerald-700 border-emerald-200",
-};
-
-const STAGE_HEX = {
-  "New Leads": "#2563eb",
-  "Follow Up": "#f59e0b",
-  "Appointment": "#059669",
-};
-
-const defaultBranchForm = {
-  branch_name: "",
-  address: "",
-  admin_name: "",
-  admin_email: "",
-  admin_password: "",
-  admin_phone: "",
-  vertical: "offline_physiotherapy",
-};
 
 const defaultSheetForm = {
   connection_name: "",
@@ -124,79 +115,45 @@ function formatMoney(v) {
   return `Rs.${n.toLocaleString("en-IN")}`;
 }
 
-function csvEscape(value) {
-  const s = String(value ?? "");
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
-function downloadCsv(filename, rows) {
-  const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 /**
- * @param currentUser  the signed-in Business Development Executive. Only the Marketing
- *                     View and Sales View tabs read it — PreSalesCRM schedules and stamps
- *                     activity against whoever is looking, and without this those two
- *                     tabs would be working leads on behalf of nobody.
+ * @param currentUser  the signed-in Business Development Executive. Read by the three
+ *                     tabs that mount another desk's board -- Marketing View, Sales View
+ *                     and Branch Control. PreSalesCRM schedules and stamps activity
+ *                     against whoever is looking, and BranchManagementBoard's Branch
+ *                     Control sub-tab acts as them; without this those tabs would be
+ *                     working on behalf of nobody.
  */
 export const BusinessLeadsDashboard = ({ currentUser = null }) => {
+  // Holds a main tab key, or -- while Settings is open -- one of SETTINGS_SUB_VIEWS.
   const [activeTab, setActiveTab] = useState("dashboard");
   const [loading, setLoading] = useState(false);
 
   const [summary, setSummary] = useState(null);
   const [branches, setBranches] = useState([]);
-  const [leads, setLeads] = useState([]);
   const [sheetConnections, setSheetConnections] = useState([]);
   const [leadSources, setLeadSources] = useState([]);
   const [showCreateLead, setShowCreateLead] = useState(false);
-
-  const [branchForm, setBranchForm] = useState(defaultBranchForm);
-  const [showBranchForm, setShowBranchForm] = useState(false);
-  const [editingBranch, setEditingBranch] = useState(null);
-  const [deletingBranchId, setDeletingBranchId] = useState(null);
-
-  // Shared filter toolbar — drives both the Dashboard KPIs/charts and the Lead Master table.
-  const [leadStageFilter, setLeadStageFilter] = useState("");
-  const [leadBranchFilter, setLeadBranchFilter] = useState("");
-  const [leadSourceFilter, setLeadSourceFilter] = useState("");
-  const [leadDateFrom, setLeadDateFrom] = useState("");
-  const [leadDateTo, setLeadDateTo] = useState("");
-  const [leadSearch, setLeadSearch] = useState("");
-  const [assignBranchSelection, setAssignBranchSelection] = useState({});
 
   const [sheetForm, setSheetForm] = useState(defaultSheetForm);
   const [selectedConnectionId, setSelectedConnectionId] = useState("");
   const [mappingFields, setMappingFields] = useState(defaultMapping);
   const [syncPayload, setSyncPayload] = useState(defaultSyncPayload);
 
-  const filterParams = useMemo(() => {
-    const params = {};
-    if (leadStageFilter) params.stage = leadStageFilter;
-    if (leadBranchFilter) params.branch_id = leadBranchFilter;
-    if (leadSourceFilter) params.source_tab = leadSourceFilter;
-    if (leadDateFrom) params.start_date = `${leadDateFrom}T00:00:00`;
-    if (leadDateTo) params.end_date = `${leadDateTo}T23:59:59`;
-    return params;
-  }, [leadStageFilter, leadBranchFilter, leadSourceFilter, leadDateFrom, leadDateTo]);
+  // Which summary card is open, and the rows behind it. One card at a time: these lists
+  // answer "which ones are they" about a figure just clicked, and two of them open at
+  // once would be a report rather than an answer.
+  const [openMetric, setOpenMetric] = useState(null);
+  const [drill, setDrill] = useState(null);
+  const [drillLoading, setDrillLoading] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getBdSummary(filterParams);
+      const data = await getBdSummary();
       setSummary(data);
     } catch (e) { console.warn("[BD load failed]", e?.message || e); }
     setLoading(false);
-  }, [filterParams]);
+  }, []);
 
   const loadBranches = useCallback(async () => {
     try {
@@ -204,15 +161,6 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
       setBranches(data);
     } catch (e) { console.warn("[BD load failed]", e?.message || e); }
   }, []);
-
-  const loadLeads = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getLeads(filterParams);
-      setLeads(data);
-    } catch (e) { console.warn("[BD load failed]", e?.message || e); }
-    setLoading(false);
-  }, [filterParams]);
 
   const loadSheets = useCallback(async () => {
     try {
@@ -228,154 +176,51 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
     } catch (e) { console.warn("[BD load failed]", e?.message || e); }
   }, []);
 
+  // The rows behind a card. Asked for on the click rather than held for all nine: eight of
+  // the nine are never opened in a given sitting, and Total Leads alone is thousands of
+  // rows this board would otherwise fetch to show a number it already has.
+  const openCard = useCallback(async (metricKey) => {
+    if (openMetric === metricKey) { setOpenMetric(null); setDrill(null); return; }
+    setOpenMetric(metricKey);
+    setDrill(null);
+    setDrillLoading(true);
+    try {
+      setDrill(await getBdSummaryRows(metricKey));
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not open that list");
+      setOpenMetric(null);
+    }
+    setDrillLoading(false);
+  }, [openMetric]);
+
   useEffect(() => {
     loadDashboard();
     loadBranches();
   }, [loadDashboard, loadBranches]);
 
   useEffect(() => {
-    if (activeTab === "lead_master") loadLeads();
     if (activeTab === "sheets") loadSheets();
     if (activeTab === "lead_source") loadSources();
-  }, [activeTab, loadLeads, loadSheets, loadSources]);
+  }, [activeTab, loadSheets, loadSources]);
 
   const refreshAll = async () => {
-    await Promise.all([loadDashboard(), loadBranches(), loadLeads(), loadSheets(), loadSources()]);
+    await Promise.all([loadDashboard(), loadBranches(), loadSheets(), loadSources()]);
+    // An open list is refreshed along with everything else, or Refresh would leave the
+    // rows on screen older than the card above them.
+    if (openMetric) {
+      try { setDrill(await getBdSummaryRows(openMetric)); } catch { /* the toast on open already said so */ }
+    }
     toast.success("Data refreshed");
-  };
-
-  const exportLeadsCsv = async () => {
-    try {
-      const data = await getLeads(filterParams);
-      const rows = [
-        ["Name", "Phone", "Email", "Source", "Stage", "Branch", "Created"],
-        ...data.map((l) => [
-          l.name,
-          l.phone,
-          l.email,
-          l.source_tab || l.source_type,
-          l.stage,
-          branches.find((b) => b.id === l.branch_id)?.branch_name || "Unassigned",
-          l.created_at?.slice(0, 10),
-        ]),
-      ];
-      downloadCsv(`bd-leads-${new Date().toISOString().slice(0, 10)}.csv`, rows);
-      toast.success(`Exported ${data.length} leads`);
-    } catch (err) {
-      toast.error("Export failed");
-    }
-  };
-
-  const filteredLeads = useMemo(() => {
-    if (!leadSearch.trim()) return leads;
-    const q = leadSearch.toLowerCase();
-    return leads.filter(
-      (l) =>
-        l.name?.toLowerCase().includes(q) ||
-        l.phone?.toLowerCase().includes(q) ||
-        l.email?.toLowerCase().includes(q),
-    );
-  }, [leads, leadSearch]);
-
-  const createBranchNow = async (e) => {
-    e.preventDefault();
-    if (!branchForm.branch_name.trim() || !branchForm.admin_email.trim()) {
-      toast.error("Branch name and admin email required");
-      return;
-    }
-    try {
-      await createBranch(branchForm);
-      setBranchForm(defaultBranchForm);
-      setShowBranchForm(false);
-      toast.success("Branch created");
-      await loadBranches();
-      await loadDashboard();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Branch creation failed");
-    }
-  };
-
-  const openEditBranch = (branch) => {
-    setEditingBranch(branch);
-    setBranchForm({
-      branch_name: branch.branch_name || "",
-      address: branch.address || "",
-      admin_name: branch.admin_name || "",
-      admin_email: branch.admin_email || "",
-      admin_password: "",
-      admin_phone: branch.admin_phone || "",
-      vertical: branch.vertical || "offline_physiotherapy",
-    });
-  };
-
-  const updateBranchNow = async (e) => {
-    e.preventDefault();
-    if (!editingBranch) return;
-    try {
-      await updateBranch(editingBranch.id, {
-        branch_name: branchForm.branch_name,
-        address: branchForm.address,
-        admin_name: branchForm.admin_name,
-        admin_phone: branchForm.admin_phone,
-        vertical: branchForm.vertical,
-      });
-      setEditingBranch(null);
-      setBranchForm(defaultBranchForm);
-      toast.success("Branch updated");
-      await loadBranches();
-      await loadDashboard();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Update failed");
-    }
-  };
-
-  const deleteBranchNow = async (branchId) => {
-    try {
-      await deleteBranch(branchId);
-      setDeletingBranchId(null);
-      toast.success("Branch deleted");
-      await loadBranches();
-      await loadDashboard();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Delete failed");
-    }
-  };
-
-  const qualifyNow = async (leadId) => {
-    try {
-      await qualifyLead(leadId);
-      toast.success("Lead qualified");
-      await loadLeads();
-      await loadDashboard();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Qualify failed");
-    }
-  };
-
-  const assignBranchNow = async (leadId) => {
-    const branchId = assignBranchSelection[leadId];
-    if (!branchId) {
-      toast.error("Select branch first");
-      return;
-    }
-    try {
-      await assignLeadBranch(leadId, { branch_id: branchId });
-      toast.success("Assigned to branch");
-      await loadLeads();
-      await loadDashboard();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Assign failed");
-    }
   };
 
   const createConnectionNow = async (e) => {
     e.preventDefault();
-    if (!sheetForm.connection_name.trim()) {
-      toast.error("Connection name required");
+    if (!sheetForm.connection_name.trim() || !sheetForm.spreadsheet_id.trim()) {
+      toast.error("Connection name and spreadsheet ID required");
       return;
     }
     try {
-      await createSheetConnection(sheetForm);
+      await createSheetConnection({ ...sheetForm, sync_interval_minutes: Number(sheetForm.sync_interval_minutes) || 30 });
       setSheetForm(defaultSheetForm);
       toast.success("Connection created");
       await loadSheets();
@@ -407,7 +252,6 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
       const parsed = JSON.parse(syncPayload);
       const result = await syncSheetConnection(selectedConnectionId, parsed);
       toast.success(`Synced: ${result.imported} imported, ${result.skipped} skipped`);
-      await loadLeads();
       await loadDashboard();
       await loadSources();
     } catch (err) {
@@ -417,20 +261,27 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
 
   return (
     <div className="space-y-5" data-testid="bd-dashboard-root">
-      {/* Tab Navigation */}
-      <div className="flex items-center gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm" data-testid="bd-tab-bar">
+      {/* Top navigation, in Branch Admin's shape: underlines on a rule rather than filled
+          pills in a floating white card. The pills read as five buttons to press; a desk
+          this size wants a nav that says where it is and otherwise gets out of the way.
+
+          Always on screen, unlike Branch Admin's own copy (`hidden md:flex`) -- that board
+          has a fixed bottom nav for phones to fall back on and this one has none, so
+          hiding the strip would leave a phone with no way between tabs. */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200" data-testid="bd-tab-bar">
         {TABS.map((tab) => {
           const Icon = tab.icon;
-          const isActive = activeTab === tab.key;
+          const isActive = isTabActive(activeTab, tab.key);
           return (
             <button
               key={tab.key}
               type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${
+              // Settings has no view of its own -- it opens on the first of its two.
+              onClick={() => setActiveTab(tab.key === "settings" ? SETTINGS_SUB_VIEWS[0] : tab.key)}
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
                 isActive
-                  ? "bg-gradient-to-r from-sky-600 to-blue-600 text-white shadow-md"
-                  : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                  ? "border-sky-500 text-sky-700"
+                  : "border-transparent text-slate-400 hover:text-slate-600"
               }`}
               data-testid={`bd-tab-${tab.key}`}
             >
@@ -439,15 +290,12 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
             </button>
           );
         })}
-        <div className="ml-auto flex flex-shrink-0 items-center gap-1.5">
+        <div className="ml-auto flex flex-shrink-0 items-center gap-1.5 pb-1.5 pl-2">
           <Button size="sm" onClick={() => setShowCreateLead(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="bd-quick-add-lead-btn">
             <UserPlus className="mr-1 h-4 w-4" /> Add Lead
           </Button>
           {/* The same Refresh as Branch Admin > Branch Leads: grey, icon-only, square,
-              with the word on title/aria-label. It was a ghost button that read as
-              nothing at all beside Add Lead; refreshing is the least interesting control
-              on the row and is coloured accordingly, but it still has to look like a
-              button you can press. */}
+              with the word on title/aria-label. */}
           <Button
             onClick={refreshAll}
             disabled={loading}
@@ -467,86 +315,11 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
           summary={summary}
           loading={loading}
           branches={branches}
-          leadSources={leadSources}
-          leadStageFilter={leadStageFilter}
-          setLeadStageFilter={setLeadStageFilter}
-          leadBranchFilter={leadBranchFilter}
-          setLeadBranchFilter={setLeadBranchFilter}
-          leadSourceFilter={leadSourceFilter}
-          setLeadSourceFilter={setLeadSourceFilter}
-          leadDateFrom={leadDateFrom}
-          setLeadDateFrom={setLeadDateFrom}
-          leadDateTo={leadDateTo}
-          setLeadDateTo={setLeadDateTo}
-          onRefresh={refreshAll}
+          openMetric={openMetric}
+          onOpenCard={openCard}
+          drill={drill}
+          drillLoading={drillLoading}
         />
-      )}
-
-      {/* Branches Tab */}
-      {activeTab === "branches" && (
-        <BranchesTab
-          branches={branches}
-          branchForm={branchForm}
-          setBranchForm={setBranchForm}
-          showBranchForm={showBranchForm}
-          setShowBranchForm={setShowBranchForm}
-          createBranchNow={createBranchNow}
-          editingBranch={editingBranch}
-          openEditBranch={openEditBranch}
-          setEditingBranch={setEditingBranch}
-          updateBranchNow={updateBranchNow}
-          deletingBranchId={deletingBranchId}
-          setDeletingBranchId={setDeletingBranchId}
-          deleteBranchNow={deleteBranchNow}
-        />
-      )}
-
-      {/* Lead Master Tab */}
-      {activeTab === "lead_master" && (
-        <LeadMasterTab
-          leads={filteredLeads}
-          branches={branches}
-          leadStageFilter={leadStageFilter}
-          setLeadStageFilter={setLeadStageFilter}
-          leadBranchFilter={leadBranchFilter}
-          setLeadBranchFilter={setLeadBranchFilter}
-          leadDateFrom={leadDateFrom}
-          setLeadDateFrom={setLeadDateFrom}
-          leadDateTo={leadDateTo}
-          setLeadDateTo={setLeadDateTo}
-          leadSearch={leadSearch}
-          setLeadSearch={setLeadSearch}
-          assignBranchSelection={assignBranchSelection}
-          setAssignBranchSelection={setAssignBranchSelection}
-          qualifyNow={qualifyNow}
-          assignBranchNow={assignBranchNow}
-          loadLeads={loadLeads}
-          onExportCsv={exportLeadsCsv}
-          loading={loading}
-        />
-      )}
-
-      {/* Google Sheet Connection Tab */}
-      {activeTab === "sheets" && (
-        <SheetsTab
-          sheetConnections={sheetConnections}
-          sheetForm={sheetForm}
-          setSheetForm={setSheetForm}
-          createConnectionNow={createConnectionNow}
-          selectedConnectionId={selectedConnectionId}
-          setSelectedConnectionId={setSelectedConnectionId}
-          mappingFields={mappingFields}
-          setMappingFields={setMappingFields}
-          saveMappingNow={saveMappingNow}
-          syncPayload={syncPayload}
-          setSyncPayload={setSyncPayload}
-          runSyncNow={runSyncNow}
-        />
-      )}
-
-      {/* Lead Source Tab */}
-      {activeTab === "lead_source" && (
-        <LeadSourceTab leadSources={leadSources} loading={loading} />
       )}
 
       {/* Marketing View / Sales View — the same two PreSalesCRM mounts Super Admin gets.
@@ -566,13 +339,72 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
         <PreSalesCRM role="sales_head" currentUser={currentUser} embedded />
       )}
 
+      {/* Branch Control — the Branch Manager panel in full, as a tab rather than the
+          dialog Operations opens it in. No `lockTab`, which is the whole point of it being
+          here: that flag drops the sub-tab row, and Overview, Analytics and Branch Control
+          are exactly what this desk did not have before.
+
+          It opens on MANAGER, the tab that lists the branches and creates them -- the
+          thing the old Branches tab did, so the board opens where it used to.
+
+          `detailReadOnly` is the one thing held back. Drilling into a branch reaches HR's
+          account actions (activate, deactivate, permanently delete a user) and the
+          payment/UPI settings, and neither is branch control -- see the note on the
+          widened guards in backend/routers/v3_branch_mgmt.py. */}
+      {activeTab === "branch_control" && (
+        <BranchManagementBoard actingUser={currentUser} initialTab="creation" detailReadOnly />
+      )}
+
+      {/* Settings — Google Sheet Connection and Lead Source, as a sub-tab pair. */}
+      {SETTINGS_SUB_VIEWS.includes(activeTab) && (
+        <div className="space-y-4" data-testid="bd-settings">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-settings-subtabs">
+            {SETTINGS_SUB_TABS.map((t) => {
+              const Icon = t.icon;
+              const active = activeTab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setActiveTab(t.key)}
+                  className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
+                  data-testid={`bd-settings-subtab-${t.key}`}
+                >
+                  <Icon className="h-4 w-4" />{t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {activeTab === "sheets" && (
+            <SheetsTab
+              sheetConnections={sheetConnections}
+              sheetForm={sheetForm}
+              setSheetForm={setSheetForm}
+              createConnectionNow={createConnectionNow}
+              selectedConnectionId={selectedConnectionId}
+              setSelectedConnectionId={setSelectedConnectionId}
+              mappingFields={mappingFields}
+              setMappingFields={setMappingFields}
+              saveMappingNow={saveMappingNow}
+              syncPayload={syncPayload}
+              setSyncPayload={setSyncPayload}
+              runSyncNow={runSyncNow}
+            />
+          )}
+
+          {activeTab === "lead_source" && (
+            <LeadSourceTab leadSources={leadSources} loading={loading} />
+          )}
+        </div>
+      )}
+
       {showCreateLead && (
         <CreateLeadModal
           isSuperAdmin
           onClose={() => setShowCreateLead(false)}
           onSaved={() => {
             loadDashboard();
-            if (activeTab === "lead_master") loadLeads();
             loadSources();
           }}
         />
@@ -589,28 +421,106 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
 
 /* ─── Sparkline ─── */
 /**
- * The trend line inside a summary card.
+ * A cubic through the points, as a path string.
  *
- * Drawn in the card's own ink rather than in white: these cards are white now (see
- * KpiCard), and a white line on a white card is a line nobody can see. The colour a
- * caller passes is used for the stroke and, at low opacity, for the fill under it —
- * one hue, so the line reads as one mark and not as a chart with a legend.
+ * The same curve OverAll Growth draws (DashboardBoard.jsx's own `smoothPath`), carried
+ * here as its own copy the way this codebase already carries `isOnlineVertical` in four
+ * files. Keep the two in step: the tension is what makes the line read as the same mark
+ * on both screens, and a different one here would be a second house style.
  */
-function Sparkline({ data, color = "#0284c7" }) {
-  if (!data || data.length < 2) return null;
+const smoothPath = (pts) => {
+  if (!pts.length) return "";
+  if (pts.length < 3) return pts.map((p, i) => `${i ? "L" : "M"} ${p[0]},${p[1]}`).join(" ");
+  const t = 0.2; // Low tension: enough to read as a curve, not enough to loop or overshoot far.
+  let d = `M ${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < pts.length - 1; i += 1) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    d += ` C ${p1[0] + (p2[0] - p0[0]) * t},${p1[1] + (p2[1] - p0[1]) * t}`
+      + ` ${p2[0] - (p3[0] - p1[0]) * t},${p2[1] - (p3[1] - p1[1]) * t}`
+      + ` ${p2[0]},${p2[1]}`;
+  }
+  return d;
+};
+
+// OverAll Growth's first ink and its baseline grey — BRANCH_INKS[0] and the hairline
+// under the plot, both from DashboardBoard.jsx.
+const TREND_INK = "#18181b";
+const TREND_BASELINE = "#e4e4e7";
+
+/**
+ * The trend line inside a summary card, in OverAll Growth's style.
+ *
+ * It was a blue line over a blue filled area. That reads as a chart in its own right on a
+ * card whose subject is one number, and it was the only blue-on-blue mark on a board
+ * whose cards are otherwise white and slate. This is the treatment the OS's own growth
+ * chart uses: a near-black cubic, a hairline baseline under it, a dot at every reading,
+ * and no fill at all.
+ *
+ * The dots are the point of it, not decoration. The curve between two readings is
+ * interpolation; the dots are the only places on the line where the ink is a measurement,
+ * which is exactly how OverAll Growth puts it.
+ */
+function Sparkline({ data, color = TREND_INK }) {
+  // Measured rather than drawn in a stretched viewBox. A viewBox with
+  // preserveAspectRatio="none" is the cheap way to fill a card of unknown width, but it
+  // scales x and y by different factors, and under that a round dot comes out an oval --
+  // on a card this wide, two and a bit times wider than it is tall. Drawing in the box's
+  // own pixels keeps the markers round, which is the half of this style that carries the
+  // meaning.
+  const ref = useRef(null);
+  const [w, setW] = useState(160);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const apply = () => setW(Math.max(40, Math.round(el.clientWidth)));
+    apply();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", apply);
+      return () => window.removeEventListener("resize", apply);
+    }
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const h = 26;
+  const r = 2;
+  // Inset by the marker's radius at all four edges, so a dot at the highest or lowest
+  // reading sits inside the box instead of half outside it.
+  const plotW = Math.max(1, w - r * 2);
+  const plotH = h - r * 2;
+
+  if (!data || data.length < 2) return <span ref={ref} className="block h-6" />;
+
   const max = Math.max(...data, 1);
   const min = Math.min(...data, 0);
   const range = Math.max(max - min, 1);
-  const w = 100;
-  const h = 26;
-  const step = w / (data.length - 1);
-  const points = data.map((v, i) => `${i * step},${h - ((v - min) / range) * h}`).join(" ");
-  const areaPoints = `0,${h} ${points} ${w},${h}`;
+  const step = plotW / (data.length - 1);
+  const pts = data.map((v, i) => [r + i * step, r + plotH - ((v - min) / range) * plotH]);
+
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-6 w-full" preserveAspectRatio="none" aria-hidden="true">
-      <polyline points={areaPoints} fill={color} fillOpacity="0.14" stroke="none" />
-      <polyline points={points} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <span ref={ref} className="block">
+      <svg width={w} height={h} className="block" aria-hidden="true">
+        <line x1="0" x2={w} y1={h - r} y2={h - r} stroke={TREND_BASELINE} strokeWidth="1" />
+        <path
+          d={smoothPath(pts)}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {/* Every reading marked. The curve between them is interpolation; these are the
+            only places on the line where the ink is a measurement. */}
+        {pts.map(([cx, cy], i) => (
+          <circle key={i} cx={cx} cy={cy} r={r} fill={color} />
+        ))}
+      </svg>
+    </span>
   );
 }
 
@@ -619,57 +529,201 @@ function Sparkline({ data, color = "#0284c7" }) {
  * A figure on this board, in the shape Super Admin > HR Admin > Dashboard uses: white,
  * a two-pixel slate rule, the label small and capitalised above a large dark number.
  *
- * It was nine cards in nine different gradients — sky, cyan, amber, violet, emerald,
- * teal, indigo, fuchsia, orange — which made the row read as nine unrelated things and
- * put the colour where the number should be. The OS already had one answer for this row
- * and it is HR's, so this is that one rather than a tenth invention.
+ * A card with an `onClick` renders as a button and opens the rows behind it; one without
+ * renders as plain text, so a card that leads nowhere never invites a click that does
+ * nothing. That is HR's rule for these tiles and it is the reason the blank card at the
+ * end of the second group is inert rather than a dead button.
  *
- * `trend` and `sparkline` are what HR's tiles do not carry, and they are re-inked to
- * suit: the pill is tinted by direction (a rise is green, a fall is red) where before it
- * leaned on the gradient behind it for contrast, and the line is drawn in sky.
+ * `trend` and `sparkline` are what HR's tiles do not carry. The pill is tinted by
+ * direction -- green for a rise, red for a fall -- because on a white card the direction
+ * has to come from the pill's own colour rather than from an arrow on a translucent chip.
  */
-function KpiCard({ label, value, icon: Icon, trend, sparkline, testid }) {
-  // Green up, red down, slate flat — the direction is the whole point of the pill, and on
-  // a white card it has to come from the pill's own colour. On the gradients it came from
-  // an arrow on a translucent white chip, which said "changed" without saying which way.
+function KpiCard({ label, value, icon: Icon, trend, sparkline, onClick, open, testid }) {
+  const Tag = onClick ? "button" : "div";
   const trendTone = trend?.direction === "up"
     ? "bg-emerald-50 text-emerald-700"
     : trend?.direction === "down"
       ? "bg-rose-50 text-rose-700"
       : "bg-slate-100 text-slate-500";
   return (
-    <div className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5" data-testid={testid}>
-      <span className="flex items-center gap-1.5 text-slate-500">
+    <Tag
+      {...(onClick ? { type: "button", onClick } : {})}
+      className={`w-full rounded-xl border-2 bg-white px-4 py-3.5 text-left transition ${
+        open
+          ? "border-sky-500 shadow-sm"
+          : `border-slate-200 ${onClick ? "cursor-pointer hover:border-sky-300 hover:shadow-sm" : ""}`
+      }`}
+      {...(onClick ? { "aria-expanded": !!open } : {})}
+      data-testid={testid}
+    >
+      <span className={`flex items-center gap-1.5 ${open ? "text-sky-700" : "text-slate-500"}`}>
         {Icon && <Icon className="h-4 w-4 shrink-0" />}
         <span className="truncate text-[11px] font-bold uppercase tracking-wider">{label}</span>
       </span>
       <span className="mt-1 block text-3xl font-extrabold text-slate-800">{value}</span>
       {trend && (
-        <div className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${trendTone}`}>
+        <span className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${trendTone}`}>
           {trend.direction === "up" && <TrendingUp className="h-3 w-3" />}
           {trend.direction === "down" && <TrendingDown className="h-3 w-3" />}
           {trend.text}
-        </div>
+        </span>
       )}
       {sparkline && (
-        <div className="mt-1.5">
+        <span className="mt-1.5 block">
           <Sparkline data={sparkline} />
-        </div>
+        </span>
       )}
-    </div>
+    </Tag>
+  );
+}
+
+/* ─── Drill-down list ─── */
+
+// What each kind of row is worth showing, in HR Admin's column order: an index, the thing
+// itself with its secondary line under it, then the facts that name it, then when it
+// arrived. One definition per kind drives both the table and the phone cards below, so
+// the two can never list different facts about the same row.
+const DRILL_COLUMNS = {
+  lead: [
+    { key: "name", label: "Lead", primary: true, value: (r) => r.name || "—", sub: (r) => r.phone || r.email || "" },
+    { key: "source", label: "Source", value: (r) => r.source_tab || r.source_type || "—" },
+    { key: "stage", label: "Stage", value: (r) => r.stage || "—" },
+    { key: "branch", label: "Branch", value: (r, ctx) => ctx.branchName(r.branch_id) },
+    { key: "created", label: "Created", value: (r) => (r.created_at || "").slice(0, 10) || "—" },
+  ],
+  appointment: [
+    { key: "lead_name", label: "Patient", primary: true, value: (r) => r.lead_name || "—" },
+    { key: "doctor_name", label: "Consultant", value: (r) => r.doctor_name || "—" },
+    { key: "slot_time", label: "Slot", value: (r) => r.slot_time || "—" },
+    { key: "status", label: "Status", value: (r) => r.status || "—" },
+    { key: "branch", label: "Branch", value: (r, ctx) => ctx.branchName(r.branch_id) },
+    { key: "created", label: "Booked", value: (r) => (r.created_at || "").slice(0, 10) || "—" },
+  ],
+  branch: [
+    { key: "branch_name", label: "Branch", primary: true, value: (r) => r.branch_name || "—", sub: (r) => r.address || "" },
+    { key: "vertical", label: "Service Type", value: (r) => r.vertical || "—" },
+    { key: "admin_name", label: "Branch Admin", value: (r) => r.admin_name || "Not assigned yet" },
+    { key: "admin_contact", label: "Contact", value: (r) => r.admin_email || r.admin_phone || "—" },
+    { key: "created", label: "Opened", value: (r) => (r.created_at || "").slice(0, 10) || "—" },
+  ],
+  connection: [
+    { key: "connection_name", label: "Connection", primary: true, value: (r) => r.connection_name || "—" },
+    { key: "spreadsheet_id", label: "Spreadsheet ID", value: (r) => r.spreadsheet_id || "—" },
+    { key: "sync_interval_minutes", label: "Every", value: (r) => (r.sync_interval_minutes ? `${r.sync_interval_minutes} min` : "—") },
+    { key: "last_synced_at", label: "Last Synced", value: (r) => (r.last_synced_at || "").slice(0, 16).replace("T", " ") || "Never" },
+    { key: "created", label: "Added", value: (r) => (r.created_at || "").slice(0, 10) || "—" },
+  ],
+};
+
+/**
+ * The rows behind a summary card: a table from tablet up, the same rows as cards on a
+ * phone. The Human Resource Master View's list, which is the pattern the OS uses wherever
+ * a list has more than two facts per row -- same slate header, same row rule, same
+ * hover, same centred line where there is nothing to show.
+ *
+ * `total` is the count the server holds and `rows` is what it sent, which is capped. The
+ * two differing is the one thing a list like this must admit rather than just stopping.
+ */
+function DrillList({ title, drill, loading, branches, onClose }) {
+  const branchName = useCallback(
+    (id) => (id ? (branches.find((b) => b.id === id)?.branch_name || "Unknown") : "Unassigned"),
+    [branches],
+  );
+  const ctx = { branchName };
+  const columns = drill ? (DRILL_COLUMNS[drill.kind] || []) : [];
+  // No column set for the kind that came back means a metric was added to the endpoint
+  // without one here. Showing nothing beats rendering rows with no headings, and beats
+  // the crash the phone branch below would take reading a first column that isn't there.
+  const rows = columns.length ? (drill?.rows || []) : [];
+  const clipped = drill ? drill.total - rows.length : 0;
+
+  return (
+    <Card data-testid="bd-drill-card">
+      <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
+        <div className="min-w-0">
+          <CardTitle className="truncate text-base" data-testid="bd-drill-title">{title}</CardTitle>
+          {drill && (
+            <p className="mt-0.5 text-xs text-slate-500" data-testid="bd-drill-count">
+              {drill.total.toLocaleString("en-IN")} in total
+              {clipped > 0 && ` · showing the ${rows.length.toLocaleString("en-IN")} most recent`}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Close list"
+          aria-label="Close list"
+          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          data-testid="bd-drill-close"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </CardHeader>
+      <CardContent className="p-0">
+        {loading ? (
+          <p className="px-3 py-8 text-center text-sm text-slate-400" data-testid="bd-drill-loading">Loading...</p>
+        ) : rows.length === 0 ? (
+          <p className="px-3 py-8 text-center text-sm text-slate-400" data-testid="bd-drill-empty">Nothing to show.</p>
+        ) : (
+          <>
+            {/* Phone: the same facts stacked, the primary column as the heading. */}
+            <div className="space-y-2 p-3 md:hidden" data-testid="bd-drill-list-mobile">
+              {rows.map((r, i) => {
+                const [head, ...rest] = columns;
+                return (
+                  <div key={r.id || i} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`bd-drill-card-${r.id || i}`}>
+                    <p className="truncate text-sm font-bold text-slate-800">{head.value(r, ctx)}</p>
+                    {head.sub?.(r) && <p className="truncate text-xs text-slate-500">{head.sub(r)}</p>}
+                    <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                      {rest.map((c) => (
+                        <div key={c.key} className="min-w-0">
+                          <dt className="truncate text-[10px] font-bold uppercase tracking-wider text-slate-400">{c.label}</dt>
+                          <dd className="truncate text-xs text-slate-600">{c.value(r, ctx)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden overflow-auto md:block">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">S.No</th>
+                    {columns.map((c) => <th key={c.key} className="px-3 py-2">{c.label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={r.id || i} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`bd-drill-row-${r.id || i}`}>
+                      <td className="px-3 py-2 text-slate-500">{i + 1}</td>
+                      {columns.map((c) => (
+                        <td key={c.key} className="px-3 py-2 text-slate-600">
+                          {c.primary ? (
+                            <div className="min-w-0">
+                              <p className="font-medium text-slate-800">{c.value(r, ctx)}</p>
+                              {c.sub?.(r) && <p className="text-xs text-slate-400">{c.sub(r)}</p>}
+                            </div>
+                          ) : c.value(r, ctx)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
 /* ─── Dashboard Tab ─── */
-function DashboardTab({
-  summary, loading, branches, leadSources,
-  leadStageFilter, setLeadStageFilter,
-  leadBranchFilter, setLeadBranchFilter,
-  leadSourceFilter, setLeadSourceFilter,
-  leadDateFrom, setLeadDateFrom,
-  leadDateTo, setLeadDateTo,
-  onRefresh,
-}) {
+function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, drill, drillLoading }) {
   if (!summary && loading) {
     return <p className="py-8 text-center text-sm text-slate-400" data-testid="bd-dash-loading">Loading dashboard...</p>;
   }
@@ -696,363 +750,86 @@ function DashboardTab({
 
   const followUp = summary.stage_counts?.["Follow Up"] || 0;
 
-  // No colour per card any more: every one of these is the same kind of thing (a count
-  // this desk is answerable for), and nine gradients said they were nine kinds. The
-  // first two keep a trend and a line because they are the only two that read against
-  // a previous period -- the rest are a standing total, and a sparkline under one of
-  // those would be a line drawn from nothing.
-  const metrics = [
-    { key: "total", label: "Total Leads", value: summary.total_leads, icon: Users, trend: weekTrend, sparkline: weekTrendCounts },
-    { key: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, trend: todayTrend, sparkline: weekTrendCounts },
-    { key: "followup", label: "Active Follow-ups", value: followUp, icon: Clock },
-    { key: "appointments", label: "Appointments", value: summary.total_appointments, icon: CalendarCheck },
-    { key: "converted", label: "Converted", value: summary.completed_appointments, icon: TrendingUp },
-    { key: "revenue", label: "Revenue Generated", value: formatMoney(summary.revenue_generated), icon: IndianRupee },
-    { key: "conversion", label: "Conversion Rate", value: `${summary.conversion_rate}%`, icon: Percent },
-    { key: "branches", label: "Branches", value: summary.total_branches, icon: Building2 },
-    { key: "sheets", label: "Connected Sheets", value: summary.total_connections, icon: FileSpreadsheet },
+  // Two groups, because the nine cards answer two different questions. OnBoarding is the
+  // pipeline as it stands today -- what came in and how far along it is, the figures a
+  // desk acts on this morning. Systematic statistics is what the desk and the group have
+  // built: money, rate, and the estate the leads arrive through. Read as one row of nine
+  // they were a wall; split, each row has a subject.
+  //
+  // `metric` on each card is the key its rows are fetched by -- see BD_ROW_METRICS in
+  // backend/routers/v3_dashboard.py. A card with no metric opens nothing.
+  const groups = [
+    {
+      key: "onboarding",
+      label: "OnBoarding",
+      hint: "The pipeline as it stands today",
+      cards: [
+        { key: "total", metric: "total", label: "Total Leads", value: summary.total_leads, icon: Users, trend: weekTrend, sparkline: weekTrendCounts },
+        { key: "today", metric: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, trend: todayTrend, sparkline: weekTrendCounts },
+        { key: "followup", metric: "followup", label: "Active Follow-ups", value: followUp, icon: Clock },
+        { key: "appointments", metric: "appointments", label: "Appointments", value: summary.total_appointments, icon: CalendarCheck },
+        { key: "converted", metric: "converted", label: "Converted", value: summary.completed_appointments, icon: TrendingUp },
+      ],
+    },
+    {
+      key: "statistics",
+      label: "systematic statistics",
+      hint: "What the desk and the estate have built",
+      cards: [
+        { key: "revenue", metric: "revenue", label: "Revenue Generated", value: formatMoney(summary.revenue_generated), icon: IndianRupee },
+        { key: "conversion", metric: "conversion", label: "Conversion Rate", value: `${summary.conversion_rate}%`, icon: Percent },
+        { key: "branches", metric: "branches", label: "Branches", value: summary.total_branches, icon: Building2 },
+        { key: "sheets", metric: "sheets", label: "Connected Sheets", value: summary.total_connections, icon: FileSpreadsheet },
+        // Held open on purpose. The row is five wide and this group has four figures, so
+        // the alternative is a four-card row that does not line up with the five above it.
+        { key: "blank", blank: true },
+      ],
+    },
   ];
+
+  const openCardDef = groups.flatMap((g) => g.cards).find((c) => c.metric && c.metric === openMetric);
 
   return (
     <div className="space-y-5" data-testid="bd-dashboard-content">
-      {/* Filter Toolbar */}
-      <Card className="rounded-2xl border-slate-200 shadow-sm">
-        <CardContent className="flex flex-wrap items-center gap-2 p-3">
-          <MilkDateInput  value={leadDateFrom} onChange={(e) => setLeadDateFrom(e.target.value)} className="h-9 w-auto" data-testid="bd-filter-date-from" />
-          <span className="text-xs text-slate-400">to</span>
-          <MilkDateInput  value={leadDateTo} onChange={(e) => setLeadDateTo(e.target.value)} className="h-9 w-auto" data-testid="bd-filter-date-to" />
-          <select value={leadBranchFilter} onChange={(e) => setLeadBranchFilter(e.target.value)} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm" data-testid="bd-filter-branch">
-            <option value="">All branches</option>
-            {branches.map((b) => (<option key={b.id} value={b.id}>{b.branch_name}</option>))}
-          </select>
-          <select value={leadSourceFilter} onChange={(e) => setLeadSourceFilter(e.target.value)} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm" data-testid="bd-filter-source">
-            <option value="">All sources</option>
-            {leadSources.map((s) => (<option key={s.source_tab} value={s.source_tab}>{s.source_tab}</option>))}
-          </select>
-          <select value={leadStageFilter} onChange={(e) => setLeadStageFilter(e.target.value)} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm" data-testid="bd-filter-stage">
-            <option value="">All stages</option>
-            {PIPELINE_STAGES.map((s) => (<option key={s} value={s}>{s}</option>))}
-          </select>
-          {(leadBranchFilter || leadSourceFilter || leadStageFilter || leadDateFrom || leadDateTo) && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => { setLeadBranchFilter(""); setLeadSourceFilter(""); setLeadStageFilter(""); setLeadDateFrom(""); setLeadDateTo(""); }}
-              data-testid="bd-filter-clear"
-            >
-              Clear filters
-            </Button>
-          )}
-          {/* Branch Admin > Branch Leads' Refresh, the same as the one on the tab strip
-              above: grey, square, icon-only, the word on title/aria-label. h-9 rather
-              than that row's h-10 -- every other control in this toolbar is h-9, and
-              matching the row it sits in beats matching a toolbar on another screen. */}
-          <Button
-            onClick={onRefresh}
-            disabled={loading}
-            title="Refresh"
-            aria-label="Refresh"
-            className="ml-auto h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-            data-testid="bd-filter-refresh"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* KPI Grid. The same grid HR Admin's Dashboard lays its row out on -- two up on a
-          phone, five across on a desk -- so nine cards land as 5 + 4 rather than in a
-          shape of their own. */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="bd-metrics-grid">
-        {metrics.map((m) => (
-          <KpiCard key={m.key} label={m.label} value={m.value} icon={m.icon} trend={m.trend} sparkline={m.sparkline} testid={`bd-metric-${m.key}`} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ─── Branches Tab ─── */
-function BranchesTab({ branches, branchForm, setBranchForm, showBranchForm, setShowBranchForm, createBranchNow, editingBranch, openEditBranch, setEditingBranch, updateBranchNow, deletingBranchId, setDeletingBranchId, deleteBranchNow }) {
-  const closeForm = () => {
-    setShowBranchForm(false);
-    setEditingBranch(null);
-    setBranchForm({ branch_name: "", address: "", admin_name: "", admin_email: "", admin_password: "", admin_phone: "", vertical: "offline_physiotherapy" });
-  };
-
-  return (
-    <div className="space-y-4" data-testid="bd-branches-content">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800" data-testid="bd-branches-title">Branches ({branches.length})</h2>
-        <Button size="sm" onClick={() => { closeForm(); setShowBranchForm(true); }} className="bg-sky-600 hover:bg-sky-700" data-testid="bd-branches-add-btn">
-          <Plus className="mr-1 h-4 w-4" /> Add Branch
-        </Button>
-      </div>
-
-      {/* Branch Table */}
-      <div className="overflow-auto rounded-2xl border border-slate-200 shadow-sm" data-testid="bd-branches-table">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
-            <tr>
-              <th className="px-3 py-2 font-medium">Branch Name</th>
-              <th className="px-3 py-2 font-medium">Address</th>
-              <th className="px-3 py-2 font-medium">Admin</th>
-              <th className="px-3 py-2 font-medium">Vertical</th>
-              <th className="px-3 py-2 font-medium">Created</th>
-              <th className="px-3 py-2 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {branches.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-slate-400">No branches yet</td>
-              </tr>
-            ) : (
-              branches.map((b) => (
-                <tr key={b.id} className="border-t border-slate-100" data-testid={`bd-branch-row-${b.id}`}>
-                  <td className="px-3 py-2 font-medium text-slate-800">{b.branch_name}</td>
-                  <td className="px-3 py-2 text-slate-600">{b.address}</td>
-                  <td className="px-3 py-2 text-slate-600">{b.admin_name} ({b.admin_email})</td>
-                  <td className="px-3 py-2">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{b.vertical}</span>
-                  </td>
-                  <td className="px-3 py-2 text-xs text-slate-400">{b.created_at?.slice(0, 10)}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1">
-                      <button type="button" onClick={() => openEditBranch(b)} className="rounded-md border border-slate-200 p-1.5 text-sky-600 hover:bg-sky-50" data-testid={`bd-branch-edit-${b.id}`}>
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </button>
-                      <button type="button" onClick={() => setDeletingBranchId(b.id)} className="rounded-md border border-slate-200 p-1.5 text-red-500 hover:bg-red-50" data-testid={`bd-branch-delete-${b.id}`}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Add Branch Popup */}
-      {showBranchForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) closeForm(); }} data-testid="bd-branch-modal-overlay">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" data-testid="bd-branch-add-modal">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Add New Branch</h3>
-              <button type="button" onClick={closeForm} className="rounded-md p-1 hover:bg-slate-100" data-testid="bd-branch-modal-close">
-                <X className="h-5 w-5 text-slate-400" />
-              </button>
-            </div>
-            <form onSubmit={createBranchNow} className="space-y-3" data-testid="bd-branch-form">
-              <Input value={branchForm.branch_name} onChange={(e) => setBranchForm((p) => ({ ...p, branch_name: e.target.value }))} placeholder="Branch Name *" data-testid="bd-branch-name-input" />
-              <Input value={branchForm.address} onChange={(e) => setBranchForm((p) => ({ ...p, address: e.target.value }))} placeholder="Address" data-testid="bd-branch-address-input" />
-              <Input value={branchForm.admin_name} onChange={(e) => setBranchForm((p) => ({ ...p, admin_name: e.target.value }))} placeholder="Admin Name" data-testid="bd-branch-admin-name-input" />
-              <Input value={branchForm.admin_email} onChange={(e) => setBranchForm((p) => ({ ...p, admin_email: e.target.value }))} placeholder="Admin Email *" data-testid="bd-branch-admin-email-input" />
-              <Input value={branchForm.admin_password} onChange={(e) => setBranchForm((p) => ({ ...p, admin_password: e.target.value }))} placeholder="Admin Password *" type="password" data-testid="bd-branch-admin-password-input" />
-              <Input value={branchForm.admin_phone} onChange={(e) => setBranchForm((p) => ({ ...p, admin_phone: e.target.value }))} placeholder="Admin Phone" data-testid="bd-branch-admin-phone-input" />
-              <select value={branchForm.vertical} onChange={(e) => setBranchForm((p) => ({ ...p, vertical: e.target.value }))} className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" data-testid="bd-branch-vertical-select">
-                <option value="offline_physiotherapy">Offline Physiotherapy</option>
-                <option value="online_physiotherapy">Online Physiotherapy</option>
-                <option value="online_fitness">Online Fitness</option>
-                <option value="offline_fitness_gym">Offline Fitness / Gym</option>
-              </select>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>
-                <Button type="submit" className="bg-sky-600 text-white hover:bg-sky-700" data-testid="bd-branch-submit-btn">Create Branch</Button>
-              </div>
-            </form>
+      {groups.map((group) => (
+        <div key={group.key} className="space-y-2" data-testid={`bd-group-${group.key}`}>
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <h2 className="text-sm font-bold text-slate-800" data-testid={`bd-group-title-${group.key}`}>{group.label}</h2>
+            <p className="text-[11px] text-slate-400">{group.hint}</p>
+          </div>
+          {/* The same grid HR Admin's Dashboard lays its row out on -- two up on a phone,
+              five across on a desk. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid={`bd-metrics-${group.key}`}>
+            {group.cards.map((m) => (
+              m.blank
+                ? <div key={m.key} className="hidden rounded-xl border-2 border-dashed border-slate-100 lg:block" aria-hidden="true" data-testid="bd-metric-blank" />
+                : (
+                  <KpiCard
+                    key={m.key}
+                    label={m.label}
+                    value={m.value}
+                    icon={m.icon}
+                    trend={m.trend}
+                    sparkline={m.sparkline}
+                    open={openMetric === m.metric}
+                    onClick={m.metric ? () => onOpenCard(m.metric) : undefined}
+                    testid={`bd-metric-${m.key}`}
+                  />
+                )
+            ))}
           </div>
         </div>
+      ))}
+
+      {openMetric && (
+        <DrillList
+          title={openCardDef?.label || "Rows"}
+          drill={drill}
+          loading={drillLoading}
+          branches={branches}
+          onClose={() => onOpenCard(openMetric)}
+        />
       )}
-
-      {/* Edit Branch Popup */}
-      {editingBranch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) closeForm(); }} data-testid="bd-branch-edit-overlay">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" data-testid="bd-branch-edit-modal">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Edit Branch</h3>
-              <button type="button" onClick={closeForm} className="rounded-md p-1 hover:bg-slate-100" data-testid="bd-branch-edit-close">
-                <X className="h-5 w-5 text-slate-400" />
-              </button>
-            </div>
-            <form onSubmit={updateBranchNow} className="space-y-3" data-testid="bd-branch-edit-form">
-              <Input value={branchForm.branch_name} onChange={(e) => setBranchForm((p) => ({ ...p, branch_name: e.target.value }))} placeholder="Branch Name" data-testid="bd-branch-edit-name-input" />
-              <Input value={branchForm.address} onChange={(e) => setBranchForm((p) => ({ ...p, address: e.target.value }))} placeholder="Address" data-testid="bd-branch-edit-address-input" />
-              <Input value={branchForm.admin_name} onChange={(e) => setBranchForm((p) => ({ ...p, admin_name: e.target.value }))} placeholder="Admin Name" data-testid="bd-branch-edit-admin-name-input" />
-              <Input value={branchForm.admin_phone} onChange={(e) => setBranchForm((p) => ({ ...p, admin_phone: e.target.value }))} placeholder="Admin Phone" data-testid="bd-branch-edit-phone-input" />
-              <select value={branchForm.vertical} onChange={(e) => setBranchForm((p) => ({ ...p, vertical: e.target.value }))} className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm" data-testid="bd-branch-edit-vertical-select">
-                <option value="offline_physiotherapy">Offline Physiotherapy</option>
-                <option value="online_physiotherapy">Online Physiotherapy</option>
-                <option value="online_fitness">Online Fitness</option>
-                <option value="offline_fitness_gym">Offline Fitness / Gym</option>
-              </select>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>
-                <Button type="submit" className="bg-sky-600 text-white hover:bg-sky-700" data-testid="bd-branch-edit-submit">Update Branch</Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Popup */}
-      {deletingBranchId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) setDeletingBranchId(null); }} data-testid="bd-branch-delete-overlay">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" data-testid="bd-branch-delete-modal">
-            <h3 className="mb-2 text-lg font-semibold text-slate-800">Delete Branch?</h3>
-            <p className="mb-4 text-sm text-slate-500">This will permanently delete the branch and its admin user. This action cannot be undone.</p>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setDeletingBranchId(null)} data-testid="bd-branch-delete-cancel">Cancel</Button>
-              <Button onClick={() => deleteBranchNow(deletingBranchId)} className="bg-red-600 text-white hover:bg-red-700" data-testid="bd-branch-delete-confirm">Delete</Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ─── Lead Master Tab ─── */
-function LeadMasterTab({
-  leads,
-  branches,
-  leadStageFilter,
-  setLeadStageFilter,
-  leadBranchFilter,
-  setLeadBranchFilter,
-  leadDateFrom,
-  setLeadDateFrom,
-  leadDateTo,
-  setLeadDateTo,
-  leadSearch,
-  setLeadSearch,
-  assignBranchSelection,
-  setAssignBranchSelection,
-  qualifyNow,
-  assignBranchNow,
-  loadLeads,
-  onExportCsv,
-  loading,
-}) {
-  return (
-    <div className="space-y-4" data-testid="bd-lead-master-content">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800" data-testid="bd-lead-master-title">Lead Master ({leads.length})</h2>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={onExportCsv} data-testid="bd-lead-master-export-btn">
-            <Download className="mr-1 h-4 w-4" /> Export
-          </Button>
-          <Button size="sm" variant="outline" onClick={loadLeads} data-testid="bd-lead-master-refresh-btn">
-            <RefreshCw className="mr-1 h-4 w-4" /> Refresh
-          </Button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-5" data-testid="bd-lead-filters">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-          <Input
-            className="pl-8"
-            value={leadSearch}
-            onChange={(e) => setLeadSearch(e.target.value)}
-            placeholder="Search leads..."
-            data-testid="bd-lead-search-input"
-          />
-        </div>
-        <select value={leadStageFilter} onChange={(e) => setLeadStageFilter(e.target.value)} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm" data-testid="bd-lead-stage-filter">
-          <option value="">All stages</option>
-          {PIPELINE_STAGES.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        <select value={leadBranchFilter} onChange={(e) => setLeadBranchFilter(e.target.value)} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm" data-testid="bd-lead-branch-filter">
-          <option value="">All branches</option>
-          {branches.map((b) => (
-            <option key={b.id} value={b.id}>{b.branch_name}</option>
-          ))}
-        </select>
-        <MilkDateInput  value={leadDateFrom} onChange={(e) => setLeadDateFrom(e.target.value)} data-testid="bd-lead-date-from" />
-        <MilkDateInput  value={leadDateTo} onChange={(e) => setLeadDateTo(e.target.value)} data-testid="bd-lead-date-to" />
-      </div>
-
-      {/* Lead Table */}
-      <div className="overflow-auto rounded-2xl border border-slate-200 shadow-sm" data-testid="bd-lead-table">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
-            <tr>
-              <th className="px-3 py-2 font-medium">Name</th>
-              <th className="px-3 py-2 font-medium">Phone</th>
-              <th className="px-3 py-2 font-medium">Email</th>
-              <th className="px-3 py-2 font-medium">Source</th>
-              <th className="px-3 py-2 font-medium">Stage</th>
-              <th className="px-3 py-2 font-medium">Branch</th>
-              <th className="px-3 py-2 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {leads.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
-                  {loading ? "Loading..." : "No leads found"}
-                </td>
-              </tr>
-            ) : (
-              leads.map((lead) => (
-                <tr key={lead.id} className="border-t border-slate-100" data-testid={`bd-lead-row-${lead.id}`}>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700">
-                        {(lead.name || "?").charAt(0).toUpperCase()}
-                      </span>
-                      <span className="font-medium text-slate-800">{lead.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-slate-600">{lead.phone}</td>
-                  <td className="px-3 py-2 text-slate-600">{lead.email}</td>
-                  <td className="px-3 py-2 text-slate-600">{lead.source_tab || lead.source_type}</td>
-                  <td className="px-3 py-2">
-                    <span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${STAGE_COLOR[lead.stage] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
-                      {lead.stage}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-slate-600">
-                    {branches.find((b) => b.id === lead.branch_id)?.branch_name || "Unassigned"}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-1">
-                      {lead.stage === "New Leads" && (
-                        <Button size="sm" onClick={() => qualifyNow(lead.id)} className="h-7 bg-amber-500 px-2 text-xs text-white hover:bg-amber-600" data-testid={`bd-lead-qualify-${lead.id}`}>
-                          Qualify
-                        </Button>
-                      )}
-                      {["New Leads", "Follow Up"].includes(lead.stage) && (
-                        <>
-                          <select
-                            value={assignBranchSelection[lead.id] || ""}
-                            onChange={(e) => setAssignBranchSelection((p) => ({ ...p, [lead.id]: e.target.value }))}
-                            className="h-7 rounded border border-slate-200 bg-white px-1 text-xs"
-                            data-testid={`bd-lead-branch-select-${lead.id}`}
-                          >
-                            <option value="">Branch</option>
-                            {branches.map((b) => (
-                              <option key={b.id} value={b.id}>{b.branch_name}</option>
-                            ))}
-                          </select>
-                          <Button size="sm" onClick={() => assignBranchNow(lead.id)} className="h-7 bg-violet-500 px-2 text-xs text-white hover:bg-violet-600" data-testid={`bd-lead-assign-${lead.id}`}>
-                            Assign
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

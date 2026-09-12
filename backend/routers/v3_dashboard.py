@@ -177,6 +177,138 @@ async def v3_bd_summary(
     }
 
 
+# Every card on the Business Development dashboard opens the rows it counted. The counts
+# come from /dashboard/bd-summary above; these are the same collections under the same
+# filters, so a card reading 2 cannot open a list of five. That is the whole reason this
+# is an endpoint rather than a filter over the leads the board already holds: three of
+# these nine metrics are not lead rows at all (two read `appointments`, one reads
+# `sheet_connections`), and a client-side approximation of them would disagree with the
+# number the person just clicked.
+#
+# `kind` tells the caller which shape came back -- one of "lead", "appointment", "branch"
+# or "connection" -- because the four carry different columns. The caller owns the column
+# set; this owns which rows belong to which card.
+BD_ROW_METRICS = {
+    "total", "today", "followup", "appointments",
+    "converted", "revenue", "conversion", "branches", "sheets",
+}
+
+# A cap, not a page. These lists are read to answer "which ones are they", and a desk
+# scrolling past a few hundred rows has stopped reading and wants a filter instead. The
+# total is returned alongside so the table can say what it is not showing rather than
+# quietly ending.
+BD_ROWS_LIMIT = 500
+
+
+@router.get("/dashboard/bd-summary/rows")
+async def v3_bd_summary_rows(
+    metric: str = Query(..., description="Which card was opened: one of BD_ROW_METRICS"),
+    branch_id: Optional[str] = Query(None),
+    source_tab: Optional[str] = Query(None),
+    stage: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    _: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin")),
+):
+    if metric not in BD_ROW_METRICS:
+        raise HTTPException(status_code=400, detail=f"Unknown metric: {metric}")
+
+    # Built exactly as /dashboard/bd-summary builds them. Kept as a copy of that shape
+    # rather than a shared helper for now: the summary's version also feeds the appointment
+    # and revenue aggregations there, and pulling one filter out of it while leaving those
+    # behind is how the two drift apart.
+    lead_match: dict = {}
+    if branch_id:
+        lead_match["branch_id"] = branch_id
+    if source_tab:
+        lead_match["source_tab"] = source_tab
+    if stage:
+        lead_match["stage"] = stage
+    if start_date or end_date:
+        created_range: dict = {}
+        if start_date:
+            created_range["$gte"] = start_date
+        if end_date:
+            created_range["$lte"] = end_date
+        lead_match["created_at"] = created_range
+
+    appt_match: dict = {}
+    if branch_id:
+        appt_match["branch_id"] = branch_id
+    if start_date or end_date:
+        appt_match["created_at"] = lead_match.get("created_at", {})
+
+    # Copied from today_leads in /dashboard/bd-summary above, deliberately including its
+    # quirks: UTC midnight rather than the clinic day, and a lower bound with no upper
+    # one. Neither is what this codebase does elsewhere (clinic_day_of/CLINIC_UTC_OFFSET
+    # are right there), but the card's number is counted that way, and a list that
+    # silently corrected it would come back a different length from the figure that was
+    # clicked. Fix the two together or not at all.
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Which collection, and which query over it, per card. Named the same as the metric
+    # keys the cards carry so the two can be read side by side.
+    if metric in {"total", "today", "followup", "revenue"}:
+        query = dict(lead_match)
+        if metric == "today":
+            query["created_at"] = {"$gte": today_start.isoformat()}
+        elif metric == "followup":
+            query["stage"] = "Follow Up"
+        elif metric == "revenue":
+            # The leads the revenue figure is a sum over -- Consultation + Treatment Fee
+            # actually collected. A lead that has paid neither contributes nothing to the
+            # number, so it does not belong in the list behind it.
+            query["$or"] = [
+                {"package_paid": {"$gt": 0}},
+                {"treatment_fee_paid": {"$gt": 0}},
+            ]
+        total = await v3_col("leads").count_documents(query)
+        rows = await v3_col("leads").find(query, {"_id": 0}).sort("created_at", -1).to_list(BD_ROWS_LIMIT)
+        return {
+            "metric": metric,
+            "kind": "lead",
+            "total": total,
+            "rows": [V3LeadOut(**r).model_dump() for r in rows],
+        }
+
+    if metric in {"appointments", "converted", "conversion"}:
+        query = dict(appt_match)
+        # Conversion Rate is completed_appointments over total_leads, so the rows worth
+        # opening under it are the completed appointments -- its numerator. The
+        # denominator is Total Leads, one card away.
+        if metric in {"converted", "conversion"}:
+            query["status"] = "completed"
+        total = await v3_col("appointments").count_documents(query)
+        rows = await v3_col("appointments").find(
+            query,
+            {"_id": 0, "id": 1, "lead_id": 1, "lead_name": 1, "branch_id": 1,
+             "doctor_name": 1, "slot_time": 1, "status": 1, "created_at": 1},
+        ).sort("created_at", -1).to_list(BD_ROWS_LIMIT)
+        return {"metric": metric, "kind": "appointment", "total": total, "rows": rows}
+
+    if metric == "branches":
+        # live_branch_query(), the same as total_branches -- an archived branch is not one
+        # of the eight the card is counting.
+        query = live_branch_query()
+        total = await v3_col("branches").count_documents(query)
+        rows = await v3_col("branches").find(
+            query,
+            {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1, "address": 1,
+             "admin_name": 1, "admin_email": 1, "admin_phone": 1, "created_at": 1},
+        ).sort("created_at", -1).to_list(BD_ROWS_LIMIT)
+        return {"metric": metric, "kind": "branch", "total": total, "rows": rows}
+
+    # metric == "sheets"
+    total = await v3_col("sheet_connections").count_documents({})
+    rows = await v3_col("sheet_connections").find(
+        {},
+        {"_id": 0, "id": 1, "connection_name": 1, "spreadsheet_id": 1,
+         "sync_interval_minutes": 1, "last_synced_at": 1, "created_at": 1},
+    ).sort("created_at", -1).to_list(BD_ROWS_LIMIT)
+    return {"metric": metric, "kind": "connection", "total": total, "rows": rows}
+
+
 @router.get("/lead-sources")
 async def v3_lead_sources(_: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin"))):
     pipeline = [

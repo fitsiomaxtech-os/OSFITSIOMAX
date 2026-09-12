@@ -77,8 +77,22 @@ async def list_branches_full(archived: bool = False, _: V3UserOut = Depends(v3_r
     return out
 
 
+# business_dev on the six branch-management routes below (archive, restore,
+# with-existing-admin, admin, head-physio-candidates, head-physio).
+#
+# The Business Development Executive's board mounts BranchManagementBoard as its own
+# Branch Control tab, in full rather than as Operations' cut-down dialog, so the desk
+# that opens branches can now run them: create one against an existing admin, reassign
+# that admin, assign a CONSULTANT, and archive a branch that has closed.
+#
+# Deliberately NOT widened, and the reason this is a list of six rather than of every
+# super_admin route in this file: /team-candidates and /team/{user_id}, every /upi-account
+# route, /upload-qr-image, and the HR account actions in v3_hr (activate, deactivate,
+# delete-permanent). Those are staff accounts and payment routing, not branch control,
+# and BranchManagementBoard's drill-in is mounted `readOnly` for this role so none of
+# them is reachable from the panel in the first place.
 @router.post("/{branch_id}/archive")
-async def archive_branch(branch_id: str, payload: BranchArchiveInput, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def archive_branch(branch_id: str, payload: BranchArchiveInput, user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     # Soft-delete: keeps the branch, its admin user, and its leads/appointments intact
     # (unlike DELETE /branches/{id}, which hard-deletes) — gated by the acting Super
     # Admin re-entering their own login password so archiving isn't a stray misclick.
@@ -96,7 +110,7 @@ async def archive_branch(branch_id: str, payload: BranchArchiveInput, user: V3Us
 
 
 @router.post("/{branch_id}/restore")
-async def restore_branch(branch_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def restore_branch(branch_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     res = await v3_col("branches").update_one(
         {"id": branch_id},
         {"$set": {"archived": False}, "$unset": {"archived_at": "", "archived_by": ""}},
@@ -107,7 +121,7 @@ async def restore_branch(branch_id: str, _: V3UserOut = Depends(v3_require_roles
 
 
 @router.post("/with-existing-admin")
-async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     # An admin is only looked up when one was named. Every check below still runs in that
     # case, so an admin passed by an older client (or by the reassign dialog's own path)
     # is validated exactly as before.
@@ -164,7 +178,7 @@ async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3
 
 
 @router.patch("/{branch_id}/admin")
-async def reassign_branch_admin(branch_id: str, payload: AssignAdmin, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def reassign_branch_admin(branch_id: str, payload: AssignAdmin, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -195,14 +209,14 @@ async def reassign_branch_admin(branch_id: str, payload: AssignAdmin, _: V3UserO
 
 
 @router.get("/head-physio-candidates")
-async def head_physio_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def head_physio_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     rows = await v3_col("doctors").find(active_doctor_query({"profile_type": "head_physio"}), {"_id": 0}).to_list(500)
     branches = {b["id"]: b.get("branch_name") for b in await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)}
     return [{**d, "assigned_branch": branches.get(d.get("branch_id")) if d.get("branch_id") else None} for d in rows]
 
 
 @router.patch("/{branch_id}/head-physio")
-async def assign_head_physio(branch_id: str, payload: AssignHeadPhysio, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def assign_head_physio(branch_id: str, payload: AssignHeadPhysio, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")

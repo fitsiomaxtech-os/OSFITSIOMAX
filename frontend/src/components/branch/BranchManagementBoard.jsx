@@ -36,7 +36,17 @@ const TABS = [
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
 ];
 
-export const BranchManagementBoard = ({ actingUser, onNavigateToOperations, initialTab = "overview", lockTab = false } = {}) => {
+/**
+ * @param detailReadOnly  drill into a branch, but read-only. The Business Development
+ *                        Executive's board mounts this panel as its own Branch Control
+ *                        tab, and a branch's detail page reaches HR's account actions
+ *                        (activate, deactivate, permanently delete a user) and its
+ *                        payment settings -- neither of which is branch control, and
+ *                        neither of which that role's token is allowed to call. Without
+ *                        this the controls would be drawn and then 403 on press. Super
+ *                        Admin's own mounts leave it off and keep the full page.
+ */
+export const BranchManagementBoard = ({ actingUser, onNavigateToOperations, initialTab = "overview", lockTab = false, detailReadOnly = false } = {}) => {
   const [tab, setTab] = useState(initialTab);
   const [drilledBranchId, setDrilledBranchId] = useState(null);
   // A callback ref, not useRef: the portal has to re-render once the node exists, and a
@@ -44,7 +54,7 @@ export const BranchManagementBoard = ({ actingUser, onNavigateToOperations, init
   const [actionSlot, setActionSlot] = useState(null);
 
   if (drilledBranchId) {
-    return <BranchDetailPage branchId={drilledBranchId} onBack={() => setDrilledBranchId(null)} />;
+    return <BranchDetailPage branchId={drilledBranchId} onBack={() => setDrilledBranchId(null)} readOnly={detailReadOnly} />;
   }
 
   return (

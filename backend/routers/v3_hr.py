@@ -1521,7 +1521,7 @@ async def delete_user_permanent(user_id: str, current: V3UserOut = Depends(v3_re
 # ---------- Branch Admin Picker (for super-admin Branch creation flow) ----------
 
 @router.get("/branch-admin-candidates")
-async def branch_admin_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def branch_admin_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     # Every role that holds Branch Admin's authority (Physio-only, Fitness-only, both,
     # or either online arm) — not just the literal "branch_admin" slug. Same set the
     # backend's own scoping checks use (deps.BRANCH_ADMIN_ROLES), so a branch can be
