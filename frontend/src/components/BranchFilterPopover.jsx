@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Building2, ChevronDown, X } from "lucide-react";
+import { Building2, Check, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -8,6 +8,10 @@ import { Button } from "@/components/ui/button";
  * The branch picker Operations used to spell out as a full row of pills, folded into a
  * single trigger + dialog so the row it lived on is free for the actions that belong
  * beside it (Branch Transfer, Branch Manager).
+ *
+ * The dialog *is* the picker — the branches are rows you click, not a <select> inside it.
+ * A dropdown here meant opening a popup to open a popup, and the list is short enough to
+ * show whole.
  *
  * Wears the same clothes as DateFilterPopover's `centered` variant — milk-white panel
  * (#FDFCF8 on #EFEAE0), amber for the active state — because to the person using it this
@@ -37,8 +41,15 @@ export const BranchFilterPopover = ({ branches = [], selectedId, onSelect, testi
     });
   }, [branches]);
 
+  // Grouped rather than one flat list: an online vertical is not a place you can walk
+  // into, and reading the two apart matters more the longer the list gets.
   const offline = sorted.filter((b) => !isOnlineVertical(b.vertical));
   const online = sorted.filter((b) => isOnlineVertical(b.vertical));
+  const groups = [
+    { key: "branches", label: "Branches", items: offline },
+    { key: "online", label: "Online", items: online },
+  ];
+  const bothGroups = offline.length > 0 && online.length > 0;
 
   const selected = sorted.find((b) => b.id === selectedId);
   const activeLabel = selected?.branch_name || "Branch Filter";
@@ -71,8 +82,8 @@ export const BranchFilterPopover = ({ branches = [], selectedId, onSelect, testi
           onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
           data-testid={`${testid}-modal`}
         >
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-2xl" data-testid={`${testid}-panel`}>
-            <div className="flex items-center justify-between border-b border-[#EFEAE0] px-4 py-3">
+          <div className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-2xl" data-testid={`${testid}-panel`}>
+            <div className="flex shrink-0 items-center justify-between border-b border-[#EFEAE0] px-4 py-3">
               <p className="text-sm font-bold text-slate-800">Filter by Branch</p>
               <button
                 type="button"
@@ -86,36 +97,43 @@ export const BranchFilterPopover = ({ branches = [], selectedId, onSelect, testi
               </button>
             </div>
 
-            <div className="space-y-3 p-4">
-              <label className="block text-xs font-medium text-slate-500" htmlFor={`${testid}-select`}>Branch</label>
-              {/* Grouped rather than one flat list: an online vertical is not a place you
-                  can walk into, and reading the two apart matters more the longer the
-                  list gets. */}
-              <div className="relative">
-                <select
-                  id={`${testid}-select`}
-                  value={selectedId || ""}
-                  onChange={(e) => pick(e.target.value)}
-                  className="h-10 w-full appearance-none rounded-md border border-[#EFEAE0] bg-white px-3 pr-9 text-sm text-slate-700 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
-                  data-testid={`${testid}-select`}
-                >
-                  <option value="">— Select a branch —</option>
-                  {offline.length > 0 && (
-                    <optgroup label="Branches">
-                      {offline.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-                    </optgroup>
-                  )}
-                  {online.length > 0 && (
-                    <optgroup label="Online">
-                      {online.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-                    </optgroup>
-                  )}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              </div>
-              <p className="text-[11px] text-slate-400" data-testid={`${testid}-hint`}>
-                {sorted.length === 0 ? "No branches yet." : "The board below follows whichever branch is picked here."}
-              </p>
+            {/* A list, not a dropdown. The <select> put a second popup on top of the one
+                the person had just opened — two layers of chrome to answer "which
+                branch", when the whole list fits in the dialog the click already cost
+                them. Picking a row is the answer and the close, in one. */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-2" data-testid={`${testid}-list`}>
+              {groups.map((g) => (
+                g.items.length > 0 && (
+                  <div key={g.key} className="mb-1 last:mb-0" data-testid={`${testid}-group-${g.key}`}>
+                    {/* The heading only earns its line when there is another group to
+                        tell this one apart from. */}
+                    {bothGroups && (
+                      <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{g.label}</p>
+                    )}
+                    {g.items.map((b) => {
+                      const on = b.id === selectedId;
+                      return (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => pick(b.id)}
+                          className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                            on ? "bg-amber-100 font-semibold text-amber-800" : "text-slate-700 hover:bg-[#F3EFE6]"
+                          }`}
+                          data-testid={`${testid}-option-${b.id}`}
+                        >
+                          <Building2 className={`h-4 w-4 shrink-0 ${on ? "text-amber-700" : "text-slate-400"}`} />
+                          <span className="min-w-0 flex-1 truncate">{b.branch_name}</span>
+                          {on && <Check className="h-4 w-4 shrink-0 text-amber-700" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )
+              ))}
+              {sorted.length === 0 && (
+                <p className="px-3 py-6 text-center text-sm text-slate-400" data-testid={`${testid}-empty`}>No branches yet.</p>
+              )}
             </div>
           </div>
         </div>
