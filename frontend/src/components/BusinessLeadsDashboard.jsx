@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   Megaphone,
   Percent,
+  Plus,
   RefreshCw,
   Settings,
   Sparkles,
