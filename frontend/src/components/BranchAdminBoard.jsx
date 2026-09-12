@@ -544,6 +544,58 @@ const apptSlotLabel = (lead) => {
   };
 };
 
+/** The follow-up call a lead is actually waiting on, for the Follow Up column —
+ *  "06 Aug" + "10:30 AM", plus whether that moment has already gone by.
+ *
+ *  Newest first and skipping the rescheduled ones, which is the rule the lead card's own
+ *  Follow-Up preview draws with: a booking that was moved is history, not the call
+ *  somebody is waiting on, and naming it here would put a date on the list nobody is
+ *  going to ring on.
+ *
+ *  next_follow_up_at is the fallback rather than the source. Every scheduling path stamps
+ *  it (see v3_schedule_branch_follow_up), so a lead that reached this stage through
+ *  Pre-Sales carries the field without the branch's own follow_ups[] behind it — and a
+ *  column that read follow_ups[] alone would show those rows a dash.
+ *
+ *  Dates are plain "YYYY-MM-DD" calendar days, so they are parsed at local midnight and
+ *  never shift a day; only the overdue test needs the time on it. */
+const followUpSlotLabel = (lead) => {
+  const active = (lead?.follow_ups || []).slice().reverse().find((f) => f.status !== "rescheduled");
+  let date = active?.date;
+  let time = active?.time;
+  if (!date && lead?.next_follow_up_at) {
+    const [d, t] = String(lead.next_follow_up_at).split("T");
+    date = d;
+    time = (t || "").slice(0, 5);
+  }
+  if (!date) return null;
+  return {
+    date: new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }),
+    time: time ? to12h(time) : "",
+    overdue: new Date(`${date}T${time || "00:00"}:00`).getTime() < Date.now(),
+  };
+};
+
+/** The Follow Up column's heading — a clock and nothing else.
+ *
+ *  Icon-only because the column is only ever drawn on the Follow Up stage, where what the
+ *  date under it means is not in question, and because the word spelled out is wider than
+ *  the "06 Aug · 10:30 AM" beneath it: the heading would have set the column's width and
+ *  taken the room from the columns that are actually read.
+ *
+ *  The name is still carried, twice — a title for the pointer and an sr-only label for a
+ *  screen reader, which would otherwise be handed a column of dates headed by nothing.
+ *
+ *  Renders nothing rather than an empty cell when the column is off, so the header and
+ *  the rows below it count the same number of columns.
+ */
+const FollowUpHeaderCell = ({ show, widthClass }) => (show ? (
+  <th className={`${widthClass} px-4 py-3`} title="Follow-up date & time" data-testid="branch-list-followup-head">
+    <Clock className="h-4 w-4" aria-hidden="true" />
+    <span className="sr-only">Follow-up date &amp; time</span>
+  </th>
+) : null);
+
 /** lucide has no WhatsApp glyph and the brand mark can't be approximated with a generic
  *  chat bubble — staff scan for this exact shape. */
 const WhatsAppIcon = ({ className }) => (
@@ -570,6 +622,43 @@ const waNumber = (raw) => {
   if (digits.length === 10) return `91${digits}`;
   if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
   return digits;
+};
+
+/** The list's column widths, with and without the Follow Up column.
+ *
+ *  Stated rather than computed because table-fixed divides by the widths written down, and
+ *  a set that overshoots 100 quietly squeezes the last column instead of complaining — so
+ *  the extra column is paid for out of the other eight rather than added on top of them.
+ *  Both sets total 100.
+ *
+ *  Written as whole classes, not assembled from pieces: Tailwind compiles the class names
+ *  it can see in the source, and `w-[${n}%]` is not one of them.
+ *
+ *  Only the branch's post-entry shape has a second set. Follow Up is never an entry stage,
+ *  so the entry header can only ever draw the eight it always has. */
+const BRANCH_LIST_WIDTHS = {
+  base: {
+    patient: "w-[21%]", phone: "w-[13%]", city: "w-[12%]", painType: "w-[13%]",
+    painDuration: "w-[12%]", physio: "w-[11%]", appt: "w-[10%]", followUp: "", stage: "w-[8%]",
+  },
+  withFollowUp: {
+    patient: "w-[19%]", phone: "w-[12%]", city: "w-[11%]", painType: "w-[11%]",
+    painDuration: "w-[11%]", physio: "w-[10%]", appt: "w-[9%]", followUp: "w-[9%]", stage: "w-[8%]",
+  },
+};
+
+/** The same, for an online arm — five fixed columns and the form's own questions sharing
+ *  what is left. The questions give up three points for the Follow Up column and the fixed
+ *  five give up the other six, so no single column carries the whole of it. */
+const ARM_LIST_WIDTHS = {
+  base: {
+    name: "w-[19%]", phone: "w-[12%]", city: "w-[10%]", appt: "w-[10%]",
+    followUp: "", stage: "w-[11%]", questionShare: 38,
+  },
+  withFollowUp: {
+    name: "w-[17%]", phone: "w-[11%]", city: "w-[9%]", appt: "w-[9%]",
+    followUp: "w-[9%]", stage: "w-[10%]", questionShare: 35,
+  },
 };
 
 // Which of the six get a direct slot on the phone bar. The other three go behind More.
@@ -891,10 +980,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const toolbarFilters = armPractice === "fitness" ? FITNESS_ARM_TOOLBAR_FILTERS
     : armPractice === "physio" ? PHYSIO_ARM_TOOLBAR_FILTERS
       : BRANCH_TOOLBAR_FILTERS;
-  // The five fixed columns on an arm's table take 62% between them; the questions share
-  // what is left, however many the arm asks. An inline width rather than a class because
-  // Tailwind compiles the classes it can see in the source, and this one is arithmetic.
-  const armQuestionWidth = `${38 / (intakeQuestions.length || 1)}%`;
 
   const loadBoard = useCallback(async () => {
     // Only a branch board needs a branch. Returning here used to be silent, which is how an
@@ -1004,6 +1089,37 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     [showingMirror, atBranchOpening, mirrorStage, finalBranchStages],
   );
   const entryStageNames = [mirrorStage?.name, realEntryStage?.name].filter(Boolean);
+
+  /**
+   * Whether the list draws its Follow Up column: the date and time of the call this
+   * patient is waiting on.
+   *
+   * Only while the reader is standing on that stage. It is the one column that is the
+   * whole of what a stage is for — a branch working Follow Up is working a diary, and on
+   * every other stage it would be a column of dashes taking width from the ones being
+   * read. This is how the strip's other stage-shaped columns already behave; see
+   * Pre-Sales' LAST CALL, drawn on RNR and nowhere else.
+   *
+   * Matched by role first and loosely on the name after it. Pipeline Stage Management can
+   * rename this stage, and a literal "Follow Up" would silently drop the column the day
+   * somebody typed "Followup" into it — the lead card's own preview reads it the same
+   * loose way (see atFollowUpStage).
+   */
+  const showFollowUpColumn = useMemo(() => {
+    if (!stageFilter) return false;
+    return stageFilter === stageNameForRole(stages, STAGE_ROLE_FOLLOW_UP)
+      || /follow\s*-?\s*up/i.test(stageFilter);
+  }, [stageFilter, stages]);
+
+  // The column widths this list is drawn at, chosen once for the header and the rows
+  // together — a row that disagreed with the header about how many columns there are
+  // slides every cell after it a column across.
+  const listWidths = (showFollowUpColumn ? BRANCH_LIST_WIDTHS.withFollowUp : BRANCH_LIST_WIDTHS.base);
+  const armWidths = (showFollowUpColumn ? ARM_LIST_WIDTHS.withFollowUp : ARM_LIST_WIDTHS.base);
+  // The fixed columns on an arm's table take their stated share; the questions divide what
+  // is left, however many the arm asks. An inline width rather than a class because
+  // Tailwind compiles the classes it can see in the source, and this one is arithmetic.
+  const armQuestionWidth = `${armWidths.questionShare / (intakeQuestions.length || 1)}%`;
 
   // A stage the Consultation pipeline owns and the Branch one does not. Any name the two
   // share stays on the Branch side and is backed by the sales field, so one name never gets
@@ -2054,6 +2170,21 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             </p>
                           );
                         })()}
+                        {/* The same Follow Up line the table draws, on the same stage and
+                            under the same rule. A phone is where a branch actually works a
+                            call list, so leaving this to the desk table would hide it from
+                            the reader most likely to be looking for it. */}
+                        {showFollowUpColumn && (() => {
+                          const fu = followUpSlotLabel(lead);
+                          if (!fu) return null;
+                          return (
+                            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px]" data-testid={`branch-card-followup-${lead.id}`}>
+                              <Clock className={`h-3 w-3 ${fu.overdue ? "text-rose-500" : "text-slate-400"}`} />
+                              <span className={`font-semibold ${fu.overdue ? "text-rose-600" : "text-slate-700"}`}>{[fu.date, fu.time].filter(Boolean).join(" · ")}</span>
+                              {fu.overdue && <span className="font-medium text-rose-500">Overdue</span>}
+                            </p>
+                          );
+                        })()}
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-slate-400">
                           {lead.assigned_physio_name && <span className="truncate">Physio: {lead.assigned_physio_name}</span>}
                           <span>Updated {(lead.updated_at || "").slice(0, 10)}</span>
@@ -2156,14 +2287,15 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                        Assigned Physio is not among them: nobody is assigned a room, and
                        the consultant taking the call is on the patient's card. */
                     <>
-                      <th className="w-[19%] px-4 py-3">Name</th>
-                      <th className="w-[12%] px-4 py-3">Phone Number</th>
-                      <th className="w-[10%] px-4 py-3">City</th>
+                      <th className={`${armWidths.name} px-4 py-3`}>Name</th>
+                      <th className={`${armWidths.phone} px-4 py-3`}>Phone Number</th>
+                      <th className={`${armWidths.city} px-4 py-3`}>City</th>
                       {intakeQuestions.map((q) => (
                         <th key={q.key} className="px-4 py-3" style={{ width: armQuestionWidth }}>{q.label}</th>
                       ))}
-                      <th className="w-[10%] px-4 py-3">Appointment</th>
-                      <th className="w-[11%] px-4 py-3">Stage</th>
+                      <th className={`${armWidths.appt} px-4 py-3`}>Appointment</th>
+                      <FollowUpHeaderCell show={showFollowUpColumn} widthClass={armWidths.followUp} />
+                      <th className={`${armWidths.stage} px-4 py-3`}>Stage</th>
                     </>
                   ) : entryStageNames.includes(stageFilter) ? (
                     <>
@@ -2177,14 +2309,15 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                     </>
                   ) : (
                     <>
-                      <th className="w-[21%] px-4 py-3">Patient</th>
-                      <th className="w-[13%] px-4 py-3">Phone</th>
-                      <th className="w-[12%] px-4 py-3">City</th>
-                      <th className="w-[13%] px-4 py-3">Pain Type</th>
-                      <th className="w-[12%] px-4 py-3">Pain Duration</th>
-                      <th className="w-[11%] px-4 py-3">Assigned Physio</th>
-                      <th className="w-[10%] px-4 py-3">Appointment</th>
-                      <th className="w-[8%] px-4 py-3">Stage</th>
+                      <th className={`${listWidths.patient} px-4 py-3`}>Patient</th>
+                      <th className={`${listWidths.phone} px-4 py-3`}>Phone</th>
+                      <th className={`${listWidths.city} px-4 py-3`}>City</th>
+                      <th className={`${listWidths.painType} px-4 py-3`}>Pain Type</th>
+                      <th className={`${listWidths.painDuration} px-4 py-3`}>Pain Duration</th>
+                      <th className={`${listWidths.physio} px-4 py-3`}>Assigned Physio</th>
+                      <th className={`${listWidths.appt} px-4 py-3`}>Appointment</th>
+                      <FollowUpHeaderCell show={showFollowUpColumn} widthClass={listWidths.followUp} />
+                      <th className={`${listWidths.stage} px-4 py-3`}>Stage</th>
                     </>
                   )}
                 </tr>
@@ -2204,7 +2337,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             drawn. It used to read 9/8, one more than the table has ever
                             had, and a fitness arm's nine would have been a third wrong
                             answer to write down. */}
-                        <td colSpan={5 + intakeQuestions.length + (showAssignedPhysio ? 1 : 0)} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        <td colSpan={5 + intakeQuestions.length + (showAssignedPhysio ? 1 : 0) + (showFollowUpColumn ? 1 : 0)} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageFilter}"` : "yet"}.
                         </td>
                       </tr>
@@ -2330,6 +2463,29 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             );
                           })()}
                         </td>
+                        {/* The call this patient is waiting on. Drawn only on the Follow Up
+                            stage — see showFollowUpColumn, which the header reads too, so
+                            the two cannot end up counting different numbers of columns.
+
+                            Overdue is the state worth colouring, the same judgement the
+                            lead card's preview makes: an upcoming call needs nothing done
+                            today, a missed one is the reason this list is open. */}
+                        {showFollowUpColumn && (
+                          <td className="px-4 py-3">
+                            {(() => {
+                              const fu = followUpSlotLabel(lead);
+                              if (!fu) return <span className="text-slate-400">—</span>;
+                              return (
+                                <div className="flex flex-col gap-0.5" data-testid={`branch-row-followup-${lead.id}`}>
+                                  <span className={`whitespace-nowrap text-xs font-semibold ${fu.overdue ? "text-rose-600" : "text-slate-700"}`}>
+                                    {[fu.date, fu.time].filter(Boolean).join(" · ")}
+                                  </span>
+                                  {fu.overdue && <span className="text-[10px] font-medium text-rose-500">Overdue</span>}
+                                </div>
+                              );
+                            })()}
+                          </td>
+                        )}
                         <td className="px-4 py-3">
                           <span
                             title={rowStage ? rowStage : undefined}
