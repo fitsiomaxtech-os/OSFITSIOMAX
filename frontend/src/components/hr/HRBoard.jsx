@@ -3541,6 +3541,11 @@ const RolesTab = ({ meta, reloadMeta }) => {
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span>
+              {u.two_factor_enabled && (
+                <span className="inline-flex items-center gap-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700" data-testid={`hr-user-card-2fa-${u.id}`}>
+                  <ShieldCheck className="h-3 w-3" />2FA
+                </span>
+              )}
             </div>
             {u.linked_employee && (
               <p className="mt-1.5 text-xs text-emerald-600">{u.linked_employee.employee_code} - {u.linked_employee.designation || u.linked_employee.full_name}</p>
@@ -3584,7 +3589,21 @@ const RolesTab = ({ meta, reloadMeta }) => {
                     <td className="px-3 py-2 font-medium text-slate-800">{u.full_name}</td>
                     <td className="px-3 py-2 text-slate-600">{u.email}</td>
                     <td className="px-3 py-2 text-xs text-emerald-600">{u.linked_employee ? `${u.linked_employee.employee_code} - ${u.linked_employee.designation || u.linked_employee.full_name}` : "—"}</td>
-                    <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span></td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span>
+                        {/* Read-only, and beside Active because it belongs to the same
+                            question — can this person get in. It is the first thing to
+                            check when somebody reports being stuck at sign-in, and there
+                            is no action on it here: two-factor is the account holder's
+                            own, switched off only from their Security tab. */}
+                        {u.two_factor_enabled && (
+                          <span className="inline-flex items-center gap-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700" title="Two-factor authentication is on — this user gets a code by email at every sign-in" data-testid={`hr-user-2fa-${u.id}`}>
+                            <ShieldCheck className="h-3 w-3" />2FA
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-2"><UserBranch user={u} /></td>
                     <td className="px-3 py-2">
                       <button
@@ -3666,8 +3685,12 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
     if (pwd !== confirmPwd) { toast.error("Passwords do not match"); return; }
     try {
       setBusy(true);
-      await hrResetPassword(user.id, pwd);
-      toast.success(`Password updated for ${user.full_name}`);
+      const data = await hrResetPassword(user.id, pwd);
+      toast.success(
+        data?.sessions_ended
+          ? `Password updated for ${user.full_name} — signed out of ${data.sessions_ended} device${data.sessions_ended === 1 ? "" : "s"}`
+          : `Password updated for ${user.full_name}`,
+      );
       onDone();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to update password"); }
     finally { setBusy(false); }
@@ -3701,7 +3724,10 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
         <div className="flex items-start justify-between">
           <div>
             <h3 className="text-base font-semibold text-slate-800" data-testid="hr-actions-title">Actions — {user.full_name}</h3>
-            <p className="text-xs text-slate-500">{user.email} · <span className={user.is_active ? "text-emerald-600" : "text-slate-500"}>{user.is_active ? "Active" : "Inactive"}</span></p>
+            <p className="text-xs text-slate-500">
+              {user.email} · <span className={user.is_active ? "text-emerald-600" : "text-slate-500"}>{user.is_active ? "Active" : "Inactive"}</span>
+              {user.two_factor_enabled && <span className="text-violet-600"> · 2FA on</span>}
+            </p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100" data-testid="hr-actions-close"><X className="h-4 w-4" /></button>
         </div>
@@ -3834,6 +3860,15 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
           <div className="space-y-3" data-testid="hr-actions-password-form">
             <PasswordInput placeholder="New password (min 6)" value={pwd} onChange={(e) => setPwd(e.target.value)} testid="hr-actions-password-new" />
             <PasswordInput placeholder="Confirm new password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} testid="hr-actions-password-confirm" />
+            {/* The two consequences, said where the button is. Both are asked about often
+                enough to be worth two lines: the sign-out is new, and the 2FA one is the
+                answer to "I reset their password and they still can't get in". */}
+            <p className="text-[11px] text-slate-500" data-testid="hr-actions-password-note">
+              This signs {user.full_name} out of every device.
+              {user.two_factor_enabled
+                ? " They have two-factor on, so they'll still need the code emailed to them at sign-in — only they can switch that off, from their own Security tab."
+                : ""}
+            </p>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => { setMode(null); setPwd(""); setConfirmPwd(""); }} className="flex-1" data-testid="hr-actions-password-back">Back</Button>
               <Button onClick={submitPwd} disabled={busy} className="flex-1 bg-violet-600 hover:bg-violet-700" data-testid="hr-actions-password-save">Update Password</Button>

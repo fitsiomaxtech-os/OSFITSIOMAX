@@ -1,11 +1,11 @@
 /**
- * Time Off — the third tab of everybody's own page, and the only one that writes.
+ * Time Off — the third tab of everybody's own page, and the one that writes into HR's work.
  *
  *     Leave        whole days, one or many
  *     Permission   hours inside one working day
  *
  * It sits beside Attendance rather than in a dialog off the header for the reason the
- * other two tabs do: what is on it is a year of requests and a form, which a dialog can
+ * other tabs do: what is on it is a year of requests and a form, which a dialog can
  * only letterbox. And it belongs on this page in particular because the tab next to it is
  * where an approved request ends up — a leave becomes the day marked `leave` on the month,
  * a permission becomes hours accounted for on a day still worked.

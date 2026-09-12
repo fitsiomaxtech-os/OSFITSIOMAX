@@ -1355,13 +1355,33 @@ async def update_user_role(user_id: str, role: str, caller: V3UserOut = Depends(
 
 @router.patch("/users/{user_id}/reset-password")
 async def reset_password(user_id: str, password: str, caller: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Set somebody else's password — the reset, as opposed to the change they make themselves.
+
+    No current password is asked for, which is the whole point: this is the path for
+    somebody who has lost theirs, and the accountability is that only a Super Admin can
+    walk it. A person changing their own goes through POST /me/security/password, which
+    does demand the old one.
+
+    The account's live sessions go with it, for the same reason the self-serve change ends
+    them: a password is reset because somebody may have had it, and tokens minted under the
+    old one keep working until they are deleted. That is also why the reset alone was not
+    enough to lock out whoever it was called about.
+
+    Two-factor is untouched. It belongs to the account holder and only they can switch it
+    off (see backend/routers/v3_security.py) — so a reset password still lands on the code
+    screen at the next sign-in, which is the correct answer for an account under suspicion.
+    """
     await _guard_super_admin_target(user_id, caller)
     if len(password) < 6:
         raise HTTPException(status_code=400, detail="Password too short (min 6)")
-    res = await v3_col("users").update_one({"id": user_id}, {"$set": {"password": hash_password(password)}})
+    res = await v3_col("users").update_one(
+        {"id": user_id},
+        {"$set": {"password": hash_password(password), "password_changed_at": now_iso()}},
+    )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"message": "Password reset"}
+    ended = await v3_col("sessions").delete_many({"user_id": user_id})
+    return {"message": "Password reset", "sessions_ended": ended.deleted_count}
 
 
 async def _set_expert_active(user_id: str, active: bool) -> int:

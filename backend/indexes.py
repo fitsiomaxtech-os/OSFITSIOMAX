@@ -42,6 +42,14 @@ CORE_INDEXES = [
     # physio boards read a patient's days by it.
     ("sessions", [("lead_id", 1)], "lead_id"),
     ("sessions", [("id", 1)], "id"),
+    # The Security tab counts an account's live sessions, and changing a password or
+    # signing out everywhere else deletes by the same field. Unindexed, each of those
+    # scanned a collection that also holds every treatment day on the install.
+    ("sessions", [("user_id", 1)], "user_id"),
+    # A 2FA code is looked up by its challenge id on every digit typed into a sign-in, and
+    # raising one clears the account's open challenges by (user_id, purpose) first.
+    ("two_factor_challenges", [("id", 1)], "id"),
+    ("two_factor_challenges", [("user_id", 1), ("purpose", 1)], "user_id_purpose"),
     # The other half of a course. Every Branch Leads board runs leads_awaiting_review to
     # decide who is Completed, which reads _course_progress and _completed_day_counts, and
     # both scan rehab_sessions by lead_id -- twice per load, and unindexed it was the whole

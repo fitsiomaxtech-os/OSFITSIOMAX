@@ -43,6 +43,17 @@ class V3LoginResponse(BaseModel):
     user: V3UserOut
 
 
+# The other answer POST /auth/login can give: no token, a challenge. Two-factor accounts
+# get a code by email and finish at /auth/login/verify-2fa with these two fields.
+class V3TwoFactorVerifyRequest(BaseModel):
+    challenge_id: str
+    code: str
+
+
+class V3TwoFactorResendRequest(BaseModel):
+    challenge_id: str
+
+
 class V3VerticalCreate(BaseModel):
     name: str
     active: bool = True

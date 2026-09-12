@@ -3,6 +3,7 @@
  *
  *     Attendance     the month I have worked, and today so far
  *     My Profile     what this company holds about me
+ *     Security       the password and second factor on my own login
  *
  * It replaced a dialog. The old My Profile was four lines in a box — name, role, joining
  * date — and every other fact about a person (their address, who to call in an emergency,
@@ -35,6 +36,7 @@ import {
   Home,
   Palmtree,
   ShieldAlert,
+  ShieldCheck,
   UserRound,
 } from "lucide-react";
 import { myAttendance, myProfile } from "@/lib/api";
@@ -42,20 +44,30 @@ import { myAttendance, myProfile } from "@/lib/api";
 // page is already six hundred lines of two tabs, and the one that writes is the one most
 // likely to be edited on its own.
 import { TimeOffTab } from "@/components/MyTimeOff";
+// And the fourth, split out for the same reason — it is the other tab that writes, and
+// what it writes is the login itself.
+import { SecurityTab } from "@/components/MySecurity";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 // The same formatters the header clock and HR's register read a day with, so an hour and
 // a half is not "1h 30m" here and "90m" three screens away.
 import { duration, hours, prettyTime } from "@/lib/clock";
 
+// A fourth tab means four across a phone, which is about 46px of text a tab — under what
+// "Attendance" and "My Profile" need, so both would arrive as an ellipsis. `short` is the
+// phone label; the full one returns from sm up. See SegmentedTabs.
 const TABS = [
-  { key: "attendance", label: "Attendance", icon: Clock },
+  { key: "attendance", label: "Attendance", short: "Hours", icon: Clock },
   // Between the two, because that is the order the questions come in: what did I work,
-  // what am I asking for, and who am I on the books. Time Off is also the only tab that
-  // writes, and what it writes lands on the tab to its left -- an approved leave marks
-  // those days, an approved permission notes its hours on one of them.
-  { key: "timeoff", label: "Time Off", icon: Palmtree },
-  { key: "profile", label: "My Profile", icon: UserRound },
+  // what am I asking for, and who am I on the books. What Time Off writes also lands on
+  // the tab to its left -- an approved leave marks those days, an approved permission
+  // notes its hours on one of them.
+  { key: "timeoff", label: "Time Off", short: "Leave", icon: Palmtree },
+  { key: "profile", label: "My Profile", short: "Profile", icon: UserRound },
+  // Last, because it is the tab opened on purpose rather than in passing. The three before
+  // it are read — what did I work, what did I ask for, what do they have on me — and this
+  // one is only reached by somebody who came to change something.
+  { key: "security", label: "Security", short: "Login", icon: ShieldCheck },
 ];
 
 // ---------- reading the figures ----------
@@ -627,7 +639,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
           </div>
         </div>
         <div className="w-full sm:w-96" data-testid="my-profile-tabs-wrap">
-          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={3} />
+          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={4} />
         </div>
       </div>
 
@@ -637,7 +649,8 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
           happened today. */}
       {tab === "attendance" ? <AttendanceTab />
         : tab === "timeoff" ? <TimeOffTab />
-          : <ProfileTab roleLabel={roleLabel} />}
+          : tab === "security" ? <SecurityTab />
+            : <ProfileTab roleLabel={roleLabel} />}
     </div>
   );
 };

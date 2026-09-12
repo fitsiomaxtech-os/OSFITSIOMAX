@@ -48,7 +48,14 @@ api.interceptors.response.use(
       if (flat !== error.response.data.detail) error.response.data.detail = flat;
     }
     const url = error?.config?.url || "";
-    const isAuthCall = url.includes("/auth/login") || url.includes("/auth/logout");
+    // A 401 from these does not mean the session went stale — it means a secret typed
+    // into the form was wrong. The two 2FA endpoints under /auth/login are reached with
+    // no session at all, and every 401 from /me/security is about the field, not the
+    // token: a mistyped current password, a mistyped code. Without this, getting either
+    // one wrong by a character would clear the session and reload the page out from under
+    // somebody who is signed in perfectly well.
+    const isAuthCall =
+      url.includes("/auth/login") || url.includes("/auth/logout") || url.includes("/me/security");
     if (status === 401 && !isAuthCall && !_redirecting) {
       _redirecting = true;
       clearSession();
@@ -65,6 +72,14 @@ export const apiLogin = async (email, password) => {
 };
 
 export const apiMe = async () => (await api.get("/auth/me")).data;
+
+// Sign-in, second half. An account with two-factor on gets no token from /auth/login —
+// it gets `{ two_factor_required: true, challenge_id, email_masked }`, and the token only
+// exists once the emailed code comes back through here. See backend/routers/v3_auth.py.
+export const apiVerifyLogin2fa = async (challengeId, code) =>
+  (await api.post("/auth/login/verify-2fa", { challenge_id: challengeId, code })).data;
+export const apiResendLogin2fa = async (challengeId) =>
+  (await api.post("/auth/login/resend-2fa", { challenge_id: challengeId })).data;
 
 export const apiLogout = async () => {
   const { data } = await api.post("/auth/logout");
@@ -638,6 +653,20 @@ export const myAttendance = async (month) => (await api.get("/me/attendance", { 
 // The three that write. They post into the very list HR decides on -- see
 // backend/routers/v3_me.py -- so a leave raised here and one HR logged are the same
 // record, and approving either is the same click on the same board.
+// The Security tab. Same rule as the two above — no id is accepted by any of them, so
+// nothing here reads or changes another person's login. HR's side of this subject (setting
+// somebody else's password, deactivating an account) stays on /hr/users behind HR's roles.
+export const mySecurity = async () => (await api.get("/me/security")).data;
+export const changeMyPassword = async (payload) => (await api.post("/me/security/password", payload)).data;
+// `intent` is "enable" or "disable" — sent rather than inferred from the stored flag, so a
+// tab left open since before somebody turned 2FA on cannot turn it off by mistake.
+export const startMy2fa = async (intent) => (await api.post("/me/security/2fa/start", { intent })).data;
+export const resendMy2fa = async (intent, challengeId) =>
+  (await api.post("/me/security/2fa/resend", { intent, challenge_id: challengeId })).data;
+export const verifyMy2fa = async (intent, challengeId, code) =>
+  (await api.post("/me/security/2fa/verify", { intent, challenge_id: challengeId, code })).data;
+export const revokeMyOtherSessions = async () => (await api.post("/me/security/sessions/revoke-others")).data;
+
 export const myRequests = async (year) => (await api.get("/me/requests", { params: year ? { year } : {} })).data;
 export const raiseMyRequest = async (payload) => (await api.post("/me/requests", payload)).data;
 export const withdrawMyRequest = async (id) => (await api.delete("/me/requests/" + id)).data;

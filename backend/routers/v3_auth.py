@@ -2,11 +2,18 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 import re
 import uuid
 
+import two_factor
 from database import v3_col
 from utils import now_iso
 from security import verify_password, hash_password, is_hashed
 from deps import v3_current_user
-from schemas.v3 import V3UserOut, V3LoginRequest, V3LoginResponse
+from schemas.v3 import (
+    V3UserOut,
+    V3LoginRequest,
+    V3LoginResponse,
+    V3TwoFactorVerifyRequest,
+    V3TwoFactorResendRequest,
+)
 
 router = APIRouter(prefix="/api/v3")
 
@@ -39,24 +46,14 @@ async def _employee_photo(user: dict) -> str:
     return (emp or {}).get("photo_url") or ""
 
 
-@router.post("/auth/login", response_model=V3LoginResponse)
-async def v3_login(payload: V3LoginRequest):
-    # Case-insensitive match: some accounts were created with mixed-case emails
-    # (e.g. "Consultant@fitsiomax.clinic") before account creation normalized to lowercase.
-    email = payload.email.strip()
-    user = await v3_col("users").find_one(
-        {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}, "is_active": True},
-        {"_id": 0},
-    )
-    if not user or not verify_password(payload.password, user.get("password", "")):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+async def _issue_session(user: dict) -> V3LoginResponse:
+    """Mint a token for an account that has cleared every gate in front of it.
 
-    if not is_hashed(user.get("password", "")):
-        await v3_col("users").update_one(
-            {"id": user["id"]},
-            {"$set": {"password": hash_password(payload.password)}},
-        )
-
+    Split out of the login handler because there are now two doors into it: a password on
+    an account without 2FA, and a verified code on an account with it. Both have to cap
+    sessions, record the login and attach the headshot in the same way, and the version
+    that drifts is the one that was copied.
+    """
     token = str(uuid.uuid4())
     await v3_col("sessions").insert_one({"token": token, "user_id": user["id"], "created_at": now_iso()})
     # Signing in on a second device must NOT sign the first one out. A Head Physio moves
@@ -84,6 +81,59 @@ async def v3_login(payload: V3LoginRequest):
     user_public = {k: v for k, v in user.items() if k != "password"}
     user_public["photo_url"] = await _employee_photo(user)
     return V3LoginResponse(token=token, user=V3UserOut(**user_public))
+
+
+@router.post("/auth/login")
+async def v3_login(payload: V3LoginRequest):
+    # Case-insensitive match: some accounts were created with mixed-case emails
+    # (e.g. "Consultant@fitsiomax.clinic") before account creation normalized to lowercase.
+    email = payload.email.strip()
+    user = await v3_col("users").find_one(
+        {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}, "is_active": True},
+        {"_id": 0},
+    )
+    if not user or not verify_password(payload.password, user.get("password", "")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if not is_hashed(user.get("password", "")):
+        await v3_col("users").update_one(
+            {"id": user["id"]},
+            {"$set": {"password": hash_password(payload.password)}},
+        )
+
+    # The gate. No token is minted here for an account with 2FA on — the response carries a
+    # challenge instead, and the session is only created once the code comes back verified
+    # at /auth/login/verify-2fa. Anything short of that (a token issued now and revoked
+    # later, a flag on the session saying "half signed in") leaves a usable token in a
+    # browser that has not finished proving who it is.
+    #
+    # response_model is gone from this route for the same reason: the two answers are
+    # different shapes, and V3LoginResponse would have had to make token and user optional
+    # to hold both — which would let a bug return neither and still validate.
+    if two_factor.is_enabled(user):
+        challenge = await two_factor.issue_challenge(user, "login")
+        return {"two_factor_required": True, **challenge}
+
+    return await _issue_session(user)
+
+
+@router.post("/auth/login/verify-2fa")
+async def v3_login_verify_2fa(payload: V3TwoFactorVerifyRequest):
+    """Second half of a gated sign-in: the code from the email, and the session it earns.
+
+    The password was already checked to raise the challenge, and the challenge id is the
+    only thing tying this call to that one — so it is unguessable, single-use, and dies in
+    five minutes. It carries the user id itself rather than taking one from the caller,
+    which is what keeps a valid code for one account from signing in as another.
+    """
+    user = await two_factor.consume_challenge(payload.challenge_id, payload.code, "login")
+    return await _issue_session(user)
+
+
+@router.post("/auth/login/resend-2fa")
+async def v3_login_resend_2fa(payload: V3TwoFactorResendRequest):
+    """A fresh code on the same challenge, for the sign-in that never received the first."""
+    return await two_factor.resend_challenge(payload.challenge_id, "login")
 
 
 @router.get("/auth/me", response_model=V3UserOut)
