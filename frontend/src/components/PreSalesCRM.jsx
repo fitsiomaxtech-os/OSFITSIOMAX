@@ -384,11 +384,15 @@ const PreSalesViewTab = ({ active, onClick, children, testid }) => (
   </button>
 );
 
+// The branch filter chips on Marketing / Sales (Master) View. Boxes, not capsules:
+// rounded-md is the same calc(var(--radius) - 2px) the All/Online/Offline group beside
+// them already uses, so the two halves of one filter row read as one control instead of
+// a segmented box followed by a row of radio-looking pills.
 const PreSalesBranchPill = ({ active, onClick, children, testid }) => (
   <button
     type="button"
     onClick={onClick}
-    className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+    className={`shrink-0 rounded-md border px-3 py-1 text-xs font-medium transition ${
       active ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-sky-300 hover:text-sky-600"
     }`}
     data-testid={testid}
