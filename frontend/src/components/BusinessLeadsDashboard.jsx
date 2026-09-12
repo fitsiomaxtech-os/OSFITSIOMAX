@@ -725,6 +725,10 @@ function DrillList({ title, drill, loading, branches, onClose }) {
 
 /* ─── Dashboard Tab ─── */
 function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, drill, drillLoading }) {
+  // Which of the two rows of cards is on screen. Up here rather than beside the groups it
+  // switches, because a hook cannot sit after the two conditional returns below it.
+  const [openGroup, setOpenGroup] = useState("onboarding");
+
   if (!summary && loading) {
     return <p className="py-8 text-center text-sm text-slate-400" data-testid="bd-dash-loading">Loading dashboard...</p>;
   }
@@ -751,11 +755,17 @@ function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, dril
 
   const followUp = summary.stage_counts?.["Follow Up"] || 0;
 
-  // Two groups, because the nine cards answer two different questions. OnBoarding is the
-  // pipeline as it stands today -- what came in and how far along it is, the figures a
-  // desk acts on this morning. Systematic statistics is what the desk and the group have
-  // built: money, rate, and the estate the leads arrive through. Read as one row of nine
-  // they were a wall; split, each row has a subject.
+  // Two groups, on a sub-tab strip, because the nine cards answer two different
+  // questions. OnBoarding is the pipeline as it stands today -- what came in and how far
+  // along it is, the figures a desk acts on this morning. Systematic statistics is what
+  // the desk and the group have built: money, rate, and the estate the leads arrive
+  // through. Read as one row of nine they were a wall; stacked as two rows the second
+  // still pulled the eye off the first. One row at a time, the desk reads what it asked
+  // for and the board answers one question per screen.
+  //
+  // `cols` because the rows are five and four cards wide: each fills its own row rather
+  // than the four holding a gap open to line up with the five, which is what the blank
+  // card this replaced was for.
   //
   // `metric` on each card is the key its rows are fetched by -- see BD_ROW_METRICS in
   // backend/routers/v3_dashboard.py. A card with no metric opens nothing.
@@ -764,6 +774,8 @@ function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, dril
       key: "onboarding",
       label: "OnBoarding",
       hint: "The pipeline as it stands today",
+      icon: UserPlus,
+      cols: "lg:grid-cols-5",
       cards: [
         { key: "total", metric: "total", label: "Total Leads", value: summary.total_leads, icon: Users, trend: weekTrend, sparkline: weekTrendCounts },
         { key: "today", metric: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, trend: todayTrend, sparkline: weekTrendCounts },
@@ -776,51 +788,78 @@ function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, dril
       key: "statistics",
       label: "systematic statistics",
       hint: "What the desk and the estate have built",
+      icon: BarChart3,
+      cols: "lg:grid-cols-4",
       cards: [
         { key: "revenue", metric: "revenue", label: "Revenue Generated", value: formatMoney(summary.revenue_generated), icon: IndianRupee },
         { key: "conversion", metric: "conversion", label: "Conversion Rate", value: `${summary.conversion_rate}%`, icon: Percent },
         { key: "branches", metric: "branches", label: "Branches", value: summary.total_branches, icon: Building2 },
         { key: "sheets", metric: "sheets", label: "Connected Sheets", value: summary.total_connections, icon: FileSpreadsheet },
-        // Held open on purpose. The row is five wide and this group has four figures, so
-        // the alternative is a four-card row that does not line up with the five above it.
-        { key: "blank", blank: true },
       ],
     },
   ];
 
   const openCardDef = groups.flatMap((g) => g.cards).find((c) => c.metric && c.metric === openMetric);
+  // A saved key naming a group that no longer exists would render nothing at all, so the
+  // first group stands in for one.
+  const activeGroup = groups.find((g) => g.key === openGroup) || groups[0];
+
+  // Leaving a row closes the list under it. Those rows were opened by a card in the row
+  // being left, and only one row is on screen, so carrying them over would leave rows
+  // headed by one figure sitting under a row of four others.
+  const selectGroup = (key) => {
+    if (key === activeGroup.key) return;
+    if (openMetric) onOpenCard(openMetric);
+    setOpenGroup(key);
+  };
 
   return (
-    <div className="space-y-5" data-testid="bd-dashboard-content">
-      {groups.map((group) => (
-        <div key={group.key} className="space-y-2" data-testid={`bd-group-${group.key}`}>
-          <div className="flex flex-wrap items-baseline gap-x-2">
-            <h2 className="text-sm font-bold text-slate-800" data-testid={`bd-group-title-${group.key}`}>{group.label}</h2>
-            <p className="text-[11px] text-slate-400">{group.hint}</p>
-          </div>
-          {/* The same grid HR Admin's Dashboard lays its row out on -- two up on a phone,
-              five across on a desk. */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid={`bd-metrics-${group.key}`}>
-            {group.cards.map((m) => (
-              m.blank
-                ? <div key={m.key} className="hidden rounded-xl border-2 border-dashed border-slate-100 lg:block" aria-hidden="true" data-testid="bd-metric-blank" />
-                : (
-                  <KpiCard
-                    key={m.key}
-                    label={m.label}
-                    value={m.value}
-                    icon={m.icon}
-                    trend={m.trend}
-                    sparkline={m.sparkline}
-                    open={openMetric === m.metric}
-                    onClick={m.metric ? () => onOpenCard(m.metric) : undefined}
-                    testid={`bd-metric-${m.key}`}
-                  />
-                )
-            ))}
-          </div>
+    <div className="space-y-4" data-testid="bd-dashboard-content">
+      {/* The strip Settings' own two views sit on, in the same shape: a rounded row of
+          pills, the open one in sky. A sub-tab and not a sixth entry on the nav above,
+          because both rows are this desk's own figures -- the tabs up there are other
+          desks' boards. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-subtabs">
+        <span className="pl-2 pr-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">View</span>
+        {groups.map((g) => {
+          const Icon = g.icon;
+          const active = g.key === activeGroup.key;
+          return (
+            <button
+              key={g.key}
+              type="button"
+              onClick={() => selectGroup(g.key)}
+              aria-pressed={active}
+              className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
+              data-testid={`bd-dash-subtab-${g.key}`}
+            >
+              <Icon className="h-4 w-4" />{g.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="space-y-2" data-testid={`bd-group-${activeGroup.key}`}>
+        {/* The label is the tab now; what is left to say is what the row is about. */}
+        <p className="text-[11px] text-slate-400" data-testid={`bd-group-hint-${activeGroup.key}`}>{activeGroup.hint}</p>
+        {/* The same grid HR Admin's Dashboard lays its row out on -- two up on a phone,
+            the group's own width across on a desk. */}
+        <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${activeGroup.cols}`} data-testid={`bd-metrics-${activeGroup.key}`}>
+          {activeGroup.cards.map((m) => (
+            <KpiCard
+              key={m.key}
+              label={m.label}
+              value={m.value}
+              icon={m.icon}
+              trend={m.trend}
+              sparkline={m.sparkline}
+              open={openMetric === m.metric}
+              onClick={m.metric ? () => onOpenCard(m.metric) : undefined}
+              testid={`bd-metric-${m.key}`}
+            />
+          ))}
         </div>
-      ))}
+      </div>
 
       {openMetric && (
         <DrillList
