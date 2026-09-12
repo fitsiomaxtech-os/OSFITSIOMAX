@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlarmClock, ArrowLeft, Ban, CalendarOff, Check, ChevronLeft, ChevronRight, Coffee,
-  Clock3, Download, Eye, Filter, IndianRupee, LayoutGrid, List, Lock, Palmtree, Pencil,
+  Clock3, Download, Eye, Filter, IndianRupee, Lock, Palmtree, Pencil,
   Pin, PinOff, Plus, Quote, RefreshCw, Search, Trash2, Undo2, UserRound, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -948,6 +948,7 @@ const PayslipCard = ({ slip: s, editable, onAdjust, onOpen }) => (
  *  clicks: a screen that keeps moving you to whichever tab has work on it is one you
  *  cannot stand still in.
  */
+// eslint-disable-next-line no-unused-vars -- kept for reference; Payroll now always renders the list.
 const PayrollBoard = ({ slips, editable, onAdjust, onOpen }) => {
   const lanes = useMemo(() => {
     const out = Object.fromEntries(PAY_LANES.map((l) => [l.key, []]));
@@ -1461,7 +1462,6 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
 
 export const PayrollTab = () => {
   const [month, setMonth] = useState(todayIso().slice(0, 7));
-  const [view, setView] = useState("board");
   const [query, setQuery] = useState("");
   const [opened, setOpened] = useState(null);
   const [data, setData] = useState(null);
@@ -1584,27 +1584,6 @@ export const PayrollTab = () => {
                 {slips.length} of {everyone.length}
               </span>
             )}
-            {/* Two readings of the same run. The board is the default because a draft is
-                open to be corrected and the board is what shows where; the table stays a
-                click away for reading every figure at once and for checking the CSV. */}
-            <div className="flex rounded-lg bg-slate-100 p-0.5" data-testid="hr-pay-view-toggle">
-              {[
-                { key: "board", label: "Board", Icon: LayoutGrid },
-                { key: "table", label: "Table", Icon: List },
-              ].map(({ key, label, Icon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setView(key)}
-                  className={`flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium transition ${
-                    view === key ? "bg-white text-sky-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                  }`}
-                  data-testid={`hr-pay-view-${key}`}
-                >
-                  <Icon className="h-3.5 w-3.5" />{label}
-                </button>
-              ))}
-            </div>
             <Button variant="outline" size="sm" onClick={exportCsv} disabled={!slips.length} title={query.trim() ? "Exports what the search leaves" : "Exports the whole month"} data-testid="hr-pay-csv">
               <Download className="h-4 w-4" />CSV
             </Button>
@@ -1640,11 +1619,7 @@ export const PayrollTab = () => {
         <Stat label="Net payable" value={money(totals.net_payable)} tone="text-sky-700" testid="hr-pay-t-net" />
       </div>
 
-      {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : view === "board" ? (
-        slips.length === 0
-          ? <Empty>{query.trim() ? `Nobody matches “${query.trim()}”.` : "No active employees to pay."}</Empty>
-          : <PayrollBoard slips={slips} editable={editable} onAdjust={adjust} onOpen={setOpened} />
-      ) : (
+      {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : (
         <>
           <div className="space-y-2 lg:hidden" data-testid="hr-pay-cards">
             {slips.map((s) => (
@@ -1668,13 +1643,7 @@ export const PayrollTab = () => {
             {slips.length === 0 && <Empty>{query.trim() ? `Nobody matches “${query.trim()}”.` : "No active employees to pay."}</Empty>}
           </div>
 
-          <Card className="hidden lg:block">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Payslips — {prettyMonth(month)}</CardTitle>
-              <p className="text-xs text-slate-500">
-                Pay is pro-rated on calendar days: a day of loss of pay costs base ÷ days in month. Bonuses and deductions are editable while the run is a draft.
-              </p>
-            </CardHeader>
+          <Card className="hidden overflow-hidden lg:block">
             <CardContent className="p-0">
               <div className="overflow-auto">
                 <table className="min-w-full text-sm">
