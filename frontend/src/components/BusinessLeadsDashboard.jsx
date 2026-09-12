@@ -9,13 +9,11 @@ import {
   CalendarCheck,
   Clock,
   FileSpreadsheet,
-  Globe,
   Headphones,
   IndianRupee,
   LayoutDashboard,
   Megaphone,
   Percent,
-  Plus,
   RefreshCw,
   Search,
   Settings,
@@ -34,14 +32,9 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/sonner";
 import {
-  createSheetConnection,
   getBdSummary,
   getBdSummaryRows,
   getBranches,
-  getLeadSources,
-  getSheetConnections,
-  saveSheetMapping,
-  syncSheetConnection,
 } from "@/lib/api";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 // The toolbar controls, every one of them the same instance another board already uses --
@@ -127,20 +120,18 @@ const TABS = [
 // of these directly when Settings is open, so nothing has to track both a tab and a
 // sub-tab and keep the two agreeing.
 //
-// Google Sheet Connection and Lead Source were two entries on the main strip. Neither is
-// a place this desk works: one is a connection to configure, the other a read-only table
-// of where leads came from. Behind Settings they stop competing with Dashboard and Sales
-// View for the eye.
+// Marketing Source and CI/CD ROOTS, from Super Admin's own Settings, which holds exactly
+// that pair. Both are configuration rather than work, so this desk's Settings is the one
+// place its configuration lives. The keys match CRMPage's SETTINGS_SUB_VIEWS
+// ("marketing"/"stages") so the two boards name the same screens the same way.
 //
-// Marketing Source and CI/CD ROOTS join them from Super Admin's own Settings, which holds
-// exactly that pair. All four are configuration rather than work, so this desk's Settings
-// is now the one place its configuration lives instead of two Settings tabs that each held
-// half of it. The keys match CRMPage's SETTINGS_SUB_VIEWS ("marketing"/"stages") so the two
-// boards name the same screens the same way.
-const SETTINGS_SUB_VIEWS = ["sheets", "lead_source", "marketing", "stages"];
+// Google Sheet Connection and Lead Source sat here too and are gone. Neither was a place
+// this desk works, and neither was the only copy: Marketing Source -> Lead Sources already
+// connects a sheet -- through Google's own consent screen rather than a pasted spreadsheet
+// ID -- and already lists where leads came from, per branch. Keeping both would have left
+// two ways to connect one sheet, and the older one could quietly disagree with the newer.
+const SETTINGS_SUB_VIEWS = ["marketing", "stages"];
 const SETTINGS_SUB_TABS = [
-  { key: "sheets", label: "Google Sheet Connection", icon: FileSpreadsheet },
-  { key: "lead_source", label: "Lead Source", icon: Globe },
   { key: "marketing", label: "Marketing Source", icon: Megaphone },
   { key: "stages", label: "CI/CD ROOTS", icon: Activity },
 ];
@@ -150,37 +141,6 @@ const isTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.incl
 // because its toolbar carries the same one, and the three mounted boards because each
 // carries its own and this one would not touch what they show.
 const REFRESH_WITHHELD_TABS = ["dashboard", "finance", "hr", "packages"];
-
-const PIPELINE_STAGES = [
-  "New Leads",
-  "Follow Up",
-  "Appointment",
-];
-
-const defaultSheetForm = {
-  connection_name: "",
-  spreadsheet_id: "",
-  sync_interval_minutes: 30,
-};
-
-const defaultMapping = { name: "name", phone: "phone", email: "email", vertical: "vertical" };
-
-const defaultSyncPayload = `{
-  "tabs": [
-    {
-      "tab_name": "Instagram",
-      "rows": [
-        {
-          "name": "Priya",
-          "phone": "9000010001",
-          "email": "priya@example.com",
-          "vertical": "offline_physiotherapy",
-          "campaign": "meta_1"
-        }
-      ]
-    }
-  ]
-}`;
 
 function formatMoney(v) {
   const n = Number(v || 0);
@@ -227,14 +187,7 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
 
   const [summary, setSummary] = useState(null);
   const [branches, setBranches] = useState([]);
-  const [sheetConnections, setSheetConnections] = useState([]);
-  const [leadSources, setLeadSources] = useState([]);
   const [showCreateLead, setShowCreateLead] = useState(false);
-
-  const [sheetForm, setSheetForm] = useState(defaultSheetForm);
-  const [selectedConnectionId, setSelectedConnectionId] = useState("");
-  const [mappingFields, setMappingFields] = useState(defaultMapping);
-  const [syncPayload, setSyncPayload] = useState(defaultSyncPayload);
 
   // Which summary card is open, and the rows behind it. One card at a time: these lists
   // answer "which ones are they" about a figure just clicked, and two of them open at
@@ -290,20 +243,6 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
     } catch (e) { console.warn("[BD load failed]", e?.message || e); }
   }, []);
 
-  const loadSheets = useCallback(async () => {
-    try {
-      const data = await getSheetConnections();
-      setSheetConnections(data);
-    } catch (e) { console.warn("[BD load failed]", e?.message || e); }
-  }, []);
-
-  const loadSources = useCallback(async () => {
-    try {
-      const data = await getLeadSources();
-      setLeadSources(data);
-    } catch (e) { console.warn("[BD load failed]", e?.message || e); }
-  }, []);
-
   // The rows behind a card. Asked for on the click rather than held for all nine: eight of
   // the nine are never opened in a given sitting, and Total Leads alone is thousands of
   // rows this board would otherwise fetch to show a number it already has.
@@ -338,11 +277,6 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
     loadBranches();
   }, [loadDashboard, loadBranches]);
 
-  useEffect(() => {
-    if (activeTab === "sheets") loadSheets();
-    if (activeTab === "lead_source") loadSources();
-  }, [activeTab, loadSheets, loadSources]);
-
   // Everything this board holds, re-asked for. An open list goes with it -- via drillTick
   // and the effect above -- or a reload would leave the rows on screen older than the card
   // above them.
@@ -351,60 +285,14 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
   // already says how many leads it brought in, and following that with "Data refreshed"
   // would be the board congratulating itself for the second half of one action.
   const reloadAll = useCallback(async () => {
-    await Promise.all([loadDashboard(), loadBranches(), loadSheets(), loadSources()]);
+    await Promise.all([loadDashboard(), loadBranches()]);
     setDrillTick((n) => n + 1);
-  }, [loadDashboard, loadBranches, loadSheets, loadSources]);
+  }, [loadDashboard, loadBranches]);
 
   const refreshAll = useCallback(async () => {
     await reloadAll();
     toast.success("Data refreshed");
   }, [reloadAll]);
-
-  const createConnectionNow = async (e) => {
-    e.preventDefault();
-    if (!sheetForm.connection_name.trim() || !sheetForm.spreadsheet_id.trim()) {
-      toast.error("Connection name and spreadsheet ID required");
-      return;
-    }
-    try {
-      await createSheetConnection({ ...sheetForm, sync_interval_minutes: Number(sheetForm.sync_interval_minutes) || 30 });
-      setSheetForm(defaultSheetForm);
-      toast.success("Connection created");
-      await loadSheets();
-      await loadDashboard();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Connection failed");
-    }
-  };
-
-  const saveMappingNow = async () => {
-    if (!selectedConnectionId) {
-      toast.error("Select a connection first");
-      return;
-    }
-    try {
-      await saveSheetMapping(selectedConnectionId, { field_map: mappingFields, create_new_fields: true });
-      toast.success("Mapping saved");
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Save mapping failed");
-    }
-  };
-
-  const runSyncNow = async () => {
-    if (!selectedConnectionId) {
-      toast.error("Select a connection first");
-      return;
-    }
-    try {
-      const parsed = JSON.parse(syncPayload);
-      const result = await syncSheetConnection(selectedConnectionId, parsed);
-      toast.success(`Synced: ${result.imported} imported, ${result.skipped} skipped`);
-      await loadDashboard();
-      await loadSources();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Sync failed — verify JSON");
-    }
-  };
 
   return (
     <div className="space-y-5" data-testid="bd-dashboard-root">
@@ -547,8 +435,8 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
         <BranchManagementBoard actingUser={currentUser} initialTab="creation" detailReadOnly />
       )}
 
-      {/* Settings — Google Sheet Connection and Lead Source, and Super Admin's own
-          Marketing Source and CI/CD ROOTS beside them, as one sub-tab row of four. */}
+      {/* Settings — Super Admin's own Marketing Source and CI/CD ROOTS, as one sub-tab
+          row of two. */}
       {SETTINGS_SUB_VIEWS.includes(activeTab) && (
         <div className="space-y-4" data-testid="bd-settings">
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-settings-subtabs">
@@ -569,31 +457,10 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
             })}
           </div>
 
-          {activeTab === "sheets" && (
-            <SheetsTab
-              sheetConnections={sheetConnections}
-              sheetForm={sheetForm}
-              setSheetForm={setSheetForm}
-              createConnectionNow={createConnectionNow}
-              selectedConnectionId={selectedConnectionId}
-              setSelectedConnectionId={setSelectedConnectionId}
-              mappingFields={mappingFields}
-              setMappingFields={setMappingFields}
-              saveMappingNow={saveMappingNow}
-              syncPayload={syncPayload}
-              setSyncPayload={setSyncPayload}
-              runSyncNow={runSyncNow}
-            />
-          )}
-
-          {activeTab === "lead_source" && (
-            <LeadSourceTab leadSources={leadSources} loading={loading} />
-          )}
-
-          {/* Marketing Source and CI/CD ROOTS. No `leading` prop, unlike CRMPage's mount of
-              these two: that prop exists to hand each board the switcher so Super Admin's
-              Settings opens on one row of controls rather than two, and here the row is
-              already above them. Passing it would draw the same four buttons twice. */}
+          {/* No `leading` prop, unlike CRMPage's mount of these two: that prop exists to
+              hand each board the switcher so Super Admin's Settings opens on one row of
+              controls rather than two, and here the row is already above them. Passing it
+              would draw the same buttons twice. */}
           <Suspense fallback={<BoardFallback />}>
             {activeTab === "marketing" && (
               <MarketingBoard branches={branches} />
@@ -612,7 +479,6 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
           onClose={() => setShowCreateLead(false)}
           onSaved={() => {
             loadDashboard();
-            loadSources();
           }}
         />
       )}
@@ -1330,12 +1196,12 @@ function DashboardTab({
           </Button>
 
           {/* Scoped server-side to whatever this account may pull, the same as every other
-              mount of it. The hints name Settings, because that is where this desk -- and
-              only this desk -- connects a sheet in the first place. */}
+              mount of it. The hints name Settings → Marketing Source, because that is where
+              this desk connects a sheet and tags it to a branch. */}
           <PullFromSheetButton
             onPulled={onPulled}
-            notConnectedHint="Google Sheets isn't connected yet — connect it under Settings → Google Sheet Connection."
-            noSourcesHint="No Google Sheet source is configured yet — add one under Settings → Google Sheet Connection."
+            notConnectedHint="Google Sheets isn't connected yet — connect it under Settings → Marketing Source → Lead Sources."
+            noSourcesHint="No Google Sheet source is configured yet — add one under Settings → Marketing Source → Lead Sources."
             iconOnly
           />
         </div>
@@ -1375,153 +1241,6 @@ function DashboardTab({
           markFilter={markFilter}
         />
       )}
-    </div>
-  );
-}
-
-/* ─── Sheets Tab ─── */
-function SheetsTab({
-  sheetConnections,
-  sheetForm,
-  setSheetForm,
-  createConnectionNow,
-  selectedConnectionId,
-  setSelectedConnectionId,
-  mappingFields,
-  setMappingFields,
-  saveMappingNow,
-  syncPayload,
-  setSyncPayload,
-  runSyncNow,
-}) {
-  return (
-    <div className="space-y-4" data-testid="bd-sheets-content">
-      <h2 className="text-lg font-semibold text-slate-800" data-testid="bd-sheets-title">Google Sheet Connections</h2>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Create Connection */}
-        <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-sheet-create-card">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Add Connection</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={createConnectionNow} className="space-y-3" data-testid="bd-sheet-create-form">
-              <Input value={sheetForm.connection_name} onChange={(e) => setSheetForm((p) => ({ ...p, connection_name: e.target.value }))} placeholder="Connection Name" data-testid="bd-sheet-conn-name-input" />
-              <Input value={sheetForm.spreadsheet_id} onChange={(e) => setSheetForm((p) => ({ ...p, spreadsheet_id: e.target.value }))} placeholder="Spreadsheet ID" data-testid="bd-sheet-spreadsheet-id-input" />
-              <Input type="number" value={sheetForm.sync_interval_minutes} onChange={(e) => setSheetForm((p) => ({ ...p, sync_interval_minutes: Number(e.target.value) }))} placeholder="Sync interval (minutes)" data-testid="bd-sheet-interval-input" />
-              <Button type="submit" className="bg-sky-600 hover:bg-sky-700" data-testid="bd-sheet-create-btn">
-                <Plus className="mr-1 h-4 w-4" /> Add Connection
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Existing Connections */}
-        <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-sheet-list-card">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Existing Connections ({sheetConnections.length})</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {sheetConnections.length === 0 ? (
-              <p className="text-sm text-slate-400">No connections yet</p>
-            ) : (
-              sheetConnections.map((conn) => (
-                <div
-                  key={conn.id}
-                  className={`cursor-pointer rounded-xl border p-3 transition-colors ${
-                    selectedConnectionId === conn.id
-                      ? "border-sky-300 bg-sky-50"
-                      : "border-slate-200 bg-white hover:bg-slate-50"
-                  }`}
-                  onClick={() => setSelectedConnectionId(conn.id)}
-                  data-testid={`bd-sheet-conn-${conn.id}`}
-                >
-                  <p className="text-sm font-medium text-slate-800">{conn.connection_name}</p>
-                  <p className="text-xs text-slate-500">Sheet: {conn.spreadsheet_id}</p>
-                  <p className="text-xs text-slate-400">Interval: {conn.sync_interval_minutes}min</p>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Mapping & Sync */}
-      {selectedConnectionId && (
-        <Card className="rounded-2xl border-slate-200 shadow-sm" data-testid="bd-sheet-mapping-card">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Field Mapping & Sync</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <Input value={mappingFields.name} onChange={(e) => setMappingFields((p) => ({ ...p, name: e.target.value }))} placeholder="Name column" data-testid="bd-map-name-input" />
-              <Input value={mappingFields.phone} onChange={(e) => setMappingFields((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone column" data-testid="bd-map-phone-input" />
-              <Input value={mappingFields.email} onChange={(e) => setMappingFields((p) => ({ ...p, email: e.target.value }))} placeholder="Email column" data-testid="bd-map-email-input" />
-              <Input value={mappingFields.vertical} onChange={(e) => setMappingFields((p) => ({ ...p, vertical: e.target.value }))} placeholder="Vertical column" data-testid="bd-map-vertical-input" />
-            </div>
-            <Button variant="outline" onClick={saveMappingNow} data-testid="bd-map-save-btn">Save Mapping</Button>
-
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-slate-500">Sync Payload (JSON)</p>
-              <textarea
-                value={syncPayload}
-                onChange={(e) => setSyncPayload(e.target.value)}
-                className="min-h-[140px] w-full rounded-md border border-slate-200 bg-white p-3 font-mono text-xs"
-                data-testid="bd-sync-payload-textarea"
-              />
-              <Button onClick={runSyncNow} className="bg-sky-600 hover:bg-sky-700" data-testid="bd-sync-run-btn">Run Sync</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-/* ─── Lead Source Tab ─── */
-function LeadSourceTab({ leadSources, loading }) {
-  return (
-    <div className="space-y-4" data-testid="bd-lead-source-content">
-      <h2 className="text-lg font-semibold text-slate-800" data-testid="bd-lead-source-title">Lead Sources</h2>
-
-      <div className="overflow-auto rounded-2xl border border-slate-200 shadow-sm" data-testid="bd-lead-source-table">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
-            <tr>
-              <th className="px-3 py-2 font-medium">Source</th>
-              <th className="px-3 py-2 font-medium">Type</th>
-              <th className="px-3 py-2 font-medium">Total Leads</th>
-              {PIPELINE_STAGES.map((s) => (
-                <th key={s} className="px-3 py-2 font-medium">{s}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {leadSources.length === 0 ? (
-              <tr>
-                <td colSpan={3 + PIPELINE_STAGES.length} className="px-3 py-6 text-center text-slate-400">
-                  {loading ? "Loading..." : "No lead source data"}
-                </td>
-              </tr>
-            ) : (
-              leadSources.map((src) => (
-                <tr key={`${src.source_tab}-${src.source_type}`} className="border-t border-slate-100" data-testid={`bd-source-row-${src.source_tab}`}>
-                  <td className="px-3 py-2 font-medium text-slate-800">{src.source_tab}</td>
-                  <td className="px-3 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${src.source_type === "google_sheet" ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-600"}`}>
-                      {src.source_type}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 font-semibold text-sky-600">{src.total}</td>
-                  {PIPELINE_STAGES.map((stage) => (
-                    <td key={stage} className="px-3 py-2 text-slate-600">{src.stage_breakdown?.[stage] || 0}</td>
-                  ))}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
