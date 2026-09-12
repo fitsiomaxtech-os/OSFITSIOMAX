@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertCircle,
+  ArrowLeftRight,
   BarChart3,
   Building2,
   CalendarCheck,
@@ -13,8 +15,10 @@ import {
   Percent,
   Plus,
   RefreshCw,
+  Search,
   Settings,
   Sparkles,
+  Star,
   TrendingDown,
   TrendingUp,
   UserPlus,
@@ -24,6 +28,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/sonner";
 import {
   createSheetConnection,
@@ -36,6 +41,15 @@ import {
   syncSheetConnection,
 } from "@/lib/api";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
+// The toolbar controls, every one of them the same instance another board already uses --
+// the five one-tap ranges and the calendar behind them, the green sheet pull, and the
+// branch-to-branch move. Nothing here is a second copy cut to this board's shape: a range
+// means on this dashboard exactly what it means on a branch's own list, which is the only
+// reason a desk that reads both can trust either.
+import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { QuickDateFilterBar, intersectDateFilters } from "@/components/QuickDateFilterBar";
+import { PullFromSheetButton } from "@/components/PullFromSheetButton";
+import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
 // The Marketing and Sales master views and the Branch Control panel, mounted as three
 // tabs below. Imported statically, the way OperationsBoard already mounts these same two
 // boards: this file is itself behind a lazy() in CRMPage, so webpack lifts what the
@@ -117,6 +131,31 @@ function formatMoney(v) {
 }
 
 /**
+ * The toolbar's date range as the two query params both BD endpoints already take.
+ *
+ * Spelled out to the microsecond rather than as a bare "2026-09-12", because
+ * v3_dashboard.py compares these as plain strings against the ISO `created_at` on the
+ * row: "2026-09-12" sorts BELOW "2026-09-12T08:31:00+00:00", so a bare upper bound would
+ * return an empty list for the very day that was asked for.
+ *
+ * Local calendar days, not UTC ones -- the same reading `toIso` gives every other board
+ * in here. A range therefore means the day the desk is having, which is not quite the day
+ * the "Today's Leads" card counts (that one is UTC midnight, in the backend, deliberately
+ * -- see the note on BD_ROWS_LIMIT). The two disagree for leads that arrive between
+ * midnight and 5:30am IST, and fixing that belongs with the card's own definition rather
+ * than here.
+ */
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const dateParamsOf = (filter) => {
+  const out = {};
+  if (!filter) return out;
+  if (filter.from) out.start_date = `${ymd(filter.from)}T00:00:00`;
+  if (filter.to) out.end_date = `${ymd(filter.to)}T23:59:59.999999`;
+  return out;
+};
+
+/**
  * @param currentUser  the signed-in Business Development Executive. Read by the three
  *                     tabs that mount another desk's board -- Marketing View, Sales View
  *                     and Branch Control. PreSalesCRM schedules and stamps activity
@@ -146,15 +185,46 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
   const [openMetric, setOpenMetric] = useState(null);
   const [drill, setDrill] = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
+  // Bumped by Refresh and by a finished sheet pull, to re-ask for the open list. The rows
+  // are fetched by an effect below rather than by the click that opens them, so this is
+  // how anything other than a click gets that effect to run again.
+  const [drillTick, setDrillTick] = useState(0);
+
+  // The toolbar's two date controls, kept up here rather than beside the row they sit in:
+  // they re-scope the whole Dashboard tab, and both endpoints that fill it are loaded
+  // from this component.
+  //
+  // Two independent controls over one axis, combined by their overlap rather than one
+  // quietly winning -- the five one-tap ranges, and the calendar behind them carrying
+  // Yesterday, Last Month, an exact day and a typed range. Same division of labour Branch
+  // Admin's toolbar uses, and the same `intersectDateFilters` doing it, so both stay lit
+  // saying which two ranges produced the figures on screen.
+  const [quickDate, setQuickDate] = useState(null);
+  const [dateFilter, setDateFilter] = useState(null);
+
+  // Branch Transfer, from this desk's toolbar. Two steps, because this board is not
+  // scoped to a branch the way the two boards that already open this dialog are: it has
+  // to be told which branch the patient is leaving before the dialog has anything to
+  // list. `swapPicking` is that question; `swapFromId` is the answer, and the dialog.
+  const [swapPicking, setSwapPicking] = useState(false);
+  const [swapFromId, setSwapFromId] = useState("");
+
+  const effectiveDateFilter = useMemo(
+    () => intersectDateFilters(dateFilter, quickDate),
+    [dateFilter, quickDate],
+  );
+  // Memoised because it is a dependency of the two loaders below -- rebuilt every render
+  // it would re-fetch the board on every render.
+  const dateParams = useMemo(() => dateParamsOf(effectiveDateFilter), [effectiveDateFilter]);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getBdSummary();
+      const data = await getBdSummary(dateParams);
       setSummary(data);
     } catch (e) { console.warn("[BD load failed]", e?.message || e); }
     setLoading(false);
-  }, []);
+  }, [dateParams]);
 
   const loadBranches = useCallback(async () => {
     try {
@@ -180,19 +250,31 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
   // The rows behind a card. Asked for on the click rather than held for all nine: eight of
   // the nine are never opened in a given sitting, and Total Leads alone is thousands of
   // rows this board would otherwise fetch to show a number it already has.
-  const openCard = useCallback(async (metricKey) => {
-    if (openMetric === metricKey) { setOpenMetric(null); setDrill(null); return; }
-    setOpenMetric(metricKey);
+  // The click now only says which card is open. Fetching moved to the effect under it,
+  // because there are three other things that have to re-ask the same question -- a date
+  // range being pressed, Refresh, and a sheet pull landing -- and a fetch living in the
+  // click handler could be reached by none of them.
+  const openCard = useCallback((metricKey) => {
+    setOpenMetric((cur) => (cur === metricKey ? null : metricKey));
+  }, []);
+
+  useEffect(() => {
+    if (!openMetric) { setDrill(null); setDrillLoading(false); return undefined; }
+    // Guarded, because a date pressed twice quickly leaves two requests in flight and the
+    // slower one must not land on top of the newer list.
+    let cancelled = false;
     setDrill(null);
     setDrillLoading(true);
-    try {
-      setDrill(await getBdSummaryRows(metricKey));
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not open that list");
-      setOpenMetric(null);
-    }
-    setDrillLoading(false);
-  }, [openMetric]);
+    getBdSummaryRows(openMetric, dateParams)
+      .then((d) => { if (!cancelled) setDrill(d); })
+      .catch((err) => {
+        if (cancelled) return;
+        toast.error(err?.response?.data?.detail || "Could not open that list");
+        setOpenMetric(null);
+      })
+      .finally(() => { if (!cancelled) setDrillLoading(false); });
+    return () => { cancelled = true; };
+  }, [openMetric, dateParams, drillTick]);
 
   useEffect(() => {
     loadDashboard();
@@ -204,15 +286,22 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
     if (activeTab === "lead_source") loadSources();
   }, [activeTab, loadSheets, loadSources]);
 
-  const refreshAll = async () => {
+  // Everything this board holds, re-asked for. An open list goes with it -- via drillTick
+  // and the effect above -- or a reload would leave the rows on screen older than the card
+  // above them.
+  //
+  // Silent, so it can stand behind something that reports its own result: the sheet pull
+  // already says how many leads it brought in, and following that with "Data refreshed"
+  // would be the board congratulating itself for the second half of one action.
+  const reloadAll = useCallback(async () => {
     await Promise.all([loadDashboard(), loadBranches(), loadSheets(), loadSources()]);
-    // An open list is refreshed along with everything else, or Refresh would leave the
-    // rows on screen older than the card above them.
-    if (openMetric) {
-      try { setDrill(await getBdSummaryRows(openMetric)); } catch { /* the toast on open already said so */ }
-    }
+    setDrillTick((n) => n + 1);
+  }, [loadDashboard, loadBranches, loadSheets, loadSources]);
+
+  const refreshAll = useCallback(async () => {
+    await reloadAll();
     toast.success("Data refreshed");
-  };
+  }, [reloadAll]);
 
   const createConnectionNow = async (e) => {
     e.preventDefault();
@@ -296,17 +385,24 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
             <UserPlus className="mr-1 h-4 w-4" /> Add Lead
           </Button>
           {/* The same Refresh as Branch Admin > Branch Leads: grey, icon-only, square,
-              with the word on title/aria-label. */}
-          <Button
-            onClick={refreshAll}
-            disabled={loading}
-            title="Refresh"
-            aria-label="Refresh"
-            className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-            data-testid="bd-refresh-all-btn"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
+              with the word on title/aria-label.
+
+              Withheld on the Dashboard tab, where the toolbar under this strip now carries
+              it. The two are the same `refreshAll`, and two identical grey squares an inch
+              apart on one screen is a reader asking which of them is the real one. It stays
+              here for the four tabs that have no toolbar of their own. */}
+          {activeTab !== "dashboard" && (
+            <Button
+              onClick={refreshAll}
+              disabled={loading}
+              title="Refresh"
+              aria-label="Refresh"
+              className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+              data-testid="bd-refresh-all-btn"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -320,6 +416,13 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
           onOpenCard={openCard}
           drill={drill}
           drillLoading={drillLoading}
+          quickDate={quickDate}
+          onQuickDate={setQuickDate}
+          dateFilter={dateFilter}
+          onDateFilter={setDateFilter}
+          onRefresh={refreshAll}
+          onPulled={reloadAll}
+          onBranchSwap={() => setSwapPicking(true)}
         />
       )}
 
@@ -408,6 +511,65 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
             loadDashboard();
             loadSources();
           }}
+        />
+      )}
+
+      {/* Which branch the patient is leaving -- the one fact BranchTransferDialog cannot
+          work without and the one thing this board, which reads every branch at once,
+          does not already know. Branch Admin's copy of that button skips this because its
+          whole screen is one branch; Operations skips it because a branch is picked above
+          the button. This desk has neither, so it asks.
+
+          A plain list rather than a dropdown: a dropdown would be a control to open before
+          the control it opens, and the branches are few enough to name on sight. */}
+      {swapPicking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="bd-branch-swap-picker">
+          <div className="flex max-h-[80vh] w-full max-w-md flex-col rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <h3 className="inline-flex items-center gap-2 text-base font-semibold text-slate-800">
+                <ArrowLeftRight className="h-4 w-4 text-indigo-600" /> Branch Transfer
+              </h3>
+              <button
+                type="button"
+                onClick={() => setSwapPicking(false)}
+                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Close"
+                data-testid="bd-branch-swap-picker-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="px-5 pt-3 text-xs text-slate-500">Which branch is the patient leaving?</p>
+            <div className="overflow-y-auto p-3">
+              {branches.length === 0 ? (
+                <p className="px-2 py-6 text-center text-sm text-slate-400" data-testid="bd-branch-swap-picker-empty">
+                  No branches yet.
+                </p>
+              ) : branches.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => { setSwapFromId(b.id); setSwapPicking(false); }}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                  data-testid={`bd-branch-swap-from-${b.id}`}
+                >
+                  <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+                  <span className="truncate">{b.branch_name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {swapFromId && (
+        <BranchTransferDialog
+          branches={branches}
+          fromBranchId={swapFromId}
+          onClose={() => setSwapFromId("")}
+          // The figures on this board counted the patient against the branch they have
+          // just left, so they are wrong the moment the move lands.
+          onTransferred={reloadAll}
         />
       )}
 
@@ -624,19 +786,64 @@ const DRILL_COLUMNS = {
  *
  * `total` is the count the server holds and `rows` is what it sent, which is capped. The
  * two differing is the one thing a list like this must admit rather than just stopping.
+ *
+ * `search`, `sortOrder` and `markFilter` come from the toolbar above the cards and are
+ * applied here, over the rows the server sent, rather than being asked of the server: the
+ * date range is the only narrowing that endpoint takes, and these three describe the list
+ * on screen rather than the figure above it. A card's number therefore keeps meaning what
+ * it counted, and the line under the title says how many of those the toolbar is showing.
  */
-function DrillList({ title, drill, loading, branches, onClose }) {
+function DrillList({ title, drill, loading, branches, onClose, search = "", sortOrder = "newest", markFilter = "" }) {
   const branchName = useCallback(
     (id) => (id ? (branches.find((b) => b.id === id)?.branch_name || "Unknown") : "Unassigned"),
     [branches],
   );
-  const ctx = { branchName };
-  const columns = drill ? (DRILL_COLUMNS[drill.kind] || []) : [];
+  const ctx = useMemo(() => ({ branchName }), [branchName]);
+  const kind = drill?.kind;
+  // Both memoised, and not for the arithmetic -- the two `|| []` fallbacks mint a fresh
+  // empty array every render, which would be a changed dependency every render and would
+  // re-narrow and re-sort the whole list each time anything on this card moved.
+  const columns = useMemo(() => (kind ? (DRILL_COLUMNS[kind] || []) : []), [kind]);
   // No column set for the kind that came back means a metric was added to the endpoint
   // without one here. Showing nothing beats rendering rows with no headings, and beats
   // the crash the phone branch below would take reading a first column that isn't there.
-  const rows = columns.length ? (drill?.rows || []) : [];
-  const clipped = drill ? drill.total - rows.length : 0;
+  const sent = useMemo(() => (columns.length ? (drill?.rows || []) : []), [columns, drill]);
+
+  const rows = useMemo(() => {
+    let list = sent;
+    // The two marks live on a lead and on nothing else -- an appointment, a branch and a
+    // sheet connection carry neither, so applying this to those kinds would empty the
+    // list rather than narrow it, and say the branch has no VIPs when what it has is no
+    // VIP field. The buttons stay pressable on every card; they simply describe nothing
+    // on the four that are not leads.
+    if (markFilter && kind === "lead") {
+      list = list.filter((r) => (markFilter === "vip" ? r.is_vip : r.needs_attention));
+    }
+    // Matched against what the row actually shows, column by column, rather than against a
+    // hand-listed set of fields. The four kinds carry four different shapes and one list
+    // of field names could only be right about one of them; the columns are already the
+    // per-kind answer to "what is worth reading here", so searching them means you can
+    // find anything you can see and nothing you cannot.
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter((r) => columns.some((c) => {
+        const main = c.value(r, ctx);
+        const sub = c.sub?.(r);
+        return `${main ?? ""} ${sub ?? ""}`.toLowerCase().includes(q);
+      }));
+    }
+    // The server sends these newest-first already, so only the other order is work.
+    if (sortOrder === "oldest") {
+      list = [...list].sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+    }
+    return list;
+  }, [sent, columns, ctx, kind, markFilter, search, sortOrder]);
+
+  const clipped = drill ? drill.total - sent.length : 0;
+  // The toolbar is holding rows back. Said separately from `clipped`, which is the server
+  // holding rows back: one is a cap and the other is a question, and a reader who cannot
+  // tell them apart cannot tell whether clearing the search would show them everything.
+  const narrowed = rows.length !== sent.length;
 
   return (
     <Card data-testid="bd-drill-card">
@@ -646,7 +853,8 @@ function DrillList({ title, drill, loading, branches, onClose }) {
           {drill && (
             <p className="mt-0.5 text-xs text-slate-500" data-testid="bd-drill-count">
               {drill.total.toLocaleString("en-IN")} in total
-              {clipped > 0 && ` · showing the ${rows.length.toLocaleString("en-IN")} most recent`}
+              {clipped > 0 && ` · showing the ${sent.length.toLocaleString("en-IN")} most recent`}
+              {narrowed && ` · ${rows.length.toLocaleString("en-IN")} match the toolbar`}
             </p>
           )}
         </div>
@@ -665,7 +873,12 @@ function DrillList({ title, drill, loading, branches, onClose }) {
         {loading ? (
           <p className="px-3 py-8 text-center text-sm text-slate-400" data-testid="bd-drill-loading">Loading...</p>
         ) : rows.length === 0 ? (
-          <p className="px-3 py-8 text-center text-sm text-slate-400" data-testid="bd-drill-empty">Nothing to show.</p>
+          /* Which of the two emptinesses this is. "Nothing to show" over a list the
+             toolbar just emptied sends somebody looking for rows that are sitting right
+             there behind a search they forgot they typed. */
+          <p className="px-3 py-8 text-center text-sm text-slate-400" data-testid="bd-drill-empty">
+            {sent.length === 0 ? "Nothing to show." : "Nothing here matches the toolbar."}
+          </p>
         ) : (
           <>
             {/* Phone: the same facts stacked, the primary column as the heading. */}
@@ -724,10 +937,47 @@ function DrillList({ title, drill, loading, branches, onClose }) {
 }
 
 /* ─── Dashboard Tab ─── */
-function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, drill, drillLoading }) {
+function DashboardTab({
+  summary,
+  loading,
+  branches,
+  openMetric,
+  onOpenCard,
+  drill,
+  drillLoading,
+  quickDate,
+  onQuickDate,
+  dateFilter,
+  onDateFilter,
+  onRefresh,
+  onPulled,
+  onBranchSwap,
+}) {
   // Which of the two rows of cards is on screen. Up here rather than beside the groups it
   // switches, because a hook cannot sit after the two conditional returns below it.
   const [openGroup, setOpenGroup] = useState("onboarding");
+
+  // The three toolbar controls that narrow and order the open list rather than re-asking
+  // the server for it. Held here, not in the parent, because the list they describe is
+  // rendered from this component -- see the note on DrillList's own props. The date range
+  // is the opposite case and lives upstairs, since it re-scopes the cards too.
+  const [search, setSearch] = useState("");
+  const [sortOrder, setSortOrder] = useState("newest");
+  const [markFilter, setMarkFilter] = useState("");
+
+  // A name typed, or a mark pressed, with no card open has nothing to narrow -- the
+  // controls would sit there doing nothing visible and read as broken. Total Leads is the
+  // widest of the nine and every other list is a subset of it, so that is the one that
+  // opens. Clearing a mark opens nothing: an answer being put away is not a question.
+  const searchList = (v) => {
+    setSearch(v);
+    if (v.trim() && !openMetric) onOpenCard("total");
+  };
+  const toggleMark = (m) => {
+    const next = markFilter === m ? "" : m;
+    setMarkFilter(next);
+    if (next && !openMetric) onOpenCard("total");
+  };
 
   if (!summary && loading) {
     return <p className="py-8 text-center text-sm text-slate-400" data-testid="bd-dash-loading">Loading dashboard...</p>;
@@ -819,6 +1069,17 @@ function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, dril
           pills, the open one in sky. A sub-tab and not a sixth entry on the nav above,
           because both rows are this desk's own figures -- the tabs up there are other
           desks' boards. */}
+      {/* One bar, read left to right: which row of figures, then which rows of the list
+          under them, then in what order, then what to do about it. The two view pills, the
+          search and the five ranges narrow; the dropdown orders; the group on the right
+          acts.
+
+          It wraps rather than scrolling or hiding. Every control on here is on a full desk
+          at 2xl; below that the row folds onto a second and third line inside the same
+          bordered card, which is what `flex-wrap` on the container has always done for the
+          pills. A toolbar that overflows sideways puts Pull From Sheet past the edge of the
+          screen with nothing saying it is there, and a toolbar that hides its right-hand
+          half on a laptop is a toolbar most of this desk never sees. */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-subtabs">
         <span className="pl-2 pr-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">View</span>
         {groups.map((g) => {
@@ -837,6 +1098,144 @@ function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, dril
             </button>
           );
         })}
+
+        {/* Which two pills are a view of the board, and which controls are a question
+            about it. Only where the row has not wrapped -- a rule at the start of a
+            folded second line separates nothing. */}
+        <span className="hidden h-6 w-px shrink-0 bg-slate-200 2xl:block" aria-hidden="true" />
+
+        {/* The open list's own field. `flex-basis: 0` (from flex-1) is what keeps it off a
+            line of its own: the row is measured as if this were zero wide and it then
+            grows into whatever the other controls left, capped so a search box is not
+            stretched across a 1600px board it cannot use. Full width on a phone, where it
+            is the only thing on its line anyway. */}
+        <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[220px] sm:flex-1">
+          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+          <Input
+            className="h-10 pl-9"
+            placeholder="Search this list..."
+            value={search}
+            onChange={(e) => searchList(e.target.value)}
+            data-testid="bd-search"
+          />
+        </div>
+
+        {/* The five one-tap ranges, `inline` so they hold one line and tighten to about
+            330px, and without their own Custom trigger -- the calendar three controls to
+            the right opens that same popover, and two doors onto one control side by side
+            is the duplication, not the control. */}
+        {/* `w-full` below sm, and only below sm. `inline` sizes the five buttons with
+            flex-1 at phone widths -- a proportion, which needs something to be a
+            proportion OF. Branch Admin's copy never meets that case because it hides the
+            inline row under lg and keeps a full-width one underneath; this bar has no
+            second row to fall back to, so the width is given here instead. From sm the
+            buttons go flex-none and size themselves, and the wrapper gets out of the way. */}
+        <div className="w-full shrink-0 sm:w-auto">
+          <QuickDateFilterBar
+            value={quickDate}
+            onChange={onQuickDate}
+            testid="bd-quick-date"
+            inline
+            showCustom={false}
+          />
+        </div>
+
+        {/* The actions, held to the right edge of whichever line they end up on.
+            Wrappable, and deliberately not shrink-0: seven controls come to about 390px
+            and a 375px phone is 15px short of that, so the alternative to a second line
+            here is Pull From Sheet hanging off the edge of the screen. */}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+          {/* Words rather than an arrow, for the reason Branch Admin's copy gives: two
+              arrow states say which way the glyph points and never which way the list is
+              about to go. The closed control says the order the list is already in. */}
+          <Select value={sortOrder} onValueChange={setSortOrder}>
+            <SelectTrigger
+              title="Order the list by date"
+              aria-label="Sort order"
+              className="h-10 w-[112px] shrink-0 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-none transition-colors hover:bg-slate-50 focus:ring-2 focus:ring-sky-200 sm:w-[124px]"
+              data-testid="bd-sort-order"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="border-slate-200" data-testid="bd-sort-order-menu">
+              <SelectItem value="newest" className="text-xs text-slate-700">New to First</SelectItem>
+              <SelectItem value="oldest" className="text-xs text-slate-700">Old to First</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* The two marks, in Branch Admin's colours so a VIP is amber on both boards.
+              Lit when active, and pressing the lit one clears it, so one control both
+              narrows and returns. */}
+          <button
+            type="button"
+            onClick={() => toggleMark("vip")}
+            title={markFilter === "vip" ? "Showing VIP clients only — click to show all" : "Show VIP clients only"}
+            aria-label="Show VIP clients only"
+            aria-pressed={markFilter === "vip"}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
+              markFilter === "vip" ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white hover:bg-amber-50"
+            }`}
+            data-testid="bd-filter-vip"
+          >
+            <Star className={`h-4 w-4 ${markFilter === "vip" ? "fill-amber-400 text-amber-500" : "text-slate-400"}`} />
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleMark("attention")}
+            title={markFilter === "attention" ? "Showing flagged leads only — click to show all" : "Show leads needing attention only"}
+            aria-label="Show leads needing attention only"
+            aria-pressed={markFilter === "attention"}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
+              markFilter === "attention" ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white hover:bg-rose-50"
+            }`}
+            data-testid="bd-filter-attention"
+          >
+            <AlertCircle className={`h-4 w-4 ${markFilter === "attention" ? "fill-rose-500 text-white" : "text-slate-400"}`} />
+          </button>
+
+          {/* Everything the five ranges are not: Yesterday, Last Month, an exact day, a
+              typed range. Narrowed together with them rather than overruling them, so both
+              stay lit saying what produced the figures. */}
+          <DateFilterPopover
+            value={dateFilter}
+            onChange={onDateFilter}
+            testid="bd-date-filter"
+            centered
+            iconOnly
+          />
+
+          <Button
+            onClick={onRefresh}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+            data-testid="bd-refresh-btn"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+
+          <Button
+            onClick={onBranchSwap}
+            title="Branch Transfer"
+            aria-label="Branch Transfer"
+            variant="outline"
+            className="h-10 w-10 shrink-0 border-indigo-200 p-0 text-indigo-700 hover:bg-indigo-50"
+            data-testid="bd-branch-swap-btn"
+          >
+            <ArrowLeftRight className="h-4 w-4" />
+          </Button>
+
+          {/* Scoped server-side to whatever this account may pull, the same as every other
+              mount of it. The hints name Settings, because that is where this desk -- and
+              only this desk -- connects a sheet in the first place. */}
+          <PullFromSheetButton
+            onPulled={onPulled}
+            notConnectedHint="Google Sheets isn't connected yet — connect it under Settings → Google Sheet Connection."
+            noSourcesHint="No Google Sheet source is configured yet — add one under Settings → Google Sheet Connection."
+            iconOnly
+          />
+        </div>
       </div>
 
       <div className="space-y-2" data-testid={`bd-group-${activeGroup.key}`}>
@@ -868,6 +1267,9 @@ function DashboardTab({ summary, loading, branches, openMetric, onOpenCard, dril
           loading={drillLoading}
           branches={branches}
           onClose={() => onOpenCard(openMetric)}
+          search={search}
+          sortOrder={sortOrder}
+          markFilter={markFilter}
         />
       )}
     </div>
