@@ -37,6 +37,7 @@ import {
   IdCard,
   Pencil,
   Repeat,
+  Eye,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -65,6 +66,7 @@ import {
   bulkDeleteLeads,
   setLeadFlags,
   rnrAttempt,
+  getLeadAppointmentCard,
 } from "@/lib/api";
 import { to12h, callTimeStamp, callDateStamp, dateStampFull } from "@/lib/time";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
@@ -2633,6 +2635,31 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   // Shown once a booking is actually made. Kept outside the Appointment popup because
   // confirming closes that popup and the lead card with it.
   const [apptConfirm, setApptConfirm] = useState(null);
+  // The same confirmation handed back off the record, any number of times, long after the
+  // booking dialog that first raised it has gone. Held apart from apptConfirm above
+  // because closing that one is what moves the lead on -- reusing it for a reissue would
+  // unmount this card on dismiss and drag the lead a stage forward for the crime of
+  // looking at its own receipt. This one only closes.
+  //
+  // Loaded on press rather than with the lead: the reference, the room and the notes live
+  // on the appointment row and not on the lead, so there is nothing to draw without
+  // asking, and asking for every patient opened would be a request each time to save one
+  // click on the few who want it. Same endpoint the Consultations board reissues from, so
+  // the second copy is the first copy in every field.
+  const [apptCard, setApptCard] = useState(null);
+  const [loadingApptCard, setLoadingApptCard] = useState(false);
+  const openApptCard = async () => {
+    if (!lead?.id || loadingApptCard) return;
+    setLoadingApptCard(true);
+    try {
+      setApptCard(await getLeadAppointmentCard(lead.id));
+    } catch (err) {
+      // 404 here is the useful case, not a failure: a cancelled or never-booked
+      // appointment has no sheet, and the server says which in its own words.
+      toast.error(err?.response?.data?.detail || "Couldn't load this patient's appointment");
+    }
+    setLoadingApptCard(false);
+  };
   // The branch's own address and map link, for the confirmation the patient is sent —
   // they need to know where to come, which the lead record doesn't carry.
   const [branchInfo, setBranchInfo] = useState(null);
@@ -3470,9 +3497,37 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   word in the header. */}
               {(lead.appointment_date || lead.appointment_time || lead.appointment_department || lead.appointment_mode || lead.diagnosis) && (
                 <div className="overflow-hidden rounded-xl border border-blue-100 bg-white shadow-sm" data-testid="branch-lead-appointment-details">
-                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-700"><ClipboardList className="h-4 w-4" /></span>
-                    <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Appointment Details</p>
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-700">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-700"><ClipboardList className="h-4 w-4" /></span>
+                      Appointment Details
+                    </p>
+                    {/* The confirmation the patient was sent, handed back. The branch's
+                        copy of it used to live exactly as long as the dialog that raised
+                        it, so a patient who lost the WhatsApp message could only be given
+                        another by rescheduling the appointment onto itself to make one.
+
+                        On this card rather than up in the header, because the sheet is
+                        about the slot printed underneath it -- somebody reaching for it is
+                        already reading this block to check the day.
+
+                        Appointment stage only. Before it there is no booking to print, and
+                        the stages after it belong to boards that hand the patient their
+                        own documents; the endpoint answers for the live consultation alone
+                        and refuses a cancelled one, which is the same line. */}
+                    {inAppointmentStage && (
+                      <button
+                        type="button"
+                        onClick={openApptCard}
+                        disabled={loadingApptCard}
+                        className="flex shrink-0 items-center gap-1 rounded-[5px] border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-700 transition hover:bg-teal-100 disabled:opacity-60"
+                        title="Open the appointment confirmation — print, send or download it again"
+                        data-testid="branch-lead-open-appt-card"
+                      >
+                        <Eye className="h-3.5 w-3.5 shrink-0" />
+                        {loadingApptCard ? "Opening..." : "View"}
+                      </button>
+                    )}
                   </div>
                   <div className="space-y-2 px-4 py-3">
                     {lead.appointment_date && (
@@ -4609,6 +4664,15 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
       <AppointmentConfirmCard
         appt={apptConfirm}
         onClose={() => { const s = apptConfirm.finalStage; setApptConfirm(null); onMoved && onMoved(s); }}
+      />
+
+      {/* The same card, reopened off the booking from the View above. A separate mount
+          from the one over it so the two cannot share a close: that one moves the lead
+          on, this one only puts the sheet away. */}
+      <AppointmentConfirmCard
+        appt={apptCard}
+        onClose={() => setApptCard(null)}
+        testid="branch-appt-reissue"
       />
 
       {/* Follow Up Date & Time Popup (triggered from Move to Stage) */}
