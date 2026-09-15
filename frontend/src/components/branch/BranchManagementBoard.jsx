@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, RefreshCw, Layers, LayoutDashboard, ChevronDown, ChevronUp, BadgeIndianRupee, BarChart3, CalendarDays, Workflow } from "lucide-react";
+import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, RefreshCw, Layers, LayoutDashboard, ChevronDown, ChevronUp, BadgeIndianRupee, BarChart3, CalendarDays, Workflow, Building2, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -289,23 +289,10 @@ const OverviewTab = () => {
 
 // ---------- Branch Control (Super Admin driving a Branch Admin's own board) ----------
 
-// A fixed color per branch would need a stable id->color map that survives
-// the branch list changing; cycling a palette by list position is simpler and
-// still gives each branch its own distinct color in the open dropdown.
-const BRANCH_COLOR_PALETTE = [
-  "border-purple-300 bg-purple-50 text-purple-700",
-  "border-indigo-300 bg-indigo-50 text-indigo-700",
-  "border-emerald-300 bg-emerald-50 text-emerald-700",
-  "border-amber-300 bg-amber-50 text-amber-700",
-  "border-cyan-300 bg-cyan-50 text-cyan-700",
-  "border-pink-300 bg-pink-50 text-pink-700",
-  "border-orange-300 bg-orange-50 text-orange-700",
-  "border-sky-300 bg-sky-50 text-sky-700",
-];
-
-// Native <select> can't reliably color individual dropdown-list items across
-// browsers — only the closed box. This renders each option as its own colored,
-// rounded row in a custom open list instead.
+// Dressed like DateFilterPopover's `centered` variant and BranchFilterPopover — milk-white
+// panel (#FDFCF8 on #EFEAE0), amber for the picked branch — so it reads as the same kind
+// of filter as the date filter elsewhere on the OS. It used to cycle a rainbow palette by
+// list position, which gave a branch a different colour whenever the list changed.
 const BranchSelectDropdown = ({ value, branches, onChange }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -316,42 +303,56 @@ const BranchSelectDropdown = ({ value, branches, onChange }) => {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const idx = branches.findIndex((b) => b.id === value);
-  const currentClasses = idx >= 0 ? BRANCH_COLOR_PALETTE[idx % BRANCH_COLOR_PALETTE.length] : "border-slate-200 bg-white text-slate-700";
-  const currentLabel = idx >= 0 ? branches[idx].branch_name : "— Select a branch —";
+  const current = branches.find((b) => b.id === value);
+  const pick = (id) => { onChange(id); setOpen(false); };
 
   return (
     <div className="relative" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex h-9 min-w-[240px] items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${currentClasses}`}
+        className={`flex h-9 min-w-[240px] items-center justify-between gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${
+          current ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        }`}
         data-testid="bm-branch-control-select"
       >
-        <span className="truncate">{currentLabel}</span>
-        <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+        <span className="flex min-w-0 items-center gap-2">
+          <Building2 className="h-4 w-4 shrink-0" />
+          <span className="truncate">{current ? current.branch_name : "Select a branch"}</span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
       </button>
       {open && (
-        <div className="absolute left-0 z-20 mt-1 max-h-64 min-w-[240px] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="bm-branch-control-select-list">
+        <div className="absolute left-0 z-20 mt-1 max-h-72 min-w-[260px] overflow-y-auto rounded-xl border border-[#EFEAE0] bg-[#FDFCF8] p-1.5 shadow-2xl" data-testid="bm-branch-control-select-list">
           <button
             type="button"
-            onClick={() => { onChange(""); setOpen(false); }}
-            className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
+            onClick={() => pick("")}
+            className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+              current ? "text-slate-500 hover:bg-[#F3EFE6]" : "bg-amber-100 font-semibold text-amber-800"
+            }`}
             data-testid="bm-branch-control-select-option-none"
           >
             — Select a branch —
           </button>
-          {branches.map((b, i) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => { onChange(b.id); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${BRANCH_COLOR_PALETTE[i % BRANCH_COLOR_PALETTE.length]}`}
-              data-testid={`bm-branch-control-select-option-${b.id}`}
-            >
-              {b.branch_name}
-            </button>
-          ))}
+          {branches.length > 0 && <div className="my-1 border-t border-[#EFEAE0]" />}
+          {branches.map((b) => {
+            const on = b.id === value;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => pick(b.id)}
+                className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  on ? "bg-amber-100 font-semibold text-amber-800" : "text-slate-700 hover:bg-[#F3EFE6]"
+                }`}
+                data-testid={`bm-branch-control-select-option-${b.id}`}
+              >
+                <Building2 className={`h-4 w-4 shrink-0 ${on ? "text-amber-700" : "text-slate-400"}`} />
+                <span className="min-w-0 flex-1 truncate">{b.branch_name}</span>
+                {on && <Check className="h-4 w-4 shrink-0 text-amber-700" />}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
