@@ -88,7 +88,6 @@ import { ZumbaPanel } from "@/components/branch/ZumbaPanel";
 import { FitnessPanel } from "@/components/branch/FitnessPanel";
 import { CreateLeadModal, DEPARTMENT_OPTIONS, LEAD_DATA_FIELDS } from "@/components/CreateLeadModal";
 import { LeadEditModal } from "@/components/LeadEditModal";
-import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { isCourseComplete } from "@/lib/leadStage";
 
@@ -919,10 +918,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // the rows on screen come from ConsultationsBoard, which needs telling separately.
   const [refreshTick, setRefreshTick] = useState(0);
   const [showCreateLead, setShowCreateLead] = useState(false);
-  // Branch Transfer, opened from this branch's own toolbar. Only on a Branch Admin's own
-  // board: Operations embeds this one and already carries the same button in its header,
-  // and two doors to one dialog on the same screen is how a reader stops trusting either.
-  const [showTransfer, setShowTransfer] = useState(false);
   // Ticked rows in the leads table, and the confirm dialog they feed. A Set because this
   // is asked "is this row ticked" once per row on every render, and 2,000 rows against an
   // array is 2,000 scans of it.
@@ -2008,20 +2003,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 <UserPlus className="h-4 w-4" />
               </Button>
             )}
-            {/* Moving one of this branch's patients to another. Hidden when embedded —
-                Operations transfers from each lead's own popup instead (canTransferBranch). */}
-            {!embedded && (
-              <Button
-                onClick={() => setShowTransfer(true)}
-                title="Branch Transfer"
-                aria-label="Branch Transfer"
-                variant="outline"
-                className="h-10 w-10 shrink-0 border-indigo-200 p-0 text-indigo-700 hover:bg-indigo-50"
-                data-testid="branch-transfer-btn"
-              >
-                <ArrowLeftRight className="h-4 w-4" />
-              </Button>
-            )}
             <PullFromSheetButton
               onPulled={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
               notConnectedHint="Google Sheets isn't connected yet — ask your Super Admin to connect it."
@@ -2600,14 +2581,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         />
       )}
 
-      {showTransfer && branchId && (
-        <BranchTransferDialog
-          fromBranchId={branchId}
-          onClose={() => setShowTransfer(false)}
-          // This board is still showing the patient who has just left it.
-          onTransferred={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
-        />
-      )}
         </>
       )}
 
