@@ -4621,18 +4621,27 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setAssignTrack(track);
     setShowPhysioModal(true);
     setShowSlotPicker(false);
-    setPhysioPick(selectedLead.assigned_physio_id || "");
+    setPhysioPick("");
     setPhysioCalendarData(null);
     setPickedSessionSlots([]);
     setPickerDate(null);
     setPickerMonth(new Date().getMonth());
     setPickerYear(new Date().getFullYear());
+    let physios = [];
     try {
       const rows = await getDoctors({ branch_id: branchId });
-      setPhysioOptions((rows || []).filter((d) => d.profile_type === "physio"));
+      physios = (rows || []).filter((d) => d.profile_type === "physio");
     } catch {
-      setPhysioOptions([]);
+      physios = [];
     }
+    setPhysioOptions(physios);
+    // assigned_physio_id is also written by the consultation booking, where it holds the
+    // CONSULTANT (a head_physio record). Pre-picking it opened the consultant's calendar,
+    // pre-loaded their consultation slot as Day 1, and the booking then failed with
+    // "Physio not found" because assign-physio-sessions only accepts physio records.
+    // Only carry it forward when it is actually one of this branch's physios.
+    const current = selectedLead.assigned_physio_id;
+    setPhysioPick(current && physios.some((p) => p.id === current) ? current : "");
   };
 
   // Load the picked physio's own calendar (same one managed at MANAGEMENT > PHYSIO
