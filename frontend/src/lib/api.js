@@ -938,6 +938,10 @@ export const moveBranchFeedback = async (feedbackId, status, reply, note) => (aw
 // — it says what was done and asks whether that settled it; the patient's answer resolves
 // it, and nothing on this side can.
 export const replyBranchFeedback = async (feedbackId, body, askResolved = false) => (await api.post(`/branch/feedback/${feedbackId}/message`, { body, ask_resolved: askResolved })).data;
+// Developer tools for demo and testing tickets, behind the Danger Zone password. Two separate
+// calls: resetting never deletes, deleting never resets.
+export const devResetFeedbackToNew = async (ids, password) => (await api.post("/branch/feedback/dev/reset-to-new", { ids }, { headers: developerHeaders(password) })).data;
+export const devDeleteFeedback = async (ids, password) => (await api.post("/branch/feedback/dev/delete", { ids }, { headers: developerHeaders(password) })).data;
 
 // ---- Zumba (Branch Admin's own tab) ----
 // Not a clinical journey and so not a lead: no stage, no consultation, no discharge. The

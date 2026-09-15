@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Bell, Building2, CheckCircle2, Clock, Inbox, MessageCircle, RefreshCw, Search, Send, Star, Stethoscope, Ticket } from "lucide-react";
+import { ArrowLeft, Bell, Building2, CheckCircle2, Clock, Inbox, KeyRound, Lock, MessageCircle, RefreshCw, RotateCcw, Search, Send, Star, Stethoscope, Ticket, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
-import { listBranchFeedback, moveBranchFeedback, replyBranchFeedback } from "@/lib/api";
+import {
+  devDeleteFeedback, devResetFeedbackToNew, listBranchFeedback, moveBranchFeedback, replyBranchFeedback, unlockDangerZone,
+} from "@/lib/api";
 
 // What can have happened to a ticket, in the order it is worked through. A ticket arrives
 // New, somebody picks it up, somebody asks whether it is settled, the patient closes it.
@@ -127,13 +129,27 @@ const Avatar = ({ name, tone, size = "h-9 w-9 text-[11px]" }) => (
  * headings called Priya with three phone numbers under them and nothing to say from the
  * outside that they were one person.
  */
-const ClientRow = ({ client, active, onSelect, showBranch }) => (
+const ClientRow = ({ client, active, onSelect, showBranch, picking, pickedCount, onPick }) => (
+  <div className={`flex items-stretch border-l-2 transition ${active ? "border-sky-500 bg-sky-50/70" : "border-transparent hover:bg-slate-50"}`}>
+  {/* Developer tools only: ticks every ticket this client has on the list. A checkbox beside
+      the row rather than inside it, because a checkbox inside a button is not clickable on
+      its own. */}
+  {picking && (
+    <label className="flex shrink-0 cursor-pointer items-center pl-3" title="Select all of this client's tickets">
+      <input
+        type="checkbox"
+        className="h-4 w-4 accent-rose-600"
+        checked={pickedCount > 0 && pickedCount === client.tickets.length}
+        ref={(el) => { if (el) el.indeterminate = pickedCount > 0 && pickedCount < client.tickets.length; }}
+        onChange={(e) => onPick(client.tickets.map((t) => t.id), e.target.checked)}
+        data-testid={`feedback-pick-client-${client.key}`}
+      />
+    </label>
+  )}
   <button
     type="button"
     onClick={() => onSelect(client.key)}
-    className={`flex w-full items-start gap-3 border-l-2 px-3 py-2.5 text-left transition ${
-      active ? "border-sky-500 bg-sky-50/70" : "border-transparent hover:bg-slate-50"
-    }`}
+    className="flex min-w-0 flex-1 items-start gap-3 px-3 py-2.5 text-left"
     data-testid={`feedback-client-${client.key}`}
   >
     <Avatar name={client.name} tone={client.tone} />
@@ -158,6 +174,7 @@ const ClientRow = ({ client, active, onSelect, showBranch }) => (
       </div>
     </div>
   </button>
+  </div>
 );
 
 /**
@@ -169,7 +186,7 @@ const ClientRow = ({ client, active, onSelect, showBranch }) => (
  * one stream would close both when the patient answers about one. The rail keeps them
  * apart; the thread underneath keeps each one readable as the conversation it is.
  */
-const TicketPane = ({ client, ticket, onPickTicket, onMove, onSend, moving, sending, onBack, showBranch }) => {
+const TicketPane = ({ client, ticket, onPickTicket, onMove, onSend, moving, sending, onBack, showBranch, picking, picked, onPick }) => {
   const [draft, setDraft] = useState("");
   const scroller = useRef(null);
   const ticketId = ticket?.id;
@@ -230,8 +247,18 @@ const TicketPane = ({ client, ticket, onPickTicket, onMove, onSend, moving, send
           const c = STATUS_CHIP[t.status] || STATUS_CHIP.new;
           const on = t.id === ticket.id;
           return (
+            <span key={t.id} className="flex shrink-0 items-center gap-1">
+            {picking && (
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-rose-600"
+                checked={picked.has(t.id)}
+                onChange={(e) => onPick([t.id], e.target.checked)}
+                aria-label={`Select ticket ${ticketRef(t.id)}`}
+                data-testid={`feedback-pick-ticket-${t.id}`}
+              />
+            )}
             <button
-              key={t.id}
               type="button"
               onClick={() => onPickTicket(t.id)}
               className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] font-medium transition ${
@@ -245,6 +272,7 @@ const TicketPane = ({ client, ticket, onPickTicket, onMove, onSend, moving, send
               <span className="font-sans text-[10px] text-slate-400">{listStamp(ticketAt(t))}</span>
               {t.awaiting_staff && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />}
             </button>
+            </span>
           );
         })}
       </div>
@@ -392,6 +420,15 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
   // Head office reads two different post-bags and they are not the same job. Only shown to
   // them: a branch has one, its own, and a tab strip over a single thing is furniture.
   const [audience, setAudience] = useState("all"); // "all" | "super_admin" | "branch_admin" | "physio"
+  // Developer tools, for clearing demo and testing tickets. Nothing shows until the Danger
+  // Zone password is in, and the server checks it again on every call -- this lock is manners.
+  // Held in memory only, so a reload locks it again.
+  const [devPassword, setDevPassword] = useState("");
+  const [askingPassword, setAskingPassword] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [picked, setPicked] = useState(() => new Set());
+  const [devBusy, setDevBusy] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -548,6 +585,88 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
     }
   };
 
+  const lockDev = () => {
+    setDevPassword("");
+    setAskingPassword(false);
+    setPasswordInput("");
+    setPicked(new Set());
+  };
+
+  const unlockDev = async (e) => {
+    e.preventDefault();
+    setUnlocking(true);
+    try {
+      await unlockDangerZone(passwordInput);
+      setDevPassword(passwordInput);
+      setAskingPassword(false);
+      setPasswordInput("");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not unlock");
+    } finally {
+      setUnlocking(false);
+    }
+  };
+
+  const pick = (ids, on) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) (on ? next.add(id) : next.delete(id));
+      return next;
+    });
+  };
+
+  // Every ticket the list is showing right now, so "select all" means what is on screen and
+  // never quietly includes tickets a filter or search has hidden.
+  const shownIds = useMemo(() => clients.flatMap((c) => c.tickets.map((t) => t.id)), [clients]);
+  // Only what still exists and is on screen is acted on: a ticket picked, then filtered out,
+  // is not deleted by somebody who can no longer see it was ticked.
+  const pickedShown = shownIds.filter((id) => picked.has(id));
+  const allShownPicked = shownIds.length > 0 && pickedShown.length === shownIds.length;
+
+  // Reset and Delete are two separate actions with two separate confirmations. Resetting a
+  // ticket keeps its conversation and never deletes it; deleting never resets anything.
+  const devResetToNew = async () => {
+    const ids = pickedShown;
+    if (!ids.length) return;
+    if (!window.confirm(`Move ${ids.length} selected ticket(s) back to New?\n\nThe conversation is kept. Only the status changes.`)) return;
+    setDevBusy("reset");
+    try {
+      const res = await devResetFeedbackToNew(ids, devPassword);
+      toast.success(`${res.reset} ticket(s) moved back to New`);
+      setPicked(new Set());
+      await load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not reset those");
+    } finally {
+      setDevBusy("");
+    }
+  };
+
+  const devDelete = async () => {
+    const ids = pickedShown;
+    if (!ids.length) return;
+    // Typed, not clicked: this runs on the live server too, and a stray OK on a dialog should
+    // not be enough to remove what a real patient wrote.
+    const typed = window.prompt(
+      `Permanently delete ${ids.length} selected ticket(s)?\n\nThey will be removed from this board and from the patient's portal. This cannot be undone.\n\nType DELETE to confirm.`,
+    );
+    if ((typed || "").trim() !== "DELETE") {
+      if (typed !== null) toast.error("Not deleted. Type DELETE to confirm.");
+      return;
+    }
+    setDevBusy("delete");
+    try {
+      const res = await devDeleteFeedback(ids, devPassword);
+      toast.success(`${res.deleted} ticket(s) deleted`);
+      setPicked(new Set());
+      await load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not delete those");
+    } finally {
+      setDevBusy("");
+    }
+  };
+
   // What head office is looking at, and how many of each. Counted off every row rather
   // than off what is on screen, or the tab you are standing on would always read as all
   // of them.
@@ -590,10 +709,85 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
             <h2 className="truncate text-base font-semibold text-slate-800">Patient Feedback</h2>
             <p className="truncate text-xs text-slate-400">What patients have written about their care</p>
           </div>
+          {!devPassword && !askingPassword && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 text-slate-400 hover:text-slate-600"
+              onClick={() => setAskingPassword(true)}
+              title="Developer tools: reset or delete demo tickets"
+              data-testid="feedback-dev-access"
+            >
+              <KeyRound className="h-3.5 w-3.5 sm:mr-1" /> <span className="hidden sm:inline">Developer Access</span>
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={load} disabled={loading} className="shrink-0" data-testid="feedback-refresh">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </div>
+
+        {!devPassword && askingPassword && (
+          <form onSubmit={unlockDev} className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-2 sm:px-6" data-testid="feedback-dev-password">
+            <span className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+              <Lock className="h-3.5 w-3.5" /> Developer password
+            </span>
+            <input
+              type="password"
+              autoComplete="off"
+              autoFocus
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              className="h-8 w-full max-w-xs rounded-md border border-slate-200 px-2 text-xs focus:border-sky-400 focus:outline-none"
+              data-testid="feedback-dev-password-input"
+            />
+            <Button type="submit" size="sm" className="h-8" disabled={unlocking || !passwordInput} data-testid="feedback-dev-unlock">
+              {unlocking ? "Checking…" : "Unlock"}
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-8" onClick={lockDev}>Cancel</Button>
+          </form>
+        )}
+
+        {devPassword && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-rose-200 bg-rose-50 px-4 py-2 sm:px-6" data-testid="feedback-dev-toolbar">
+            <span className="text-xs font-semibold text-rose-800">Developer tools · demo &amp; testing only</span>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-rose-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-rose-600"
+                checked={allShownPicked}
+                disabled={!shownIds.length}
+                onChange={(e) => pick(shownIds, e.target.checked)}
+                data-testid="feedback-dev-pick-all"
+              />
+              Select all shown ({shownIds.length})
+            </label>
+            <span className="text-xs text-rose-700" data-testid="feedback-dev-count">{pickedShown.length} selected</span>
+            <span className="flex-1" />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-amber-300 bg-white text-amber-700 hover:bg-amber-50"
+              disabled={!pickedShown.length || !!devBusy}
+              onClick={devResetToNew}
+              data-testid="feedback-dev-reset-new"
+            >
+              <RotateCcw className="mr-1 h-3.5 w-3.5" /> {devBusy === "reset" ? "Resetting…" : "Reset to New"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-rose-300 bg-white text-rose-700 hover:bg-rose-100"
+              disabled={!pickedShown.length || !!devBusy}
+              onClick={devDelete}
+              data-testid="feedback-dev-delete"
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" /> {devBusy === "delete" ? "Deleting…" : "Delete"}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-8 text-slate-500" onClick={lockDev} data-testid="feedback-dev-lock">
+              <Lock className="mr-1 h-3.5 w-3.5" /> Lock
+            </Button>
+          </div>
+        )}
       </header>
 
       {error ? (
@@ -713,6 +907,9 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
                           active={c.key === selectedClient}
                           onSelect={pickClient}
                           showBranch={isHeadOffice && audience !== "branch_admin"}
+                          picking={!!devPassword}
+                          pickedCount={c.tickets.filter((t) => picked.has(t.id)).length}
+                          onPick={pick}
                         />
                       ))}
                     </div>
@@ -738,6 +935,9 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
                   sending={sending === ticket.id}
                   onBack={() => setShowThreadOnMobile(false)}
                   showBranch={isHeadOffice}
+                  picking={!!devPassword}
+                  picked={picked}
+                  onPick={pick}
                 />
               ) : (
                 <p className="m-auto px-6 text-center text-xs text-slate-400">

@@ -13,7 +13,7 @@ through.
 """
 
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from database import v3_col
 from deps import v3_require_roles, is_branch_admin_role, is_head_physio_role
 from physio_scope import resolve_consultant_doctor
+from routers.v3_config import require_developer_password
 from schemas.v3 import V3UserOut
 from utils import now_iso
 
@@ -395,3 +396,60 @@ async def reply_to_feedback(
     }
     await v3_col("patient_feedback").update_one({"id": feedback_id}, {"$set": changes})
     return {**existing, **changes, "awaiting_staff": False}
+
+
+# ---- Developer tools: for demo and testing data, on any server including production ----
+#
+# Behind the developer password rather than a role, the same gate as the Danger Zone resets,
+# because both of these step outside the rules above: Reset to New walks a ticket back past
+# the patient's own "resolved", and Delete removes what a patient wrote. Neither is part of
+# working the desk. They are also two separate calls on purpose -- resetting a ticket never
+# deletes it, and deleting one never resets anything else -- and neither touches the lead.
+
+MAX_BULK = 500
+
+
+class FeedbackIdsIn(BaseModel):
+    ids: List[str]
+
+
+def _clean_ids(payload: FeedbackIdsIn) -> list:
+    ids = list(dict.fromkeys(str(i).strip() for i in (payload.ids or []) if str(i).strip()))
+    if not ids:
+        raise HTTPException(status_code=400, detail="Select at least one ticket")
+    if len(ids) > MAX_BULK:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_BULK} tickets at a time")
+    return ids
+
+
+@router.post("/branch/feedback/dev/reset-to-new")
+async def dev_reset_feedback_to_new(
+    payload: FeedbackIdsIn,
+    _: V3UserOut = Depends(require_developer_password),
+):
+    """Put the selected tickets back in New, as if nobody had picked them up.
+
+    The conversation is kept -- only where the ticket stands changes. Who handled it goes, so
+    the board does not claim somebody is on a ticket that says nobody has picked it up.
+    """
+    ids = _clean_ids(payload)
+    result = await v3_col("patient_feedback").update_many(
+        {"id": {"$in": ids}},
+        {
+            "$set": {"status": STATUS_NEW},
+            "$unset": {"handled_by": "", "handled_at": "", "resolved_by_patient_at": ""},
+        },
+    )
+    return {"reset": result.matched_count}
+
+
+@router.post("/branch/feedback/dev/delete")
+async def dev_delete_feedback(
+    payload: FeedbackIdsIn,
+    _: V3UserOut = Depends(require_developer_password),
+):
+    """Permanently delete the selected tickets, thread and all. Gone from the patient's portal
+    too. Only the tickets: the lead and anything else of theirs is left alone."""
+    ids = _clean_ids(payload)
+    result = await v3_col("patient_feedback").delete_many({"id": {"$in": ids}})
+    return {"deleted": result.deleted_count}
