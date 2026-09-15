@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { loadSession } from "@/lib/session";
 import {
   Calendar,
   CheckCircle2,
@@ -639,12 +640,14 @@ const waNumber = (raw) => {
  *  so the entry header can only ever draw the eight it always has. */
 const BRANCH_LIST_WIDTHS = {
   base: {
-    patient: "w-[21%]", phone: "w-[13%]", city: "w-[12%]", painType: "w-[13%]",
-    painDuration: "w-[12%]", physio: "w-[11%]", appt: "w-[10%]", followUp: "", stage: "w-[8%]",
+    patient: "w-[19%]", phone: "w-[12%]", city: "w-[11%]", painType: "w-[12%]",
+    painDuration: "w-[11%]", physio: "w-[11%]", appt: "w-[10%]", followUp: "", stage: "w-[8%]",
+    action: "w-[6%]",
   },
   withFollowUp: {
-    patient: "w-[19%]", phone: "w-[12%]", city: "w-[11%]", painType: "w-[11%]",
-    painDuration: "w-[11%]", physio: "w-[10%]", appt: "w-[9%]", followUp: "w-[9%]", stage: "w-[8%]",
+    patient: "w-[17%]", phone: "w-[11%]", city: "w-[10%]", painType: "w-[10%]",
+    painDuration: "w-[10%]", physio: "w-[10%]", appt: "w-[9%]", followUp: "w-[9%]", stage: "w-[8%]",
+    action: "w-[6%]",
   },
 };
 
@@ -654,11 +657,11 @@ const BRANCH_LIST_WIDTHS = {
 const ARM_LIST_WIDTHS = {
   base: {
     name: "w-[19%]", phone: "w-[12%]", city: "w-[10%]", appt: "w-[10%]",
-    followUp: "", stage: "w-[11%]", questionShare: 38,
+    followUp: "", stage: "w-[11%]", questionShare: 32,
   },
   withFollowUp: {
     name: "w-[17%]", phone: "w-[11%]", city: "w-[9%]", appt: "w-[9%]",
-    followUp: "w-[9%]", stage: "w-[10%]", questionShare: 35,
+    followUp: "w-[9%]", stage: "w-[10%]", questionShare: 29,
   },
 };
 
@@ -924,6 +927,14 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // array is 2,000 scans of it.
   const [picked, setPicked] = useState(() => new Set());
   const [showBulkDelete, setShowBulkDelete] = useState(false);
+  // One patient off the row's Action cell. Goes through the same branch-scoped delete as
+  // the bulk bar, so it keeps that endpoint's refusal of anyone with sessions or payments.
+  const [rowDelete, setRowDelete] = useState(null);
+  // The roles that endpoint accepts (branch_admin's aliases included server-side). Anyone
+  // else would only be shown a button that 403s.
+  const canDeleteLeads = ["super_admin", "business_dev", "branch_admin", "online_physio_admin", "online_fitness_admin",
+    "branch_admin_physio", "branch_admin_fitness", "branch_admin_physio_fitness"]
+    .includes(String((currentUser || loadSession()?.user)?.role || "").trim().toLowerCase());
   // Set when a lead's own detail popup hands off to a Consultation-only stage — tells the
   // embedded ConsultationsBoard which lead to auto-open once it loads, so the handoff lands
   // straight on that lead's own rich modal instead of just the filtered list.
@@ -2294,11 +2305,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                     </>
                   ) : entryStageNames.includes(stageFilter) ? (
                     <>
-                      <th className="w-[22%] px-4 py-3">Patient</th>
-                      <th className="w-[14%] px-4 py-3">Phone</th>
-                      <th className="w-[13%] px-4 py-3">City</th>
-                      <th className="w-[14%] px-4 py-3">Pain Type</th>
-                      <th className="w-[14%] px-4 py-3">Pain Duration</th>
+                      <th className="w-[20%] px-4 py-3">Patient</th>
+                      <th className="w-[13%] px-4 py-3">Phone</th>
+                      <th className="w-[12%] px-4 py-3">City</th>
+                      <th className="w-[13%] px-4 py-3">Pain Type</th>
+                      <th className="w-[13%] px-4 py-3">Pain Duration</th>
                       <th className="w-[12%] px-4 py-3">Appointment</th>
                       <th className="w-[11%] px-4 py-3">Stage</th>
                     </>
@@ -2315,6 +2326,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       <th className={`${listWidths.stage} px-4 py-3`}>Stage</th>
                     </>
                   )}
+                  {/* Last on every shape of the table; each shape leaves it 6%. */}
+                  {canDeleteLeads && <th className="w-[6%] px-2 py-3 text-center">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -2332,7 +2345,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             drawn. It used to read 9/8, one more than the table has ever
                             had, and a fitness arm's nine would have been a third wrong
                             answer to write down. */}
-                        <td colSpan={5 + intakeQuestions.length + (showAssignedPhysio ? 1 : 0) + (showFollowUpColumn ? 1 : 0)} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        <td colSpan={5 + intakeQuestions.length + (showAssignedPhysio ? 1 : 0) + (showFollowUpColumn ? 1 : 0) + (canDeleteLeads ? 1 : 0)} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageFilter}"` : "yet"}.
                         </td>
                       </tr>
@@ -2496,6 +2509,20 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             {rowStage ? rowStage : "—"}
                           </span>
                         </td>
+                        {canDeleteLeads && (
+                          <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setRowDelete(lead); }}
+                              className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              title="Delete lead"
+                              aria-label={`Delete ${lead.name || "patient"}`}
+                              data-testid={`branch-row-delete-${lead.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   });
@@ -2582,6 +2609,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           onDeleted={(res) => {
             setShowBulkDelete(false);
             setPicked(new Set((res.blocked || []).map((b) => b.lead_id)));
+            loadBoard();
+          }}
+        />
+      )}
+
+      {rowDelete && (
+        <BulkDeleteLeadsModal
+          leads={[rowDelete]}
+          onClose={() => setRowDelete(null)}
+          onDeleted={() => {
+            setRowDelete(null);
             loadBoard();
           }}
         />
