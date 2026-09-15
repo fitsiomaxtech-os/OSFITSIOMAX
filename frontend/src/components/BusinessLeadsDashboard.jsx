@@ -24,7 +24,6 @@ import {
   TrendingUp,
   UserPlus,
   Users,
-  Workflow,
   X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,19 +61,14 @@ import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard
 // opens on. A lazy() could not carry useDashboardData in any case; a hook has to be
 // there when the component that calls it renders.
 import { DASH_TABS, DashboardTabPanel, useDashboardData } from "@/components/DashboardBoard";
-// Operations, Finance, HR Admin, Services and Products, and the two Settings screens --
-// the same six boards Super Admin reaches, mounted here as this desk's own tabs.
+// Finance, HR Admin, Services and Products, and the two Settings screens -- the same five
+// boards Super Admin reaches, mounted here as this desk's own tabs.
 //
 // lazy() rather than the static imports above, and deliberately not the same call: these
-// six are the same lazy() targets CRMPage already names, so webpack hands both pages the
+// five are the same lazy() targets CRMPage already names, so webpack hands both pages the
 // one chunk per board and neither pays for the other's copy. Static would have pulled the
 // whole HR org chart and the whole catalogue into the chunk that draws this board's
 // Dashboard, which is the tab it opens on and the only one most days need.
-//
-// Operations matters most of the six here: it reaches six other boards of its own -- a
-// branch's, a consultant's, a physio's, a nutritionist's, a rep's and a client's -- so
-// mounting it statically would have folded all of them into Dashboard's chunk.
-const OperationsBoard = lazy(() => import("@/components/OperationsBoard").then((m) => ({ default: m.OperationsBoard })));
 const FinanceWiseBoard = lazy(() => import("@/components/branch/FinanceWiseBoard").then((m) => ({ default: m.FinanceWiseBoard })));
 const HRBoard = lazy(() => import("@/components/hr/HRBoard").then((m) => ({ default: m.HRBoard })));
 const PackagesBoard = lazy(() => import("@/components/PackagesBoard").then((m) => ({ default: m.PackagesBoard })));
@@ -94,27 +88,17 @@ const BoardFallback = () => (
   </div>
 );
 
-// Operations is Super Admin's own Operations board in full -- every team, one designation
-// at a time, each tab opening the board that person or branch already has, with full
-// control and no separate login. It sits directly after Dashboard, where it does on Super
-// Admin's own strip and for the same reason: the figures say what happened, and this is
-// the one tab that can go and do something about it, at whichever desk it happened.
-//
-// Mounted with nothing held back and nothing passed to narrow it -- the same rule the five
-// tabs after it already follow. What this desk may actually read and write is settled by
-// the API off its token: business_dev sits beside super_admin now on every guard behind
-// the six boards Operations reaches, and on the two scoping rules that decide whether a
-// caller is reading one branch or driving somebody else's board (works_org_wide in
-// backend/deps.py, and the callers named on it).
+// Operations is not on this strip. It stays Super Admin's own board; this desk's day is
+// read on Dashboard and worked through the views below.
 //
 // Marketing View and Sales View are the same two boards Super Admin reaches as
 // "Marketing Master View" and "Sales Master View" -- the same PreSalesCRM mount, under the
 // shorter names, because here they are two tabs on a strip and not two entries on a
-// top-level nav. They sit after Operations, before the money: the desk reads the day on
-// Dashboard, works it in Operations, then reads what the other two desks did with it.
+// top-level nav. They sit after Dashboard, before the money: the desk reads the day, then
+// reads what the other two desks did with it.
 //
-// Branch Control is BranchManagementBoard in full -- the same panel Operations opens as a
-// "Branch Manager" dialog, mounted as a tab instead of a popup so it has the room its
+// Branch Control is BranchManagementBoard in full -- the same panel Super Admin's
+// Operations opens as a "Branch Manager" dialog, mounted as a tab instead of a popup so it has the room its
 // four sub-tabs need. It replaced a "Branches" tab that held a create form and a card
 // list, both of which that panel does better.
 //
@@ -132,10 +116,6 @@ const BoardFallback = () => (
 // the one that acts on a branch rather than reads across all of them.
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
-  // Every team, one designation at a time -- Pre Sales, Branch, Consultant, Physio,
-  // Nutritionist and Client, each reached by picking a branch and then the person, and
-  // each opening that person's own board in full.
-  { key: "operations", label: "Operations", icon: Workflow },
   { key: "marketing_view", label: "Marketing View", icon: Megaphone },
   { key: "sales_view", label: "Sales View", icon: Headphones },
   { key: "finance", label: "Finance", icon: BadgeIndianRupee },
@@ -170,9 +150,9 @@ const SETTINGS_SUB_TABS = [
 const isTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.includes(view) : view === key);
 
 // Where the strip's own Refresh is not drawn -- see the note on the button itself. Dashboard
-// because its toolbar carries the same one, and the four mounted boards because each
+// because its toolbar carries the same one, and the three mounted boards because each
 // carries its own and this one would not touch what they show.
-const REFRESH_WITHHELD_TABS = ["dashboard", "operations", "finance", "hr", "packages"];
+const REFRESH_WITHHELD_TABS = ["dashboard", "finance", "hr", "packages"];
 
 function formatMoney(v) {
   const n = Number(v || 0);
@@ -205,13 +185,12 @@ const dateParamsOf = (filter) => {
 };
 
 /**
- * @param currentUser  the signed-in Business Development Executive. Read by the four
- *                     tabs that mount another desk's board -- Operations, Marketing View,
- *                     Sales View and Branch Control. PreSalesCRM schedules and stamps
- *                     activity against whoever is looking, and BranchManagementBoard's
- *                     Branch Control sub-tab acts as them -- as does Operations' own Branch
- *                     tab, which opens that same panel; without this those tabs would be
- *                     working on behalf of nobody.
+ * @param currentUser  the signed-in Business Development Executive. Read by the three
+ *                     tabs that mount another desk's board -- Marketing View, Sales View
+ *                     and Branch Control. PreSalesCRM schedules and stamps activity against
+ *                     whoever is looking, and BranchManagementBoard's Branch Control
+ *                     sub-tab acts as them; without this those tabs would be working on
+ *                     behalf of nobody.
  */
 export const BusinessLeadsDashboard = ({ currentUser = null }) => {
   // Holds a main tab key, or -- while Settings is open -- one of SETTINGS_SUB_VIEWS.
@@ -369,9 +348,9 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
               it. The two are the same `refreshAll`, and two identical grey squares an inch
               apart on one screen is a reader asking which of them is the real one.
 
-              Withheld on Operations, Finance, HR Admin and Services and Products for the
+              Withheld on Finance, HR Admin and Services and Products for the
               same reason, one step further out: this button reloads THIS board's summary,
-              branches and sheet connections, and on those four the screen under it is
+              branches and sheet connections, and on those three the screen under it is
               somebody else's board with its own reload. A refresh that visibly does nothing to what is on
               screen is worse than no refresh at all. It stays for the tabs that have
               neither their own toolbar nor a board of their own. */}
@@ -428,32 +407,18 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
         <PreSalesCRM role="sales_head" currentUser={currentUser} embedded />
       )}
 
-      {/* Operations, Finance, HR Admin and Services and Products — Super Admin's own four
-          boards, each the same component that board mounts, with nothing held back and
-          nothing passed to narrow them. What this desk may actually read and write is
-          settled by the API off its token, the same as it is for Super Admin's copy: the
-          guards in backend/routers/v3_finance.py, v3_hr.py, v3_hr_ops.py, v3_packages.py,
-          v3_store.py and v3_inventory.py name business_dev beside super_admin now, and so
-          do the guards behind the six boards Operations reaches — v3_branch_admin.py,
-          v3_head_physio.py, v3_head_physio_board.py, v3_physio_board.py, v3_diet.py,
-          v3_patient_portal.py and the routers those boards work through.
+      {/* Finance, HR Admin and Services and Products — Super Admin's own three boards,
+          each the same component that board mounts, with nothing held back and nothing
+          passed to narrow them. What this desk may actually read and write is settled by
+          the API off its token, the same as it is for Super Admin's copy: the guards in
+          backend/routers/v3_finance.py, v3_hr.py, v3_hr_ops.py, v3_packages.py,
+          v3_store.py and v3_inventory.py name business_dev beside super_admin now.
 
-          Wrapped in one Suspense rather than four: only one of them is ever mounted, so a
-          boundary each would be four copies of the same fallback waiting on the same
+          Wrapped in one Suspense rather than three: only one of them is ever mounted, so a
+          boundary each would be three copies of the same fallback waiting on the same
           switch. It sits inside the strip, not around it, so the tabs stay put while a
           chunk arrives. */}
       <Suspense fallback={<BoardFallback />}>
-        {/* Operations — Super Admin's own board, mounted the way that page mounts it and
-            with the same two props. `actingUser` is what its Branch tab acts as and what
-            PreSalesCRM stamps activity against; `branches` is the list its six tabs all
-            pick from, already loaded here for the Dashboard's own branch filter rather
-            than fetched a second time. `compact` folds the Branch tab's pill row into a
-            Branch Filter dialog on the nav bar and puts Branch Transfer / Branch Manager
-            up there beside it. Super Admin's own page mounts it the same way. */}
-        {activeTab === "operations" && (
-          <OperationsBoard actingUser={currentUser} branches={branches} compact />
-        )}
-
         {activeTab === "finance" && (
           <FinanceWiseBoard branches={branches} />
         )}

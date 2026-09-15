@@ -13,7 +13,7 @@ import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard
 // Shared with a branch's own board, which offers the same transfer to its Branch Admin for
 // its own patients — see the component's own note on why there is only one of these.
 import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
-// The pill row's replacement on the compact layout (BDE and Super Admin) — see `compact`
+// The pill row's replacement on the compact layout (Super Admin's page) — see `compact`
 // on OperationsBoard below.
 import { BranchFilterPopover } from "@/components/BranchFilterPopover";
 
