@@ -367,7 +367,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
             data-testid="hp-search-input"
           />
         </div>
-        <QuickDateFilterBar value={dateRange} onChange={setDateRange} testid="hp-date-filter" inline />
+        <QuickDateFilterBar value={dateRange} onChange={setDateRange} testid="hp-date-filter" segmented />
         <button
           type="button"
           onClick={() => setRefreshTick((n) => n + 1)}
