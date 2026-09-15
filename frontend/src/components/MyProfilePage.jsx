@@ -26,7 +26,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft,
   Banknote,
   BriefcaseBusiness,
   CalendarClock,
@@ -625,11 +624,10 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
           <button
             type="button"
             onClick={onBack}
-            className="flex shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+            className="shrink-0 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
             data-testid="my-profile-back"
           >
-            <ArrowLeft className="h-4 w-4" />
-            <span className="hidden sm:inline">Back</span>
+            Back
           </button>
           <div className="min-w-0">
             <h2 className="truncate text-lg font-bold text-emerald-700 sm:text-xl" data-testid="my-profile-greeting">
@@ -644,7 +642,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
             four characters is not a tab. shrink-0 keeps the greeting beside it from
             squeezing it back into an ellipsis; the row wraps instead. */}
         <div className="w-full sm:w-auto sm:shrink-0" data-testid="my-profile-tabs-wrap">
-          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={4} />
+          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={4} fit />
         </div>
       </div>
 

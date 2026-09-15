@@ -31,7 +31,10 @@ const MOBILE_LAYOUTS = {
   4: "grid grid-cols-4 sm:flex",
 };
 
-export const SegmentedTabs = ({ tabs, value, onChange, testid = "segmented-tabs", size = "md", mobileCols = 0 }) => {
+// `fit` sizes each tab to its full label from sm up instead of sharing the row equally.
+// For a bar that sits in a shrink-to-fit wrapper: flex-1 there has no width to share, and
+// min-w-0 lets every label collapse into an ellipsis.
+export const SegmentedTabs = ({ tabs, value, onChange, testid = "segmented-tabs", size = "md", mobileCols = 0, fit = false }) => {
   // Four across a phone is about 80px a tab, and the usual px-2 plus the icon leaves ~46px
   // of text — under what "Pre Sales" needs, so it would arrive as "Pre Sal…". The padding
   // and the icon gap tighten only in that case; two and three columns have room already,
@@ -53,7 +56,7 @@ export const SegmentedTabs = ({ tabs, value, onChange, testid = "segmented-tabs"
             type="button"
             onClick={() => onChange(t.key)}
             aria-current={active ? "page" : undefined}
-            className={`flex min-w-0 items-center justify-center ${iconGap} rounded-lg font-semibold transition sm:flex-1 sm:gap-1.5 ${mobileCols ? "" : "flex-1"} ${pad} ${
+            className={`flex min-w-0 items-center justify-center ${iconGap} rounded-lg font-semibold transition ${fit ? "sm:shrink-0 sm:whitespace-nowrap" : "sm:flex-1"} sm:gap-1.5 ${mobileCols ? "" : "flex-1"} ${pad} ${
               active
                 ? "bg-white text-slate-900 shadow-sm"
                 : "text-slate-500 hover:text-slate-800"
