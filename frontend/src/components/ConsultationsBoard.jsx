@@ -2686,7 +2686,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // have to be written first, but no add-on has to be picked — every toggle starts off,
   // which submits as a plain Consultation, the same as a patient who needs nothing else.
   // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
-  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
+  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "", service_terms: {} });
   const [savingDecision, setSavingDecision] = useState(false);
   // Which service's picker is open over the form, by addon key, or null for none.
   // The pickers used to stack down the form, one block per ticked service, which is what
@@ -3240,7 +3240,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setTreatmentFeeDraft(null);
     setTreatmentConfirmDraft(null);
     setTreatmentBalanceChoice(null);
-    setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
+    setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "", service_terms: {} });
     setDecisionReceipt(null);
     setEditingDecision(false);
     setAddonPicker(null);
@@ -3349,12 +3349,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     if (!(selectedLead.physio_diagnosis_report || "").trim()) { toast.error("Write the Diagnosis Report first"); return; }
     if (!(selectedLead.treatment_summary || "").trim()) { toast.error("Write the Treatment Summary first"); return; }
 
-    if (!decisionDraft.treatment) { toast.error("Pick Treatment before moving to Admin"); return; }
-
-    // Always a treatment now. "consultation_only" is a legacy value some already-saved
-    // leads still carry — the server still accepts it, and Edit on one of those reopens
-    // this form with nothing ticked — but nothing written from here takes it any more.
-    const decision = "consultation_treatment";
+    // Treatment is optional: without it the patient moves to Admin as Consultation only,
+    // with whichever other services were ticked.
+    const decision = decisionDraft.treatment ? "consultation_treatment" : "consultation_only";
     let payload = {
       decision,
       // A Diet referral is a referral to the Nutritionist's consultation and nothing else,
@@ -3369,6 +3366,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       zumba_recommended: decisionDraft.zumba,
       zumba_item_id: decisionDraft.zumba ? decisionDraft.zumba_item_id || null : null,
       mode: decisionDraft.mode,
+      // Short / Long Term per ticked service; unticked services are left out.
+      service_terms: Object.fromEntries(
+        CONSULTATION_ADDONS.filter((a) => decisionDraft[a.key])
+          .map((a) => [a.key, decisionDraft.service_terms?.[a.key] || "short"]),
+      ),
     };
     if (decisionDraft.treatment) {
       if (!decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
@@ -3451,6 +3453,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       zumba_item_id: lead.zumba_package_id || "",
       mode: lead.consultation_mode || "offline",
       sessionsPerWeek: weeks && total ? String(Math.round(total / weeks)) : "",
+      service_terms: lead.service_terms || {},
     });
     setDecisionReceipt(null);
     setEditingDecision(true);
@@ -6866,16 +6869,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                 const summaryReady = !!(selectedLead.treatment_summary || "").trim();
                 const selectedPackage = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
                 const selectedPackageWeeks = selectedPackage ? weeksFromPackageName(selectedPackage.name) : null;
-                // Treatment is not one of five optional add-ons any more. What leaves this
-                // form for Branch Admin is a treatment plan — sessions to book and a package
-                // to collect against — so the tick, its package and its sessions/week are as
-                // required as the two reports above. Ticked with no package, or a package
-                // with no sessions/week, is the same gap as never having ticked it: the
-                // branch gets a patient with nothing to book.
-                const treatmentReady = !!decisionDraft.treatment
-                  && !!decisionDraft.item_id
+                // Treatment is optional. Once ticked, though, its package and sessions/week
+                // must be filled in: a ticked Treatment with no package gives the branch
+                // nothing to book.
+                const treatmentReady = !decisionDraft.treatment || (
+                  !!decisionDraft.item_id
                   && !!selectedPackageWeeks
-                  && !!parseInt(decisionDraft.sessionsPerWeek, 10);
+                  && !!parseInt(decisionDraft.sessionsPerWeek, 10)
+                );
                 // Diet asks nothing: the referral is to the Nutritionist's consultation,
                 // which is the whole of what a Consultant decides on that side.
                 //
@@ -7271,7 +7272,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                             both at once sends the eye to the wrong half of the screen. */}
                         {!diagnosisReady || !summaryReady
                           ? "Write the Diagnosis Report and Treatment Summary above before Move to Admin."
-                          : "Pick Treatment, its package and its sessions/week before Move to Admin."}
+                          : "Choose Treatment's package and sessions/week before Move to Admin."}
                       </p>
                     )}
                     {/* Consultation itself needs no toggle — writing this form up is the
@@ -7312,16 +7313,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                               >
                                 <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
                                 <span className="truncate">{p.label}</span>
-                                {/* The one service that has to be picked says so on the chip
-                                    itself, where the choice is made. The hint at the top of
-                                    the panel names the reports first while they are unwritten,
-                                    so on a fresh consultation it is not saying this yet.
-                                    Gone once Treatment is on — the tick says the rest. */}
-                                {p.key === "treatment" && !selected && (
-                                  <span className="ml-auto shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-600">
-                                    Required
-                                  </span>
-                                )}
                                 {selected && <CheckCircle2 aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0" />}
                               </button>
                             );
@@ -7342,15 +7333,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       <div>
                         <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Selected Services</label>
                         {selectedAddons.length === 0 ? (
-                          /* Nothing picked is not a valid outcome any more — Treatment is
-                             required — so this column reads as the gap it is rather than as
-                             a note about what saving now would do. Rose to match the hint at
-                             the top of the panel: they are the same missing thing. */
                           <p
-                            className="rounded-lg border border-dashed border-rose-200 bg-rose-50/40 px-3 py-3 text-[11px] font-medium text-rose-600"
+                            className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-3 text-[11px] text-slate-500"
                             data-testid="cons-decision-selected-empty"
                           >
-                            Pick Treatment to move this patient to Admin.
+                            No services picked — this patient moves to Admin as Consultation only.
                           </p>
                         ) : (
                           <div className="space-y-1.5" data-testid="cons-decision-details">
@@ -7378,24 +7365,28 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                                       {summary.text}
                                     </span>
                                   </button>
-                                  {a.key === "treatment" ? (
-                                    /* A pencil where every other row has its ×. Treatment
-                                       cannot come off, so the only thing this row does is
-                                       reopen the picker — and a row that ends in nothing
-                                       reads as a row that does nothing. Decorative: the press
-                                       target is the whole row beside it. */
-                                    <Pencil aria-hidden className="mr-1.5 h-3 w-3 shrink-0 text-slate-400" />
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => clearAddon(a.key)}
-                                      className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
-                                      title={`Remove ${a.label}`}
-                                      data-testid={`cons-decision-remove-${a.key}`}
-                                    >
-                                      <X aria-hidden className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
+                                  <select
+                                    value={decisionDraft.service_terms?.[a.key] || "short"}
+                                    onChange={(e) => {
+                                      const term = e.target.value;
+                                      setDecisionDraft((d) => ({ ...d, service_terms: { ...(d.service_terms || {}), [a.key]: term } }));
+                                    }}
+                                    className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                                    title={`${a.label} term`}
+                                    data-testid={`cons-decision-term-${a.key}`}
+                                  >
+                                    <option value="short">Short Term</option>
+                                    <option value="long">Long Term</option>
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => clearAddon(a.key)}
+                                    className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+                                    title={`Remove ${a.label}`}
+                                    data-testid={`cons-decision-remove-${a.key}`}
+                                  >
+                                    <X aria-hidden className="h-3.5 w-3.5" />
+                                  </button>
                                 </div>
                               );
                             })}
@@ -7439,21 +7430,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                                 ids, drawn here instead of down the form. */}
                             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{addonDetail(addonPicker)}</div>
                             <div className="flex shrink-0 justify-between gap-2 border-t border-slate-100 px-4 py-3">
-                              {/* Required, so there is nothing to remove it with — the same
-                                  reason its row in Selected carries no ×. The empty span
-                                  holds Done on the right, where it is on every other
-                                  service's picker. */}
-                              {addonPicker === "treatment" ? <span /> : (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8 border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
-                                  onClick={() => clearAddon(addonPicker)}
-                                  data-testid="cons-decision-picker-remove"
-                                >
-                                  Remove {a.label}
-                                </Button>
-                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
+                                onClick={() => clearAddon(addonPicker)}
+                                data-testid="cons-decision-picker-remove"
+                              >
+                                Remove {a.label}
+                              </Button>
                               {/* Shut while the open picker is still missing something, so
                                   the popup cannot be dismissed by the one button that reads
                                   like the choice was made. The X and the backdrop still

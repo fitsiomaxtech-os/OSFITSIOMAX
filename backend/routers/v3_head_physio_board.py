@@ -494,6 +494,20 @@ async def hp_consultation_decision(
         chosen += " + Zumba"
     detail = f"Consultation decision: {chosen}"
 
+    # Short / Long Term, kept only for the services actually ticked.
+    ticked = {
+        "treatment": payload.decision == "consultation_treatment",
+        "diet": bool(payload.diet_recommended),
+        "rehab": bool(payload.rehab_referred),
+        "fitness": bool(payload.fitness_recommended),
+        "zumba": bool(payload.zumba_recommended),
+    }
+    service_terms = {k: v for k, v in payload.service_terms.items() if ticked.get(k)}
+    updates["service_terms"] = service_terms
+    long_term = [k.title() for k, v in service_terms.items() if v == "long"]
+    if long_term:
+        detail += f" · Long Term: {', '.join(long_term)}"
+
     # Consultation Fee has a single fixed price (FITSIO STORE > Consultation) — there's
     # nothing for the Head Physio to pick, so it's auto-assigned the first time a lead
     # reaches this decision, the same way it always has been, just without a manual step.

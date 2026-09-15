@@ -433,6 +433,8 @@ class V3LeadOut(BaseModel):
     needs_attention: Optional[bool] = False
     fitness_recommended: Optional[bool] = False
     zumba_recommended: Optional[bool] = False
+    # Short / Long Term per service, set at Move to Admin.
+    service_terms: Optional[Dict[str, str]] = None
     # Who is actually delivering that diet plan, set by branch/assign-diet. This model
     # ignores extras, so without these three the Consultations board could never tell an
     # already-assigned patient from a new one and its Reassign control would never appear.
@@ -899,6 +901,8 @@ class V3ConsultationDecisionInput(BaseModel):
     rehab_item_id: Optional[str] = None
     # The Zumba membership, when one is picked alongside it. Optional on the same terms.
     zumba_item_id: Optional[str] = None
+    # Short or Long Term per ticked service, keyed treatment/diet/rehab/fitness/zumba.
+    service_terms: Dict[Literal["treatment", "diet", "rehab", "fitness", "zumba"], Literal["short", "long"]] = {}
 
 
 class V3AssignPhysioSessionsInput(BaseModel):
