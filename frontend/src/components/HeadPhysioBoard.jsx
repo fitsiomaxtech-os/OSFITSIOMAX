@@ -355,7 +355,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
           needs on the right, divided off from it. */}
       {/* Laid out like the Branch Admin toolbar: a capped search, the one-tap ranges beside
           it, then the calendar icon (custom range) and Refresh pinned to the right. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 lg:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-2 border border-slate-200 bg-white p-2 lg:flex-nowrap">
         {/* One search for the whole board, so it works on Review, Rehab and All and not
             only on Consultations. Hidden on a phone, where the header's magnifier does the
             same job without costing a row of vertical space above the lists. */}
@@ -371,10 +371,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
         </div>
         {/* The presets and the calendar icon drive the same single scope; a custom range
             simply leaves none of the preset buttons lit. */}
-        <div className="w-full sm:w-auto sm:shrink-0">
+        {/* ml-auto opens the gap after the search, so the ranges, calendar and Refresh sit
+            together on the right. */}
+        <div className="w-full sm:ml-auto sm:w-auto sm:shrink-0">
           <QuickDateFilterBar value={dateRange} onChange={setDateRange} testid="hp-date-filter" inline showCustom={false} />
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
           <DateFilterPopover
             value={dateRange && !QUICK_DATE_PRESETS.some((p) => p.key === dateRange.key) ? dateRange : null}
             onChange={setDateRange}
