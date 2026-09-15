@@ -3,11 +3,58 @@ import { Eye, ChevronDown, ChevronRight, ChevronLeft, Printer, FileSpreadsheet, 
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { RecordCards } from "@/components/branch/RecordCards";
+import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { getClientTransactionHistory } from "@/lib/api";
+import { waNumber } from "@/lib/phone";
+import { isHandheld } from "@/lib/receipt";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const longDate = (iso) => new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+/** The WhatsApp wording for one row — the same points the automatic reminder email makes
+ * (backend/payment_reminders.py), for the desk to send by hand. */
+const reminderText = (r, today) => {
+  const lines = [`Hi ${r.client_name || "there"},`, "", `This is a payment reminder from FITSIOMAX${r.branch_name ? ` ${r.branch_name}` : ""}.`];
+  if (r.due_date && r.next_installment_amount != null) {
+    const what = `${r.next_installment_fee_label || "Payment"}${r.next_installment_number ? ` (installment ${r.next_installment_number})` : ""}`;
+    const when = r.due_date < today ? `was due on ${longDate(r.due_date)}` : r.due_date === today ? "is due today" : `is due on ${longDate(r.due_date)}`;
+    lines.push(`${what}: ${fmt(r.next_installment_amount)} ${when}.`);
+  }
+  lines.push(`Total outstanding balance: ${fmt(r.balance)}.`, "", "If you have already paid, please ignore this message. Thank you!");
+  return lines.join("\n");
+};
+
+/** Straight to the patient's chat with the reminder typed — same handoff as whatsappReceipt. */
+const whatsappReminder = (r, today) => {
+  const num = waNumber(r.phone);
+  if (!num) return;
+  const url = `https://wa.me/${num}?text=${encodeURIComponent(reminderText(r, today))}`;
+  if (isHandheld()) {
+    window.location.href = url;
+    return;
+  }
+  const tab = window.open(url, "_blank");
+  if (tab) tab.opener = null;
+};
+
+const ReminderButton = ({ row, today, compact }) => (
+  <button
+    type="button"
+    // The phone card is itself clickable (it opens the patient), so neither a tap nor
+    // Enter on this button may reach it.
+    onClick={(e) => { e.stopPropagation(); whatsappReminder(row, today); }}
+    onKeyDown={(e) => e.stopPropagation()}
+    title="Send payment reminder on WhatsApp"
+    className={compact
+      ? "inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+      : "rounded p-1 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"}
+    data-testid={`outstanding-remind-whatsapp-${row.lead_id}`}
+  >
+    <WhatsAppIcon className="h-3.5 w-3.5" />{compact ? " Remind" : null}
+  </button>
+);
 const formatMode = (mode) => (mode ? (mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1)) : "");
 
 const MONTHS = [
@@ -339,6 +386,7 @@ export const OutstandingAmountBoard = ({ rows, onView }) => {
               meta: [
                 <StatusBadge status={r.status} />,
                 r.due_date ? `Due ${r.due_date}` : null,
+                waNumber(r.phone) && <ReminderButton row={r} today={today} compact />,
               ],
               onOpen: onView ? () => onView(r.lead_id) : undefined,
             })}
@@ -382,10 +430,11 @@ export const OutstandingAmountBoard = ({ rows, onView }) => {
                       <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{r.due_date || "—"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-2 text-center"><StatusBadge status={r.status} /></td>
                       <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2">
-                        <div className="flex items-center justify-center">
+                        <div className="flex items-center justify-center gap-1">
                           <button type="button" onClick={() => onView && onView(r.lead_id)} title="View Details" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600">
                             <Eye className="h-3.5 w-3.5" />
                           </button>
+                          {waNumber(r.phone) && <ReminderButton row={r} today={today} />}
                         </div>
                       </td>
                     </tr>

@@ -154,6 +154,9 @@ CORE_INDEXES = [
     ("payslips", [("month", 1), ("employee_id", 1)], "month_employee"),
     ("payroll_runs", [("month", 1)], "month"),
     ("hr_quotes", [("id", 1)], "id"),
+    # payment_reminders.py checks every due installment against what was already sent for
+    # it, once an hour.
+    ("payment_reminders", [("lead_id", 1), ("fee", 1), ("installment_number", 1)], "lead_fee_installment"),
 ]
 
 

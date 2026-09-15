@@ -1462,9 +1462,12 @@ def _lead_outstanding_detail(lead: dict, today: str) -> dict:
     due_date = None
     next_installment_number = None
     next_installment_fee = None
+    next_installment_amount = None
     if unpaid:
         next_fee, next_idx, next_inst = unpaid[0]
         due_date = next_inst.get("due_date")
+        # What a payment reminder names as owed on that date, as opposed to the balance.
+        next_installment_amount = round(next_inst.get("amount", 0), 2)
         # 1-based, matching what the Payment Schedules table shows, and named by the fee
         # it belongs to — the quick-collect action posts both back, so a balance on any
         # fee can be taken from here rather than only a Treatment Fee one.
@@ -1489,6 +1492,7 @@ def _lead_outstanding_detail(lead: dict, today: str) -> dict:
         "status": status,
         "next_installment_number": next_installment_number,
         "next_installment_fee": next_installment_fee,
+        "next_installment_amount": next_installment_amount,
     }
 
 
@@ -2011,6 +2015,8 @@ async def revenue_overview(
                 "status": detail["status"],
                 "next_installment_number": detail["next_installment_number"],
                 "next_installment_fee": detail["next_installment_fee"],
+                "next_installment_amount": detail["next_installment_amount"],
+                "next_installment_fee_label": FEE_SCHEDULES[detail["next_installment_fee"]]["label"] if detail["next_installment_fee"] else None,
             })
         # Every fee's schedule, not only the Treatment Fee's. A schedule is a schedule
         # whichever fee left it — a Consultation Fee part paid today with the rest due
