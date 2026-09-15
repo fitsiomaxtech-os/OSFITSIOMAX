@@ -10,6 +10,7 @@ import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
   patientPortalSwitch, patientPortalChangePassword,
+  patientPortalForgotPassword, patientPortalVerifyResetOtp, patientPortalResetPassword,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback,
@@ -114,6 +115,7 @@ function PortalLogin({ onLogin }) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [forgot, setForgot] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -137,6 +139,14 @@ function PortalLogin({ onLogin }) {
           <h1 className="text-lg font-bold text-slate-900">Client Portal</h1>
         </CardHeader>
         <CardContent>
+          {forgot ? (
+            <ForgotPasswordFlow
+              initialLogin={loginId}
+              onCancel={() => setForgot(false)}
+              onDone={() => { setPassword(""); setForgot(false); }}
+            />
+          ) : (
+          <>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Phone number or Email</label>
@@ -172,11 +182,23 @@ function PortalLogin({ onLogin }) {
                 </button>
               </div>
             </div>
+            <div className="-mt-1 text-right">
+              <button
+                type="button"
+                onClick={() => setForgot(true)}
+                className="text-xs font-medium text-sky-600 hover:text-sky-700"
+                data-testid="patient-portal-forgot-password"
+              >
+                Forgot password?
+              </button>
+            </div>
             <Button type="submit" className="w-full" disabled={loading} data-testid="patient-portal-login-submit">
               {loading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
           <GoogleSignInButton onLogin={onLogin} />
+          </>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -1236,10 +1258,175 @@ function PatientDocuments() {
 
 const PORTAL_PASSWORD_MIN = 6;
 
+// Forgot password in three steps — who you are, the emailed code, the new password. Used
+// on the sign-in screen and inside the Overview's Password card.
+function ForgotPasswordFlow({ initialLogin = "", onDone, onCancel }) {
+  const [step, setStep] = useState("login"); // "login" | "otp" | "password"
+  const [loginId, setLoginId] = useState(initialLogin);
+  const [requestId, setRequestId] = useState("");
+  const [sentMessage, setSentMessage] = useState("");
+  const [otp, setOtp] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const run = async (fn) => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Something went wrong. Please try again.");
+    }
+    setBusy(false);
+  };
+
+  const sendCode = (e) => {
+    e?.preventDefault();
+    if (!loginId.trim()) { toast.error("Enter your phone number or email"); return; }
+    run(async () => {
+      const res = await patientPortalForgotPassword(loginId.trim());
+      setRequestId(res.request_id);
+      setSentMessage(res.message);
+      setOtp("");
+      setStep("otp");
+      setCooldown(60);
+      toast.success("Code sent");
+    });
+  };
+
+  const verifyCode = (e) => {
+    e.preventDefault();
+    if (!/^\d{6}$/.test(otp.trim())) { toast.error("Enter the 6-digit code"); return; }
+    run(async () => {
+      const res = await patientPortalVerifyResetOtp(requestId, otp.trim());
+      setResetToken(res.reset_token);
+      setStep("password");
+    });
+  };
+
+  const savePassword = (e) => {
+    e.preventDefault();
+    if (next.length < PORTAL_PASSWORD_MIN) { toast.error(`New password must be at least ${PORTAL_PASSWORD_MIN} characters`); return; }
+    if (next !== confirm) { toast.error("New passwords do not match"); return; }
+    run(async () => {
+      const res = await patientPortalResetPassword(resetToken, next, confirm);
+      toast.success(res?.message || "Password reset. Please sign in with your new password.");
+      onDone?.();
+    });
+  };
+
+  const stepNumber = { login: 1, otp: 2, password: 3 }[step];
+  const label = "mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400";
+
+  return (
+    <div className="space-y-3" data-testid="patient-portal-forgot-flow">
+      <div>
+        <p className="text-sm font-semibold text-slate-800">Reset your password</p>
+        <p className="text-[11px] text-slate-400">Step {stepNumber} of 3</p>
+      </div>
+
+      {step === "login" && (
+        <form onSubmit={sendCode} className="space-y-3">
+          <div>
+            <label className={label}>Phone number or Email</label>
+            <Input
+              type="text"
+              autoComplete="username"
+              value={loginId}
+              onChange={(e) => setLoginId(e.target.value)}
+              placeholder="98765 43210 or you@example.com"
+              className="h-9 text-sm"
+              data-testid="patient-portal-forgot-login"
+            />
+          </div>
+          <p className="text-[11px] text-slate-500">We'll email a 6-digit code to the email address on your portal login.</p>
+          <Button type="submit" className="w-full bg-sky-600 text-white hover:bg-sky-700" disabled={busy} data-testid="patient-portal-forgot-send">
+            {busy ? "Sending..." : "Send Code"}
+          </Button>
+        </form>
+      )}
+
+      {step === "otp" && (
+        <form onSubmit={verifyCode} className="space-y-3">
+          <p className="rounded-md bg-sky-50 px-3 py-2 text-[11px] text-sky-700">{sentMessage}</p>
+          <div>
+            <label className={label}>6-digit code</label>
+            <Input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+              placeholder="••••••"
+              className="h-10 text-center text-lg tracking-[0.5em]"
+              data-testid="patient-portal-forgot-otp"
+            />
+          </div>
+          <Button type="submit" className="w-full bg-sky-600 text-white hover:bg-sky-700" disabled={busy} data-testid="patient-portal-forgot-verify">
+            {busy ? "Checking..." : "Verify Code"}
+          </Button>
+          <div className="flex items-center justify-between text-xs">
+            <button type="button" onClick={() => setStep("login")} className="font-medium text-slate-500">
+              Change phone / email
+            </button>
+            <button
+              type="button"
+              onClick={() => sendCode()}
+              disabled={busy || cooldown > 0}
+              className="font-medium text-sky-600 disabled:text-slate-400"
+              data-testid="patient-portal-forgot-resend"
+            >
+              {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {step === "password" && (
+        <form onSubmit={savePassword} className="space-y-3">
+          <div>
+            <label className={label}>New password</label>
+            <Input type={show ? "text" : "password"} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} className="h-9 text-sm" data-testid="patient-portal-forgot-new" />
+          </div>
+          <div>
+            <label className={label}>Confirm new password</label>
+            <Input type={show ? "text" : "password"} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="h-9 text-sm" data-testid="patient-portal-forgot-confirm" />
+          </div>
+          <button type="button" onClick={() => setShow((v) => !v)} className="flex items-center gap-1 text-[11px] font-medium text-slate-500">
+            {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {show ? "Hide passwords" : "Show passwords"}
+          </button>
+          <p className="text-[10px] text-slate-400">
+            At least {PORTAL_PASSWORD_MIN} characters. Family members on this login get the new password too, and everyone is signed out.
+          </p>
+          <Button type="submit" className="w-full bg-sky-600 text-white hover:bg-sky-700" disabled={busy} data-testid="patient-portal-forgot-save">
+            {busy ? "Saving..." : "Reset Password"}
+          </Button>
+        </form>
+      )}
+
+      <Button type="button" variant="ghost" size="sm" className="w-full text-xs text-slate-500" onClick={onCancel} disabled={busy}>
+        Back
+      </Button>
+    </div>
+  );
+}
+
 // Collapsed to one button until asked for: most visits to Overview are not to change a
 // password, and three empty fields would push the branch card off a phone screen.
-function ChangePasswordCard() {
+function ChangePasswordCard({ loginHint = "" }) {
   const [open, setOpen] = useState(false);
+  const [forgot, setForgot] = useState(false);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -1247,7 +1434,7 @@ function ChangePasswordCard() {
   const [saving, setSaving] = useState(false);
 
   const reset = () => { setCurrent(""); setNext(""); setConfirm(""); setShow(false); };
-  const close = () => { reset(); setOpen(false); };
+  const close = () => { reset(); setOpen(false); setForgot(false); };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -1284,7 +1471,7 @@ function ChangePasswordCard() {
     <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="patient-portal-change-password">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Password</p>
-        {!open && (
+        {!open && !forgot && (
           <Button
             size="sm"
             variant="outline"
@@ -1296,7 +1483,17 @@ function ChangePasswordCard() {
           </Button>
         )}
       </div>
-      {open && (
+      {forgot && (
+        <div className="mt-3">
+          <ForgotPasswordFlow
+            initialLogin={loginHint}
+            onCancel={close}
+            // The reset signs every session on this login out, this one included.
+            onDone={() => { clearPortalSession(); window.location.reload(); }}
+          />
+        </div>
+      )}
+      {open && !forgot && (
         <form onSubmit={submit} className="mt-3 space-y-2.5">
           {field("Current password", current, setCurrent, "current-password", "patient-portal-current-password")}
           {field("New password", next, setNext, "new-password", "patient-portal-new-password")}
@@ -1308,6 +1505,14 @@ function ChangePasswordCard() {
           >
             {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             {show ? "Hide passwords" : "Show passwords"}
+          </button>
+          <button
+            type="button"
+            onClick={() => { reset(); setOpen(false); setForgot(true); }}
+            className="block text-[11px] font-medium text-sky-600"
+            data-testid="patient-portal-change-password-forgot"
+          >
+            Forgot current password? Get a code by email
           </button>
           <p className="text-[10px] text-slate-400">
             At least {PORTAL_PASSWORD_MIN} characters. If family members share this login, the new password applies to them too.
@@ -1366,7 +1571,7 @@ function ProfileTab({ data }) {
 
       <PatientDocuments />
 
-      <ChangePasswordCard />
+      <ChangePasswordCard loginHint={data.phone || data.email || ""} />
 
       {(data.branch_name || data.branch_phone) && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">

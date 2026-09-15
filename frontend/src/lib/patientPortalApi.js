@@ -64,6 +64,26 @@ export const patientPortalChangePassword = async (currentPassword, newPassword) 
   return data;
 };
 
+/** Forgot password, step 1: email a 6-digit code for this phone number or email. */
+export const patientPortalForgotPassword = async (login) => {
+  const { data } = await portalApi.post("/patient-portal/forgot-password", { login });
+  return data;
+};
+
+/** Step 2: trade the code for a short-lived reset token. */
+export const patientPortalVerifyResetOtp = async (requestId, otp) => {
+  const { data } = await portalApi.post("/patient-portal/verify-reset-otp", { request_id: requestId, otp });
+  return data;
+};
+
+/** Step 3: set the new password. Every open sign-in on that login is ended. */
+export const patientPortalResetPassword = async (resetToken, newPassword, confirmPassword) => {
+  const { data } = await portalApi.post("/patient-portal/reset-password", {
+    reset_token: resetToken, new_password: newPassword, confirm_password: confirmPassword,
+  });
+  return data;
+};
+
 export const patientPortalLogout = async () => {
   try {
     await portalApi.post("/patient-portal/logout", null, { headers: authHeaders() });

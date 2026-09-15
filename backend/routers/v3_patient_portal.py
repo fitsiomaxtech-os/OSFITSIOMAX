@@ -18,8 +18,10 @@ import asyncio
 import logging
 import os
 import random
+import secrets
 import string
 import uuid
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -31,8 +33,9 @@ from fastapi.responses import FileResponse
 
 from database import v3_col
 from routers.v3_reviews import review_numbers_for_lead
-from utils import now_iso
+from utils import now_iso, now_utc
 from security import hash_password, verify_password
+from routers.v3_password_reset import _hash_token, _mask_email, _send_or_503
 from email_utils import SmtpNotConfigured, send_email
 from deps import v3_require_roles, is_branch_admin_role, works_org_wide
 from routers.v3_lead_documents import DIET_CHART, DOC_DIR, is_shared_with_patient
@@ -1015,6 +1018,173 @@ async def patient_portal_change_password(payload: V3PatientPortalChangePassword,
         "created_at": now,
     } for a in matched])
     return {"message": "Password changed"}
+
+
+# ------------------------------------------------------- Patient: forgot password (OTP)
+#
+# The same safeguards as the staff flow in v3_password_reset.py: a 6-digit code stored
+# only as a hash, 5 minutes to use it, 5 wrong tries, one request a minute and five an
+# hour per login. The code goes to email because no SMS or WhatsApp gateway is set up;
+# phone is still how the patient names their login.
+
+PORTAL_OTP_TTL_MINUTES = 5
+PORTAL_OTP_MAX_ATTEMPTS = 5
+PORTAL_RESET_COOLDOWN_SECONDS = 60
+PORTAL_RESET_MAX_PER_HOUR = 5
+
+
+class PortalForgotIn(BaseModel):
+    login: str
+
+
+class PortalVerifyOtpIn(BaseModel):
+    request_id: str
+    otp: str
+
+
+class PortalResetIn(BaseModel):
+    reset_token: str
+    new_password: str
+    confirm_password: str
+
+
+def _expired(iso: str) -> bool:
+    return datetime.fromisoformat(iso) < now_utc()
+
+
+@router.post("/patient-portal/forgot-password")
+async def patient_portal_forgot_password(payload: PortalForgotIn):
+    """Email a one-time code to the patient who has lost their password.
+
+    One login answers for a whole family, so the reset covers every account on that phone
+    or email — the same reach a branch reset has. A login nobody holds gets the same reply
+    as a real one, so this cannot be used to find out who is a patient.
+    """
+    query = _login_query(payload.login)
+    if not query:
+        raise HTTPException(status_code=400, detail="Enter the phone number or email you sign in with")
+    key = query.get("phone") or query.get("email")
+    requests_col = v3_col("patient_portal_reset_requests")
+
+    window_start = (now_utc() - timedelta(hours=1)).isoformat()
+    if await requests_col.count_documents({"login": key, "created_at": {"$gte": window_start}}) >= PORTAL_RESET_MAX_PER_HOUR:
+        raise HTTPException(status_code=429, detail="Too many reset requests. Please try again later.")
+    last = await requests_col.find_one({"login": key}, {"_id": 0, "created_at": 1}, sort=[("created_at", -1)])
+    if last:
+        elapsed = (now_utc() - datetime.fromisoformat(last["created_at"])).total_seconds()
+        if elapsed < PORTAL_RESET_COOLDOWN_SECONDS:
+            raise HTTPException(status_code=429, detail=f"Please wait {int(PORTAL_RESET_COOLDOWN_SECONDS - elapsed)}s before requesting another code")
+
+    accounts = await v3_col("patient_portal_accounts").find(
+        {**query, "blocked": {"$ne": True}}, {"_id": 0, "id": 1, "lead_id": 1, "email": 1},
+    ).to_list(50)
+    request_id = str(uuid.uuid4())
+    doc = {
+        "id": request_id,
+        "login": key,
+        "account_ids": [a["id"] for a in accounts],
+        "attempts": 0,
+        "verified": False,
+        "consumed": False,
+        "created_at": now_iso(),
+        "expires_at": (now_utc() + timedelta(minutes=PORTAL_OTP_TTL_MINUTES)).isoformat(),
+    }
+    if not accounts:
+        await requests_col.insert_one(doc.copy())
+        return {"request_id": request_id, "message": "If this login is registered, a 6-digit code has been sent to its email."}
+
+    email = query.get("email") or next((a["email"] for a in accounts if a.get("email")), "")
+    if not email:
+        lead = await v3_col("leads").find_one(
+            {"id": {"$in": [a["lead_id"] for a in accounts]}, "email": {"$nin": [None, ""]}}, {"_id": 0, "email": 1},
+        )
+        email = ((lead or {}).get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="No email is on file for this login, so a code cannot be sent. Please contact your branch to reset your password.",
+        )
+
+    otp = f"{secrets.randbelow(1000000):06d}"
+    doc["otp_hash"] = _hash_token(otp)
+    await asyncio.to_thread(
+        _send_or_503,
+        email,
+        "FitsiomaxOS Client Portal — Password reset code",
+        (
+            "Hello,\n\n"
+            "A password reset was requested for your FitsiomaxOS Client Portal login.\n\n"
+            f"Your code: {otp}\n"
+            f"It expires in {PORTAL_OTP_TTL_MINUTES} minutes.\n\n"
+            "If you did not ask for this, ignore this email — your password will not change."
+        ),
+    )
+    await requests_col.insert_one(doc.copy())
+    return {"request_id": request_id, "message": f"A 6-digit code has been sent to {_mask_email(email)}"}
+
+
+@router.post("/patient-portal/verify-reset-otp")
+async def patient_portal_verify_reset_otp(payload: PortalVerifyOtpIn):
+    requests_col = v3_col("patient_portal_reset_requests")
+    req = await requests_col.find_one({"id": payload.request_id}, {"_id": 0})
+    if not req or not req.get("otp_hash") or req.get("consumed") or req.get("verified"):
+        raise HTTPException(status_code=400, detail="Incorrect code. Please check it or request a new one.")
+    if _expired(req["expires_at"]):
+        raise HTTPException(status_code=400, detail="This code has expired. Please request a new one.")
+    if req.get("attempts", 0) >= PORTAL_OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=400, detail="Too many incorrect attempts. Please request a new code.")
+    if not secrets.compare_digest(_hash_token((payload.otp or "").strip()), req["otp_hash"]):
+        await requests_col.update_one({"id": req["id"]}, {"$inc": {"attempts": 1}})
+        raise HTTPException(status_code=400, detail="Incorrect code. Please check it or request a new one.")
+
+    reset_token = secrets.token_urlsafe(32)
+    await requests_col.update_one({"id": req["id"]}, {"$set": {
+        "verified": True,
+        "reset_token_hash": _hash_token(reset_token),
+        "expires_at": (now_utc() + timedelta(minutes=10)).isoformat(),
+    }})
+    return {"reset_token": reset_token}
+
+
+@router.post("/patient-portal/reset-password")
+async def patient_portal_reset_password(payload: PortalResetIn):
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="New passwords do not match")
+    if len(payload.new_password or "") < PORTAL_PASSWORD_MIN:
+        raise HTTPException(status_code=400, detail=f"New password must be at least {PORTAL_PASSWORD_MIN} characters")
+
+    requests_col = v3_col("patient_portal_reset_requests")
+    req = await requests_col.find_one(
+        {"reset_token_hash": _hash_token(payload.reset_token or ""), "verified": True, "consumed": False}, {"_id": 0},
+    )
+    if not req or _expired(req["expires_at"]):
+        raise HTTPException(status_code=400, detail="This reset has expired. Please start again.")
+
+    accounts = await v3_col("patient_portal_accounts").find(
+        {"id": {"$in": req.get("account_ids") or []}, "blocked": {"$ne": True}}, {"_id": 0, "id": 1, "lead_id": 1},
+    ).to_list(50)
+    if not accounts:
+        raise HTTPException(status_code=400, detail="This login is not available. Please contact your branch.")
+
+    now = now_iso()
+    lead_ids = [a["lead_id"] for a in accounts]
+    await v3_col("patient_portal_accounts").update_many(
+        {"id": {"$in": [a["id"] for a in accounts]}},
+        {"$set": {"password_hash": hash_password(payload.new_password), "updated_at": now, "updated_by": "Patient"}},
+    )
+    # Every open sign-in on these patients ends: whoever had the old password is out.
+    await v3_col("patient_portal_sessions").delete_many({"$or": [{"lead_id": {"$in": lead_ids}}, {"lead_ids": {"$in": lead_ids}}]})
+    await requests_col.update_one({"id": req["id"]}, {"$set": {"consumed": True, "consumed_at": now}})
+    await v3_col("lead_activity").insert_many([{
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "portal_password_reset_otp",
+        "details": "Client Portal password reset by the patient with an emailed code",
+        "created_by": "Patient",
+        "created_by_role": "patient",
+        "created_at": now,
+    } for lead_id in lead_ids])
+    return {"message": "Password reset. Please sign in with your new password."}
 
 
 @router.post("/patient-portal/logout")
