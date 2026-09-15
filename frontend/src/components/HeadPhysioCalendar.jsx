@@ -152,7 +152,18 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
     // same store item a treatment session does until Diet gets its own.
     listStoreItems(undefined, isRecurring ? "session" : "consultation")
       .then((items) => {
-        const configured = (items || []).map((i) => i.duration_minutes).find((d) => Number(d) > 0);
+        // The same pick the booking popup's server makes (consultation_slot_minutes): a
+        // physiotherapy item before any other shelf, then the one Super Admin edited last,
+        // so the length published here is the length Branch Leads → Appointment offers.
+        const rank = (i) => [["", "physiotherapy"].includes(i.category || "") ? 1 : 0, i.updated_at || i.created_at || ""];
+        const configured = (items || [])
+          .filter((i) => Number(i.duration_minutes) > 0)
+          .sort((a, b) => {
+            const [pa, ta] = rank(a);
+            const [pb, tb] = rank(b);
+            return pb - pa || tb.localeCompare(ta);
+          })
+          .map((i) => i.duration_minutes)[0];
         if (!cancelled && configured) setSlotDuration(Number(configured));
       })
       .catch(() => { /* keep the fallback */ });

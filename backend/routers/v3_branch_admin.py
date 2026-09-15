@@ -1139,6 +1139,122 @@ async def _expert_photos(experts: list) -> Dict[str, str]:
     return out
 
 
+async def consultation_slot_minutes() -> Optional[int]:
+    """The Consultation Duration Super Admin set in FITSIO STORE, or None if none is set.
+
+    Read on every request rather than frozen into the calendar: changing 60 mins to 30
+    there has to change the times the booking popup offers straight away, without every
+    Consultant re-publishing their days. A physiotherapy consultation wins over any other
+    shelf's, and among those the one edited last — that is the edit being asked for.
+    """
+    rows = await v3_col("store_items").find(
+        {"item_type": {"$in": ["consultation", None]}, "duration_minutes": {"$gt": 0}},
+        {"_id": 0, "category": 1, "duration_minutes": 1, "updated_at": 1, "created_at": 1},
+    ).to_list(500)
+    if not rows:
+        return None
+    rows.sort(
+        key=lambda r: (
+            r.get("category") in (None, "", "physiotherapy"),
+            r.get("updated_at") or r.get("created_at") or "",
+        ),
+        reverse=True,
+    )
+    return int(rows[0]["duration_minutes"])
+
+
+def _clock_minutes(hhmm: str) -> Optional[int]:
+    """"09:30" -> 570. None for anything that isn't HH:MM."""
+    try:
+        h, m = str(hhmm).split(":")[:2]
+        return int(h) * 60 + int(m)
+    except (ValueError, TypeError):
+        return None
+
+
+def _clock_text(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _consultant_day(expert: dict, date_str: str, bookings: list, slot_minutes: Optional[int], own: Optional[dict] = None) -> dict:
+    """One Consultant's bookable day, cut at the store's Consultation Duration.
+
+    What the Consultant published is when they are available, not a fixed grid: their
+    slots are laid end to end into windows, and each window is cut again at slot_minutes.
+    A 8:00–12:00 day published as 60-minute slots offers 8:00, 8:30 … 11:30 once the
+    duration is 30 mins, and 8:00 and 10:00 once it is 2 hours. With no duration set in
+    the store the published slots are offered as they are.
+
+    `bookings` are this expert's live appointments on the date, other leads only; each
+    blocks every slot it overlaps, so a 60-minute booking at 5:00 takes both 5:00 and
+    5:30 off a 30-minute day. `own` is this lead's own appointment, kept selectable.
+    """
+    details = {x.get("slot_time"): x for x in (expert.get("slot_details") or [])}
+    windows = []
+    for s in expert.get("slots") or []:
+        if not isinstance(s, str) or not s.startswith(f"{date_str}T"):
+            continue
+        start = _clock_minutes(s.split("T")[1])
+        if start is None:
+            continue
+        length = int((details.get(s) or {}).get("duration") or 30)
+        windows.append((start, start + length))
+    windows.sort()
+
+    if slot_minutes:
+        blocks: list = []
+        for start, end in windows:
+            if blocks and start <= blocks[-1][1]:
+                blocks[-1][1] = max(blocks[-1][1], end)
+            else:
+                blocks.append([start, end])
+        offered = []
+        for start, end in blocks:
+            t = start
+            while t + slot_minutes <= end and t + slot_minutes <= 24 * 60:
+                offered.append((t, slot_minutes))
+                t += slot_minutes
+    else:
+        offered = [(start, end - start) for start, end in windows]
+
+    taken = []
+    for b in bookings:
+        start = _clock_minutes((b.get("slot_time") or "").split("T")[-1])
+        if start is None:
+            continue
+        taken.append((start, start + int(b.get("duration") or slot_minutes or 30), b))
+
+    def overlaps(start: int, length: int) -> bool:
+        return any(start < t_end and t_start < start + length for t_start, t_end, _ in taken)
+
+    free = [(t, length) for t, length in offered if not overlaps(t, length)]
+    if own:
+        own_start = _clock_minutes((own.get("slot_time") or "").split("T")[-1])
+        own_length = int(own.get("duration") or slot_minutes or 30)
+        if own_start is not None and own_start not in {t for t, _ in free} and not overlaps(own_start, own_length):
+            free.append((own_start, own_length))
+    free.sort()
+
+    return {
+        "published_slot_count": len(offered),
+        "free_slots": [
+            {"slot_time": f"{date_str}T{_clock_text(t)}", "time": _clock_text(t), "duration": length}
+            for t, length in free
+        ],
+        "booked_slots": [
+            {
+                "slot_time": f"{date_str}T{_clock_text(t_start)}",
+                "time": _clock_text(t_start),
+                "duration": t_end - t_start,
+                "lead_name": b.get("lead_name"),
+                "lead_id": b.get("lead_id"),
+            }
+            for t_start, t_end, b in sorted(taken, key=lambda x: x[0])
+        ],
+        "taken": taken,
+    }
+
+
 @router.get("/branch-admin/available-experts/{branch_id}")
 async def v3_available_experts(
     branch_id: str,
@@ -1174,30 +1290,24 @@ async def v3_available_experts(
     # the Consultant Calendar instead of silently offering no one.
     booked_rows = await v3_col("appointments").find(
         {"status": "new_appointment", "slot_time": {"$regex": f"^{date}T"}},
-        {"_id": 0, "doctor_id": 1, "slot_time": 1, "lead_id": 1, "lead_name": 1},
+        {"_id": 0, "doctor_id": 1, "slot_time": 1, "lead_id": 1, "lead_name": 1, "duration": 1},
     ).to_list(2000)
-    booked_by_doc: Dict[str, set] = {}
-    # Who holds each taken slot, so the picker can name them rather than only saying the
-    # time is gone. Read off the appointment row, which already carries lead_name — no
-    # second lookup against leads.
-    booked_names: Dict[tuple, str] = {}
-    # And which lead it is, not just their name. The booking popup's slot grid can move a
-    # taken slot — to another consultant, or to another time — and every one of those is
-    # the same POST against the lead holding it, addressed by id. Without this the grid
-    # can say a slot is spoken for but not act on it, which is a pencil that opens a
-    # dialog with nothing behind it.
-    booked_leads: Dict[tuple, str] = {}
+    # Who holds each taken slot and for how long, so the picker can name them and a
+    # booking blocks every slot it runs across. lead_id rides along because the grid's
+    # pencil moves a taken slot with a POST against the lead holding it.
+    bookings_by_doc: Dict[str, list] = {}
+    own_by_doc: Dict[str, dict] = {}
     for r in booked_rows:
         # A slot this same lead already holds isn't "taken" as far as they're concerned —
         # reopening their own booking has to keep offering the slot they're sitting in,
         # otherwise the popup can't show the current appointment or reschedule off it.
         if lead_id and r.get("lead_id") == lead_id:
+            own_by_doc[r.get("doctor_id")] = r
             continue
-        booked_by_doc.setdefault(r.get("doctor_id"), set()).add(r.get("slot_time"))
-        if r.get("lead_name"):
-            booked_names[(r.get("doctor_id"), r.get("slot_time"))] = r.get("lead_name")
-        if r.get("lead_id"):
-            booked_leads[(r.get("doctor_id"), r.get("slot_time"))] = r.get("lead_id")
+        bookings_by_doc.setdefault(r.get("doctor_id"), []).append(r)
+
+    # Slot length is Super Admin's Consultation Duration, fetched fresh on every open.
+    slot_minutes = await consultation_slot_minutes()
 
     # Faces for the picker's Consultant column, resolved once for the whole branch list
     # rather than per row. See _expert_photos.
@@ -1205,57 +1315,35 @@ async def v3_available_experts(
 
     available = []
     for d in branch_experts:
-        published = {s for s in (d.get("slots") or []) if isinstance(s, str) and s.startswith(f"{date}T")}
-        taken = booked_by_doc.get(d.get("id"), set())
-        free = published - taken
+        day = _consultant_day(
+            d, date, bookings_by_doc.get(d.get("id"), []), slot_minutes, own_by_doc.get(d.get("id")),
+        )
         if time:
             # Caller asked about one exact time — only offer experts free right then.
-            if f"{date}T{time}" in taken:
+            start = _clock_minutes(time)
+            length = slot_minutes or 30
+            if start is not None and any(start < t_end and t_start < start + length for t_start, t_end, _ in day["taken"]):
                 continue
-        elif published and not free:
+        elif day["published_slot_count"] and not day["free_slots"]:
             continue  # fully booked for the day
-        # The free slots themselves, not just how many — the booking popup lists the
-        # date's open times first and only then who can take each one, so it needs to
-        # know which times each expert actually has open.
-        detail_by_slot = {x.get("slot_time"): x for x in (d.get("slot_details") or [])}
         available.append({
             **d,
             # The expert's own headshot where HR has one on file, "" where they do not --
             # the picker draws their initial in the same circle either way, so this never
             # has to be present for the row to render.
             "photo_url": photo_by_expert.get(d.get("id"), ""),
-            "free_slot_count": len(free),
-            "published_slot_count": len(published),
-            "free_slots": [
-                {
-                    "slot_time": s,
-                    "time": s.split("T")[1],
-                    "duration": (detail_by_slot.get(s) or {}).get("duration") or 30,
-                }
-                for s in sorted(free)
-            ],
-            # The taken ones too, so the booking popup can show the expert's whole day
-            # rather than only the gaps. A grid of four free times says nothing about
-            # whether the day is quiet or nearly full, and Branch Admin is choosing a slot
-            # for a patient on the phone who wants to know what else is around.
-            #
-            # `taken` already excludes this lead's own booking, so reopening an existing
-            # appointment still shows that slot as free and selectable rather than as a
-            # clash with itself.
-            "booked_slots": [
-                {
-                    "slot_time": s,
-                    "time": s.split("T")[1],
-                    "duration": (detail_by_slot.get(s) or {}).get("duration") or 30,
-                    "lead_name": booked_names.get((d.get("id"), s)),
-                    "lead_id": booked_leads.get((d.get("id"), s)),
-                }
-                for s in sorted(taken)
-            ],
+            "free_slot_count": len(day["free_slots"]),
+            "published_slot_count": day["published_slot_count"],
+            # The free slots and the taken ones, so the booking popup can show the
+            # expert's whole day rather than only the gaps. Both are cut at the store's
+            # Consultation Duration — see _consultant_day.
+            "free_slots": day["free_slots"],
+            "booked_slots": day["booked_slots"],
         })
     return {
         "date": date,
         "time": time,
+        "slot_minutes": slot_minutes,
         "branch_id": branch_id,
         "total_branch_experts": len(branch_experts),
         "available_count": len(available),
@@ -1286,31 +1374,37 @@ async def v3_available_dates(
     # user_id is projected because that is what the narrowing reads.
     branch_experts = await v3_col("doctors").find(
         active_doctor_query({"profile_type": "head_physio"}),
-        {"_id": 0, "id": 1, "slots": 1, "user_id": 1, "profile_type": 1, "branch_id": 1},
+        {"_id": 0, "id": 1, "slots": 1, "slot_details": 1, "user_id": 1, "profile_type": 1, "branch_id": 1},
     ).to_list(500)
     branch_experts = await consultants_serving_branch(branch_experts, branch_id)
 
     booked_rows = await v3_col("appointments").find(
         {"status": "new_appointment", "slot_time": {"$regex": f"^{month}-"}},
-        {"_id": 0, "doctor_id": 1, "slot_time": 1, "lead_id": 1},
+        {"_id": 0, "doctor_id": 1, "slot_time": 1, "lead_id": 1, "duration": 1},
     ).to_list(5000)
     # This lead's own bookings don't count against it — the day it already sits on has to
     # stay reachable so the appointment can be seen and moved.
-    taken = {
-        (r.get("doctor_id"), r.get("slot_time"))
-        for r in booked_rows
-        if not (lead_id and r.get("lead_id") == lead_id)
-    }
+    bookings: Dict[tuple, list] = {}
+    for r in booked_rows:
+        if lead_id and r.get("lead_id") == lead_id:
+            continue
+        key = (r.get("doctor_id"), (r.get("slot_time") or "").split("T")[0])
+        bookings.setdefault(key, []).append(r)
 
+    # Counted off the same cut as available-experts, so a day's number here is the number
+    # of tiles its slot grid will draw.
+    slot_minutes = await consultation_slot_minutes()
     dates: Dict[str, int] = {}
     for d in branch_experts:
-        for s in (d.get("slots") or []):
-            if not isinstance(s, str) or not s.startswith(f"{month}-") or "T" not in s:
-                continue
-            if (d["id"], s) in taken:
-                continue
-            day = s.split("T")[0]
-            dates[day] = dates.get(day, 0) + 1
+        days = {
+            s.split("T")[0]
+            for s in (d.get("slots") or [])
+            if isinstance(s, str) and s.startswith(f"{month}-") and "T" in s
+        }
+        for day in days:
+            free = len(_consultant_day(d, day, bookings.get((d["id"], day), []), slot_minutes)["free_slots"])
+            if free:
+                dates[day] = dates.get(day, 0) + free
     return {"month": month, "branch_id": branch_id, "dates": dates}
 
 
