@@ -105,51 +105,11 @@ export const intersectDateFilters = (a, b) => {
   return { key: `${a.key}+${b.key}`, label: `${a.label} · ${b.label}`, from, to };
 };
 
-export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inline = false, showCustom = true, segmented = false }) => {
+export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inline = false, showCustom = true }) => {
   // What lights up. All is the resting state, so a cleared filter lights All rather than
   // leaving the row with nothing selected and no way to tell it apart from a custom range.
   const activeKey = value?.key || "all";
   const onPreset = QUICK_DATE_PRESETS.some((p) => p.key === activeKey);
-
-  // Segmented: the five presets joined in one grey track with a teal pill on the active one,
-  // everything 36px tall to sit level with a h-9 search box and Refresh. Custom stays a
-  // separate button beside the track, since it opens a dialog rather than picking a range.
-  if (segmented) {
-    return (
-      <div className="flex w-full items-center gap-2 lg:w-auto lg:shrink-0" data-testid={testid}>
-        <div role="group" aria-label="Date range" className="flex h-9 min-w-0 flex-1 items-center gap-0.5 rounded-lg bg-slate-100 p-0.5 lg:flex-none">
-          {QUICK_DATE_PRESETS.map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              onClick={() => onChange(quickFilter(p))}
-              aria-pressed={activeKey === p.key}
-              className={`h-8 min-w-0 flex-1 truncate rounded-md px-1.5 text-xs font-medium transition sm:px-3 sm:text-[13px] lg:flex-none ${
-                activeKey === p.key
-                  ? "bg-teal-500 font-semibold text-white shadow-sm"
-                  : "text-slate-600 hover:bg-white hover:text-slate-900"
-              }`}
-              data-testid={`${testid}-preset-${p.key}`}
-            >
-              <span className="sm:hidden">{p.short}</span>
-              <span className="hidden sm:inline">{p.label}</span>
-            </button>
-          ))}
-        </div>
-        {showCustom && (
-          <span className="shrink-0 [&_button]:h-9 [&_button]:px-3 [&_button]:text-[13px]">
-            <DateFilterPopover
-              value={onPreset ? null : value}
-              onChange={(next) => onChange(next || null)}
-              testid={`${testid}-custom`}
-              placeholder="Custom"
-              centered
-            />
-          </span>
-        )}
-      </div>
-    );
-  }
 
   return (
     /* One row at every width, six equal columns on a phone so nothing lands off screen —

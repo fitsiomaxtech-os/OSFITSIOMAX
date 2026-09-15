@@ -25,7 +25,8 @@ import { ConsultationsBoard, leadPlanParts, PlanLine } from "@/components/Consul
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
 import { todayIso } from "@/components/WeekStrip";
 import { RescheduledTag } from "@/components/ui/lead-marks";
-import { QuickDateFilterBar, quickDatePreset } from "@/components/QuickDateFilterBar";
+import { QuickDateFilterBar, QUICK_DATE_PRESETS, quickDatePreset } from "@/components/QuickDateFilterBar";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   getHPMyCalendar,
   hpRecommendPackage,
@@ -352,33 +353,47 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
       {/* Two regions. The left is deliberately left empty — reserved space, not a gap to
           be filled later by whatever comes along. The day filter takes only the width it
           needs on the right, divided off from it. */}
-      <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-2 lg:flex-row lg:items-center lg:gap-4">
+      {/* Laid out like the Branch Admin toolbar: a capped search, the one-tap ranges beside
+          it, then the calendar icon (custom range) and Refresh pinned to the right. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 lg:flex-nowrap">
         {/* One search for the whole board, so it works on Review, Rehab and All and not
-            only on Consultations — that tab had its own box and the other three had
-            nothing. Hidden on a phone, where the header's magnifier does the same job
-            without costing a row of vertical space above the lists. */}
-        <div className="relative hidden min-h-[2.25rem] flex-1 sm:block" data-testid="hp-header-search">
+            only on Consultations. Hidden on a phone, where the header's magnifier does the
+            same job without costing a row of vertical space above the lists. */}
+        <div className="relative hidden min-w-0 flex-1 sm:block sm:max-w-xs" data-testid="hp-header-search">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={search}
             onChange={(e) => onSearchChange && onSearchChange(e.target.value)}
-            placeholder="Search patient, phone or patient no..."
-            className="h-9 w-full rounded-md border border-slate-200 pl-9 pr-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+            placeholder="Search patients..."
+            className="h-10 w-full rounded-md border border-slate-200 pl-9 pr-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
             data-testid="hp-search-input"
           />
         </div>
-        <QuickDateFilterBar value={dateRange} onChange={setDateRange} testid="hp-date-filter" segmented />
-        <button
-          type="button"
-          onClick={() => setRefreshTick((n) => n + 1)}
-          disabled={loading}
-          title="Refresh"
-          aria-label="Refresh"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-500 text-white transition hover:bg-slate-600 disabled:opacity-50"
-          data-testid="hp-refresh-btn"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </button>
+        {/* The presets and the calendar icon drive the same single scope; a custom range
+            simply leaves none of the preset buttons lit. */}
+        <div className="w-full sm:w-auto sm:shrink-0">
+          <QuickDateFilterBar value={dateRange} onChange={setDateRange} testid="hp-date-filter" inline showCustom={false} />
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <DateFilterPopover
+            value={dateRange && !QUICK_DATE_PRESETS.some((p) => p.key === dateRange.key) ? dateRange : null}
+            onChange={setDateRange}
+            testid="hp-date-custom"
+            centered
+            iconOnly
+          />
+          <button
+            type="button"
+            onClick={() => setRefreshTick((n) => n + 1)}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-500 text-white transition hover:bg-slate-600 disabled:opacity-50"
+            data-testid="hp-refresh-btn"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
       <div className="space-y-4" data-testid="hp-work-view">
