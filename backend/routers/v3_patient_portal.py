@@ -14,6 +14,7 @@ unrelated shape (treatment-session bookings, deliberately, per v3_reviews.py's d
 about what happened the last time this collection grew a second shape); a third shape on
 top of that is exactly the mistake to avoid, not repeat.
 """
+import asyncio
 import logging
 import os
 import random
@@ -32,6 +33,7 @@ from database import v3_col
 from routers.v3_reviews import review_numbers_for_lead
 from utils import now_iso
 from security import hash_password, verify_password
+from email_utils import SmtpNotConfigured, send_email
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_lead_documents import DIET_CHART, DOC_DIR, is_shared_with_patient
 from routers.v3_feedback import (
@@ -49,6 +51,8 @@ from schemas.v3 import (
 router = APIRouter(prefix="/api/v3")
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+# Where the emailed login points. Same variable and default the password-reset emails use.
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://os.fitsiomax.clinic")
 _google_request = google_requests.Request()
 
 
@@ -221,11 +225,20 @@ async def create_or_reset_portal_account(
             status_code=400,
             detail="A 10-digit phone number or an email is required for portal access",
         )
+    return await _save_portal_login(lead, user, phone, email, (payload.password or "").strip(), "manual")
 
+
+async def _save_portal_login(lead: dict, user, phone: str, email: str, supplied: str, created_via: str) -> dict:
+    """Write one lead's portal login — create it, reset it, or add it to its family's.
+
+    Shared by the Branch Admin's Generate / Reset button and the automatic login made when
+    a treatment course is booked, so the family-password rules in the endpoint's docstring
+    hold whichever of the two made the account.
+    """
+    lead_id = lead["id"]
     now = now_iso()
     existing = await v3_col("patient_portal_accounts").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1})
     siblings = await _accounts_sharing_login(lead_id, phone, email)
-    supplied = (payload.password or "").strip()
 
     joined_existing = not existing and not supplied and bool(siblings)
     if joined_existing:
@@ -252,6 +265,8 @@ async def create_or_reset_portal_account(
             **login_fields,
             "created_at": now,
             "created_by": user.full_name,
+            # "auto" when booking the treatment course made it, "manual" for the button.
+            "created_via": created_via,
         })
     if password is not None and siblings:
         await v3_col("patient_portal_accounts").update_many(
@@ -267,6 +282,8 @@ async def create_or_reset_portal_account(
         details = f"{'Reset' if existing else 'Created'} Client Portal access for {login_label}"
         if shared_with:
             details += f" — same password now applies to {', '.join(shared_with)}"
+    if created_via == "auto":
+        details = f"Automatically, on booking treatment: {details[0].lower()}{details[1:]}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
@@ -283,6 +300,115 @@ async def create_or_reset_portal_account(
         "joined_existing": joined_existing,
         "shared_with": shared_with,
     }
+
+
+# ------------------------------------------------- Automatic login when treatment is booked
+
+async def _email_portal_login(lead: dict, login: dict) -> str:
+    """Send a new portal login to the patient's inbox, and say what became of it.
+
+    Returns "sent", "failed", "not_configured" (no SMTP credentials on this server) or
+    "no_email". Never raises: the caller is a booking, and a mail server being down is
+    not a reason for a patient's sessions not to be booked. The real SMTP error is logged
+    by email_utils either way.
+
+    Sent off the event loop — smtplib blocks, for up to its 20-second timeout, and every
+    other request on this worker would otherwise wait out a slow mail server with it.
+    """
+    if not login.get("email"):
+        return "no_email"
+    branch = {}
+    if lead.get("branch_id"):
+        branch = await v3_col("branches").find_one(
+            {"id": lead["branch_id"]}, {"_id": 0, "branch_name": 1, "phone": 1},
+        ) or {}
+    lines = [
+        f"Hi {lead.get('name') or 'there'},",
+        "",
+        "Your Fitsiomax Client Portal is ready. You can see your session dates, your treatment",
+        "progress and your payments there, any time.",
+        "",
+        f"Login here: {FRONTEND_URL}/portal",
+    ]
+    if login.get("phone"):
+        lines.append(f"Login (phone): {login['phone']}")
+    lines.append(f"{'Or email' if login.get('phone') else 'Login (email)'}: {login['email']}")
+    lines += [f"Password: {login['password']}", "", "Please keep this password private."]
+    if branch.get("phone"):
+        lines.append(f"If you cannot sign in, call {branch.get('branch_name') or 'your branch'} on {branch['phone']}.")
+    lines += ["", "— Fitsiomax"]
+    try:
+        await asyncio.to_thread(send_email, login["email"], "Your Fitsiomax Client Portal login", "\n".join(lines))
+        return "sent"
+    except SmtpNotConfigured:
+        return "not_configured"
+    except Exception:
+        return "failed"
+
+
+async def auto_portal_login_for_treatment(lead_id: str, user) -> dict:
+    """Give a patient their Client Portal login the moment their treatment is booked.
+
+    Called by the two routes that book a treatment course against a physio. What comes
+    back rides on that route's response, so the desk sees the password once and can send
+    it on WhatsApp; `status` says what happened:
+
+      created     a new login, password included, emailed if the patient has an email
+      joined      added to a family's existing login — same password, nothing to send
+      exists      the patient already had one (a reassignment or rebooking); untouched
+      no_contact  no 10-digit phone and no email on file, so nothing could be made
+      error       something failed; logged, and the booking stands regardless
+
+    No has_treatment check: the caller has just booked the treatment days, which is the
+    thing that check exists to look for.
+    """
+    try:
+        lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+        if not lead:
+            return {"status": "error"}
+        if await v3_col("patient_portal_accounts").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1}):
+            return {"status": "exists"}
+
+        phone = login_phone(lead.get("phone"))
+        email = (lead.get("email") or "").strip().lower()
+        now = now_iso()
+        if not phone and not email:
+            await v3_col("lead_activity").insert_one({
+                "id": str(uuid.uuid4()),
+                "lead_id": lead_id,
+                "action": "portal_account_skipped",
+                "details": "Client Portal login not made automatically: no 10-digit phone or email on file",
+                "created_by": user.full_name,
+                "created_by_role": user.role,
+                "created_at": now,
+            })
+            return {"status": "no_contact", "patient_name": lead.get("name") or ""}
+
+        login = await _save_portal_login(lead, user, phone, email, "", "auto")
+        if login["joined_existing"]:
+            return {"status": "joined", "patient_name": lead.get("name") or "", **login}
+
+        email_status = await _email_portal_login(lead, login)
+        await v3_col("patient_portal_accounts").update_one(
+            {"lead_id": lead_id}, {"$set": {"email_status": email_status, "email_status_at": now_iso()}},
+        )
+        if email_status != "no_email":
+            await v3_col("lead_activity").insert_one({
+                "id": str(uuid.uuid4()),
+                "lead_id": lead_id,
+                "action": "portal_login_emailed" if email_status == "sent" else "portal_login_email_failed",
+                "details": (
+                    f"Client Portal login emailed to {email}" if email_status == "sent"
+                    else f"Client Portal login email to {email} not sent ({email_status.replace('_', ' ')})"
+                ),
+                "created_by": user.full_name,
+                "created_by_role": user.role,
+                "created_at": now_iso(),
+            })
+        return {"status": "created", "email_status": email_status, "patient_name": lead.get("name") or "", **login}
+    except Exception:
+        logging.getLogger(__name__).exception("Automatic Client Portal login failed for lead %s", lead_id)
+        return {"status": "error"}
 
 
 # --------------------------------------------------------------------- Patient: log in

@@ -842,12 +842,21 @@ async def hp_assign_physio_with_sessions(
         "created_by_role": user.role,
         "created_at": now,
     })
+
+    # Treatment is booked, so the patient gets their Client Portal login now — made and
+    # emailed on its own, and never able to fail the booking it follows. A patient who
+    # already has one (a reassignment, a rebooking) is left exactly as they are.
+    # Imported here rather than at the top: the portal router pulls in several others.
+    from routers.v3_patient_portal import auto_portal_login_for_treatment
+    portal = await auto_portal_login_for_treatment(lead_id, user)
+
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return {
         "message": "Physio assigned and sessions booked",
         "lead": V3LeadOut(**updated).model_dump(),
         "sessions_booked": len(session_docs),
         "sessions_already_completed": done,
+        "portal": portal,
     }
 
 

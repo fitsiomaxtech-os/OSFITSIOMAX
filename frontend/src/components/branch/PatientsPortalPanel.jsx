@@ -17,17 +17,9 @@ import {
 // lib/phone.js exists this one points at it — the others can follow as they're touched.
 import { waNumber } from "@/lib/phone";
 
-const portalUrl = () => `${window.location.origin}/portal`;
+import { credentialLines, portalCopyText, portalUrl, portalWhatsAppText } from "@/lib/portalCredentials";
 
 const phoneDigits = (raw) => String(raw || "").replace(/\D/g, "");
-
-/** The ways in, as [label, value] rows, for the WhatsApp message and the copied text.
-    Phone first because every patient has one; email only when the login carries one. */
-const credentialLines = (c) => [
-  ...(c.phone ? [["Login (phone)", c.phone]] : []),
-  ...(c.email ? [[c.phone ? "Or email" : "Login (email)", c.email]] : []),
-  ["Password", c.password],
-];
 
 /**
  * Whether this patient is on a course of treatment.
@@ -608,24 +600,14 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
     if (!justCreated?.password) return;
     const num = waNumber(justCreated.phone || phone);
     if (!num) { toast.error("This patient has no phone number on file"); return; }
-    // Blank lines between each field, *bold* labels (WhatsApp markdown), and the
-    // auto-linked URL last on its own line — a credential sandwiched right next to
-    // label text with no visual gap is exactly what gets over-selected on a small
-    // touchscreen when the patient copies it by hand.
-    const text = [
-      `Hi ${name}, here is your Fitsiomax Client Portal access:`,
-      "",
-      ...credentialLines(justCreated).flatMap(([label, value]) => [`*${label}:* ${value}`, ""]),
-      `*Login here:* ${portalUrl()}`,
-    ].join("\n");
     // Same-tab handoff, not window.open(..., "_blank") — that leaves the tab on a
     // blank white screen on the way back on mobile (see PhysioBoard's Call/WhatsApp fix).
-    window.location.href = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
+    window.location.href = `https://wa.me/${num}?text=${encodeURIComponent(portalWhatsAppText(name, justCreated))}`;
   };
 
   const copyCredentials = async () => {
     if (!justCreated?.password) return;
-    const text = [portalUrl(), ...credentialLines(justCreated).map(([label, value]) => `${label}: ${value}`)].join("\n");
+    const text = portalCopyText(justCreated);
     try {
       await navigator.clipboard.writeText(text);
       toast.success("Copied to clipboard");

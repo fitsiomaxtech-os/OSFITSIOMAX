@@ -31,6 +31,7 @@ import { loadSession } from "@/lib/session";
 import { endTime12h, slotRange12h, to12h } from "@/lib/time";
 import { ALL_PAYMENT_MODE_LABELS, isHandheld, paymentReference } from "@/lib/receipt";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
+import { PortalLoginCreatedDialog } from "@/components/branch/PortalLoginCreatedDialog";
 import { AppointmentConfirmCard } from "@/components/AppointmentConfirmCard";
 import { isCourseComplete } from "@/lib/leadStage";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
@@ -2602,6 +2603,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
   const [assigningPhysio, setAssigningPhysio] = useState(false);
+  // The Client Portal login the server made on its own when treatment was just booked —
+  // held here so its popup outlives the physio dialog closing. Null once dismissed.
+  const [portalNotice, setPortalNotice] = useState(null);
   const [physioCalendarData, setPhysioCalendarData] = useState(null);
   const [loadingPhysioCalendar, setLoadingPhysioCalendar] = useState(false);
   // The published hour whose bookings are open in the manage popup, and the one booking
@@ -5075,6 +5079,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       toast.success(isRehabAssign
         ? `Rehab assigned to ${res.physio_name} — ${res.days_booked} days booked`
         : `Physio assigned — ${res.sessions_booked} sessions booked`);
+      // Booking treatment makes the patient's Client Portal login on the server. The popup
+      // opens only when there is something to hand over (a new login, or a family login
+      // they joined); one they already had, or a skip, says nothing.
+      if (!isRehabAssign && ["created", "joined"].includes(res.portal?.status)) setPortalNotice(res.portal);
+      else if (!isRehabAssign && res.portal?.status === "no_contact") {
+        toast.warning("No Client Portal login made — this patient has no phone number or email on file");
+      }
       setShowSlotPicker(false);
       setShowPhysioModal(false);
       // A treatment assignment moves the lead — Fee Collected to Physio Assign — so the
@@ -12349,6 +12360,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       {/* Both cards a patient can be handed, held here rather than inside the lead
           dialog so they survive it closing on the last fee. */}
       <ReceiptDialog receipt={receipt} onClose={() => setReceipt(null)} />
+
+      {/* The Client Portal login made when treatment was booked — see submitPhysioAssign. */}
+      <PortalLoginCreatedDialog portal={portalNotice} onClose={() => setPortalNotice(null)} />
 
       {/* The confirmation the patient was given when the slot was booked, handed back.
           The same card the Branch Admin board raises off the booking itself, because a

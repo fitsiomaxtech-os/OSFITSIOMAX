@@ -115,11 +115,17 @@ async def assign_sessions(
     }
     await v3_col("lead_activity").insert_one(activity.copy())
 
+    # The same automatic Client Portal login the Consultations board's booking makes — see
+    # hp_assign_physio_with_sessions. Imported here: the portal router pulls in several others.
+    from routers.v3_patient_portal import auto_portal_login_for_treatment
+    portal = await auto_portal_login_for_treatment(payload.lead_id, user)
+
     return {
         "sessions_created": total,
         "physio_name": physio["full_name"],
         "patient_token": patient_token,
         "lead_id": payload.lead_id,
+        "portal": portal,
     }
 
 
