@@ -355,7 +355,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
           needs on the right, divided off from it. */}
       {/* Laid out like the Branch Admin toolbar: a capped search, the one-tap ranges beside
           it, then the calendar icon (custom range) and Refresh pinned to the right. */}
-      <div className="flex flex-wrap items-center gap-2 border border-slate-200 bg-white p-2 lg:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-2 bg-white p-2 lg:flex-nowrap">
         {/* One search for the whole board, so it works on Review, Rehab and All and not
             only on Consultations. Hidden on a phone, where the header's magnifier does the
             same job without costing a row of vertical space above the lists. */}
