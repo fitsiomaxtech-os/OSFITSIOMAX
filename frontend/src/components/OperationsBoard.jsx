@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Building2, Headphones, Stethoscope, Activity, Salad, UserRound, ChevronDown, ChevronUp, Search, Users, X, ArrowLeftRight } from "lucide-react";
+import { Building2, Headphones, Stethoscope, Activity, Salad, UserRound, ChevronDown, ChevronUp, Search, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/components/ui/sonner";
 import { getDoctors, bmPreSalesMembers, getLeads, hrUsers } from "@/lib/api";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
@@ -10,9 +9,6 @@ import { DietBoard } from "@/components/DietBoard";
 import { PreSalesCRM } from "@/components/PreSalesCRM";
 import { ClientPortalPreview } from "@/components/ClientPortalPreview";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
-// Shared with a branch's own board, which offers the same transfer to its Branch Admin for
-// its own patients — see the component's own note on why there is only one of these.
-import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
 // The pill row's replacement on the compact layout (Super Admin's page) — see `compact`
 // on OperationsBoard below.
 import { BranchFilterPopover } from "@/components/BranchFilterPopover";
@@ -87,7 +83,7 @@ const EmptyPrompt = ({ text, testid }) => (
 
 // ---------- Branch tab: pick a branch, see that branch admin's full board ----------
 
-// `compact` hands the branch picker and the two action buttons up to the Operations nav
+// `compact` hands the branch picker and the Branch Manager button up to the Operations nav
 // bar, where BDE puts them (see OperationsBranchActions) — the tab then renders only the
 // board and the dialogs those buttons open. Selection and dialog state live in
 // OperationsBoard either way, so the nav bar and the tab are never arguing over which
@@ -98,11 +94,8 @@ const OperationsBranchTab = ({
   compact = false,
   selectedId,
   onSelect,
-  showTransfer,
-  onCloseTransfer,
   showManager,
   onCloseManager,
-  onOpenTransfer,
   onOpenManager,
 }) => {
   return (
@@ -116,18 +109,6 @@ const OperationsBranchTab = ({
             back button. */}
         {selectedId && (
           <div className="flex shrink-0 items-center gap-2">
-            {/* Super Admin's way in, for any branch they have picked above. A Branch Admin
-                reaches the same dialog from their own board for their own patients — the
-                money already collected stays with the branch that took it either way, so
-                whose hand is on the button does not decide where the revenue lands. */}
-            <Button
-              variant="outline"
-              className="h-9 gap-2 border-indigo-200 px-3 text-indigo-700 hover:bg-indigo-50"
-              onClick={onOpenTransfer}
-              data-testid="ops-branch-transfer-btn"
-            >
-              <ArrowLeftRight className="h-4 w-4" /> Branch Transfer
-            </Button>
             <Button
               className="h-9 gap-2 bg-indigo-600 px-3 text-white hover:bg-indigo-700"
               onClick={onOpenManager}
@@ -139,17 +120,12 @@ const OperationsBranchTab = ({
         )}
       </div>
       )}
+      {/* Branch Transfer lives on each lead's own popup here (the icon beside Edit), not as a
+          button over the stages. */}
       {selectedId ? (
-        <BranchAdminBoard key={selectedId} branchId={selectedId} embedded />
+        <BranchAdminBoard key={selectedId} branchId={selectedId} embedded canTransferBranch />
       ) : (
         <EmptyPrompt text="Pick a branch above to open its full board" testid="ops-branch-empty" />
-      )}
-      {showTransfer && selectedId && (
-        <BranchTransferDialog
-          branches={branches}
-          fromBranchId={selectedId}
-          onClose={onCloseTransfer}
-        />
       )}
       {showManager && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="ops-branch-manager-dialog">
@@ -512,7 +488,6 @@ export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_s
   // Branch tab state, held here rather than inside the tab because on the compact layout
   // the controls that drive it sit in the nav bar above it, outside the tab entirely.
   const [branchTabId, setBranchTabId] = useState("");
-  const [showTransfer, setShowTransfer] = useState(false);
   const [showManager, setShowManager] = useState(false);
   useEffect(() => {
     if (!branchTabId && branches && branches.length) setBranchTabId(findDefaultBranchId(branches));
@@ -553,15 +528,6 @@ export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_s
               testid="ops-branch-filter"
             />
             <Button
-              variant="outline"
-              className="h-9 gap-2 border-indigo-200 px-3 text-indigo-700 hover:bg-indigo-50"
-              onClick={() => setShowTransfer(true)}
-              disabled={!branchTabId}
-              data-testid="ops-branch-transfer-btn"
-            >
-              <ArrowLeftRight className="h-4 w-4" /> Branch Transfer
-            </Button>
-            <Button
               className="h-9 gap-2 bg-indigo-600 px-3 text-white hover:bg-indigo-700"
               onClick={() => setShowManager(true)}
               data-testid="ops-branch-goto-manager-btn"
@@ -580,9 +546,6 @@ export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_s
           compact={compact}
           selectedId={branchTabId}
           onSelect={setBranchTabId}
-          showTransfer={showTransfer}
-          onOpenTransfer={() => setShowTransfer(true)}
-          onCloseTransfer={() => setShowTransfer(false)}
           showManager={showManager}
           onOpenManager={() => setShowManager(true)}
           onCloseManager={() => setShowManager(false)}

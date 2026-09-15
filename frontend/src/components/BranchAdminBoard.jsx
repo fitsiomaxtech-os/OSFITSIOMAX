@@ -80,6 +80,7 @@ import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { TimeManagementPanel } from "@/components/branch/TimeManagementPanel";
 import { ZumbaMastersPanel } from "@/components/branch/ZumbaMastersPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
+import { LeadBranchTransferDialog } from "@/components/branch/LeadBranchTransferDialog";
 import MissedClassPanel from "@/components/branch/MissedClassPanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
@@ -879,7 +880,7 @@ function BulkDeleteLeadsModal({ leads, onClose, onDeleted }) {
   );
 }
 
-export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null }) => {
+export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null, canTransferBranch = false }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {}, stages: [] });
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
   const [loading, setLoading] = useState(false);
@@ -2008,8 +2009,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               </Button>
             )}
             {/* Moving one of this branch's patients to another. Hidden when embedded —
-                Operations mounts this board under its own Branch Transfer button, and the
-                Super Admin pressing that one is already looking at this toolbar. */}
+                Operations transfers from each lead's own popup instead (canTransferBranch). */}
             {!embedded && (
               <Button
                 onClick={() => setShowTransfer(true)}
@@ -2533,6 +2533,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           // counted it — see matchesBranchStage.
           consultationOpeningStage={consultationOpeningStage}
           onlineArm={armScoped}
+          canTransferBranch={canTransferBranch}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
           onOpenConsultationStage={(stage) => {
@@ -2718,7 +2719,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 // appointment about to be confirmed. At a branch it is nothing — the consultation is held
 // in a room, the field that would set a link is not offered on that board at all, and an
 // amber panel naming a gap nobody there can fill is noise on every booking they make.
-function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, onOpenConsultationStage, consultationOpeningStage = null, openedFromMirror = false, onlineArm = false }) {
+function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, onOpenConsultationStage, consultationOpeningStage = null, openedFromMirror = false, onlineArm = false, canTransferBranch = false }) {
   // The board offers two entry stages — the mirrored Pre-Sales "Leads" pill and the branch's
   // own first stage — but a single lead only ever came in through one of them, so its
   // pipeline shows that one and drops the other. Everything from RNR onwards is shared.
@@ -2782,6 +2783,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   // below are all things done TO a lead; this is the one thing done to the record, and it
   // belongs beside the name it fixes rather than as a sixth tab among the four.
   const [editing, setEditing] = useState(false);
+  const [transferring, setTransferring] = useState(false);
 
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration } | null
   // Asked before the lead is cancelled off the Appointment stage. A boolean rather than a
@@ -3497,6 +3499,19 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              {/* Super Admin only — the backend refuses anyone else, and the branch losing
+                  the patient should not be the one deciding it. */}
+              {canTransferBranch && (
+                <button
+                  onClick={() => setTransferring(true)}
+                  title="Branch Transfer"
+                  aria-label="Branch Transfer"
+                  className="inline-flex items-center rounded-[5px] border border-indigo-200 bg-white p-1.5 text-indigo-600 transition hover:bg-indigo-50"
+                  data-testid="branch-lead-transfer"
+                >
+                  <ArrowLeftRight className="h-3.5 w-3.5" />
+                </button>
+              )}
               <button
                 onClick={() => setEditing(true)}
                 className="inline-flex items-center gap-1.5 rounded-[5px] border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
@@ -4907,6 +4922,16 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
           allowBranchChange={false}
           onClose={() => setEditing(false)}
           onSaved={onUpdate}
+        />
+      )}
+      {transferring && (
+        <LeadBranchTransferDialog
+          lead={lead}
+          fromBranchId={branchId}
+          onClose={() => setTransferring(false)}
+          // The lead now belongs to another branch's board, so close the popup and refresh
+          // the list it came from — the same path a stage move takes.
+          onTransferred={() => { setTransferring(false); onMoved?.(); }}
         />
       )}
     </div>
