@@ -23,9 +23,9 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { ConsultationsBoard, leadPlanParts, PlanLine } from "@/components/ConsultationsBoard";
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
-import { WeekStrip, todayIso } from "@/components/WeekStrip";
+import { todayIso } from "@/components/WeekStrip";
 import { RescheduledTag } from "@/components/ui/lead-marks";
-import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { QuickDateFilterBar, quickDatePreset } from "@/components/QuickDateFilterBar";
 import {
   getHPMyCalendar,
   hpRecommendPackage,
@@ -96,20 +96,10 @@ const isDone = (...stages) => stages.some((s) => /complete/i.test(String(s || ""
  */
 export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, mine = false, search = "", onSearchChange }) => {
   const [workTab, setWorkTab] = useState("consultations");
-  // The day every list under Consultations answers to. Starts on today.
-  const [workDate, setWorkDate] = useState(todayIso());
-  // A range covering several days, from the filter beside Refresh. While one is set it
-  // replaces the single day rather than narrowing it further: the board offers one scope
-  // at a time, or the counts on the cards would describe a different set from the list.
-  const [dateRange, setDateRange] = useState(null);
-  // The third scope: no date at all. The day strip answers "which day", the range answers
-  // "which days", and this answers "never mind the date" — which neither of the other two
-  // can express, since clearing the range only hands the board back to a single day.
-  //
-  // It replaces them rather than combining with them, the same way a range replaces the
-  // day. Two live scopes on one row invite the reader to read the counts as the overlap.
-  const [allTime, setAllTime] = useState(false);
-  const showAllTime = () => { setAllTime(true); setDateRange(null); };
+  // The one date scope every list answers to, from the preset row (All, Today, This Week,
+  // This Month, Last 90 Days, Custom). Starts on Today; null is All.
+  const [dateRange, setDateRange] = useState(() => quickDatePreset("today"));
+  const allTime = !dateRange;
   // Which of the three queues All is showing. Lives on the All card itself.
   const [allKind, setAllKind] = useState("all");
   // Reported up by each list so the cards can be labelled without fetching twice.
@@ -377,29 +367,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
             data-testid="hp-search-input"
           />
         </div>
-        {/* Beside the search rather than as a sixth preset inside the date filter. "Show
-            me everything" is a different question from "which dates", and a preset named
-            All Time inside a control called Date Filter is a contradiction filed where
-            nobody would look for it. */}
-        <button
-          type="button"
-          onClick={() => (allTime ? setAllTime(false) : showAllTime())}
-          aria-pressed={allTime}
-          title={allTime ? "Back to the day picked on the strip" : "Count every date, ignoring the day and the range"}
-          className={`h-9 shrink-0 rounded-md border px-3 text-sm font-semibold transition ${allTime ? "border-teal-500 bg-teal-500 text-white hover:bg-teal-600" : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:text-teal-700"}`}
-          data-testid="hp-all-time-btn"
-        >
-          All Time
-        </button>
-        {/* Dimmed and inert while a range is set — two live scopes on one row invite the
-            reader to combine them, and the board answers to one. */}
-        <div
-          className={`shrink-0 lg:border-l lg:border-slate-100 lg:pl-4 ${dateRange || allTime ? "pointer-events-none opacity-40" : ""}`}
-          aria-disabled={dateRange || allTime ? "true" : undefined}
-          data-testid="hp-header-day-filter"
-        >
-          <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
-        </div>
+        <QuickDateFilterBar value={dateRange} onChange={setDateRange} testid="hp-date-filter" inline />
         <button
           type="button"
           onClick={() => setRefreshTick((n) => n + 1)}
@@ -411,15 +379,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-        {/* After Refresh, with its own presets and a custom range. Clearing it hands the
-            board back to the week strip. */}
-        <div
-          className={`shrink-0 ${allTime ? "pointer-events-none opacity-40" : ""}`}
-          aria-disabled={allTime ? "true" : undefined}
-          data-testid="hp-header-range-filter"
-        >
-          <DateFilterPopover value={dateRange} onChange={setDateRange} testid="hp-date-filter" centered />
-        </div>
       </div>
 
       <div className="space-y-4" data-testid="hp-work-view">
@@ -439,7 +398,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               // The caption names the scope the figure was counted over, so it has to
               // move with it — a count of every review ever raised sitting under the words
               // "on this day" is the card reporting a day it did not count.
-              const when = allTime ? "all time" : dateRange ? "in this range" : "on this day";
+              const when = allTime ? "all time"
+                : ["today", "this_week", "this_month", "last_90"].includes(dateRange.key) ? dateRange.label.toLowerCase()
+                : "in this range";
               const sub = t.key === "consultations" ? (firstStage ? `in ${firstStage}` : when)
                 : t.key === "review" ? when
                 : `everything ${when}`;
@@ -502,8 +463,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               // branch in Operations asks for the branch's. One flag, opposite answers, and
               // the board has no way to tell which it is being mounted for on its own.
               mine={mine}
-              externalDate={allTime ? null : (dateRange ? undefined : workDate)}
-              externalDateFilter={allTime ? undefined : (dateRange || undefined)}
+              externalDateFilter={dateRange}
               hideDateFilter
               externalSearch={search}
               mobileCards
@@ -523,8 +483,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
           <div className={workTab === "review" ? "" : "hidden"} data-testid="hp-work-review">
             <HeadPhysioReviewTab
               branchId={supervising ? effectiveBranchId : null}
-              selectedDate={allTime || dateRange ? null : workDate}
-              dateRange={allTime ? null : dateRange}
+              selectedDate={null}
+              dateRange={dateRange}
               compact={workTab === "all"}
               onCountChange={setReviewCount}
               onRowsChange={setReviewRows}

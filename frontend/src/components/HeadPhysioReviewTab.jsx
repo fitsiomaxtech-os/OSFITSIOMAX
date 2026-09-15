@@ -109,8 +109,11 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
   // one scope at a time, so this answers to whichever is active rather than both.
   const inScope = useMemo(() => {
     if (dateRange?.from && dateRange?.to) {
-      const from = new Date(dateRange.from).toISOString().slice(0, 10);
-      const to = new Date(dateRange.to).toISOString().slice(0, 10);
+      // Local calendar day, not toISOString: in IST local midnight is the previous day in
+      // UTC, which would pull yesterday's reviews into Today.
+      const iso = (v) => { const x = new Date(v); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+      const from = iso(dateRange.from);
+      const to = iso(dateRange.to);
       return (d) => !!d && d >= from && d <= to;
     }
     if (selectedDate) return (d) => d === selectedDate;
