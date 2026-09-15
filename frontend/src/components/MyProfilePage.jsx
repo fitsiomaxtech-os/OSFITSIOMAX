@@ -631,9 +631,8 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
           </button>
           <div className="min-w-0">
             <h2 className="truncate text-lg font-bold text-emerald-700 sm:text-xl" data-testid="my-profile-greeting">
-              Hi, {user?.full_name}
+              {user?.full_name}
             </h2>
-            <p className="truncate text-xs text-slate-500">Your attendance, hours, time off and record — all in one place.</p>
           </div>
         </div>
         {/* Full width on a phone, where the bar is its own row of four columns; sized to
