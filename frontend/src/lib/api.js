@@ -723,6 +723,10 @@ export const hrAddQuote = async (text, author) => (await api.post("/hr/quotes", 
 export const hrUpdateQuote = async (id, payload) => (await api.patch(`/hr/quotes/${id}`, payload)).data;
 export const hrDeleteQuote = async (id) => (await api.delete(`/hr/quotes/${id}`)).data;
 
+// Client Reviews — the stars clients give their Consultant and Physio from the portal.
+// A Branch Admin is held to their own branch on the server whatever branch_id says.
+export const getClientReviews = async (branchId) => (await api.get("/client-reviews", { params: branchId ? { branch_id: branchId } : {} })).data;
+
 // Branch Management
 export const bmList = async () => (await api.get("/branch-mgmt")).data;
 export const bmListArchived = async () => (await api.get("/branch-mgmt", { params: { archived: true } })).data;

@@ -106,6 +106,10 @@ CORE_INDEXES = [
     ("patient_feedback", [("lead_id", 1), ("created_at", -1)], "lead_recent"),
     ("patient_feedback", [("branch_id", 1), ("created_at", -1)], "branch_recent"),
     ("patient_feedback", [("id", 1)], "id"),
+    # Client Reviews: one per client, found by lead from the portal and by branch from the
+    # management boards.
+    ("client_reviews", [("lead_id", 1)], "lead"),
+    ("client_reviews", [("branch_id", 1)], "branch"),
     # Client Portal sign-in. A login is matched on phone or on email, and several accounts
     # can share either (one family, one number), so both are scanned rather than found once.
     # The staff panel reaches a patient's account by lead_id, and every portal request

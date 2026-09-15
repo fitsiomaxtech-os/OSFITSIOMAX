@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, AlertTriangle, MailCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, Quote } from "lucide-react";
+import { Users, ShieldCheck, AlertTriangle, MailCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, Quote, Star } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { downloadCsv } from "@/lib/printable";
 import { ROLE_META, roleLabel, roleClasses, setCustomRoleClasses } from "@/lib/roles";
 import { AttendanceTab, PayrollTab, ApprovalsTab, QuotesTab } from "@/components/hr/HROpsTabs";
+import { ClientReviewsPanel } from "@/components/reviews/ClientReviewsPanel";
 
 // Matches ALL_BRANCHES in backend/routers/v3_hr.py, which resolves it to a name on the way
 // out. Held in branch_id where a real branch id would go, so everything that already reads
@@ -35,6 +36,9 @@ const TABS = [
   // Eight tabs is two rows of four on a phone, which is the same width per tab the bar
   // has always had -- so only the two labels that outrun it carry a `short`.
   { key: "attendance", label: "Attendance", short: "Attend", icon: CalendarCheck },
+  // The stars clients give their Consultant and Physio from the Client Portal. Read by
+  // Super Admin and BDE across every branch; Branch Admin has the same panel on its board.
+  { key: "client_reviews", label: "Client Reviews", short: "Reviews", icon: Star },
   { key: "payroll", label: "Payroll", icon: Wallet },
   { key: "approvals", label: "Approvals", short: "Approve", icon: ClipboardCheck },
   { key: "quotes", label: "Quotes", icon: Quote },
@@ -232,6 +236,7 @@ export const HRBoard = () => {
       <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={4} />
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "attendance" && <AttendanceTab />}
+      {tab === "client_reviews" && <ClientReviewsPanel />}
       {tab === "payroll" && <PayrollTab />}
       {tab === "approvals" && <ApprovalsTab />}
       {tab === "quotes" && <QuotesTab />}

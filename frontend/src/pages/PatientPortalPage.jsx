@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Calendar, Check, ChevronRight, ClipboardCheck, ClipboardList, Clock, Dumbbell, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Users, Video, X } from "lucide-react";
+import { Calendar, Check, ChevronRight, ClipboardCheck, ClipboardList, Clock, Dumbbell, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, Star, UserRound, Users, Video, X } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import {
   patientPortalForgotPassword, patientPortalVerifyResetOtp, patientPortalResetPassword,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
-  patientPortalReplyFeedback,
+  patientPortalReplyFeedback, patientPortalMyReview, patientPortalSaveReview,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -1953,6 +1953,143 @@ function FeedbackTab({ data, onSeen }) {
   );
 }
 
+/** Five tappable stars. Tapping the chosen star again clears it. */
+function StarPicker({ value, onChange, testid }) {
+  return (
+    <div className="flex items-center gap-1" role="radiogroup" data-testid={testid}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          role="radio"
+          aria-checked={value === n}
+          aria-label={`${n} star${n === 1 ? "" : "s"}`}
+          onClick={() => onChange(value === n ? null : n)}
+          className="p-0.5"
+          data-testid={`${testid}-${n}`}
+        >
+          <Star className={`h-7 w-7 transition ${value && n <= value ? "fill-amber-400 text-amber-400" : "text-slate-300 hover:text-amber-300"}`} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const STAR_WORDS = { 1: "Poor", 2: "Not great", 3: "Okay", 4: "Good", 5: "Excellent" };
+
+/**
+ * Rate your care — the client's one star review of their Consultant and their Physio's work,
+ * plus a summary in their own words. Sits above the Feedback conversation: that tab is for
+ * something to be answered, this is a verdict management reads (see v3_client_reviews.py).
+ * One review per client; saving again changes it.
+ */
+function RateCareCard() {
+  const [team, setTeam] = useState(null);
+  const [form, setForm] = useState({ consultant_rating: null, consultant_comment: "", physio_rating: null, physio_comment: "", summary: "" });
+  const [saved, setSaved] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    patientPortalMyReview()
+      .then((d) => {
+        setTeam({ consultant: d.consultant || {}, physio: d.physio || {} });
+        if (d.review) {
+          setSaved(d.review);
+          setForm({
+            consultant_rating: d.review.consultant_rating || null,
+            consultant_comment: d.review.consultant_comment || "",
+            physio_rating: d.review.physio_rating || null,
+            physio_comment: d.review.physio_comment || "",
+            summary: d.review.summary || "",
+          });
+        }
+      })
+      .catch(() => setTeam({ consultant: {}, physio: {} }));
+  }, []);
+
+  if (!team) return null;
+  const hasConsultant = Boolean(team.consultant?.name);
+  const hasPhysio = Boolean(team.physio?.name);
+  // Nobody to rate yet — a client who has not seen a consultant or been given a physio.
+  if (!hasConsultant && !hasPhysio) return null;
+
+  const set = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
+
+  const save = async () => {
+    if (!form.consultant_rating && !form.physio_rating) { toast.error("Tap the stars to give a rating"); return; }
+    setSaving(true);
+    try {
+      const res = await patientPortalSaveReview(form);
+      setSaved(res.review);
+      toast.success(res.message || "Thank you for your review.");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save your review. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const box = "w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400";
+
+  const person = (role, name, ratingKey, commentKey, placeholder) => (
+    <div className="space-y-1.5 rounded-lg border border-slate-200 p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        {role} <span className="normal-case tracking-normal text-slate-700">· {name}</span>
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <StarPicker value={form[ratingKey]} onChange={set(ratingKey)} testid={`portal-review-${ratingKey}`} />
+        {form[ratingKey] && <span className="text-xs font-semibold text-amber-600">{STAR_WORDS[form[ratingKey]]}</span>}
+      </div>
+      <textarea
+        rows={2}
+        maxLength={2000}
+        value={form[commentKey]}
+        onChange={(e) => set(commentKey)(e.target.value)}
+        placeholder={placeholder}
+        className={box}
+        data-testid={`portal-review-${commentKey}`}
+      />
+    </div>
+  );
+
+  return (
+    <Card data-testid="portal-review">
+      <CardContent className="space-y-3 p-5">
+        <div>
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />Rate your care
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Your review goes to the clinic management, not to the consultant or physio directly. You can change it any time.
+          </p>
+        </div>
+        {hasConsultant && person("Consultant", team.consultant.name, "consultant_rating", "consultant_comment", "What was your consultation like? (optional)")}
+        {hasPhysio && person("Physio work", team.physio.name, "physio_rating", "physio_comment", "How are your physio sessions going? (optional)")}
+        <div>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Overall summary</p>
+          <textarea
+            rows={3}
+            maxLength={2000}
+            value={form.summary}
+            onChange={(e) => set("summary")(e.target.value)}
+            placeholder="Your overall thoughts about your treatment (optional)"
+            className={box}
+            data-testid="portal-review-summary"
+          />
+        </div>
+        <Button className="w-full" disabled={saving} onClick={save} data-testid="portal-review-submit">
+          {saving ? "Saving…" : saved ? "Update my review" : "Submit review"}
+        </Button>
+        {saved && (
+          <p className="text-center text-[10px] text-slate-400" data-testid="portal-review-saved">
+            Last saved {feedbackSentOn(saved.updated_at || saved.created_at)}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function PortalDashboard({ onLogout, onSwitchPatient }) {
   // Lands on Overview, the first tab. A patient opening the app is most often checking
   // who they are with and when — not scrolling a session list they already know.
@@ -2020,7 +2157,12 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
         {activeTab === "treatment" && <TreatmentTab data={data} />}
         {activeTab === "payment" && <PaymentTab data={data} />}
         {activeTab === "profile" && <ProfileTab data={data} />}
-        {activeTab === "feedback" && <FeedbackTab data={data} onSeen={clearFeedbackBadge} />}
+        {activeTab === "feedback" && (
+          <div className="space-y-4">
+            <RateCareCard />
+            <FeedbackTab data={data} onSeen={clearFeedbackBadge} />
+          </div>
+        )}
       </div>
 
       {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal

@@ -84,6 +84,7 @@ import { LeadBranchTransferDialog } from "@/components/branch/LeadBranchTransfer
 import MissedClassPanel from "@/components/branch/MissedClassPanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
+import { ClientReviewsPanel } from "@/components/reviews/ClientReviewsPanel";
 import { ZumbaPanel } from "@/components/branch/ZumbaPanel";
 import { FitnessPanel } from "@/components/branch/FitnessPanel";
 import { CreateLeadModal, DEPARTMENT_OPTIONS, LEAD_DATA_FIELDS } from "@/components/CreateLeadModal";
@@ -1525,6 +1526,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     { key: "review", label: "Review", short: "Review", icon: ClipboardCheck },
     { key: "consultations", label: "Management", short: "Manage", icon: Stethoscope },
     { key: "patients", label: "Patients", short: "Patients", icon: User },
+    // What this branch's clients rated their Consultant and Physio in the Client Portal.
+    // The same panel HR Admin shows Super Admin and BDE, held to this one branch.
+    { key: "client_reviews", label: "Client Reviews", short: "Ratings", icon: Star },
     { key: "accountant_mgmt", label: "Accountant Manage", short: "Accounts", icon: BadgeIndianRupee },
     // Named as Super Admin names it. This tab is that page's catalogue read from a
     // branch, and calling the same shelves two different things left nobody able to say
@@ -1666,6 +1670,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         <BranchReviewPanel branchId={branchId} />
       ) : activeView === "patients" ? (
         <PatientsPortalPanel branchId={branchId} />
+      ) : activeView === "client_reviews" ? (
+        <ClientReviewsPanel branchId={branchId} />
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel branchId={branchId} />
       ) : activeView === "accountant_mgmt" ? (

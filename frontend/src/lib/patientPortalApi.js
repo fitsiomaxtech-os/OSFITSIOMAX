@@ -102,6 +102,18 @@ export const patientPortalSubmitFeedback = async ({ rating, message, audience })
   return data;
 };
 
+/** The client's one star review, and who they can rate (consultant, physio). */
+export const patientPortalMyReview = async () => {
+  const { data } = await portalApi.get("/patient-portal/review", { headers: authHeaders() });
+  return data;
+};
+
+/** Write or change that review. */
+export const patientPortalSaveReview = async (payload) => {
+  const { data } = await portalApi.put("/patient-portal/review", payload, { headers: authHeaders() });
+  return data;
+};
+
 /** What this patient has sent, and where each piece has got to. */
 export const patientPortalMyFeedback = async () => {
   const { data } = await portalApi.get("/patient-portal/feedback", { headers: authHeaders() });
