@@ -1,6 +1,12 @@
-"""Client Portal — a login (email + password) Branch Admin generates for a patient once
-their Treatment Fee is paid, so the patient can check their own session progress without
-staff involvement.
+"""Client Portal — a login (phone or email + password) Branch Admin generates for a patient
+once their Treatment Fee is paid, so the patient can check their own session progress
+without staff involvement.
+
+Phone is the login everyone has; email is the second way in, to the same account. Several
+patients may sit behind one login — a family registered on one number — so an account is
+still one per patient, a password is shared across every account on the same phone or
+email, and signing in hands back every patient the password opened for the patient to pick
+between (see _start_portal_session and /patient-portal/switch).
 
 Kept in its own patient_portal_accounts / patient_portal_sessions collections rather than
 reusing `users`/`sessions` — those are staff-only, and `sessions` already carries a second,
@@ -8,6 +14,7 @@ unrelated shape (treatment-session bookings, deliberately, per v3_reviews.py's d
 about what happened the last time this collection grew a second shape); a third shape on
 top of that is exactly the mistake to avoid, not repeat.
 """
+import logging
 import os
 import random
 import string
@@ -33,7 +40,11 @@ from routers.v3_feedback import (
     _audience, _rating, _thread,
 )
 from physio_scope import consultant_of_lead
-from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin
+from routers.v3_marketing import normalize_phone
+from schemas.v3 import (
+    V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin,
+    V3PatientPortalSwitch,
+)
 
 router = APIRouter(prefix="/api/v3")
 
@@ -84,15 +95,97 @@ def has_treatment(lead: dict) -> bool:
 
 # ------------------------------------------------------------- Branch Admin: manage access
 
+def login_phone(raw) -> str:
+    """The ten digits a phone login is matched on, or "" when there is no whole number.
+
+    The last ten, so +91 98765 43210, 098765 43210 and a record carrying a "p:" prefix all
+    reach the same account. Anything shorter is not a phone anybody can sign in with, and
+    is kept off the account rather than stored as a partial key that could match a stranger.
+    """
+    key = normalize_phone(str(raw or ""))
+    return key if len(key) == 10 else ""
+
+
+async def _accounts_sharing_login(lead_id: str, phone: str, email: str) -> list:
+    """Every other patient's account signed in with this phone or this email — the family
+    this lead's login belongs to. Newest first, so the password a joining patient inherits
+    is the one most recently shared."""
+    clauses = []
+    if phone:
+        clauses.append({"phone": phone})
+    if email:
+        clauses.append({"email": email})
+    if not clauses:
+        return []
+    return await v3_col("patient_portal_accounts").find(
+        {"$or": clauses, "lead_id": {"$ne": lead_id}}, {"_id": 0},
+    ).sort("updated_at", -1).to_list(50)
+
+
+async def _patients_for(lead_ids: list) -> list:
+    """Who each lead is, as the patient picker shows them, in a stable order by name."""
+    if not lead_ids:
+        return []
+    rows = await v3_col("leads").find(
+        {"id": {"$in": list(lead_ids)}}, {"_id": 0, "id": 1, "name": 1, "patient_number": 1},
+    ).to_list(len(lead_ids))
+    rows.sort(key=lambda r: (r.get("name") or "").lower())
+    return [
+        {"lead_id": r["id"], "name": r.get("name") or "", "patient_number": r.get("patient_number")}
+        for r in rows
+    ]
+
+
+async def sync_portal_login_phone(lead_id: str, phone) -> None:
+    """Carry a corrected phone number onto the patient's portal login.
+
+    Called after staff edit a lead. Without it, fixing a mistyped number at the desk leaves
+    the patient signing in with the wrong one — the number on file and the number that
+    logs in would quietly disagree.
+    """
+    await v3_col("patient_portal_accounts").update_one(
+        {"lead_id": lead_id}, {"$set": {"phone": login_phone(phone), "updated_at": now_iso()}},
+    )
+
+
+async def backfill_portal_account_phones() -> None:
+    """Give every account made before phone sign-in the phone its patient is on file with.
+
+    Run at startup. Only touches accounts with no `phone` field at all, so it does its work
+    once and costs a single empty query on every boot after.
+    """
+    filled = 0
+    async for account in v3_col("patient_portal_accounts").find(
+        {"phone": {"$exists": False}}, {"_id": 0, "id": 1, "lead_id": 1},
+    ):
+        lead = await v3_col("leads").find_one({"id": account.get("lead_id")}, {"_id": 0, "phone": 1})
+        await v3_col("patient_portal_accounts").update_one(
+            {"id": account["id"]}, {"$set": {"phone": login_phone((lead or {}).get("phone"))}},
+        )
+        filled += 1
+    if filled:
+        logging.getLogger(__name__).info(f"portal accounts given a login phone: {filled}")
+
+
 @router.get("/leads/{lead_id}/portal-account")
 async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     lead = await _lead_or_404(lead_id)
     if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Patient not found")
-    account = await v3_col("patient_portal_accounts").find_one({"lead_id": lead_id}, {"_id": 0, "email": 1, "created_at": 1})
+    account = await v3_col("patient_portal_accounts").find_one(
+        {"lead_id": lead_id}, {"_id": 0, "phone": 1, "email": 1, "created_at": 1},
+    )
     if not account:
         return {"exists": False}
-    return {"exists": True, "email": account["email"], "created_at": account.get("created_at")}
+    phone, email = account.get("phone") or "", account.get("email") or ""
+    siblings = await _accounts_sharing_login(lead_id, phone, email)
+    return {
+        "exists": True,
+        "phone": phone,
+        "email": email,
+        "created_at": account.get("created_at"),
+        "shared_with": [p["name"] for p in await _patients_for([s["lead_id"] for s in siblings])],
+    }
 
 
 @router.post("/leads/{lead_id}/portal-account")
@@ -104,7 +197,14 @@ async def create_or_reset_portal_account(
     """Create-or-reset in one call: the first time, this creates the account; every call
     after that resets the password (freshly generated unless the caller supplies one),
     since re-sharing a lost password is the same action either way. The plaintext
-    password is returned only here, this once — nothing later can ever read it back."""
+    password is returned only here, this once — nothing later can ever read it back.
+
+    One password per login. Resetting it resets every patient signed in on the same phone
+    or email, since that is one person holding one set of credentials. A new patient
+    joining a login the family already has inherits its password instead of replacing it,
+    so the rest of the family is not locked out by a sibling being added — `password` then
+    comes back as None and `joined_existing` says why.
+    """
     lead = await _lead_or_404(lead_id)
     if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -114,68 +214,133 @@ async def create_or_reset_portal_account(
             detail="Only treatment patients get the Client Portal — this patient has no treatment sessions.",
         )
 
+    phone = login_phone(payload.phone if payload.phone is not None else lead.get("phone"))
     email = (payload.email or lead.get("email") or "").strip().lower()
-    if not email:
-        raise HTTPException(status_code=400, detail="An email is required for portal access")
+    if not phone and not email:
+        raise HTTPException(
+            status_code=400,
+            detail="A 10-digit phone number or an email is required for portal access",
+        )
 
-    clash = await v3_col("patient_portal_accounts").find_one(
-        {"email": email, "lead_id": {"$ne": lead_id}}, {"_id": 0, "id": 1}
-    )
-    if clash:
-        raise HTTPException(status_code=409, detail="This email is already used for another patient's portal account")
-
-    password = (payload.password or "").strip() or _generate_password()
     now = now_iso()
     existing = await v3_col("patient_portal_accounts").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1})
+    siblings = await _accounts_sharing_login(lead_id, phone, email)
+    supplied = (payload.password or "").strip()
+
+    joined_existing = not existing and not supplied and bool(siblings)
+    if joined_existing:
+        password = None
+        password_hash = siblings[0].get("password_hash", "")
+    else:
+        password = supplied or _generate_password()
+        password_hash = hash_password(password)
+
+    login_fields = {
+        "phone": phone,
+        "email": email,
+        "password_hash": password_hash,
+        "updated_at": now,
+        "updated_by": user.full_name,
+    }
     if existing:
-        await v3_col("patient_portal_accounts").update_one(
-            {"lead_id": lead_id},
-            {"$set": {"email": email, "password_hash": hash_password(password), "updated_at": now, "updated_by": user.full_name}},
-        )
+        await v3_col("patient_portal_accounts").update_one({"lead_id": lead_id}, {"$set": login_fields})
     else:
         await v3_col("patient_portal_accounts").insert_one({
             "id": str(uuid.uuid4()),
             "lead_id": lead_id,
             "branch_id": lead.get("branch_id"),
-            "email": email,
-            "password_hash": hash_password(password),
+            **login_fields,
             "created_at": now,
             "created_by": user.full_name,
-            "updated_at": now,
         })
+    if password is not None and siblings:
+        await v3_col("patient_portal_accounts").update_many(
+            {"id": {"$in": [s["id"] for s in siblings]}},
+            {"$set": {"password_hash": password_hash, "updated_at": now, "updated_by": user.full_name}},
+        )
+
+    shared_with = [p["name"] for p in await _patients_for([s["lead_id"] for s in siblings])]
+    login_label = " / ".join(x for x in (phone, email) if x)
+    if joined_existing:
+        details = f"Added to the existing Client Portal login {login_label} (shared with {', '.join(shared_with)})"
+    else:
+        details = f"{'Reset' if existing else 'Created'} Client Portal access for {login_label}"
+        if shared_with:
+            details += f" — same password now applies to {', '.join(shared_with)}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "portal_account_reset" if existing else "portal_account_created",
-        "details": f"{'Reset' if existing else 'Created'} Client Portal access for {email}",
+        "details": details,
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now,
     })
-    return {"email": email, "password": password}
+    return {
+        "phone": phone,
+        "email": email,
+        "password": password,
+        "joined_existing": joined_existing,
+        "shared_with": shared_with,
+    }
 
 
 # --------------------------------------------------------------------- Patient: log in
 
-async def _start_portal_session(account: dict) -> dict:
+async def _start_portal_session(accounts: list) -> dict:
+    """One session for every patient the credentials opened.
+
+    The session carries the whole list and one of them as the active patient. Every portal
+    route keeps reading `lead_id` exactly as before, so nothing downstream knows families
+    exist; switching patients rewrites that one field, and only to a lead in `lead_ids`,
+    which was fixed here from accounts whose password actually matched.
+    """
+    patients = await _patients_for([a["lead_id"] for a in accounts])
+    if not patients:
+        raise HTTPException(status_code=401, detail="Invalid phone/email or password")
+    by_lead = {a["lead_id"]: a for a in accounts}
     token = str(uuid.uuid4())
     await v3_col("patient_portal_sessions").insert_one({
         "token": token,
-        "account_id": account["id"],
-        "lead_id": account["lead_id"],
+        "account_id": by_lead[patients[0]["lead_id"]]["id"],
+        "lead_id": patients[0]["lead_id"],
+        "lead_ids": [p["lead_id"] for p in patients],
         "created_at": now_iso(),
     })
-    lead = await v3_col("leads").find_one({"id": account["lead_id"]}, {"_id": 0, "name": 1})
-    return {"token": token, "patient_name": (lead or {}).get("name", "")}
+    return {
+        "token": token,
+        "lead_id": patients[0]["lead_id"],
+        "patient_name": patients[0]["name"],
+        "patients": patients,
+        "needs_choice": len(patients) > 1,
+    }
+
+
+def _login_query(identifier: str) -> Optional[dict]:
+    """What a typed login is looked up by: an email if it has an @, else a phone number."""
+    identifier = (identifier or "").strip()
+    if "@" in identifier:
+        return {"email": identifier.lower()}
+    phone = login_phone(identifier)
+    return {"phone": phone} if phone else None
 
 
 @router.post("/patient-portal/login")
 async def patient_portal_login(payload: V3PatientPortalLogin):
-    email = payload.email.strip().lower()
-    account = await v3_col("patient_portal_accounts").find_one({"email": email}, {"_id": 0})
-    if not account or not verify_password(payload.password, account.get("password_hash", "")):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    return await _start_portal_session(account)
+    """Phone number or email, and the password.
+
+    Several accounts can answer one login (a family on one number), and each is checked
+    against the password on its own rather than assuming they agree — an account left
+    behind on an older password does not get opened by the newer one.
+    """
+    query = _login_query(payload.login or payload.email or "")
+    if not query or not payload.password:
+        raise HTTPException(status_code=401, detail="Invalid phone/email or password")
+    accounts = await v3_col("patient_portal_accounts").find(query, {"_id": 0}).to_list(50)
+    matched = [a for a in accounts if verify_password(payload.password, a.get("password_hash", ""))]
+    if not matched:
+        raise HTTPException(status_code=401, detail="Invalid phone/email or password")
+    return await _start_portal_session(matched)
 
 
 @router.post("/patient-portal/google-login")
@@ -195,23 +360,69 @@ async def patient_portal_google_login(payload: V3PatientPortalGoogleLogin):
         raise HTTPException(status_code=401, detail="Google account email is not verified")
 
     email = claims["email"].strip().lower()
-    account = await v3_col("patient_portal_accounts").find_one({"email": email}, {"_id": 0})
-    if not account:
+    accounts = await v3_col("patient_portal_accounts").find({"email": email}, {"_id": 0}).to_list(50)
+    if not accounts:
         raise HTTPException(
             status_code=404,
             detail="No portal account found for this Google account. Ask your clinic to share your portal login.",
         )
-    return await _start_portal_session(account)
+    return await _start_portal_session(accounts)
 
 
-async def _current_patient_lead_id(authorization: str = Header(...)) -> str:
+async def _portal_session(authorization: str) -> dict:
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
     token = authorization.split(" ", 1)[1].strip()
-    session = await v3_col("patient_portal_sessions").find_one({"token": token}, {"_id": 0, "lead_id": 1})
+    session = await v3_col("patient_portal_sessions").find_one(
+        {"token": token}, {"_id": 0, "token": 1, "lead_id": 1, "lead_ids": 1},
+    )
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    return session["lead_id"]
+    return session
+
+
+async def _current_patient_lead_id(authorization: str = Header(...)) -> str:
+    return (await _portal_session(authorization))["lead_id"]
+
+
+@router.get("/patient-portal/patients")
+async def patient_portal_patients(authorization: str = Header(...)):
+    """Every patient this sign-in may look at, and which one it is looking at now.
+
+    A session from before families existed has no `lead_ids`, and reads as the one patient
+    it was opened for.
+    """
+    session = await _portal_session(authorization)
+    return {
+        "active_lead_id": session["lead_id"],
+        "patients": await _patients_for(session.get("lead_ids") or [session["lead_id"]]),
+    }
+
+
+@router.post("/patient-portal/switch")
+async def patient_portal_switch(payload: V3PatientPortalSwitch, authorization: str = Header(...)):
+    """Point this session at another patient on the same login.
+
+    Only to a lead the session was opened with — the list was fixed at sign-in from the
+    accounts the password matched, and a lead id from the body is never trusted beyond it.
+    The account is looked up again as well, so a patient whose portal access was removed
+    after sign-in cannot be switched back to.
+    """
+    session = await _portal_session(authorization)
+    allowed = session.get("lead_ids") or [session["lead_id"]]
+    if payload.lead_id not in allowed:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    account = await v3_col("patient_portal_accounts").find_one(
+        {"lead_id": payload.lead_id}, {"_id": 0, "id": 1},
+    )
+    patients = await _patients_for([payload.lead_id])
+    if not account or not patients:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    await v3_col("patient_portal_sessions").update_one(
+        {"token": session["token"]},
+        {"$set": {"lead_id": payload.lead_id, "account_id": account["id"]}},
+    )
+    return {"lead_id": payload.lead_id, "patient_name": patients[0]["name"]}
 
 
 @router.post("/patient-portal/logout")

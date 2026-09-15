@@ -334,6 +334,12 @@ async def v3_edit_lead(
             raise HTTPException(status_code=404, detail="Lead not found")
         raise HTTPException(status_code=403, detail="Lead not in your branch scope")
 
+    if "phone" in updates:
+        # Imported here, not at the top: the portal router pulls in several others, and
+        # this is the only thing v3_leads needs from it.
+        from routers.v3_patient_portal import sync_portal_login_phone
+        await sync_portal_login_phone(lead_id, updates["phone"])
+
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return V3LeadOut(**lead)
 

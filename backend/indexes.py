@@ -106,6 +106,14 @@ CORE_INDEXES = [
     ("patient_feedback", [("lead_id", 1), ("created_at", -1)], "lead_recent"),
     ("patient_feedback", [("branch_id", 1), ("created_at", -1)], "branch_recent"),
     ("patient_feedback", [("id", 1)], "id"),
+    # Client Portal sign-in. A login is matched on phone or on email, and several accounts
+    # can share either (one family, one number), so both are scanned rather than found once.
+    # The staff panel reaches a patient's account by lead_id, and every portal request
+    # resolves its bearer token first.
+    ("patient_portal_accounts", [("phone", 1)], "phone"),
+    ("patient_portal_accounts", [("email", 1)], "email"),
+    ("patient_portal_accounts", [("lead_id", 1)], "lead_id"),
+    ("patient_portal_sessions", [("token", 1)], "token"),
     # Branch Cash -- see the branch-cash section of routers/v3_finance.py. Every read of a
     # branch's box scans its handovers and its adjustments by branch_id (the adjustments
     # also as a date range, up to a day, for the closing screen), and receiving a handover

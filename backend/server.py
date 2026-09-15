@@ -171,6 +171,8 @@ async def startup_seed_data():
     # their expert profile. Without this they stay in every consultant list.
     await retire_experts_without_a_login()
     await backfill_login_history_from_sessions()
+    # Portal accounts made before phone sign-in carry no phone to be found by.
+    await v3_patient_portal.backfill_portal_account_phones()
     await v3_inventory.ensure_inventory_indexes()
     start_auto_sync_scheduler()
 

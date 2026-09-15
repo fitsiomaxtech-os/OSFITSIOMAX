@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Dumbbell, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Video, X } from "lucide-react";
+import { Calendar, Check, ChevronRight, ClipboardCheck, ClipboardList, Clock, Dumbbell, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound, Users, Video, X } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
+  patientPortalSwitch,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback,
@@ -71,6 +72,12 @@ export const PatientPortalPage = () => {
     setSession(data);
   };
 
+  const updateSession = (changes) => {
+    const next = { ...loadPortalSession(), ...changes };
+    savePortalSession(next);
+    setSession(next);
+  };
+
   const handleLogout = async () => {
     await patientPortalLogout();
     clearPortalSession();
@@ -80,11 +87,30 @@ export const PatientPortalPage = () => {
   if (!session?.token) {
     return <PortalLogin onLogin={handleLogin} />;
   }
-  return <PortalDashboard onLogout={handleLogout} />;
+  // A family on one login picks who they are looking at before anything loads — every
+  // tab below answers for exactly one patient.
+  if (session.needs_choice) {
+    return (
+      <PatientPicker
+        patients={session.patients || []}
+        onChosen={(chosen) => updateSession({ ...chosen, needs_choice: false })}
+        onLogout={handleLogout}
+      />
+    );
+  }
+  return (
+    <PortalDashboard
+      // Keyed on the patient so switching drops the last patient's data rather than
+      // flashing it under the new name while the next load is in flight.
+      key={session.lead_id || "patient"}
+      onLogout={handleLogout}
+      onSwitchPatient={(session.patients || []).length > 1 ? () => updateSession({ needs_choice: true }) : null}
+    />
+  );
 };
 
 function PortalLogin({ onLogin }) {
-  const [email, setEmail] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -93,7 +119,7 @@ function PortalLogin({ onLogin }) {
     e.preventDefault();
     setLoading(true);
     try {
-      const data = await patientPortalLogin(email.trim(), password);
+      const data = await patientPortalLogin(loginId.trim(), password);
       onLogin(data);
       toast.success("Login successful");
     } catch (err) {
@@ -113,8 +139,18 @@ function PortalLogin({ onLogin }) {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Email</label>
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required data-testid="patient-portal-email" />
+              <label className="mb-1 block text-xs font-medium text-slate-600">Phone number or Email</label>
+              {/* Plain text, not type="email": the browser would refuse a phone number
+                  as an invalid email before the form ever submitted. */}
+              <Input
+                type="text"
+                autoComplete="username"
+                value={loginId}
+                onChange={(e) => setLoginId(e.target.value)}
+                placeholder="98765 43210 or you@example.com"
+                required
+                data-testid="patient-portal-email"
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Password</label>
@@ -141,6 +177,62 @@ function PortalLogin({ onLogin }) {
             </Button>
           </form>
           <GoogleSignInButton onLogin={onLogin} />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// A family registered on one phone or email signs in once and picks who to look at. The
+// list comes from the sign-in itself, and the server only switches to a patient it holds.
+function PatientPicker({ patients, onChosen, onLogout }) {
+  const [busy, setBusy] = useState(null);
+
+  const choose = async (p) => {
+    setBusy(p.lead_id);
+    try {
+      const data = await patientPortalSwitch(p.lead_id);
+      onChosen({ lead_id: data.lead_id, patient_name: data.patient_name });
+    } catch (err) {
+      if (err?.response?.status === 401) { onLogout(); return; }
+      toast.error(err?.response?.data?.detail || "Could not open this patient");
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8" data-testid="patient-portal-picker">
+      <Card className="w-full max-w-sm rounded-xl border border-slate-200 shadow-[0_8px_30px_rgb(2,6,23,0.06)]">
+        <CardHeader className="space-y-2 pb-2 text-center">
+          <img src={LOGO_URL} alt="Fitsiomax" className="mx-auto h-12 w-12 rounded-lg object-contain" />
+          <h1 className="text-lg font-bold text-slate-900">Who are you checking?</h1>
+          <p className="text-xs text-slate-500">This login has more than one patient.</p>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {patients.map((p) => (
+            <button
+              key={p.lead_id}
+              type="button"
+              disabled={busy !== null}
+              onClick={() => choose(p)}
+              className="flex w-full items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-sky-300 hover:bg-sky-50 disabled:opacity-60"
+              data-testid={`patient-portal-pick-${p.lead_id}`}
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sm font-bold text-sky-700">
+                {(p.name || "?").charAt(0).toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-slate-800">{p.name || "Patient"}</span>
+                {p.patient_number && <span className="block text-[11px] text-slate-400">{p.patient_number}</span>}
+              </span>
+              {busy === p.lead_id
+                ? <span className="text-[11px] text-slate-400">Opening…</span>
+                : <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />}
+            </button>
+          ))}
+          <Button variant="ghost" size="sm" className="w-full text-xs text-slate-500" onClick={onLogout} data-testid="patient-portal-picker-logout">
+            <LogOut className="mr-1.5 h-3.5 w-3.5" /> Sign out
+          </Button>
         </CardContent>
       </Card>
     </div>
@@ -1562,7 +1654,7 @@ function FeedbackTab({ data, onSeen }) {
   );
 }
 
-function PortalDashboard({ onLogout }) {
+function PortalDashboard({ onLogout, onSwitchPatient }) {
   // Lands on Overview, the first tab. A patient opening the app is most often checking
   // who they are with and when — not scrolling a session list they already know.
   const [activeTab, setActiveTab] = useState("profile");
@@ -1610,9 +1702,17 @@ function PortalDashboard({ onLogout }) {
               <p className="text-[10px] text-sky-600">FitsiomaxOS Client Portal</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={onLogout} data-testid="patient-portal-logout">
-            <LogOut className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            {onSwitchPatient && (
+              <Button variant="outline" size="sm" onClick={onSwitchPatient} data-testid="patient-portal-switch-patient">
+                <Users className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Switch patient</span>
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={onLogout} data-testid="patient-portal-logout">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
 

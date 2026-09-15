@@ -19,6 +19,16 @@ import { waNumber } from "@/lib/phone";
 
 const portalUrl = () => `${window.location.origin}/portal`;
 
+const phoneDigits = (raw) => String(raw || "").replace(/\D/g, "");
+
+/** The ways in, as [label, value] rows, for the WhatsApp message and the copied text.
+    Phone first because every patient has one; email only when the login carries one. */
+const credentialLines = (c) => [
+  ...(c.phone ? [["Login (phone)", c.phone]] : []),
+  ...(c.email ? [[c.phone ? "Or email" : "Login (email)", c.email]] : []),
+  ["Password", c.password],
+];
+
 /**
  * Whether this patient is on a course of treatment.
  *
@@ -574,13 +584,20 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
     setSavingProfile(false);
   };
 
+  // The portal logs in on the phone saved on the lead — the server reads it from there, so
+  // an unsaved edit in the field above is not what the login will be.
+  const savedPhoneOk = phoneDigits(lead.phone).length >= 10;
+
   const generateAccess = async () => {
     setCreating(true);
     try {
       const result = await createOrResetPortalAccount(lead.id, { email: emailInput.trim() || undefined });
       setJustCreated(result);
-      setAccount({ exists: true, email: result.email });
-      toast.success(account?.exists ? "Portal password reset" : "Portal access created");
+      setAccount({ exists: true, phone: result.phone, email: result.email, shared_with: result.shared_with || [] });
+      toast.success(
+        result.joined_existing ? "Added to the family's existing portal login"
+          : account?.exists ? "Portal password reset" : "Portal access created",
+      );
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to create portal access");
     }
@@ -588,8 +605,8 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
   };
 
   const shareOnWhatsApp = () => {
-    if (!justCreated) return;
-    const num = waNumber(phone);
+    if (!justCreated?.password) return;
+    const num = waNumber(justCreated.phone || phone);
     if (!num) { toast.error("This patient has no phone number on file"); return; }
     // Blank lines between each field, *bold* labels (WhatsApp markdown), and the
     // auto-linked URL last on its own line — a credential sandwiched right next to
@@ -598,10 +615,7 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
     const text = [
       `Hi ${name}, here is your Fitsiomax Client Portal access:`,
       "",
-      `*Username:* ${justCreated.email}`,
-      "",
-      `*Password:* ${justCreated.password}`,
-      "",
+      ...credentialLines(justCreated).flatMap(([label, value]) => [`*${label}:* ${value}`, ""]),
       `*Login here:* ${portalUrl()}`,
     ].join("\n");
     // Same-tab handoff, not window.open(..., "_blank") — that leaves the tab on a
@@ -610,8 +624,8 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
   };
 
   const copyCredentials = async () => {
-    if (!justCreated) return;
-    const text = `${portalUrl()}\nUsername: ${justCreated.email}\nPassword: ${justCreated.password}`;
+    if (!justCreated?.password) return;
+    const text = [portalUrl(), ...credentialLines(justCreated).map(([label, value]) => `${label}: ${value}`)].join("\n");
     try {
       await navigator.clipboard.writeText(text);
       toast.success("Copied to clipboard");
@@ -691,20 +705,38 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
             ) : (
               <>
                 {account.exists && (
-                  <p className="text-xs text-slate-600">Current login: <span className="font-semibold text-slate-800">{account.email}</span></p>
+                  <div className="space-y-0.5 text-xs text-slate-600" data-testid="branch-patient-portal-login">
+                    {account.phone && <p>Login phone: <span className="font-semibold text-slate-800">{account.phone}</span></p>}
+                    {account.email && <p>Login email: <span className="font-semibold text-slate-800">{account.email}</span></p>}
+                    {!account.phone && !account.email && <p className="text-amber-700">This login has no phone or email — reset it after saving a phone number.</p>}
+                  </div>
+                )}
+                {account.exists && (account.shared_with || []).length > 0 && (
+                  // Resetting changes everyone on this login, so say who before the click.
+                  <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800" data-testid="branch-patient-portal-shared">
+                    Shared login — also used by {account.shared_with.join(", ")}. A password reset changes it for all of them.
+                  </p>
                 )}
 
                 {!account.exists && (
-                  <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Email (used to log in)</label>
-                    <Input
-                      type="email"
-                      value={emailInput}
-                      onChange={(e) => setEmailInput(e.target.value)}
-                      placeholder="patient@example.com"
-                      className="h-9"
-                      data-testid="branch-patient-portal-email"
-                    />
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-slate-500">
+                      Login phone:{" "}
+                      {savedPhoneOk
+                        ? <span className="font-semibold text-slate-700">{lead.phone}</span>
+                        : <span className="font-semibold text-amber-700">none saved — add a 10-digit number above, or use email</span>}
+                    </p>
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Email (optional second login)</label>
+                      <Input
+                        type="email"
+                        value={emailInput}
+                        onChange={(e) => setEmailInput(e.target.value)}
+                        placeholder="patient@example.com"
+                        className="h-9"
+                        data-testid="branch-patient-portal-email"
+                      />
+                    </div>
                   </div>
                 )}
 
@@ -713,18 +745,30 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
                   variant="outline"
                   className="text-xs"
                   onClick={generateAccess}
-                  disabled={creating || (!account.exists && !emailInput.trim())}
+                  disabled={creating || (!account.exists && !savedPhoneOk && !emailInput.trim())}
                   data-testid="branch-patient-portal-generate"
                 >
                   {creating ? "Working..." : account.exists ? "Reset Password" : "Generate Portal Access"}
                 </Button>
 
-                {justCreated && (
+                {justCreated?.joined_existing && (
+                  <div className="rounded-md border border-violet-300 bg-white p-3 text-xs text-slate-700" data-testid="branch-patient-portal-joined">
+                    Added to the login already used by {(justCreated.shared_with || []).join(", ")}. The password stays
+                    the same, so nothing new needs sending — they pick this patient after signing in. Use Reset Password
+                    only if the family has lost it.
+                  </div>
+                )}
+
+                {justCreated?.password && (
                   <div className="space-y-2 rounded-md border border-violet-300 bg-white p-3" data-testid="branch-patient-portal-credentials">
                     <p className="text-[11px] font-semibold text-violet-700">Share these once — the password won't be shown again</p>
                     <p className="text-xs text-slate-700">Link: <span className="break-all font-mono">{portalUrl()}</span></p>
-                    <p className="text-xs text-slate-700">Username: <span className="font-mono">{justCreated.email}</span></p>
-                    <p className="text-xs text-slate-700">Password: <span className="font-mono">{justCreated.password}</span></p>
+                    {credentialLines(justCreated).map(([label, value]) => (
+                      <p key={label} className="text-xs text-slate-700">{label}: <span className="font-mono">{value}</span></p>
+                    ))}
+                    {(justCreated.shared_with || []).length > 0 && (
+                      <p className="text-[11px] text-amber-700">This password now also applies to {justCreated.shared_with.join(", ")}.</p>
+                    )}
                     <div className="flex gap-2 pt-1">
                       <Button size="sm" className="flex-1 bg-[#25D366] text-xs text-white hover:bg-[#1da851]" onClick={shareOnWhatsApp} data-testid="branch-patient-portal-whatsapp">
                         <WhatsAppIcon className="mr-1.5 h-3.5 w-3.5" /> Share on WhatsApp

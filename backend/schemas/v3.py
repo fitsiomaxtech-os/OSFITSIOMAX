@@ -816,16 +816,24 @@ class V3MarkInstallmentPaidInput(BaseModel):
 
 
 class V3PortalAccountInput(BaseModel):
-    # Both optional — email defaults to the lead's own email if it has one; password
-    # defaults to a freshly generated one when omitted ("Generate"), or the Branch
-    # Admin can supply their own ("Create").
+    # All optional — phone and email default to the lead's own; password defaults to a
+    # freshly generated one when omitted ("Generate"), or the Branch Admin can supply
+    # their own ("Create").
+    phone: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = None
 
 
 class V3PatientPortalLogin(BaseModel):
-    email: str
+    # `login` is a phone number or an email, whichever the patient typed. `email` is the
+    # field's old name, still read so a browser holding a stale chunk can sign in.
+    login: Optional[str] = None
+    email: Optional[str] = None
     password: str
+
+
+class V3PatientPortalSwitch(BaseModel):
+    lead_id: str
 
 
 class V3PatientPortalGoogleLogin(BaseModel):

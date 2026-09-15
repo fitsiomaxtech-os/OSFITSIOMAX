@@ -31,8 +31,22 @@ const authHeaders = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-export const patientPortalLogin = async (email, password) => {
-  const { data } = await portalApi.post("/patient-portal/login", { email, password });
+/** `login` is whatever the patient typed: a phone number in any format, or an email. */
+export const patientPortalLogin = async (login, password) => {
+  const { data } = await portalApi.post("/patient-portal/login", { login, password });
+  return data;
+};
+
+/** Every patient this sign-in may look at — more than one when a family shares a login. */
+export const patientPortalPatients = async () => {
+  const { data } = await portalApi.get("/patient-portal/patients", { headers: authHeaders() });
+  return data;
+};
+
+/** Point the session at another patient on the same login. Every other call then answers
+    for that patient; the server refuses anyone the sign-in did not open. */
+export const patientPortalSwitch = async (leadId) => {
+  const { data } = await portalApi.post("/patient-portal/switch", { lead_id: leadId }, { headers: authHeaders() });
   return data;
 };
 
