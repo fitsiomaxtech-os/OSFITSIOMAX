@@ -105,7 +105,13 @@ async def v3_bd_summary(
     # Time-bucketed lead volume — real, computed straight off created_at, no invented figures.
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_leads = await v3_col("leads").count_documents(lead_filter({"created_at": {"$gte": today_start.isoformat()}}))
+    # Bounded above as well as below: a lead with a mistyped future created_at is not
+    # today's, and without the upper bound it counted here while the week_trend bucket for
+    # today (which is bounded) left it out -- the card and its trend line disagreed.
+    today_end = today_start + timedelta(days=1)
+    today_leads = await v3_col("leads").count_documents(lead_filter({
+        "created_at": {"$gte": today_start.isoformat(), "$lt": today_end.isoformat()}
+    }))
 
     week_start = today_start - timedelta(days=6)
     prev_week_start = week_start - timedelta(days=7)
@@ -239,20 +245,21 @@ async def v3_bd_summary_rows(
         appt_match["created_at"] = lead_match.get("created_at", {})
 
     # Copied from today_leads in /dashboard/bd-summary above, deliberately including its
-    # quirks: UTC midnight rather than the clinic day, and a lower bound with no upper
-    # one. Neither is what this codebase does elsewhere (clinic_day_of/CLINIC_UTC_OFFSET
-    # are right there), but the card's number is counted that way, and a list that
-    # silently corrected it would come back a different length from the figure that was
-    # clicked. Fix the two together or not at all.
+    # remaining quirk: UTC midnight rather than the clinic day. That is not what this
+    # codebase does elsewhere (clinic_day_of/CLINIC_UTC_OFFSET are right there), but the
+    # card's number is counted that way, and a list that silently corrected it would come
+    # back a different length from the figure that was clicked. Fix the two together or
+    # not at all -- as the upper bound was.
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
 
     # Which collection, and which query over it, per card. Named the same as the metric
     # keys the cards carry so the two can be read side by side.
     if metric in {"total", "today", "followup", "revenue"}:
         query = dict(lead_match)
         if metric == "today":
-            query["created_at"] = {"$gte": today_start.isoformat()}
+            query["created_at"] = {"$gte": today_start.isoformat(), "$lt": today_end.isoformat()}
         elif metric == "followup":
             query["stage"] = "Follow Up"
         elif metric == "revenue":

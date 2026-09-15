@@ -26,7 +26,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -35,6 +35,8 @@ import {
   getBdSummary,
   getBdSummaryRows,
   getBranches,
+  stagesList,
+  updateLead,
 } from "@/lib/api";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 // The toolbar controls, every one of them the same instance another board already uses --
@@ -50,7 +52,9 @@ import { BranchTransferDialog } from "@/components/branch/BranchTransferDialog";
 // tabs below. Imported statically, the way OperationsBoard already mounts these same two
 // boards: this file is itself behind a lazy() in CRMPage, so webpack lifts what the
 // chunks share rather than copying either board into each.
-import { PreSalesCRM } from "@/components/PreSalesCRM";
+// LeadDetailDialog is Sales View's own lead popup, opened here from a row in a card's list
+// so a lead reads and moves the same way from either place.
+import { LeadDetailDialog, PreSalesCRM } from "@/components/PreSalesCRM";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
 // Super Admin's own six Dashboard tabs -- Marketing, Sales, Revenue, Team, Clients and
 // Analytics -- and the hook that fetches what they read. Mounted on this desk's own
@@ -204,7 +208,9 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
   // Which summary card is open, and the rows behind it. One card at a time: these lists
   // answer "which ones are they" about a figure just clicked, and two of them open at
   // once would be a report rather than an answer.
-  const [openMetric, setOpenMetric] = useState(null);
+  //
+  // Today's Leads is open on arrival: it is the list this desk works first every morning.
+  const [openMetric, setOpenMetric] = useState("today");
   const [drill, setDrill] = useState(null);
   const [drillLoading, setDrillLoading] = useState(false);
   // Bumped by Refresh and by a finished sheet pull, to re-ask for the open list. The rows
@@ -306,6 +312,25 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
     toast.success("Data refreshed");
   }, [reloadAll]);
 
+  // The lead a row in a card's list was clicked for, shown in Sales View's own popup. The
+  // pre-sales stages it offers are fetched on the first click rather than on load: most
+  // sittings never open one.
+  const [openLead, setOpenLead] = useState(null);
+  const [leadStages, setLeadStages] = useState([]);
+  const openLeadDetail = useCallback((lead) => {
+    setOpenLead(lead);
+    if (!leadStages.length) {
+      stagesList("pre_sales").then(setLeadStages).catch((e) => console.warn("[BD stages load failed]", e?.message || e));
+    }
+  }, [leadStages.length]);
+  const moveLeadStage = useCallback(async (leadId, stageName) => {
+    try {
+      await updateLead(leadId, { stage: stageName });
+      toast.success(`Moved to ${stageName}`);
+      reloadAll();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Move failed"); }
+  }, [reloadAll]);
+
   return (
     <div className="space-y-5" data-testid="bd-dashboard-root">
       {/* Top navigation, in Branch Admin's shape: underlines on a rule rather than filled
@@ -387,6 +412,7 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
           onRefresh={refreshAll}
           onPulled={reloadAll}
           onBranchSwap={() => setSwapPicking(true)}
+          onOpenLead={openLeadDetail}
         />
       )}
 
@@ -484,6 +510,17 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
             )}
           </Suspense>
         </div>
+      )}
+
+      {openLead && (
+        <LeadDetailDialog
+          lead={openLead}
+          stages={leadStages}
+          currentUser={currentUser}
+          onClose={() => setOpenLead(null)}
+          onSaved={reloadAll}
+          onMoveStage={moveLeadStage}
+        />
       )}
 
       {showCreateLead && (
@@ -608,7 +645,11 @@ const TREND_BASELINE = "#e4e4e7";
  * interpolation; the dots are the only places on the line where the ink is a measurement,
  * which is exactly how OverAll Growth puts it.
  */
-function Sparkline({ data, color = TREND_INK }) {
+//
+// `fromZero` pins the bottom of the plot at 0, which is right for a daily count. A running
+// total is thousands high and moves by tens a day, so on a zero floor it draws as a flat
+// line at the top; it scales to its own low and high instead.
+function Sparkline({ data, color = TREND_INK, fromZero = true }) {
   // Measured rather than drawn in a stretched viewBox. A viewBox with
   // preserveAspectRatio="none" is the cheap way to fill a card of unknown width, but it
   // scales x and y by different factors, and under that a round dot comes out an oval --
@@ -641,8 +682,8 @@ function Sparkline({ data, color = TREND_INK }) {
 
   if (!data || data.length < 2) return <span ref={ref} className="block h-6" />;
 
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
+  const max = fromZero ? Math.max(...data, 1) : Math.max(...data);
+  const min = fromZero ? Math.min(...data, 0) : Math.min(...data);
   const range = Math.max(max - min, 1);
   const step = plotW / (data.length - 1);
   const pts = data.map((v, i) => [r + i * step, r + plotH - ((v - min) / range) * plotH]);
@@ -683,7 +724,7 @@ function Sparkline({ data, color = TREND_INK }) {
  * direction -- green for a rise, red for a fall -- because on a white card the direction
  * has to come from the pill's own colour rather than from an arrow on a translucent chip.
  */
-function KpiCard({ label, value, icon: Icon, trend, sparkline, onClick, open, testid }) {
+function KpiCard({ label, value, icon: Icon, trend, sparkline, sparklineFromZero = true, onClick, open, testid }) {
   const Tag = onClick ? "button" : "div";
   const trendTone = trend?.direction === "up"
     ? "bg-emerald-50 text-emerald-700"
@@ -715,7 +756,7 @@ function KpiCard({ label, value, icon: Icon, trend, sparkline, onClick, open, te
       )}
       {sparkline && (
         <span className="mt-1.5 block">
-          <Sparkline data={sparkline} />
+          <Sparkline data={sparkline} fromZero={sparklineFromZero} />
         </span>
       )}
     </Tag>
@@ -775,7 +816,7 @@ const DRILL_COLUMNS = {
  * on screen rather than the figure above it. A card's number therefore keeps meaning what
  * it counted, and the line under the title says how many of those the toolbar is showing.
  */
-function DrillList({ title, drill, loading, branches, onClose, search = "", sortOrder = "newest", markFilter = "" }) {
+function DrillList({ drill, loading, branches, onOpenLead, search = "", sortOrder = "newest", markFilter = "" }) {
   const branchName = useCallback(
     (id) => (id ? (branches.find((b) => b.id === id)?.branch_name || "Unknown") : "Unassigned"),
     [branches],
@@ -826,32 +867,22 @@ function DrillList({ title, drill, loading, branches, onClose, search = "", sort
   // holding rows back: one is a cap and the other is a question, and a reader who cannot
   // tell them apart cannot tell whether clearing the search would show them everything.
   const narrowed = rows.length !== sent.length;
+  // A lead row opens that lead. The other three kinds have no popup of their own to open.
+  const openRow = kind === "lead" && onOpenLead ? onOpenLead : null;
 
   return (
     <Card data-testid="bd-drill-card">
-      <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
-        <div className="min-w-0">
-          <CardTitle className="truncate text-base" data-testid="bd-drill-title">{title}</CardTitle>
-          {drill && (
-            <p className="mt-0.5 text-xs text-slate-500" data-testid="bd-drill-count">
-              {drill.total.toLocaleString("en-IN")} in total
-              {clipped > 0 && ` · showing the ${sent.length.toLocaleString("en-IN")} most recent`}
-              {narrowed && ` · ${rows.length.toLocaleString("en-IN")} match the toolbar`}
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Close list"
-          aria-label="Close list"
-          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          data-testid="bd-drill-close"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </CardHeader>
+      {/* No title bar: the highlighted card above already names the list, and it closes by
+          clicking that card again. What is still worth a line is the two ways this list can
+          be shorter than the card's figure -- said only when one of them is happening. */}
       <CardContent className="p-0">
+        {drill && (clipped > 0 || narrowed) && (
+          <p className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500" data-testid="bd-drill-count">
+            {clipped > 0 && `Showing the ${sent.length.toLocaleString("en-IN")} most recent of ${drill.total.toLocaleString("en-IN")}`}
+            {clipped > 0 && narrowed && " · "}
+            {narrowed && `${rows.length.toLocaleString("en-IN")} match the toolbar`}
+          </p>
+        )}
         {loading ? (
           <p className="px-3 py-8 text-center text-sm text-slate-400" data-testid="bd-drill-loading">Loading...</p>
         ) : rows.length === 0 ? (
@@ -868,7 +899,12 @@ function DrillList({ title, drill, loading, branches, onClose, search = "", sort
               {rows.map((r, i) => {
                 const [head, ...rest] = columns;
                 return (
-                  <div key={r.id || i} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`bd-drill-card-${r.id || i}`}>
+                  <div
+                    key={r.id || i}
+                    {...(openRow ? { role: "button", tabIndex: 0, onClick: () => openRow(r), onKeyDown: (e) => { if (e.key === "Enter") openRow(r); } } : {})}
+                    className={`rounded-xl border border-slate-200 bg-white p-3 ${openRow ? "cursor-pointer hover:border-sky-300" : ""}`}
+                    data-testid={`bd-drill-card-${r.id || i}`}
+                  >
                     <p className="truncate text-sm font-bold text-slate-800">{head.value(r, ctx)}</p>
                     {head.sub?.(r) && <p className="truncate text-xs text-slate-500">{head.sub(r)}</p>}
                     <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
@@ -894,7 +930,12 @@ function DrillList({ title, drill, loading, branches, onClose, search = "", sort
                 </thead>
                 <tbody>
                   {rows.map((r, i) => (
-                    <tr key={r.id || i} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`bd-drill-row-${r.id || i}`}>
+                    <tr
+                      key={r.id || i}
+                      {...(openRow ? { onClick: () => openRow(r), title: "Open lead" } : {})}
+                      className={`border-t border-slate-100 hover:bg-slate-50 ${openRow ? "cursor-pointer" : ""}`}
+                      data-testid={`bd-drill-row-${r.id || i}`}
+                    >
                       <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                       {columns.map((c) => (
                         <td key={c.key} className="px-3 py-2 text-slate-600">
@@ -999,11 +1040,20 @@ const buildCardGroups = (summary) => {
     text: `${weekChangePct >= 0 ? "+" : ""}${weekChangePct}% vs last week`,
   };
 
+  // Total Leads' own line: the running total at the close of each of the seven days. It
+  // used to be the same daily counts Today's Leads draws, so the two cards carried one
+  // identical line and the total's said nothing about the total. Worked back from today's
+  // figure by taking off each later day's arrivals, so its last dot is the card's number.
+  const totalLeads = summary.total_leads || 0;
+  const totalTrend = weekTrendCounts.map((_, i) => (
+    totalLeads - weekTrendCounts.slice(i + 1).reduce((sum, n) => sum + n, 0)
+  ));
+
   const followUp = summary.stage_counts?.["Follow Up"] || 0;
 
   const cards = {
     onboarding: [
-      { key: "total", metric: "total", label: "Total Leads", value: summary.total_leads, icon: Users, trend: weekTrend, sparkline: weekTrendCounts },
+      { key: "total", metric: "total", label: "Total Leads", value: summary.total_leads, icon: Users, trend: weekTrend, sparkline: totalTrend, sparklineFromZero: false },
       { key: "today", metric: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, trend: todayTrend, sparkline: weekTrendCounts },
       { key: "followup", metric: "followup", label: "Active Follow-ups", value: followUp, icon: Clock },
       { key: "appointments", metric: "appointments", label: "Appointments", value: summary.total_appointments, icon: CalendarCheck },
@@ -1036,6 +1086,7 @@ function DashboardTab({
   onRefresh,
   onPulled,
   onBranchSwap,
+  onOpenLead,
 }) {
   // Which tab of the eight is on screen. OnBoarding, because this desk's own pipeline is
   // what it opens the board for; the six group-wide reads after it are the question behind
@@ -1082,7 +1133,6 @@ function DashboardTab({
 
   const cardGroups = summary ? buildCardGroups(summary) : [];
   const activeCardGroup = cardGroups.find((g) => g.key === openGroup);
-  const openCardDef = cardGroups.flatMap((g) => g.cards).find((c) => c.metric && c.metric === openMetric);
 
   // Leaving a tab closes the list under it. Those rows were opened by a card in the row
   // being left, and only one row is on screen, so carrying them over would leave rows
@@ -1091,6 +1141,8 @@ function DashboardTab({
   const selectGroup = (key) => {
     if (key === openGroup) return;
     if (openMetric) onOpenCard(openMetric);
+    // Back on OnBoarding, Today's Leads opens again -- the same list the board arrives on.
+    if (key === "onboarding") onOpenCard("today");
     if (!CARD_GROUP_KEYS.includes(key)) setWantsPanels(true);
     setOpenGroup(key);
   };
@@ -1326,6 +1378,7 @@ function DashboardTab({
                     icon={m.icon}
                     trend={m.trend}
                     sparkline={m.sparkline}
+                    sparklineFromZero={m.sparklineFromZero}
                     open={openMetric === m.metric}
                     onClick={m.metric ? () => onOpenCard(m.metric) : undefined}
                     testid={`bd-metric-${m.key}`}
@@ -1336,11 +1389,10 @@ function DashboardTab({
 
             {openMetric && (
               <DrillList
-                title={openCardDef?.label || "Rows"}
                 drill={drill}
                 loading={drillLoading}
                 branches={branches}
-                onClose={() => onOpenCard(openMetric)}
+                onOpenLead={onOpenLead}
                 search={search}
                 sortOrder={sortOrder}
                 markFilter={markFilter}

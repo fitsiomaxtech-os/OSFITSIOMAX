@@ -2025,7 +2025,7 @@ const rnrDetail = (details) => {
 // pinnedBranchId: set when the board is a single branch's, which is how a Super Admin
 // drilled into a branch gets a branch for the appointment flow — they have none of their
 // own, and without it every appointment asks them to pick one they already chose.
-const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, canMoveStage = true, onClose, onSaved, onMoveStage }) => {
+export const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, canMoveStage = true, onClose, onSaved, onMoveStage }) => {
   const [tab, setTab] = useState("overview");
   const [showEdit, setShowEdit] = useState(false);
   const [currentLead, setCurrentLead] = useState(lead);
