@@ -17,41 +17,133 @@ export const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
 export const PRINTABLE_STYLES = `
   /* Its own font link. This is a standalone document opened in its own window, so the
      app's index.css never reaches it — without this the sheet falls back to Segoe UI and
-     paper stops matching screen. Weights go to 800 because .brand, .amt and .tag all use
-     it; requesting only the app's 500-700 would leave the browser synthesising the bold. */
+     paper stops matching screen. Segoe UI stays in the stack: a printer with no network
+     still produces a receipt. */
   @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&display=swap');
   *{box-sizing:border-box}
-  /* 88%, on the document rather than .wrap, so the page padding scales with the sheet.
-     Segoe UI stays in the stack: a printer with no network still produces a receipt. */
-  body{margin:0;padding:28px;zoom:.88;font-family:'Lexend','Segoe UI',Arial,sans-serif;color:#0f172a;background:#f1f5f9}
-  .wrap{max-width:560px;margin:0 auto;border:1px solid #cbd5e1;border-radius:12px;padding:26px;background:#fff}
-  .head{display:flex;align-items:center;gap:14px}
-  .logo{width:52px;height:52px;object-fit:contain;border-radius:10px;flex:none}
-  .brand{font-size:22px;font-weight:800;letter-spacing:.5px}
-  .sub{font-size:12px;color:#64748b;margin-top:2px}
-  .tag{display:inline-block;margin-top:12px;padding:5px 12px;border-radius:6px;
-       background:#dcfce7;color:#15803d;font-size:12px;font-weight:800;letter-spacing:.6px}
-  .tag-sch{background:#fef3c7;color:#b45309}
-  .tag-appt{background:#ccfbf1;color:#0f766e}
-  hr{border:0;border-top:1px dashed #cbd5e1;margin:18px 0}
-  .amt-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#64748b}
-  .amt{font-size:34px;font-weight:800;color:#15803d;margin-top:2px}
-  .amt-sch{color:#b45309}
-  .amt-appt{color:#0f766e;font-size:26px}
-  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
-  td{padding:7px 0;vertical-align:top}
-  td.k{color:#64748b;width:45%}
-  td.v{text-align:right;font-weight:600}
-  .note{margin-top:16px;padding:12px 14px;border-radius:8px;background:#f8fafc;
-        border:1px solid #e2e8f0;font-size:12px;color:#475569;line-height:1.6}
-  .foot{margin-top:20px;font-size:11px;color:#94a3b8;text-align:center;line-height:1.6}
-  @media print{body{padding:0;background:#fff}.wrap{border:none;border-radius:0}}
+  /* One accent per document state, set on .doc, so every tinted surface follows it. */
+  .doc{--accent:#0f766e;--soft:#f0fdfa;--edge:#99f6e4}
+  .tone-paid{--accent:#047857;--soft:#ecfdf5;--edge:#a7f3d0}
+  .tone-sch{--accent:#b45309;--soft:#fffbeb;--edge:#fde68a}
+  .tone-appt{--accent:#0f766e;--soft:#f0fdfa;--edge:#99f6e4}
+  /* print-color-adjust, or the browser drops every tint and the accent bar on paper. */
+  body{margin:0;padding:32px 16px;font-family:'Lexend','Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.45;
+       color:#0f172a;background:#e2e8f0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .doc{position:relative;max-width:760px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;
+       box-shadow:0 12px 32px rgba(15,23,42,.14)}
+  .bar{height:6px;background:var(--accent)}
+
+  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding:26px 34px 22px;border-bottom:1px solid #e2e8f0}
+  .brand-row{display:flex;align-items:center;gap:14px;min-width:0}
+  .logo{width:58px;height:58px;object-fit:contain;border-radius:14px;background:var(--soft);border:1px solid var(--edge);padding:7px;flex:none}
+  .brand{font-size:23px;font-weight:800;letter-spacing:2px;line-height:1.1}
+  .sub{font-size:11.5px;color:#64748b;margin-top:2px}
+  .branch{font-size:12px;font-weight:600;color:#334155;margin-top:5px}
+  .meta{text-align:right;flex:none}
+  .doc-title{font-size:19px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:1.5px;line-height:1.1}
+  .meta-line{font-size:11.5px;color:#64748b;margin-top:5px}
+  .meta-line b{color:#0f172a;font-weight:600;margin-left:6px}
+  .pill{display:inline-flex;align-items:center;gap:6px;margin-top:9px;padding:4px 11px;border-radius:999px;
+        font-size:10.5px;font-weight:700;letter-spacing:.9px;background:var(--soft);color:var(--accent);border:1px solid var(--edge)}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+
+  .body{padding:24px 34px 8px}
+  .label{font-size:10.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#64748b;margin:0 0 8px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:stretch}
+  .panel{border:1px solid #e2e8f0;border-radius:12px;padding:15px 17px}
+  .name{font-size:17px;font-weight:700;margin-bottom:6px}
+  .kv{width:100%;border-collapse:collapse}
+  .kv td{padding:3.5px 0;font-size:12px;vertical-align:top}
+  .kv td.k{color:#64748b;width:42%;padding-right:12px}
+  .kv td.v{font-weight:600;word-break:break-word}
+
+  .amount{position:relative;display:flex;flex-direction:column;justify-content:center;text-align:right;
+          background:var(--soft);border:1px solid var(--edge);border-radius:12px;padding:16px 18px;overflow:hidden}
+  .amount .value{font-size:31px;font-weight:800;color:var(--accent);line-height:1.15;margin-top:2px}
+  .amount .mode{font-size:12px;color:#475569;margin-top:4px}
+  .stamp{position:absolute;left:18px;top:50%;transform:translateY(-50%) rotate(-14deg);border:2.5px solid var(--accent);
+         color:var(--accent);border-radius:8px;padding:3px 10px;font-size:17px;font-weight:800;letter-spacing:3px;opacity:.45}
+
+  .items{width:100%;border-collapse:collapse;margin-top:22px}
+  .items th{text-align:left;font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:#64748b;font-weight:700;
+            padding:9px 12px;background:#f8fafc;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0}
+  .items td{padding:12px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:12.5px}
+  .items .num{text-align:right;white-space:nowrap}
+  .items .desc{font-weight:600}
+  .items .desc small{display:block;font-weight:400;color:#64748b;font-size:11.5px;margin-top:2px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.6px}
+  .badge-paid{background:#dcfce7;color:#15803d}
+  .badge-due{background:#fef3c7;color:#b45309}
+
+  .summary{margin-top:18px}
+  .totals{width:100%;border-collapse:collapse;align-self:start}
+  .totals td{padding:5px 2px;font-size:12.5px}
+  .totals td.num{text-align:right;font-weight:600;white-space:nowrap}
+  .totals .off td{color:#be123c}
+  .totals .grand td{font-size:15.5px;font-weight:800;color:var(--accent);border-top:2px solid #0f172a;padding-top:10px}
+  .totals .due td{color:#be123c;font-weight:700}
+
+  .hero{display:flex;gap:20px;align-items:center;background:var(--soft);border:1px solid var(--edge);border-radius:14px;padding:18px 20px}
+  .tile{flex:none;width:100px;border-radius:12px;background:#fff;border:1px solid var(--edge);text-align:center;overflow:hidden}
+  .tile .m{background:var(--accent);color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;padding:5px 0}
+  .tile .d{font-size:38px;font-weight:800;line-height:1.05;padding-top:8px}
+  .tile .w{font-size:11px;color:#64748b;padding:2px 0 9px}
+  .when{font-size:21px;font-weight:800;color:var(--accent);line-height:1.2}
+  .time{font-size:15px;font-weight:600;margin-top:3px}
+  .facts{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:10px;font-size:12px;color:#64748b}
+  .facts b{color:#0f172a;font-weight:600;word-break:break-all}
+
+  .note{margin-top:18px;padding:12px 15px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;font-size:12px;color:#475569;line-height:1.6}
+  .note-warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
+  .steps{list-style:none;margin:0;padding:0}
+  .steps li{position:relative;padding-left:24px;margin:5px 0}
+  .steps li::before{content:"\\2713";position:absolute;left:0;top:2px;width:16px;height:16px;border-radius:50%;
+                    background:var(--accent);color:#fff;font-size:9px;line-height:16px;text-align:center;font-weight:700}
+
+  .foot{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-top:22px;padding:16px 34px 22px;
+        border-top:1px dashed #cbd5e1;font-size:11px;color:#94a3b8;line-height:1.6}
+  .thanks{font-size:13px;font-weight:700;color:var(--accent);text-align:right}
+
+  @page{size:A4;margin:12mm}
+  @media print{body{padding:0;background:#fff}.doc{box-shadow:none;border-radius:0;max-width:none}}
+  @media (max-width:600px){
+    .head{flex-direction:column}.meta{text-align:left}.grid2{grid-template-columns:1fr}
+    .head,.body,.foot{padding-left:18px;padding-right:18px}.foot{flex-direction:column;align-items:flex-start}.thanks{text-align:left}
+  }
 `;
 
 /** Rows are [label, value] pairs; falsy entries are dropped so callers can inline conditions. */
-export const rowsHtml = (rows) => `<table>${rows.filter(Boolean).map(
+export const rowsHtml = (rows) => `<table class="kv">${rows.filter(Boolean).map(
   ([k, v]) => `<tr><td class="k">${escapeHtml(k)}</td><td class="v">${escapeHtml(v)}</td></tr>`,
 ).join("")}</table>`;
+
+/** "1200" -> "Rs.1,200". Anything that isn't a plain number is printed as it came. */
+export const rupees = (v) => {
+  const n = Number(v);
+  return `Rs.${v !== "" && v != null && Number.isFinite(n) ? n.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : escapeHtml(v)}`;
+};
+
+/**
+ * The letterhead every printable opens with — brand on the left, what the document is and
+ * its number on the right — so a receipt and an appointment sheet read as one stationery.
+ * `meta` is [label, value] pairs; `status` is the pill under the title.
+ */
+export const docHeadHtml = ({ title, meta = [], status, branch }) => `<div class="bar"></div>
+  <div class="head">
+    <div class="brand-row">
+      <img class="logo" src="${LOGO_URL}" alt="FITSIOMAX">
+      <div>
+        <div class="brand">FITSIOMAX</div>
+        <div class="sub">Physiotherapy &amp; Rehabilitation</div>
+        ${branch ? `<div class="branch">${escapeHtml(branch)}</div>` : ""}
+      </div>
+    </div>
+    <div class="meta">
+      <div class="doc-title">${escapeHtml(title)}</div>
+      ${meta.filter(Boolean).map(([k, v]) => `<div class="meta-line">${escapeHtml(k)}<b>${escapeHtml(v)}</b></div>`).join("")}
+      ${status ? `<div class="pill">${escapeHtml(status)}</div>` : ""}
+    </div>
+  </div>`;
 
 /**
  * Opens the document in its own window.

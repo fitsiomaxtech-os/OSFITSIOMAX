@@ -12,7 +12,7 @@
 import { toast } from "@/components/ui/sonner";
 import { waNumber } from "@/lib/phone";
 import {
-  LOGO_URL, PRINTABLE_STYLES, escapeHtml, openPrintable, downloadPrintable, sharePrintable,
+  PRINTABLE_STYLES, docHeadHtml, escapeHtml, rupees, openPrintable, downloadPrintable, sharePrintable,
 } from "@/lib/printable";
 
 // "split" is here and not on the collect popups' own lists on purpose: it is never a mode
@@ -85,29 +85,92 @@ export const receiptPopupRows = (r) => [
   [isSchedule(r) ? "Scheduled For" : "Paid For", r.paidFor],
 ].filter(([, v]) => v);
 
-export const receiptHtml = (r) => `<!doctype html><html><head><meta charset="utf-8">
+// The printed bill. Laid out as an invoice rather than a list of rows — who paid, how much,
+// for what, and how — but it carries every field receiptRows does, so paper and the shared
+// text still say the same things.
+export const receiptHtml = (r) => {
+  const sch = isSchedule(r);
+  const hasOriginal = r.originalAmount != null && r.originalAmount !== r.amount;
+  const pct = r.discount && r.originalAmount > 0
+    ? ` (${Number(((r.discount / r.originalAmount) * 100).toFixed(2))}%)`
+    : "";
+  const kv = (rows) => `<table class="kv">${rows.filter((row) => row && row[1]).map(
+    ([k, v]) => `<tr><td class="k">${escapeHtml(k)}</td><td class="v">${escapeHtml(v)}</td></tr>`,
+  ).join("")}</table>`;
+  const installments = r.installments || [];
+
+  return `<!doctype html><html><head><meta charset="utf-8">
 <title>Receipt ${escapeHtml(r.receiptNo)}</title><style>${PRINTABLE_STYLES}</style></head>
-<body><div class="wrap">
-  <div class="head">
-    <img class="logo" src="${LOGO_URL}" alt="FITSIOMAX">
-    <div>
-      <div class="brand">FITSIOMAX</div>
-      <div class="sub">${escapeHtml(r.branch || "Physiotherapy & Rehabilitation")}</div>
+<body><div class="doc ${sch ? "tone-sch" : "tone-paid"}">
+  ${docHeadHtml({
+    title: sch ? "Payment Schedule" : "Payment Receipt",
+    meta: [[sch ? "Reference No." : "Transaction ID", r.receiptNo], ["Date", r.dateLabel]],
+    status: sch ? "PAYMENT SCHEDULE" : "PAYMENT RECEIVED",
+    branch: r.branch,
+  })}
+  <div class="body">
+    <div class="grid2">
+      <div class="panel">
+        <p class="label">${sch ? "Prepared For" : "Received From"}</p>
+        <div class="name">${escapeHtml(r.patient)}</div>
+        ${kv([["Patient No.", r.patientNo], ["Phone", r.phone]])}
+      </div>
+      <div class="amount">
+        ${sch ? "" : `<div class="stamp">PAID</div>`}
+        <p class="label">${sch ? "Total Payable" : "Amount Paid"}</p>
+        <div class="value">${rupees(r.amount)}</div>
+        <div class="mode">${escapeHtml(r.modeLabel)}</div>
+      </div>
     </div>
+
+    <table class="items">
+      <thead><tr><th>Description</th><th class="num">Amount</th></tr></thead>
+      <tbody><tr>
+        <td class="desc">${escapeHtml(r.paidFor || (sch ? "Payment schedule" : "Payment"))}
+          ${r.packageName ? `<small>Package: ${escapeHtml(r.packageName)}</small>` : ""}
+          ${r.sessionsCovered ? `<small>Sessions covered: ${escapeHtml(r.sessionsCovered)}</small>` : ""}
+        </td>
+        <td class="num">${rupees(hasOriginal ? r.originalAmount : r.amount)}</td>
+      </tr></tbody>
+    </table>
+
+    <div class="grid2 summary">
+      <div class="panel">
+        <p class="label">Payment Details</p>
+        ${kv([
+          ["Payment Mode", r.modeLabel],
+          ["Reference", r.reference],
+          ["Cash Counted", r.cashCounted],
+          [sch ? "Prepared By" : "Collected By", r.collectedBy],
+        ])}
+      </div>
+      <table class="totals">
+        ${hasOriginal ? `<tr><td>Original Price</td><td class="num">${rupees(r.originalAmount)}</td></tr>` : ""}
+        ${r.discount ? `<tr class="off"><td>Discount${pct}</td><td class="num">- ${rupees(r.discount)}</td></tr>` : ""}
+        <tr class="grand"><td>${sch ? "Total Payable" : "Amount Paid"}</td><td class="num">${rupees(r.amount)}</td></tr>
+        ${r.balanceDue ? `<tr class="due"><td>Balance Due</td><td class="num">${escapeHtml(r.balanceDue)}</td></tr>` : ""}
+      </table>
+    </div>
+
+    ${installments.length ? `<table class="items">
+      <thead><tr><th>#</th><th>Sessions</th><th>Due Date</th><th class="num">Amount</th><th class="num">Status</th></tr></thead>
+      <tbody>${installments.map((i, n) => `<tr>
+        <td>${n + 1}</td>
+        <td>${i.sessions ? escapeHtml(i.sessions) : "—"}</td>
+        <td>${escapeHtml(i.due_date || "—")}</td>
+        <td class="num">${rupees(i.amount)}</td>
+        <td class="num"><span class="badge ${i.paid ? "badge-paid" : "badge-due"}">${i.paid ? "PAID" : "DUE"}</span></td>
+      </tr>`).join("")}</tbody>
+    </table>` : ""}
+
+    ${sch ? `<div class="note note-warn">This is a payment schedule, not a receipt — no amount has been collected yet.<br>A receipt is issued for each installment when it is paid.</div>` : ""}
   </div>
-  <div class="tag${isSchedule(r) ? " tag-sch" : ""}">${isSchedule(r) ? "PAYMENT SCHEDULE" : "PAYMENT RECEIVED"}</div>
-  <hr>
-  <div class="amt-label">${isSchedule(r) ? "Total Payable" : "Amount Paid"}</div>
-  <div class="amt${isSchedule(r) ? " amt-sch" : ""}">Rs.${escapeHtml(r.amount)}</div>
-  <hr>
-  <table>${receiptRows(r).map(([k, v]) => `<tr><td class="k">${escapeHtml(k)}</td><td class="v">${escapeHtml(v)}</td></tr>`).join("")}</table>
-  ${(r.installments || []).length ? `<hr><div class="amt-label">Installments</div>
-  <table>${r.installments.map((i, n) => `<tr><td class="k">#${n + 1}${i.sessions ? ` · ${escapeHtml(i.sessions)} sessions` : ""} · due ${escapeHtml(i.due_date || "—")}</td><td class="v">Rs.${escapeHtml(i.amount)}${i.paid ? " · PAID" : ""}</td></tr>`).join("")}</table>` : ""}
-  <hr>
-  <div class="foot">${isSchedule(r)
-    ? "This is a payment schedule, not a receipt — no amount has been collected yet.<br>A receipt is issued for each installment when it is paid."
-    : "This is a computer-generated receipt and needs no signature.<br>Thank you for choosing FITSIOMAX."}</div>
+  <div class="foot">
+    <div>${sch ? "Computer-generated payment schedule." : "This is a computer-generated receipt and needs no signature."}</div>
+    <div class="thanks">Thank you for choosing FITSIOMAX</div>
+  </div>
 </div></body></html>`;
+};
 
 export const receiptText = (r) => [
   `FITSIOMAX — Payment Receipt`,

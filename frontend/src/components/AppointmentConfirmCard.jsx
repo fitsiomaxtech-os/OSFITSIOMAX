@@ -15,7 +15,7 @@ import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
 import { waNumber } from "@/lib/phone";
 import { isHandheld } from "@/lib/receipt";
-import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
+import { PRINTABLE_STYLES, docHeadHtml, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 import { to12h, endTime12h } from "@/lib/time";
 
 /** "2026-08-05" -> "05 - 08 - 2026" */
@@ -199,28 +199,73 @@ export const shareApptCard = async (a) => {
 };
 
 /** The card on its own, for attaching by hand where the share sheet isn't available. */
-export const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
+// The printed sheet: a calendar tile and the when/where up top, the patient's details and
+// the booking beneath, then the standing instructions. Every field apptRows carries is on it.
+export const apptHtml = (a) => {
+  const [y, m, d] = String(a.date || "").split("-");
+  const day = y && m && d ? new Date(`${a.date}T00:00:00`) : null;
+  const meet = (a.meetLink || "").trim();
+  return `<!doctype html><html><head><meta charset="utf-8">
 <title>Appointment ${escapeHtml(a.refNo)}</title><style>${PRINTABLE_STYLES}</style></head>
-<body><div class="wrap">
-  <div class="head">
-    <img class="logo" src="${LOGO_URL}" alt="FITSIOMAX">
-    <div>
-      <div class="brand">FITSIOMAX</div>
-      <div class="sub">${escapeHtml(a.branch || "Physiotherapy & Rehabilitation")}</div>
+<body><div class="doc tone-appt">
+  ${docHeadHtml({
+    title: "Appointment",
+    meta: [["Reference No.", a.refNo]],
+    status: "CONFIRMED",
+    branch: a.branch,
+  })}
+  <div class="body">
+    <div class="hero">
+      ${day ? `<div class="tile">
+        <div class="m">${escapeHtml(day.toLocaleDateString("en-US", { month: "short" }).toUpperCase())} ${escapeHtml(y)}</div>
+        <div class="d">${escapeHtml(String(Number(d)))}</div>
+        <div class="w">${escapeHtml(day.toLocaleDateString("en-US", { weekday: "long" }))}</div>
+      </div>` : ""}
+      <div style="min-width:0">
+        <p class="label">Your Appointment</p>
+        <div class="when">${escapeHtml(weekdayLabel(a.date))}</div>
+        <div class="time">${escapeHtml(to12h(a.time))} – ${escapeHtml(endTime12h(a.time, a.duration))}</div>
+        <div class="facts">
+          <span>Duration <b>${escapeHtml(a.duration)} minutes</b></span>
+          <span>Consultant <b>${escapeHtml(a.headPhysio)}</b></span>
+          ${meet ? `<span>Google Meet <b>${escapeHtml(meet)}</b></span>` : a.branch ? `<span>At <b>${escapeHtml(a.branch)}</b></span>` : ""}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:20px">
+      <div class="panel">
+        <p class="label">Patient</p>
+        <div class="name">${escapeHtml(a.patient)}</div>
+        ${rowsHtml([["Patient No.", a.patientNo], ["Phone", a.phone]])}
+      </div>
+      <div class="panel">
+        <p class="label">Booking</p>
+        ${rowsHtml([
+          ["Date", dmyLabel(a.date)],
+          a.branch ? ["Branch", a.branch] : null,
+          meet ? ["Google Meet", meet] : null,
+          !meet && a.branchAddress ? ["Location", a.branchAddress] : null,
+          ["Booked By", a.bookedBy],
+        ])}
+      </div>
+    </div>
+
+    ${a.notes ? `<div class="note"><p class="label">Notes</p>${escapeHtml(a.notes)}</div>` : ""}
+    <div class="note">
+      <p class="label">Before you come</p>
+      <ul class="steps">
+        <li>${meet ? "Please join the meeting 5 minutes early." : "Please arrive 10 minutes early."}</li>
+        <li>To reschedule or cancel, contact the branch quoting reference <b>${escapeHtml(a.refNo)}</b>.</li>
+      </ul>
     </div>
   </div>
-  <div class="tag tag-appt">APPOINTMENT CONFIRMED</div>
-  <hr>
-  <div class="amt-label">Your Appointment</div>
-  <div class="amt amt-appt">${escapeHtml(weekdayLabel(a.date))}<br>${escapeHtml(to12h(a.time))}</div>
-  <hr>
-  ${rowsHtml(apptRows(a))}
-  ${a.notes ? `<div class="note"><b>Notes</b><br>${escapeHtml(a.notes)}</div>` : ""}
-  <div class="note">${a.meetLink ? "Please join the meeting 5 minutes early." : "Please arrive 10 minutes early."} To reschedule or cancel, contact the branch
-  quoting reference ${escapeHtml(a.refNo)}.</div>
-  <hr>
-  <div class="foot">This is a computer-generated confirmation and needs no signature.<br>Thank you for choosing FITSIOMAX.</div>
+  <div class="foot">
+    <div>This is a computer-generated confirmation and needs no signature.</div>
+    <div class="thanks">Thank you for choosing FITSIOMAX</div>
+  </div>
 </div></body></html>`;
+};
 
 /**
  * The confirmation on screen.
