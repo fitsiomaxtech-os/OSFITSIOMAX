@@ -11,8 +11,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, MessageSquareQuote, RefreshCw, Search, Star } from "lucide-react";
+import { Building2, Check, ChevronDown, Download, MessageSquareQuote, RefreshCw, Search, Star, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -91,6 +92,98 @@ const RatedPerson = ({ role, name, rating, comment }) => (
   </div>
 );
 
+/**
+ * The branch picker, drawn the way the Date Filter is: an outline trigger that turns sky
+ * when a branch is chosen (with an × to clear it), and a white popover list with the chosen
+ * row in sky and ticked. A native <select> opened the browser's own grey menu, which looked
+ * like it belonged to another application.
+ */
+const BranchFilter = ({ branches, value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const sorted = useMemo(
+    () => [...branches].sort((a, b) => String(a.branch_name || "").localeCompare(String(b.branch_name || ""))),
+    [branches],
+  );
+  const q = query.trim().toLowerCase();
+  const listed = q ? sorted.filter((b) => String(b.branch_name || "").toLowerCase().includes(q)) : sorted;
+  const current = branches.find((b) => b.id === value);
+  const active = Boolean(value);
+  const pick = (id) => { onChange(id); setOpen(false); setQuery(""); };
+
+  const row = (selected) => `flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+    selected ? "bg-sky-100 font-semibold text-sky-700" : "text-slate-700 hover:bg-slate-100"
+  }`;
+
+  return (
+    <div className="inline-flex items-center">
+      <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(""); }}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            className={`h-9 max-w-[240px] justify-between gap-2 ${active ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : "text-slate-600"}`}
+            data-testid="client-reviews-branch"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <Building2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">{current?.branch_name || (active ? "Selected branch" : "All Branches")}</span>
+            </span>
+            <ChevronDown className={`h-4 w-4 shrink-0 opacity-60 transition-transform ${open ? "rotate-180" : ""}`} />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-64 p-0" data-testid="client-reviews-branch-panel">
+          <div className="border-b border-slate-200 bg-slate-50/40 p-2">
+            <p className="px-1 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Filter by Branch</p>
+            {sorted.length > 6 && (
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <Input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search branch..."
+                  className="h-8 pl-8 text-sm"
+                  data-testid="client-reviews-branch-search"
+                />
+              </div>
+            )}
+          </div>
+          <div className="max-h-72 space-y-0.5 overflow-y-auto p-1.5">
+            {!q && (
+              <button type="button" onClick={() => pick("")} className={row(!active)} data-testid="client-reviews-branch-all">
+                <span className="truncate">All Branches</span>
+                {!active && <Check className="h-4 w-4 shrink-0" />}
+              </button>
+            )}
+            {listed.map((b) => (
+              <button key={b.id} type="button" onClick={() => pick(b.id)} className={row(b.id === value)} data-testid={`client-reviews-branch-${b.id}`}>
+                <span className="truncate">{b.branch_name}</span>
+                {b.id === value && <Check className="h-4 w-4 shrink-0" />}
+              </button>
+            ))}
+            {listed.length === 0 && (
+              <p className="px-3 py-4 text-center text-xs text-slate-400">
+                {sorted.length ? "No branch matches." : "No branches found."}
+              </p>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {active && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          title="Clear branch filter"
+          className="flex h-9 items-center rounded-r-md border border-l-0 border-sky-300 bg-sky-50 px-2 text-sky-700 hover:bg-sky-100"
+          data-testid="client-reviews-branch-clear"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+};
+
 export const ClientReviewsPanel = ({ branchId = null }) => {
   const [data, setData] = useState({ reviews: [], summary: null });
   const [loading, setLoading] = useState(true);
@@ -141,15 +234,7 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
       <Card>
         <CardContent className="flex flex-wrap items-center gap-2 p-3">
           {!branchId && (
-            <select
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              className={`h-9 max-w-[220px] rounded-md border px-2 text-sm font-medium ${branch ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}
-              data-testid="client-reviews-branch"
-            >
-              <option value="">All Branches</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-            </select>
+            <BranchFilter branches={branches} value={branch} onChange={setBranch} />
           )}
           <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" data-testid="client-reviews-stars">
             {STAR_FILTERS.map((f) => (
