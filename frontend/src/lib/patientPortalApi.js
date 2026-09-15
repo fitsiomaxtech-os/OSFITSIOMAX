@@ -55,6 +55,15 @@ export const patientPortalGoogleLogin = async (credential) => {
   return data;
 };
 
+export const patientPortalChangePassword = async (currentPassword, newPassword) => {
+  const { data } = await portalApi.post(
+    "/patient-portal/change-password",
+    { current_password: currentPassword, new_password: newPassword },
+    { headers: authHeaders() },
+  );
+  return data;
+};
+
 export const patientPortalLogout = async () => {
   try {
     await portalApi.post("/patient-portal/logout", null, { headers: authHeaders() });

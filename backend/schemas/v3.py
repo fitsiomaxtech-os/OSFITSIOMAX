@@ -836,6 +836,11 @@ class V3PatientPortalSwitch(BaseModel):
     lead_id: str
 
 
+class V3PatientPortalChangePassword(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class V3PatientPortalGoogleLogin(BaseModel):
     # The ID token JWT handed back by Google Identity Services' client-side button —
     # verified server-side against GOOGLE_CLIENT_ID before it's trusted for anything.

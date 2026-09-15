@@ -161,6 +161,16 @@ export const bulkHardDeleteLeads = async (leadIds, confirm) => (await api.post("
 export const getPortalAccountStatus = async (leadId) => (await api.get(`/leads/${leadId}/portal-account`)).data;
 export const createOrResetPortalAccount = async (leadId, payload) => (await api.post(`/leads/${leadId}/portal-account`, payload)).data;
 export const getClientPortalPreview = async (leadId) => (await api.get(`/leads/${leadId}/portal-preview`)).data;
+// Client Portal controls. The settings read says what this caller may change
+// (can_edit_clinic, branch_modes_allowed), so the screen offers only that.
+export const getPortalSettings = async (branchId) => (await api.get("/portal-settings", { params: { branch_id: branchId } })).data;
+export const savePortalClinicSettings = async (payload) => (await api.put("/portal-settings/clinic", payload)).data;
+export const savePortalBranchMode = async (branchId, mode) => (await api.put(`/portal-settings/branch/${branchId}`, { mode })).data;
+export const approvePortalPending = async (pendingId) => (await api.post(`/portal-pending/${pendingId}/approve`)).data;
+export const dismissPortalPending = async (pendingId) => (await api.post(`/portal-pending/${pendingId}/dismiss`)).data;
+export const emailPortalLogin = async (leadId) => (await api.post(`/leads/${leadId}/portal-account/email`)).data;
+export const setPortalBlocked = async (leadId, blocked) => (await api.post(`/leads/${leadId}/portal-account/block`, { blocked })).data;
+export const setPortalAutoSkip = async (leadId, skip) => (await api.put(`/leads/${leadId}/portal-auto`, { skip })).data;
 
 export const listTestimonials = async () => (await api.get("/testimonials/manage")).data;
 export const addTestimonial = async (payload) => (await api.post("/testimonials", payload)).data;

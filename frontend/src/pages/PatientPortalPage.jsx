@@ -9,7 +9,7 @@ import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
-  patientPortalSwitch,
+  patientPortalSwitch, patientPortalChangePassword,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback,
@@ -1234,6 +1234,98 @@ function PatientDocuments() {
   );
 }
 
+const PORTAL_PASSWORD_MIN = 6;
+
+// Collapsed to one button until asked for: most visits to Overview are not to change a
+// password, and three empty fields would push the branch card off a phone screen.
+function ChangePasswordCard() {
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => { setCurrent(""); setNext(""); setConfirm(""); setShow(false); };
+  const close = () => { reset(); setOpen(false); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (next.length < PORTAL_PASSWORD_MIN) { toast.error(`New password must be at least ${PORTAL_PASSWORD_MIN} characters`); return; }
+    if (next !== confirm) { toast.error("New passwords do not match"); return; }
+    if (next === current) { toast.error("New password must be different from the current one"); return; }
+    setSaving(true);
+    try {
+      await patientPortalChangePassword(current, next);
+      toast.success("Password changed");
+      close();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not change password");
+    }
+    setSaving(false);
+  };
+
+  const field = (label, value, setValue, autoComplete, testid) => (
+    <div>
+      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</label>
+      <Input
+        type={show ? "text" : "password"}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        required
+        className="h-9 text-sm"
+        data-testid={testid}
+      />
+    </div>
+  );
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="patient-portal-change-password">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Password</p>
+        {!open && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={() => setOpen(true)}
+            data-testid="patient-portal-change-password-open"
+          >
+            <Lock className="mr-1.5 h-3.5 w-3.5" /> Change Password
+          </Button>
+        )}
+      </div>
+      {open && (
+        <form onSubmit={submit} className="mt-3 space-y-2.5">
+          {field("Current password", current, setCurrent, "current-password", "patient-portal-current-password")}
+          {field("New password", next, setNext, "new-password", "patient-portal-new-password")}
+          {field("Confirm new password", confirm, setConfirm, "new-password", "patient-portal-confirm-password")}
+          <button
+            type="button"
+            onClick={() => setShow((v) => !v)}
+            className="flex items-center gap-1 text-[11px] font-medium text-slate-500"
+          >
+            {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {show ? "Hide passwords" : "Show passwords"}
+          </button>
+          <p className="text-[10px] text-slate-400">
+            At least {PORTAL_PASSWORD_MIN} characters. If family members share this login, the new password applies to them too.
+          </p>
+          <div className="flex gap-2 pt-1">
+            <Button type="button" variant="outline" size="sm" className="flex-1 text-xs" onClick={close} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" className="flex-1 bg-sky-600 text-xs text-white hover:bg-sky-700" disabled={saving} data-testid="patient-portal-change-password-submit">
+              {saving ? "Saving..." : "Update Password"}
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 function ProfileTab({ data }) {
   const Row = ({ label, value }) => (
     !value ? null : (
@@ -1273,6 +1365,8 @@ function ProfileTab({ data }) {
       )}
 
       <PatientDocuments />
+
+      <ChangePasswordCard />
 
       {(data.branch_name || data.branch_phone) && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">

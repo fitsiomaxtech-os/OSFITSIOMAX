@@ -34,7 +34,7 @@ from routers.v3_reviews import review_numbers_for_lead
 from utils import now_iso
 from security import hash_password, verify_password
 from email_utils import SmtpNotConfigured, send_email
-from deps import v3_require_roles, is_branch_admin_role
+from deps import v3_require_roles, is_branch_admin_role, works_org_wide
 from routers.v3_lead_documents import DIET_CHART, DOC_DIR, is_shared_with_patient
 from routers.v3_feedback import (
     AUDIENCE_CONSULTANT, AUDIENCE_SUPER, AUTHOR_PATIENT, AUTHOR_STAFF, MAX_MESSAGE,
@@ -45,7 +45,7 @@ from physio_scope import consultant_of_lead
 from routers.v3_marketing import normalize_phone
 from schemas.v3 import (
     V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin,
-    V3PatientPortalSwitch,
+    V3PatientPortalSwitch, V3PatientPortalChangePassword,
 )
 
 router = APIRouter(prefix="/api/v3")
@@ -177,10 +177,12 @@ async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_
     if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Patient not found")
     account = await v3_col("patient_portal_accounts").find_one(
-        {"lead_id": lead_id}, {"_id": 0, "phone": 1, "email": 1, "created_at": 1},
+        {"lead_id": lead_id},
+        {"_id": 0, "phone": 1, "email": 1, "created_at": 1, "blocked": 1, "created_via": 1, "email_status": 1},
     )
+    auto_skip = bool(lead.get("portal_auto_skip"))
     if not account:
-        return {"exists": False}
+        return {"exists": False, "auto_skip": auto_skip}
     phone, email = account.get("phone") or "", account.get("email") or ""
     siblings = await _accounts_sharing_login(lead_id, phone, email)
     return {
@@ -189,6 +191,10 @@ async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_
         "email": email,
         "created_at": account.get("created_at"),
         "shared_with": [p["name"] for p in await _patients_for([s["lead_id"] for s in siblings])],
+        "blocked": bool(account.get("blocked")),
+        "created_via": account.get("created_via") or "",
+        "email_status": account.get("email_status") or "",
+        "auto_skip": auto_skip,
     }
 
 
@@ -284,6 +290,8 @@ async def _save_portal_login(lead: dict, user, phone: str, email: str, supplied:
             details += f" — same password now applies to {', '.join(shared_with)}"
     if created_via == "auto":
         details = f"Automatically, on booking treatment: {details[0].lower()}{details[1:]}"
+    elif created_via == "approved":
+        details = f"On branch approval: {details[0].lower()}{details[1:]}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
@@ -304,6 +312,70 @@ async def _save_portal_login(lead: dict, user, phone: str, email: str, supplied:
 
 # ------------------------------------------------- Automatic login when treatment is booked
 
+# Who may change what — the control plan agreed with the clinic:
+#   clinic-wide switch and email wording   Super Admin, Business Development
+#   a branch's mode                         the same two for any branch, all three modes;
+#                                           a Branch Admin for their own branch, but only
+#                                           between "immediate" and "approval" — never "off"
+#   one client (block, resend, skip)        all three, a Branch Admin inside their branch
+PORTAL_SETTINGS_ID = "_singleton_"
+BRANCH_MODES = ("immediate", "approval", "off")
+BRANCH_ADMIN_MODES = ("immediate", "approval")
+
+DEFAULT_EMAIL_SUBJECT = "Your Fitsiomax Client Portal login"
+# {login} is one or two lines (phone, then email). {branch_help} is a sentence with the
+# branch's number, or nothing when the branch has none on file.
+DEFAULT_EMAIL_BODY = (
+    "Hi {name},\n"
+    "\n"
+    "Your Fitsiomax Client Portal is ready. You can see your session dates, your treatment\n"
+    "progress and your payments there, any time.\n"
+    "\n"
+    "Login here: {link}\n"
+    "{login}\n"
+    "Password: {password}\n"
+    "\n"
+    "Please keep this password private.{branch_help}\n"
+    "\n"
+    "— Fitsiomax"
+)
+EMAIL_TEMPLATE_KEYS = ("name", "link", "login", "password", "branch_help")
+
+
+async def portal_settings() -> dict:
+    """The clinic-wide portal settings, with defaults for anything never saved.
+
+    Automatic login is on unless somebody turned it off: that is what the clinic agreed,
+    and it is how Step 2 already behaved, so an install that never opens the settings keeps
+    doing what it did. A blank subject or body means the default wording.
+    """
+    row = await v3_col("portal_settings").find_one({"id": PORTAL_SETTINGS_ID}, {"_id": 0}) or {}
+    return {
+        "auto_enabled": row.get("auto_enabled", True),
+        "email_subject": (row.get("email_subject") or "").strip() or DEFAULT_EMAIL_SUBJECT,
+        "email_body": (row.get("email_body") or "").strip() or DEFAULT_EMAIL_BODY,
+        "updated_at": row.get("updated_at"),
+        "updated_by": row.get("updated_by"),
+    }
+
+
+async def branch_portal_mode(branch_id: Optional[str]) -> str:
+    """One branch's mode — "immediate" for a branch nobody has set, which is the default."""
+    if not branch_id:
+        return "immediate"
+    row = await v3_col("portal_branch_settings").find_one({"branch_id": branch_id}, {"_id": 0, "mode": 1})
+    mode = (row or {}).get("mode")
+    return mode if mode in BRANCH_MODES else "immediate"
+
+
+def _fill(template: str, values: dict) -> str:
+    """Put the values into {placeholders} by plain replacement. Not str.format: the wording
+    is typed by staff, and a stray { or } in it must not break every email that follows."""
+    for key, value in values.items():
+        template = template.replace("{" + key + "}", value)
+    return template
+
+
 async def _email_portal_login(lead: dict, login: dict) -> str:
     """Send a new portal login to the patient's inbox, and say what became of it.
 
@@ -314,6 +386,10 @@ async def _email_portal_login(lead: dict, login: dict) -> str:
 
     Sent off the event loop — smtplib blocks, for up to its 20-second timeout, and every
     other request on this worker would otherwise wait out a slow mail server with it.
+
+    Worded by the clinic-wide template. A template edited so that it no longer carries the
+    login or the password still gets them, added at the end: an email that tells a patient
+    their portal is ready without the means to open it is worse than no email.
     """
     if not login.get("email"):
         return "no_email"
@@ -322,23 +398,29 @@ async def _email_portal_login(lead: dict, login: dict) -> str:
         branch = await v3_col("branches").find_one(
             {"id": lead["branch_id"]}, {"_id": 0, "branch_name": 1, "phone": 1},
         ) or {}
-    lines = [
-        f"Hi {lead.get('name') or 'there'},",
-        "",
-        "Your Fitsiomax Client Portal is ready. You can see your session dates, your treatment",
-        "progress and your payments there, any time.",
-        "",
-        f"Login here: {FRONTEND_URL}/portal",
-    ]
+    login_lines = []
     if login.get("phone"):
-        lines.append(f"Login (phone): {login['phone']}")
-    lines.append(f"{'Or email' if login.get('phone') else 'Login (email)'}: {login['email']}")
-    lines += [f"Password: {login['password']}", "", "Please keep this password private."]
-    if branch.get("phone"):
-        lines.append(f"If you cannot sign in, call {branch.get('branch_name') or 'your branch'} on {branch['phone']}.")
-    lines += ["", "— Fitsiomax"]
+        login_lines.append(f"Login (phone): {login['phone']}")
+    login_lines.append(f"{'Or email' if login.get('phone') else 'Login (email)'}: {login['email']}")
+    values = {
+        "name": lead.get("name") or "there",
+        "link": f"{FRONTEND_URL}/portal",
+        "login": "\n".join(login_lines),
+        "password": login["password"],
+        "branch_help": (
+            f"\nIf you cannot sign in, call {branch.get('branch_name') or 'your branch'} on {branch['phone']}."
+            if branch.get("phone") else ""
+        ),
+    }
+    settings = await portal_settings()
+    body = _fill(settings["email_body"], values)
+    if "{login}" not in settings["email_body"]:
+        body += "\n\n" + values["login"]
+    if "{password}" not in settings["email_body"]:
+        body += f"\nPassword: {values['password']}"
+    subject = _fill(settings["email_subject"], values)
     try:
-        await asyncio.to_thread(send_email, login["email"], "Your Fitsiomax Client Portal login", "\n".join(lines))
+        await asyncio.to_thread(send_email, login["email"], subject, body)
         return "sent"
     except SmtpNotConfigured:
         return "not_configured"
@@ -356,6 +438,9 @@ async def auto_portal_login_for_treatment(lead_id: str, user) -> dict:
       created     a new login, password included, emailed if the patient has an email
       joined      added to a family's existing login — same password, nothing to send
       exists      the patient already had one (a reassignment or rebooking); untouched
+      pending     the branch approves logins first; queued on its Pending list
+      off         turned off clinic-wide, or for this branch
+      skipped     staff marked this patient "don't make a login automatically"
       no_contact  no 10-digit phone and no email on file, so nothing could be made
       error       something failed; logged, and the booking stands regardless
 
@@ -368,47 +453,366 @@ async def auto_portal_login_for_treatment(lead_id: str, user) -> dict:
             return {"status": "error"}
         if await v3_col("patient_portal_accounts").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1}):
             return {"status": "exists"}
-
-        phone = login_phone(lead.get("phone"))
-        email = (lead.get("email") or "").strip().lower()
-        now = now_iso()
-        if not phone and not email:
+        name = lead.get("name") or ""
+        if lead.get("portal_auto_skip"):
+            return {"status": "skipped", "patient_name": name}
+        settings = await portal_settings()
+        mode = await branch_portal_mode(lead.get("branch_id"))
+        if not settings["auto_enabled"] or mode == "off":
+            return {"status": "off", "patient_name": name}
+        if mode == "approval":
+            now = now_iso()
+            # One open request per patient: booking again while it waits must not stack a
+            # second copy of the same approval on the branch's list.
+            await v3_col("portal_pending").update_one(
+                {"lead_id": lead_id, "status": "pending"},
+                {"$setOnInsert": {
+                    "id": str(uuid.uuid4()),
+                    "lead_id": lead_id,
+                    "branch_id": lead.get("branch_id"),
+                    "patient_name": name,
+                    "phone": login_phone(lead.get("phone")),
+                    "email": (lead.get("email") or "").strip().lower(),
+                    "status": "pending",
+                    "raised_at": now,
+                    "raised_by": user.full_name,
+                }},
+                upsert=True,
+            )
             await v3_col("lead_activity").insert_one({
                 "id": str(uuid.uuid4()),
                 "lead_id": lead_id,
-                "action": "portal_account_skipped",
-                "details": "Client Portal login not made automatically: no 10-digit phone or email on file",
+                "action": "portal_login_pending",
+                "details": "Client Portal login waiting for branch approval",
                 "created_by": user.full_name,
                 "created_by_role": user.role,
                 "created_at": now,
             })
-            return {"status": "no_contact", "patient_name": lead.get("name") or ""}
-
-        login = await _save_portal_login(lead, user, phone, email, "", "auto")
-        if login["joined_existing"]:
-            return {"status": "joined", "patient_name": lead.get("name") or "", **login}
-
-        email_status = await _email_portal_login(lead, login)
-        await v3_col("patient_portal_accounts").update_one(
-            {"lead_id": lead_id}, {"$set": {"email_status": email_status, "email_status_at": now_iso()}},
-        )
-        if email_status != "no_email":
-            await v3_col("lead_activity").insert_one({
-                "id": str(uuid.uuid4()),
-                "lead_id": lead_id,
-                "action": "portal_login_emailed" if email_status == "sent" else "portal_login_email_failed",
-                "details": (
-                    f"Client Portal login emailed to {email}" if email_status == "sent"
-                    else f"Client Portal login email to {email} not sent ({email_status.replace('_', ' ')})"
-                ),
-                "created_by": user.full_name,
-                "created_by_role": user.role,
-                "created_at": now_iso(),
-            })
-        return {"status": "created", "email_status": email_status, "patient_name": lead.get("name") or "", **login}
+            return {"status": "pending", "patient_name": name}
+        return await _make_and_send_portal_login(lead, user, "auto")
     except Exception:
         logging.getLogger(__name__).exception("Automatic Client Portal login failed for lead %s", lead_id)
         return {"status": "error"}
+
+
+async def _make_and_send_portal_login(lead: dict, user, created_via: str) -> dict:
+    """Make the login and email it, with no settings consulted — the automatic path has
+    already decided it should happen, and approving a pending one is the branch deciding."""
+    lead_id = lead["id"]
+    phone = login_phone(lead.get("phone"))
+    email = (lead.get("email") or "").strip().lower()
+    if not phone and not email:
+        await v3_col("lead_activity").insert_one({
+            "id": str(uuid.uuid4()),
+            "lead_id": lead_id,
+            "action": "portal_account_skipped",
+            "details": "Client Portal login not made: no 10-digit phone or email on file",
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "created_at": now_iso(),
+        })
+        return {"status": "no_contact", "patient_name": lead.get("name") or ""}
+
+    login = await _save_portal_login(lead, user, phone, email, "", created_via)
+    if login["joined_existing"]:
+        return {"status": "joined", "patient_name": lead.get("name") or "", **login}
+
+    email_status = await _email_portal_login(lead, login)
+    await _record_email_status(lead_id, email, email_status, user)
+    return {"status": "created", "email_status": email_status, "patient_name": lead.get("name") or "", **login}
+
+
+async def _record_email_status(lead_id: str, email: str, email_status: str, user) -> None:
+    """What became of a login email — on the account for the staff panel to show, and on
+    the lead's activity so the history says whether the patient was actually sent it."""
+    await v3_col("patient_portal_accounts").update_one(
+        {"lead_id": lead_id}, {"$set": {"email_status": email_status, "email_status_at": now_iso()}},
+    )
+    if email_status == "no_email":
+        return
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "portal_login_emailed" if email_status == "sent" else "portal_login_email_failed",
+        "details": (
+            f"Client Portal login emailed to {email}" if email_status == "sent"
+            else f"Client Portal login email to {email} not sent ({email_status.replace('_', ' ')})"
+        ),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+
+
+# ------------------------------------------------------ Controls: settings, approval, per client
+
+def _may_manage_branch(user, branch_id: Optional[str]) -> bool:
+    """Super Admin and Business Development manage every branch; a Branch Admin their own."""
+    if works_org_wide(user.role):
+        return True
+    return is_branch_admin_role(user.role) and bool(branch_id) and user.branch_id == branch_id
+
+
+async def _scoped_lead(lead_id: str, user) -> dict:
+    lead = await _lead_or_404(lead_id)
+    if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return lead
+
+
+@router.get("/portal-settings")
+async def get_portal_controls(
+    branch_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
+    """Everything the Patients tab's portal card shows, and what this caller may change.
+
+    A Branch Admin always reads their own branch, whatever `branch_id` asks for. What the
+    card offers comes from `can_edit_clinic` and `branch_modes_allowed` here, so the rule
+    lives in one place and the screen cannot drift from what the PUTs below enforce.
+    """
+    org_wide = works_org_wide(user.role)
+    if not org_wide:
+        branch_id = user.branch_id
+    pending = []
+    if branch_id:
+        pending = await v3_col("portal_pending").find(
+            {"branch_id": branch_id, "status": "pending"}, {"_id": 0},
+        ).sort("raised_at", -1).to_list(200)
+    return {
+        **(await portal_settings()),
+        "default_email_subject": DEFAULT_EMAIL_SUBJECT,
+        "default_email_body": DEFAULT_EMAIL_BODY,
+        "template_keys": list(EMAIL_TEMPLATE_KEYS),
+        "can_edit_clinic": org_wide,
+        "branch_id": branch_id,
+        "branch_mode": await branch_portal_mode(branch_id),
+        "branch_modes_allowed": list(BRANCH_MODES if org_wide else BRANCH_ADMIN_MODES),
+        "pending": pending,
+    }
+
+
+class PortalClinicSettingsIn(BaseModel):
+    auto_enabled: Optional[bool] = None
+    # Blank means "back to the default wording".
+    email_subject: Optional[str] = None
+    email_body: Optional[str] = None
+
+
+@router.put("/portal-settings/clinic")
+async def save_portal_clinic_settings(
+    payload: PortalClinicSettingsIn,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    updates = {}
+    if payload.auto_enabled is not None:
+        updates["auto_enabled"] = payload.auto_enabled
+    if payload.email_subject is not None:
+        updates["email_subject"] = payload.email_subject.strip()[:200]
+    if payload.email_body is not None:
+        updates["email_body"] = payload.email_body.strip()[:5000]
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to save")
+    updates.update({"updated_at": now_iso(), "updated_by": user.full_name})
+    await v3_col("portal_settings").update_one({"id": PORTAL_SETTINGS_ID}, {"$set": updates}, upsert=True)
+    return await portal_settings()
+
+
+class PortalBranchModeIn(BaseModel):
+    mode: str
+
+
+@router.put("/portal-settings/branch/{branch_id}")
+async def save_portal_branch_mode(
+    branch_id: str,
+    payload: PortalBranchModeIn,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
+    """Set how one branch handles automatic logins.
+
+    A Branch Admin may choose between sending immediately and waiting for approval. Off is
+    not theirs to choose, and neither is undoing it: a branch Super Admin has switched off
+    stays off until an org-wide desk switches it back.
+    """
+    if not _may_manage_branch(user, branch_id):
+        raise HTTPException(status_code=404, detail="Branch not found")
+    mode = (payload.mode or "").strip().lower()
+    if mode not in BRANCH_MODES:
+        raise HTTPException(status_code=400, detail="Mode must be immediate, approval or off")
+    if not works_org_wide(user.role):
+        if mode not in BRANCH_ADMIN_MODES:
+            raise HTTPException(status_code=403, detail="Only Super Admin or Business Development can turn automatic portal login off")
+        if await branch_portal_mode(branch_id) == "off":
+            raise HTTPException(status_code=403, detail="Super Admin turned automatic portal login off for this branch — only they can turn it back on")
+    await v3_col("portal_branch_settings").update_one(
+        {"branch_id": branch_id},
+        {"$set": {"branch_id": branch_id, "mode": mode, "updated_at": now_iso(), "updated_by": user.full_name}},
+        upsert=True,
+    )
+    return {"branch_id": branch_id, "mode": mode}
+
+
+async def _open_pending(pending_id: str, user) -> dict:
+    row = await v3_col("portal_pending").find_one({"id": pending_id, "status": "pending"}, {"_id": 0})
+    if not row or not _may_manage_branch(user, row.get("branch_id")):
+        raise HTTPException(status_code=404, detail="This request is no longer waiting")
+    return row
+
+
+async def _close_pending(pending_id: str, status: str, user) -> None:
+    await v3_col("portal_pending").update_one(
+        {"id": pending_id},
+        {"$set": {"status": status, "closed_at": now_iso(), "closed_by": user.full_name}},
+    )
+
+
+@router.post("/portal-pending/{pending_id}/approve")
+async def approve_portal_pending(
+    pending_id: str,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
+    """Make and send a login that was waiting. Answers in the same shape the booking does,
+    so the desk gets the same popup with the password and Send on WhatsApp.
+
+    The request stays open when nothing could be made (no phone or email yet): fixing the
+    patient's details and approving again is the obvious next move, and closing it would
+    lose the one reminder that this patient still has no login.
+    """
+    row = await _open_pending(pending_id, user)
+    lead = await v3_col("leads").find_one({"id": row["lead_id"]}, {"_id": 0})
+    if not lead:
+        await _close_pending(pending_id, "dismissed", user)
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if await v3_col("patient_portal_accounts").find_one({"lead_id": lead["id"]}, {"_id": 0, "id": 1}):
+        await _close_pending(pending_id, "approved", user)
+        return {"status": "exists", "patient_name": lead.get("name") or ""}
+    result = await _make_and_send_portal_login(lead, user, "approved")
+    if result["status"] in ("created", "joined"):
+        await _close_pending(pending_id, "approved", user)
+    return result
+
+
+@router.post("/portal-pending/{pending_id}/dismiss")
+async def dismiss_portal_pending(
+    pending_id: str,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
+    row = await _open_pending(pending_id, user)
+    await _close_pending(pending_id, "dismissed", user)
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": row["lead_id"],
+        "action": "portal_login_pending_dismissed",
+        "details": "Client Portal login request dismissed — no login made",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    return {"status": "dismissed"}
+
+
+@router.post("/leads/{lead_id}/portal-account/email")
+async def email_portal_login_again(
+    lead_id: str,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
+    """Resend the login by email.
+
+    A password is only ever stored hashed, so there is nothing to send again as it was:
+    this is a reset that emails the new one. Like every reset it changes the password for
+    the whole family on that login — the panel warns before the click.
+    """
+    lead = await _scoped_lead(lead_id, user)
+    account = await v3_col("patient_portal_accounts").find_one({"lead_id": lead_id}, {"_id": 0})
+    if not account:
+        raise HTTPException(status_code=404, detail="This patient has no portal login yet")
+    if account.get("blocked"):
+        raise HTTPException(status_code=400, detail="Unblock this login before sending it again")
+    email = (account.get("email") or lead.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="No email on this login — share it on WhatsApp instead")
+    login = await _save_portal_login(lead, user, account.get("phone") or "", email, "", "manual")
+    email_status = await _email_portal_login(lead, login)
+    await _record_email_status(lead_id, email, email_status, user)
+    return {"status": "created", "email_status": email_status, "patient_name": lead.get("name") or "", **login}
+
+
+class PortalBlockIn(BaseModel):
+    blocked: bool
+
+
+@router.post("/leads/{lead_id}/portal-account/block")
+async def set_portal_account_blocked(
+    lead_id: str,
+    payload: PortalBlockIn,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
+    """Pause or restore one patient's portal access.
+
+    Blocking signs them out everywhere now rather than at their next login, which means
+    ending every session that can reach this patient — including a family member's, who
+    simply signs in again and no longer finds this patient on their list.
+    """
+    await _scoped_lead(lead_id, user)
+    account = await v3_col("patient_portal_accounts").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1})
+    if not account:
+        raise HTTPException(status_code=404, detail="This patient has no portal login yet")
+    now = now_iso()
+    if payload.blocked:
+        await v3_col("patient_portal_accounts").update_one(
+            {"lead_id": lead_id}, {"$set": {"blocked": True, "blocked_at": now, "blocked_by": user.full_name}},
+        )
+        await v3_col("patient_portal_sessions").delete_many({"$or": [{"lead_id": lead_id}, {"lead_ids": lead_id}]})
+    else:
+        await v3_col("patient_portal_accounts").update_one(
+            {"lead_id": lead_id}, {"$set": {"blocked": False, "unblocked_at": now, "unblocked_by": user.full_name}},
+        )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "portal_account_blocked" if payload.blocked else "portal_account_unblocked",
+        "details": "Client Portal access blocked" if payload.blocked else "Client Portal access restored",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    return {"blocked": payload.blocked}
+
+
+class PortalAutoSkipIn(BaseModel):
+    skip: bool
+
+
+@router.put("/leads/{lead_id}/portal-auto")
+async def set_portal_auto_skip(
+    lead_id: str,
+    payload: PortalAutoSkipIn,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
+    """Don't make this patient a login automatically. Generate Portal Access by hand still
+    works; this only stops the booking from doing it. Turning it on also clears an approval
+    already waiting for them, which would otherwise make the login this just ruled out."""
+    await _scoped_lead(lead_id, user)
+    now = now_iso()
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"portal_auto_skip": payload.skip, "updated_at": now}})
+    if payload.skip:
+        await v3_col("portal_pending").update_many(
+            {"lead_id": lead_id, "status": "pending"},
+            {"$set": {"status": "dismissed", "closed_at": now, "closed_by": user.full_name}},
+        )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "portal_auto_skip_on" if payload.skip else "portal_auto_skip_off",
+        "details": (
+            "Client Portal login will not be made automatically for this patient" if payload.skip
+            else "Client Portal login will be made automatically again for this patient"
+        ),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    return {"portal_auto_skip": payload.skip}
 
 
 # --------------------------------------------------------------------- Patient: log in
@@ -466,7 +870,22 @@ async def patient_portal_login(payload: V3PatientPortalLogin):
     matched = [a for a in accounts if verify_password(payload.password, a.get("password_hash", ""))]
     if not matched:
         raise HTTPException(status_code=401, detail="Invalid phone/email or password")
-    return await _start_portal_session(matched)
+    return await _start_portal_session(_unblocked(matched))
+
+
+# What a patient whose access has been paused is told. Only after the password has matched:
+# said to anyone typing a number, it would confirm that number belongs to a patient.
+PORTAL_PAUSED = "Your portal access is paused. Please contact your branch."
+
+
+def _unblocked(accounts: list) -> list:
+    """The accounts a sign-in may open. A family member who is blocked drops off the list
+    while the rest still get in; only when every one of them is blocked is the sign-in
+    refused, and then with the paused message rather than "wrong password"."""
+    open_accounts = [a for a in accounts if not a.get("blocked")]
+    if not open_accounts:
+        raise HTTPException(status_code=403, detail=PORTAL_PAUSED)
+    return open_accounts
 
 
 @router.post("/patient-portal/google-login")
@@ -492,7 +911,7 @@ async def patient_portal_google_login(payload: V3PatientPortalGoogleLogin):
             status_code=404,
             detail="No portal account found for this Google account. Ask your clinic to share your portal login.",
         )
-    return await _start_portal_session(accounts)
+    return await _start_portal_session(_unblocked(accounts))
 
 
 async def _portal_session(authorization: str) -> dict:
@@ -539,16 +958,63 @@ async def patient_portal_switch(payload: V3PatientPortalSwitch, authorization: s
     if payload.lead_id not in allowed:
         raise HTTPException(status_code=404, detail="Patient not found")
     account = await v3_col("patient_portal_accounts").find_one(
-        {"lead_id": payload.lead_id}, {"_id": 0, "id": 1},
+        {"lead_id": payload.lead_id}, {"_id": 0, "id": 1, "blocked": 1},
     )
     patients = await _patients_for([payload.lead_id])
     if not account or not patients:
         raise HTTPException(status_code=404, detail="Patient not found")
+    if account.get("blocked"):
+        raise HTTPException(status_code=403, detail=PORTAL_PAUSED)
     await v3_col("patient_portal_sessions").update_one(
         {"token": session["token"]},
         {"$set": {"lead_id": payload.lead_id, "account_id": account["id"]}},
     )
     return {"lead_id": payload.lead_id, "patient_name": patients[0]["name"]}
+
+
+PORTAL_PASSWORD_MIN = 6
+
+
+@router.post("/patient-portal/change-password")
+async def patient_portal_change_password(payload: V3PatientPortalChangePassword, authorization: str = Header(...)):
+    """The signed-in patient replaces their own password.
+
+    One password per login, so it changes for every patient this session was opened with
+    whose account the current password still opens — the same rule sign-in applies. An
+    account left behind on an older password is not swept along by knowing the newer one.
+    """
+    session = await _portal_session(authorization)
+    new_password = payload.new_password or ""
+    if len(new_password) < PORTAL_PASSWORD_MIN:
+        raise HTTPException(status_code=400, detail=f"New password must be at least {PORTAL_PASSWORD_MIN} characters")
+    if new_password == payload.current_password:
+        raise HTTPException(status_code=400, detail="New password must be different from the current one")
+
+    lead_ids = session.get("lead_ids") or [session["lead_id"]]
+    accounts = await v3_col("patient_portal_accounts").find(
+        # A blocked account is left alone: its access is paused, not the patient's to manage.
+        {"lead_id": {"$in": lead_ids}, "blocked": {"$ne": True}},
+        {"_id": 0, "id": 1, "lead_id": 1, "password_hash": 1},
+    ).to_list(50)
+    matched = [a for a in accounts if verify_password(payload.current_password or "", a.get("password_hash", ""))]
+    if not matched:
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    now = now_iso()
+    await v3_col("patient_portal_accounts").update_many(
+        {"id": {"$in": [a["id"] for a in matched]}},
+        {"$set": {"password_hash": hash_password(new_password), "updated_at": now, "updated_by": "Patient"}},
+    )
+    await v3_col("lead_activity").insert_many([{
+        "id": str(uuid.uuid4()),
+        "lead_id": a["lead_id"],
+        "action": "portal_password_changed",
+        "details": "Client Portal password changed by the patient",
+        "created_by": "Patient",
+        "created_by_role": "patient",
+        "created_at": now,
+    } for a in matched])
+    return {"message": "Password changed"}
 
 
 @router.post("/patient-portal/logout")

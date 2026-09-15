@@ -114,6 +114,11 @@ CORE_INDEXES = [
     ("patient_portal_accounts", [("email", 1)], "email"),
     ("patient_portal_accounts", [("lead_id", 1)], "lead_id"),
     ("patient_portal_sessions", [("token", 1)], "token"),
+    # The approval queue a branch reads on its Patients tab, and the one-open-request-per-
+    # patient upsert a booking makes into it; a branch's own automatic-login mode.
+    ("portal_pending", [("branch_id", 1), ("status", 1)], "branch_status"),
+    ("portal_pending", [("lead_id", 1), ("status", 1)], "lead_status"),
+    ("portal_branch_settings", [("branch_id", 1)], "branch_id"),
     # Branch Cash -- see the branch-cash section of routers/v3_finance.py. Every read of a
     # branch's box scans its handovers and its adjustments by branch_id (the adjustments
     # also as a date range, up to a day, for the closing screen), and receiving a handover

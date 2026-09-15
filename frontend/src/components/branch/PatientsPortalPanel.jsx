@@ -12,7 +12,9 @@ import { QuickDateFilterBar } from "@/components/QuickDateFilterBar";
 import {
   getBranchBoard, updateLead, deleteLead, listFitness, listZumba,
   getPortalAccountStatus, createOrResetPortalAccount,
+  emailPortalLogin, setPortalBlocked, setPortalAutoSkip,
 } from "@/lib/api";
+import { PortalControlsCard } from "@/components/branch/PortalControlsCard";
 // Was a local copy of waNumber, identical to the three still inlined elsewhere. Now that
 // lib/phone.js exists this one points at it — the others can follow as they're touched.
 import { waNumber } from "@/lib/phone";
@@ -302,6 +304,8 @@ export const PatientsPortalPanel = ({ branchId }) => {
 
   return (
     <div className="space-y-4" data-testid="branch-patients-panel">
+      <PortalControlsCard branchId={branchId} />
+
       {/* Six columns for six cards on a wide screen, so the row finishes flush with the
           page. Written as literal class names because Tailwind reads them out of the
           source — a count built from CARDS.length at runtime compiles to nothing. */}
@@ -596,6 +600,51 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
     setCreating(false);
   };
 
+  // One key for whichever per-client control is in flight, so a double-tap cannot fire two.
+  const [working, setWorking] = useState("");
+
+  // A password is stored only hashed, so "send it again" is a reset that emails the new one
+  // — and like any reset it changes the whole family's login, which the panel says above.
+  const emailAgain = async () => {
+    setWorking("email");
+    try {
+      const result = await emailPortalLogin(lead.id);
+      setJustCreated(result);
+      if (result.email_status === "sent") toast.success(`New password emailed to ${result.email}`);
+      else toast.warning("Password reset, but the email did not go — share it on WhatsApp below");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not send the login");
+    }
+    setWorking("");
+  };
+
+  const toggleBlock = async () => {
+    const next = !account?.blocked;
+    setWorking("block");
+    try {
+      await setPortalBlocked(lead.id, next);
+      setAccount((a) => ({ ...a, blocked: next }));
+      if (next) setJustCreated(null);
+      toast.success(next ? "Portal access blocked — signed out everywhere" : "Portal access restored");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not change portal access");
+    }
+    setWorking("");
+  };
+
+  const toggleAutoSkip = async () => {
+    const next = !account?.auto_skip;
+    setWorking("skip");
+    try {
+      await setPortalAutoSkip(lead.id, next);
+      setAccount((a) => ({ ...a, auto_skip: next }));
+      toast.success(next ? "No login will be made automatically for this patient" : "Login will be made automatically when treatment is booked");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not save");
+    }
+    setWorking("");
+  };
+
   const shareOnWhatsApp = () => {
     if (!justCreated?.password) return;
     const num = waNumber(justCreated.phone || phone);
@@ -698,6 +747,67 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
                   <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800" data-testid="branch-patient-portal-shared">
                     Shared login — also used by {account.shared_with.join(", ")}. A password reset changes it for all of them.
                   </p>
+                )}
+
+                {account.exists && (
+                  <div className="space-y-2" data-testid="branch-patient-portal-controls">
+                    <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                      {account.blocked
+                        ? <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-700">Blocked</span>
+                        : <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">Active</span>}
+                      {account.created_via && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+                          {account.created_via === "auto" ? "Made automatically"
+                            : account.created_via === "approved" ? "Made on approval"
+                            : "Made by hand"}
+                        </span>
+                      )}
+                      {account.email_status === "sent" && (
+                        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-sky-700">Email sent</span>
+                      )}
+                      {["failed", "not_configured"].includes(account.email_status) && (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">Email not sent</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={emailAgain}
+                        disabled={!!working || creating || account.blocked || !account.email}
+                        data-testid="branch-patient-portal-email-again"
+                      >
+                        {working === "email" ? "Sending…" : "Email login again"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`h-8 text-xs ${account.blocked ? "" : "border-rose-200 text-rose-700 hover:bg-rose-50"}`}
+                        onClick={toggleBlock}
+                        disabled={!!working || creating}
+                        data-testid="branch-patient-portal-block"
+                      >
+                        {working === "block" ? "Saving…" : account.blocked ? "Unblock access" : "Block access"}
+                      </Button>
+                    </div>
+                    {!account.email && (
+                      <p className="text-[10px] text-slate-400">No email on this login — use Reset Password and share it on WhatsApp.</p>
+                    )}
+                  </div>
+                )}
+
+                {!account.exists && (
+                  <label className="flex items-start gap-2 text-[11px] text-slate-600" data-testid="branch-patient-portal-auto-skip">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={!!account.auto_skip}
+                      disabled={!!working}
+                      onChange={toggleAutoSkip}
+                    />
+                    <span>Don&apos;t make a login automatically when treatment is booked</span>
+                  </label>
                 )}
 
                 {!account.exists && (

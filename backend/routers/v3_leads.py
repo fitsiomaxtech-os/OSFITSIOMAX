@@ -131,7 +131,7 @@ _LEAD_REFERENCING_COLLECTIONS = [
     "lead_activity", "lead_followups", "lead_remarks", "lead_documents",
     "appointments", "sessions", "reviews", "package_recommendations",
     "diet_sessions", "rehab_sessions", "weekly_assessments", "zumba_registrations",
-    "patient_portal_accounts", "patient_portal_sessions",
+    "patient_portal_accounts", "patient_portal_sessions", "portal_pending",
 ]
 
 

@@ -5085,6 +5085,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       if (!isRehabAssign && ["created", "joined"].includes(res.portal?.status)) setPortalNotice(res.portal);
       else if (!isRehabAssign && res.portal?.status === "no_contact") {
         toast.warning("No Client Portal login made — this patient has no phone number or email on file");
+      } else if (!isRehabAssign && res.portal?.status === "pending") {
+        // The branch approves logins first — say where the approval is waiting.
+        toast.info("Client Portal login is waiting for approval — Patients tab");
       }
       setShowSlotPicker(false);
       setShowPhysioModal(false);
