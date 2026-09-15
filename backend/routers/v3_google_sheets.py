@@ -345,7 +345,23 @@ def _detect_phone_column(headers: list, rows: list) -> Optional[str]:
     return best if best_score >= _PHONE_MAJORITY else None
 
 
+# One lock per source. The auto-sync loop and a Pull from Sheet click used to be able to
+# pull the same sheet at the same moment: twice the work, and both passes could see a
+# phone as new before either had inserted it, filing the same patient twice. A pull that
+# finds its source already running does not wait behind it -- it says so and returns.
+_PULL_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
 async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Dict[str, Any]:
+    """Pull a source unless a pull of it is already running (see _PULL_LOCKS)."""
+    lock = _PULL_LOCKS.setdefault(source_id, asyncio.Lock())
+    if lock.locked():
+        return {"error": "already_syncing", "imported": 0}
+    async with lock:
+        return await _pull_source_unlocked(source_id, range_)
+
+
+async def _pull_source_unlocked(source_id: str, range_: str = "A1:Z10000") -> Dict[str, Any]:
     """Pull rows from a Google Sheet into Leads. Returns result dict.
     Raises HTTPException for caller-facing errors; returns {"error": str} for scheduler usage.
     """
@@ -410,6 +426,12 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     rows_received = 0
     sample_errors = []
     last_headers, last_mapping = [], {}
+    # Phones already on a lead, looked up a tab at a time in batches rather than one query
+    # per row. The sheet is read whole on every pull, so a tab of a few thousand old rows
+    # was a few thousand round trips to find one new lead -- and the button spun for all
+    # of them. Grows with each insert below, so a phone repeated later in the same pull is
+    # still a duplicate, as it was when every row asked the database.
+    known_phones: set = set()
     # A source tagged to exactly one branch still auto-assigns every row to it, same as
     # before this field became a list. With zero or several branches there's no single one
     # to route a row to, so branch_ids becomes a tag only — same as an untagged
@@ -479,6 +501,17 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
         phone_key = mapping["phone"]
         last_headers, last_mapping = headers, mapping
 
+        tab_phones = {
+            p for p in (normalize_phone(str(r.get(phone_key, "") or "").strip()) for r in rows) if p
+        } - known_phones
+        tab_phones = list(tab_phones)
+        for start in range(0, len(tab_phones), 1000):
+            async for doc in v3_col("leads").find(
+                {"phone_normalized": {"$in": tab_phones[start:start + 1000]}},
+                {"_id": 0, "phone_normalized": 1},
+            ):
+                known_phones.add(doc["phone_normalized"])
+
         for idx, row in enumerate(rows):
             phone_raw = str(row.get(phone_key, "") or "").strip()
             phone_norm = normalize_phone(phone_raw)
@@ -487,8 +520,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
                 if len(sample_errors) < 3:
                     sample_errors.append(f"{tab_name} row {idx + 2}: missing phone in column '{phone_key}'")
                 continue
-            exists = await v3_col("leads").find_one({"phone_normalized": phone_norm}, {"_id": 0, "id": 1})
-            if exists:
+            if phone_norm in known_phones:
                 skipped_duplicate += 1
                 continue
             # Every field the mapping dialog can offer, written where it actually lives:
@@ -549,6 +581,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
                 "updated_at": now_iso(),
             }
             await v3_col("leads").insert_one(lead.copy())
+            known_phones.add(phone_norm)
             imported += 1
 
     new_row_count = (source.get("row_count") or 0) + imported
@@ -601,6 +634,8 @@ async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), user: V3
             raise HTTPException(status_code=400, detail="Source has no spreadsheet_id. Edit the source and paste the Google Sheet URL.")
         if err == "not_connected":
             raise HTTPException(status_code=400, detail="Not connected to Google. Click 'Continue with Google' first.")
+        if err == "already_syncing":
+            raise HTTPException(status_code=409, detail="This sheet is already syncing. Try again in a minute.")
         raise HTTPException(status_code=502, detail=err)
     return result
 

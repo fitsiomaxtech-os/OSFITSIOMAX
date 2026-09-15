@@ -45,7 +45,9 @@ export const PullFromSheetButton = ({ onPulled, notConnectedHint, noSourcesHint,
           totalDup += r.skipped_duplicate || 0;
           totalNoPhone += r.skipped_no_phone || 0;
         } else {
-          const detail = res.reason?.response?.data?.detail || res.reason?.message || "failed";
+          const detail = res.reason?.code === "ECONNABORTED"
+            ? "timed out — it may still be importing, refresh in a minute"
+            : res.reason?.response?.data?.detail || res.reason?.message || "failed";
           errors.push(`${s.name}: ${String(detail).slice(0, 80)}`);
         }
       });
@@ -60,8 +62,11 @@ export const PullFromSheetButton = ({ onPulled, notConnectedHint, noSourcesHint,
       onPulled && onPulled();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Pull failed");
+    } finally {
+      // In finally, not after the try: the not-connected and no-sources checks return
+      // early, and the spinner used to stay on after either until the page was reloaded.
+      setBusy(false);
     }
-    setBusy(false);
   };
 
   if (iconOnly) {

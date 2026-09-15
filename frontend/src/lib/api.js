@@ -758,8 +758,9 @@ export const gsListTabs = async (spreadsheetId) => (await api.get("/marketing/go
 // a sheet connected but never pulled has none and a sheet that gained a question has stale
 // ones, and mapping against either is mapping against columns that are not there.
 export const gsSheetHeaders = async (spreadsheetId, tab) => (await api.get("/marketing/google-sheets/headers", { params: { spreadsheet_id: spreadsheetId, tab } })).data;
-export const gsPull = async (sourceId) => (await api.post(`/marketing/google-sheets/pull/${sourceId}`)).data;
-export const gsAutoSyncSources = async () => (await api.get("/marketing/google-sheets/auto-sync/sources")).data;
+// Timed, so a pull that never answers cannot leave its button spinning for good.
+export const gsPull = async (sourceId) => (await api.post(`/marketing/google-sheets/pull/${sourceId}`, null, { timeout: 180000 })).data;
+export const gsAutoSyncSources = async () => (await api.get("/marketing/google-sheets/auto-sync/sources", { timeout: 30000 })).data;
 export const gsAutoSyncToggle = async (sourceId, payload) => (await api.patch(`/marketing/google-sheets/auto-sync/sources/${sourceId}`, payload)).data;
 
 export const hrCreateEmployee = async (payload) => (await api.post("/hr/employees", payload)).data;
