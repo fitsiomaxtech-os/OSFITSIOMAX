@@ -494,17 +494,20 @@ async def hp_consultation_decision(
         chosen += " + Zumba"
     detail = f"Consultation decision: {chosen}"
 
-    # Long Term. Only Rehab and Fitness run long term, and only what the Consultant
-    # actually wrote is kept -- a blank note on a service is no note at all, and a note
-    # on a service that ended up unticked is an answer to a question no longer asked.
+    # Long Term. Only Rehab and Fitness run long term, and a service is marked by being
+    # here at all -- the text is what was written about it, and a patient can be marked
+    # long term with nothing written yet, so a blank one is kept rather than dropped.
+    #
+    # What is dropped is a note on a service that ended up unticked: an answer to a
+    # question the form is no longer asking.
     ticked = {
         "rehab": bool(payload.rehab_referred),
         "fitness": bool(payload.fitness_recommended),
     }
     long_term_notes = {
-        k: v.strip()
+        k: (v or "").strip()
         for k, v in payload.long_term_notes.items()
-        if ticked.get(k) and (v or "").strip()
+        if ticked.get(k)
     }
     updates["long_term_notes"] = long_term_notes
     if long_term_notes:

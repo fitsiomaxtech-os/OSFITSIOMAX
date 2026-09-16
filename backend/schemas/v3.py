@@ -434,8 +434,9 @@ class V3LeadOut(BaseModel):
     fitness_recommended: Optional[bool] = False
     zumba_recommended: Optional[bool] = False
     # Long Term, per service, set at Move to Admin. Only Rehab and Fitness run long
-    # term, and a service is long term when there is something written about it here --
-    # there is no short/long pair to choose between, so the note IS the mark.
+    # term, and a service is long term when its key is present here -- there is no
+    # short/long pair to choose between, so there is nothing to store but the mark and
+    # whatever was written about it, which may be nothing.
     long_term_notes: Optional[Dict[str, str]] = None
     # Who is actually delivering that diet plan, set by branch/assign-diet. This model
     # ignores extras, so without these three the Consultations board could never tell an
@@ -903,10 +904,13 @@ class V3ConsultationDecisionInput(BaseModel):
     rehab_item_id: Optional[str] = None
     # The Zumba membership, when one is picked alongside it. Optional on the same terms.
     zumba_item_id: Optional[str] = None
-    # What the Consultant wrote about the long term, keyed by service. Only Rehab and
-    # Fitness carry one: those are the two that run on past the package being sold, and
-    # the others are bought, delivered and finished. Writing a note here is what marks
-    # the service long term -- an empty one is dropped, so nothing is marked by accident.
+    # The services marked Long Term, and what was written about each. Only Rehab and
+    # Fitness can be: those are the two that run on past the package being sold, and the
+    # others are bought, delivered and finished.
+    #
+    # The key is the mark and the value is the note, so a service marked with nothing
+    # written yet arrives as an empty string and stays marked. A service that is not
+    # marked is simply not here.
     long_term_notes: Dict[Literal["rehab", "fitness"], str] = {}
 
 

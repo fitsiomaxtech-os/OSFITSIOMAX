@@ -223,8 +223,12 @@ const LONG_TERM_SERVICES = ["rehab", "fitness"];
 // The services a lead is actually going away long term on, read off a saved lead rather
 // than the draft. Used only inside the patient's own popup -- the board's rows say where
 // a patient stands in the pipeline, and a plan's length is not that.
+//
+// A key being here is the mark; what it holds is whatever was written about it, which may
+// be nothing. Marked with nothing written is a real answer -- a patient on a long-term
+// plan the Consultant had nothing to add to yet -- so this must not read it as unmarked.
 const longTermServices = (lead) =>
-  LONG_TERM_SERVICES.filter((k) => String(lead?.long_term_notes?.[k] || "").trim());
+  LONG_TERM_SERVICES.filter((k) => lead?.long_term_notes && k in lead.long_term_notes);
 
 /**
  * The two things a Diet referral can actually be, revealed once Diet is ticked.
@@ -3388,13 +3392,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       zumba_recommended: decisionDraft.zumba,
       zumba_item_id: decisionDraft.zumba ? decisionDraft.zumba_item_id || null : null,
       mode: decisionDraft.mode,
-      // What was written about the long term, for the two services that run long term
-      // and only where they are ticked and something was actually written. Blank notes
-      // are left out rather than sent empty: the note is the mark, so an empty one would
-      // mark a patient long term on nothing.
+      // The two services that run long term, sent where they are ticked AND marked. The
+      // mark is the key being here at all, so a marked service with nothing written about
+      // it goes as an empty string rather than being left out -- leaving it out would
+      // quietly unmark a patient the Consultant had just marked.
       long_term_notes: Object.fromEntries(
-        LONG_TERM_SERVICES.filter((k) => decisionDraft[k] && (decisionDraft.long_term_notes?.[k] || "").trim())
-          .map((k) => [k, decisionDraft.long_term_notes[k].trim()]),
+        LONG_TERM_SERVICES.filter((k) => decisionDraft[k] && decisionDraft.long_term_notes && k in decisionDraft.long_term_notes)
+          .map((k) => [k, (decisionDraft.long_term_notes[k] || "").trim()]),
       ),
     };
     if (decisionDraft.treatment) {
@@ -6468,7 +6472,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       <span
                         className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-700 ring-1 ring-indigo-200"
                         title={marked
-                          .map((k) => `${CONSULTATION_ADDONS.find((a) => a.key === k)?.label || k}: ${selectedLead.long_term_notes[k]}`)
+                          .map((k) => {
+                            const label = CONSULTATION_ADDONS.find((a) => a.key === k)?.label || k;
+                            const note = String(selectedLead.long_term_notes[k] || "").trim();
+                            return note ? `${label}: ${note}` : label;
+                          })
                           .join("\n")}
                         data-testid="cons-detail-long-term"
                       >
@@ -7054,25 +7062,62 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                  */
                 const longTermField = (key) => {
                   const addon = CONSULTATION_ADDONS.find((a) => a.key === key);
+                  // Marked, rather than written. The note used to be the mark on its own, so
+                  // the only way to say "this one is long term" was to have something to type
+                  // about it, and the only way to say "this one is not" was to leave a box
+                  // open and empty. A patient can be on a long-term plan the Consultant has
+                  // nothing to add to yet, so the mark is its own button and the box belongs
+                  // to it -- unmarked, there is nothing to type into and nothing is asked.
+                  const on = Object.prototype.hasOwnProperty.call(decisionDraft.long_term_notes || {}, key);
+                  const toggle = () => {
+                    setDecisionDraft((d) => {
+                      const notes = { ...(d.long_term_notes || {}) };
+                      // Unmarking throws the note away with the mark. Keeping the text behind
+                      // a mark that is off is how a line nobody meant to send gets sent the
+                      // next time somebody marks it.
+                      if (on) delete notes[key];
+                      else notes[key] = "";
+                      return { ...d, long_term_notes: notes };
+                    });
+                  };
                   return (
                     <div className="mt-3" data-testid={`cons-decision-long-term-${key}`}>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">
-                        Long Term <span className="font-normal text-slate-400">(optional)</span>
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={decisionDraft.long_term_notes?.[key] || ""}
-                        onChange={(e) => {
-                          const text = e.target.value;
-                          setDecisionDraft((d) => ({ ...d, long_term_notes: { ...(d.long_term_notes || {}), [key]: text } }));
-                        }}
-                        placeholder={`Information about the long term ${addon?.label || key}...`}
-                        className="w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-                        data-testid={`cons-decision-long-term-input-${key}`}
-                      />
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        Written here, this patient is marked Long Term on their own page. Leave it empty if they are not.
-                      </p>
+                      <button
+                        type="button"
+                        onClick={toggle}
+                        aria-pressed={on}
+                        className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                          on
+                            ? "border-indigo-600 bg-indigo-600 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                        data-testid={`cons-decision-long-term-toggle-${key}`}
+                      >
+                        {on && <CheckCircle2 aria-hidden className="h-3.5 w-3.5 shrink-0" />}
+                        Long Term
+                      </button>
+                      {on ? (
+                        <>
+                          <textarea
+                            rows={3}
+                            value={decisionDraft.long_term_notes?.[key] || ""}
+                            onChange={(e) => {
+                              const text = e.target.value;
+                              setDecisionDraft((d) => ({ ...d, long_term_notes: { ...(d.long_term_notes || {}), [key]: text } }));
+                            }}
+                            placeholder={`Information about the long term ${addon?.label || key}...`}
+                            className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                            data-testid={`cons-decision-long-term-input-${key}`}
+                          />
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            This patient is marked Long Term on their own page. What you write here is read there with it.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          Mark this if the patient is going away on a long-term {addon?.label || key} plan.
+                        </p>
+                      )}
                     </div>
                   );
                 };
@@ -7342,8 +7387,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                           can act on. */}
                       {longTermServices(selectedLead).map((k) => (
                         <p key={k} className="mt-0.5 text-xs text-slate-600" data-testid={`cons-decision-summary-long-term-${k}`}>
-                          Long Term · {CONSULTATION_ADDONS.find((a) => a.key === k)?.label || k}:{" "}
-                          <span className="font-medium text-slate-700">{selectedLead.long_term_notes[k]}</span>
+                          Long Term · {CONSULTATION_ADDONS.find((a) => a.key === k)?.label || k}
+                          {String(selectedLead.long_term_notes[k] || "").trim()
+                            ? <>: <span className="font-medium text-slate-700">{selectedLead.long_term_notes[k]}</span></>
+                            : null}
                         </p>
                       ))}
                       <p className="mt-1.5 text-[11px] text-slate-500">Sent to Branch Admin — Consultation Visit.</p>
