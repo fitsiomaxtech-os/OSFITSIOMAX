@@ -136,9 +136,17 @@ const Section = ({ title, sub, people, liveIds, empty, testid }) => (
  * accountant belongs to no branch, so listing them under Online would be the filter
  * quietly not applying.
  */
-export const StaffRoster = ({ users, employees, loading, branches = [], visibleBranches = [], showUnposted = true }) => {
-  const [query, setQuery] = useState("");
+export const StaffRoster = ({ users, employees, loading, branches = [], visibleBranches = [], showUnposted = true, search }) => {
+  const [ownQuery, setOwnQuery] = useState("");
   const [role, setRole] = useState("");
+
+  // `search` is for a board that already carries a search box of its own -- the Business
+  // Development desk's Dashboard toolbar, where one field narrows the roster and the two
+  // team panels beside it. Given one, this card reads it and drops its own box: two boxes
+  // over one list is two places to look for why a name has gone missing. Everywhere else
+  // passes nothing and keeps the box, exactly as before.
+  const external = search !== undefined;
+  const query = external ? search : ownQuery;
 
   const liveIds = useMemo(() => new Set(branches.map((b) => b.branch_id)), [branches]);
 
@@ -230,20 +238,25 @@ export const StaffRoster = ({ users, employees, loading, branches = [], visibleB
 
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[200px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-300" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name, email, role or designation"
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-300"
-              data-testid="roster-search"
-            />
-          </div>
-          {narrowed && (
+          {!external && (
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-300" />
+              <input
+                value={query}
+                onChange={(e) => setOwnQuery(e.target.value)}
+                placeholder="Search by name, email, role or designation"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-300"
+                data-testid="roster-search"
+              />
+            </div>
+          )}
+          {/* Clear is drawn only for what this card can actually clear. With the search
+              box upstairs it owns the role chips and nothing else, so it appears on a
+              pressed chip rather than on a typed name it has no way to empty. */}
+          {(external ? !!role : narrowed) && (
             <button
               type="button"
-              onClick={() => { setQuery(""); setRole(""); }}
+              onClick={() => { if (!external) setOwnQuery(""); setRole(""); }}
               className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 hover:text-rose-800"
               data-testid="roster-clear"
             >

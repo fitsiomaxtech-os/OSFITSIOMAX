@@ -385,9 +385,16 @@ const SalesTab = ({ branches, dateFilter }) => {
  * its full breakdown underneath (BranchRevenueCards) — the same drill /finance/
  * revenue-overview has always given this board, kept rather than dropped in the redesign.
  */
-const RevenueTab = ({ data, loading, dateFilter }) => {
-  const [group, setGroup] = useState("all");
-  const [branchId, setBranchId] = useState("");
+const RevenueTab = ({ data, loading, dateFilter, scope }) => {
+  const [ownGroup, setOwnGroup] = useState("all");
+  const [ownBranchId, setOwnBranchId] = useState("");
+  // The scope is the caller's whenever the caller carries one. Super Admin's board passes
+  // nothing and keeps its own chip row below; the Business Development desk hands down the
+  // branch popover already on its toolbar, and the row is left off rather than drawn a
+  // second time under it saying the same thing.
+  const group = scope ? scope.group : ownGroup;
+  const branchId = scope ? scope.branchId : ownBranchId;
+  const setBranchId = scope ? scope.onBranch : setOwnBranchId;
   const branches = data?.leads?.branches || [];
   const selectedBranch = branches.find((b) => b.branch_id === branchId);
 
@@ -404,7 +411,9 @@ const RevenueTab = ({ data, loading, dateFilter }) => {
 
   return (
     <div className="space-y-4" data-testid="dashboard-revenue-tab">
-      <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-revenue-filter" />
+      {!scope && (
+        <ModeBranchFilter branches={branches} group={group} onGroup={setOwnGroup} branchId={branchId} onBranch={setOwnBranchId} testid="dashboard-revenue-filter" />
+      )}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-revenue-cards">
         {cards.map((c) => (
           <StatTile key={c.key} label={c.label} value={fmtValue("revenue", c.value)} icon={c.icon} color={c.color} testid={`dashboard-revenue-${c.key}`} />
@@ -427,19 +436,29 @@ const RevenueTab = ({ data, loading, dateFilter }) => {
  * two desks, and every other person on the payroll — consultants, physios, nutritionists,
  * HR, Finance — is only on this tab because the roster lists them.
  */
-const TeamTab = ({ team, loading, branches, roster, rosterLoading }) => {
-  const [group, setGroup] = useState("all");
-  const [branchId, setBranchId] = useState("");
+const TeamTab = ({ team, loading, branches, roster, rosterLoading, scope }) => {
+  const [ownGroup, setOwnGroup] = useState("all");
+  const [ownBranchId, setOwnBranchId] = useState("");
+  // Same arrangement as Revenue above: the filter belongs to whoever drew it.
+  const group = scope ? scope.group : ownGroup;
+  const branchId = scope ? scope.branchId : ownBranchId;
+  // And the same for the name search. The roster and the two panels are three lists of
+  // people on one tab, so one box narrows all three -- typing a name into a toolbar and
+  // having it reach only the middle card would be the box being wrong twice.
+  const q = (scope?.search || "").trim().toLowerCase();
 
   if (loading || !team) {
     return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
   }
 
   const scopedMembers = (members) => {
-    if (branchId) return members.filter((m) => m.branch_id === branchId);
-    if (group === "all") return members;
+    const named = q
+      ? members.filter((m) => `${m.full_name || ""} ${m.name || ""} ${m.email || ""} ${m.branch_name || ""}`.toLowerCase().includes(q))
+      : members;
+    if (branchId) return named.filter((m) => m.branch_id === branchId);
+    if (group === "all") return named;
     const ids = new Set(branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).map((b) => b.branch_id));
-    return members.filter((m) => ids.has(m.branch_id));
+    return named.filter((m) => ids.has(m.branch_id));
   };
 
   const preSalesMembers = team.pre_sales || [];
@@ -458,7 +477,9 @@ const TeamTab = ({ team, loading, branches, roster, rosterLoading }) => {
 
   return (
     <div className="space-y-4" data-testid="dashboard-team-tab">
-      <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-team-filter" />
+      {!scope && (
+        <ModeBranchFilter branches={branches} group={group} onGroup={setOwnGroup} branchId={branchId} onBranch={setOwnBranchId} testid="dashboard-team-filter" />
+      )}
 
       {/* showUnposted only under All: an accountant is posted to no branch, so keeping
           them on screen while the filter says Online or Anna Nagar would be the filter
@@ -470,6 +491,7 @@ const TeamTab = ({ team, loading, branches, roster, rosterLoading }) => {
         branches={branches}
         visibleBranches={visibleBranches}
         showUnposted={!branchId && group === "all"}
+        search={scope ? scope.search || "" : undefined}
       />
 
       {/* No benchmarkFrom, so the average follows the filter — narrowed to one branch or
@@ -589,20 +611,20 @@ export const useDashboardData = (dateFilter, activeTab, enabled = true) => {
  * Business Development desk folds both into the two navigation bars its Dashboard already
  * carries.
  */
-export const DashboardTabPanel = ({ tab, dateFilter, dash }) => {
+export const DashboardTabPanel = ({ tab, dateFilter, dash, scope }) => {
   const { data, loading, team, teamLoading, roster, rosterLoading, branches } = dash;
   return tab === "marketing" ? (
     <MarketingTab branches={branches} dateFilter={dateFilter} />
   ) : tab === "sales" ? (
     <SalesTab branches={branches} dateFilter={dateFilter} />
   ) : tab === "revenue" ? (
-    <RevenueTab data={data} loading={loading} dateFilter={dateFilter} />
+    <RevenueTab data={data} loading={loading} dateFilter={dateFilter} scope={scope} />
   ) : tab === "team" ? (
-    <TeamTab team={team} loading={teamLoading} branches={branches} roster={roster} rosterLoading={rosterLoading} />
+    <TeamTab team={team} loading={teamLoading} branches={branches} roster={roster} rosterLoading={rosterLoading} scope={scope} />
   ) : tab === "clients" ? (
-    <ClientsTab />
+    <ClientsTab branches={branches} scope={scope} />
   ) : (
-    <AnalyticsTab data={data} dateFilter={dateFilter} />
+    <AnalyticsTab data={data} dateFilter={dateFilter} scope={scope} />
   );
 };
 
@@ -716,11 +738,14 @@ const shortDate = (value) => {
  * A lead carrying both marks appears on both lists, because it is the row somebody wants to
  * find under either.
  */
-const ClientsTab = () => {
+const ClientsTab = ({ branches = [], scope }) => {
   const [view, setView] = useState("premium");
   const [data, setData] = useState({ premium: [], attention: [] });
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+  const [ownSearch, setOwnSearch] = useState("");
+  // The toolbar's box when the caller carries one, this card's own otherwise -- and only
+  // one of the two is ever drawn, so the list is never narrowed by a box nobody can see.
+  const search = scope ? scope.search || "" : ownSearch;
 
   useEffect(() => {
     let live = true;
@@ -733,7 +758,18 @@ const ClientsTab = () => {
   }, []);
 
   const current = CLIENT_VIEWS.find((v) => v.key === view) || CLIENT_VIEWS[0];
-  const rows = data[view] || [];
+
+  // The branch scope, applied here rather than at the endpoint. Both lists arrive in one
+  // request for the whole estate and the two cards above count them, so re-asking the
+  // server per branch would be a round trip to narrow rows already in hand -- and would
+  // leave the counts answering a different question from the table under them.
+  const scopedIds = scope ? resolveBranchIds(branches, scope.group, scope.branchId) : undefined;
+  const idSet = scopedIds ? new Set(String(scopedIds).split(",")) : null;
+  const scopedRows = (key) => {
+    const all = data[key] || [];
+    return idSet ? all.filter((r) => idSet.has(r.branch_id)) : all;
+  };
+  const rows = scopedRows(view);
   const q = search.trim().toLowerCase();
   const visible = q
     ? rows.filter((r) => `${r.name} ${r.phone} ${r.email}`.toLowerCase().includes(q))
@@ -748,7 +784,7 @@ const ClientsTab = () => {
           <StatTile
             key={v.key}
             label={v.label}
-            value={(data[v.key] || []).length}
+            value={scopedRows(v.key).length}
             sub={v.sub}
             icon={v.icon}
             color={v.color}
@@ -766,15 +802,17 @@ const ClientsTab = () => {
             {current.label}
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{visible.length}</span>
           </p>
-          <div className="relative ml-auto min-w-0 flex-1 sm:max-w-xs">
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, phone or email..."
-              className="h-9"
-              data-testid="dashboard-clients-search"
-            />
-          </div>
+          {!scope && (
+            <div className="relative ml-auto min-w-0 flex-1 sm:max-w-xs">
+              <Input
+                value={search}
+                onChange={(e) => setOwnSearch(e.target.value)}
+                placeholder="Search name, phone or email..."
+                className="h-9"
+                data-testid="dashboard-clients-search"
+              />
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -861,10 +899,13 @@ const GROWTH_METRICS = [
  * this board has always drawn, for the one thing the donuts/bars above don't show: a
  * branch's line over time against the others'.
  */
-const AnalyticsTab = ({ data, dateFilter }) => {
-  const [group, setGroup] = useState("all");
-  const [branchId, setBranchId] = useState("");
+const AnalyticsTab = ({ data, dateFilter, scope }) => {
+  const [ownGroup, setOwnGroup] = useState("all");
+  const [ownBranchId, setOwnBranchId] = useState("");
   const [trendMetric, setTrendMetric] = useState("leads");
+  // The caller's scope when there is one, for the reason Revenue above gives.
+  const group = scope ? scope.group : ownGroup;
+  const branchId = scope ? scope.branchId : ownBranchId;
 
   const branches = data?.leads?.branches || [];
   // Through resolveBranchIds, the same resolution Marketing, Sales, Revenue and Team all
@@ -881,7 +922,9 @@ const AnalyticsTab = ({ data, dateFilter }) => {
 
   return (
     <div className="space-y-4" data-testid="dashboard-analytics-tab">
-      <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-analytics-filter" />
+      {!scope && (
+        <ModeBranchFilter branches={branches} group={group} onGroup={setOwnGroup} branchId={branchId} onBranch={setOwnBranchId} testid="dashboard-analytics-filter" />
+      )}
 
       <LeadsAnalyticsDashboard
         startDate={dateFilter?.from ? toIso(dateFilter.from) : undefined}

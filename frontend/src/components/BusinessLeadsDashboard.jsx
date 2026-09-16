@@ -1021,6 +1021,28 @@ const CARD_GROUP_KEYS = CARD_GROUPS.map((g) => g.key);
 // which sheet the leads came from, Sales asks where in the funnel they are.
 const BREAKDOWN_TABS = { marketing: "source", sales: "stage" };
 
+// Which of the eight tabs the toolbar's branch popover scopes, beyond the two tables
+// above. All four read per-branch figures and every one of them used to draw an
+// All/Offline/Online chip row of its own under the toolbar -- the same filter, a second
+// time, in a second shape, on a board whose whole toolbar is built so that everything
+// narrowing the screen sits on one line. The popover is now the only copy, and the panels
+// take it as a prop; see DashboardTabPanel's `scope`.
+//
+// OnBoarding and systematic statistics are absent: those two are this desk's own card
+// rows, scoped by the account rather than by a branch.
+const SCOPED_TABS = ["revenue", "team", "clients", "analytics"];
+
+// What the search box narrows on each tab, and the words printed in it. A tab named here
+// has a list the box reaches; Revenue is four totals and Analytics is charts, so neither
+// is, and the box is left off there rather than sitting on the row doing nothing -- the
+// same rule that already kept it off these six entirely.
+const SEARCH_HINTS = {
+  marketing: "Search a source or branch...",
+  sales: "Search a stage or branch...",
+  clients: "Search a client name, phone or email...",
+  team: "Search a name, email or role...",
+};
+
 // What the six imported tabs are handed when neither date control is set. They read a
 // range off `.from`/`.to` without guarding it, and this board's two controls intersect to
 // null rather than to an open range. Module-level so it is the same object on every
@@ -1129,6 +1151,12 @@ function DashboardTab({
   // more controls on the toolbar and read none of the four the card rows use.
   const breakdownMode = BREAKDOWN_TABS[openGroup] ? openGroup : null;
 
+  // Whether the toolbar's branch popover applies to the open tab, and what its search box
+  // has to narrow there. Both are what make Revenue, Team, Clients and Analytics wear the
+  // same toolbar as Marketing rather than a bare row of dates and actions.
+  const scopedTab = !!breakdownMode || SCOPED_TABS.includes(openGroup);
+  const searchHint = onCards ? "Search this list..." : SEARCH_HINTS[openGroup];
+
   // The six imported tabs' own payloads -- the same hook Super Admin's Dashboard runs on.
   //
   // Gated until one of the six is first opened: the overview is a wide request, and this
@@ -1144,6 +1172,18 @@ function DashboardTab({
   // server for rows of its own. Memoised because it is a dependency of that table's fetch:
   // rebuilt every render, it would re-ask for the sources each time anything here moved.
   const panelDateParams = useMemo(() => dateParamsOf(effectiveDateFilter), [effectiveDateFilter]);
+
+  // The toolbar's own branch popover and search box, handed to whichever of the six is
+  // open so the panel is scoped by the row above it instead of by a filter of its own.
+  // Memoised because the four tabs that take it name it in their render path on every
+  // keystroke; rebuilt each render it would be a new object for no change.
+  const panelScope = useMemo(() => ({
+    group: scopeGroup,
+    onGroup: setScopeGroup,
+    branchId: scopeBranchId,
+    onBranch: setScopeBranchId,
+    search,
+  }), [scopeGroup, scopeBranchId, search]);
 
   // That range in words, for the caption over the Marketing table. Both halves, because
   // neither is enough on its own: the label says which button is pressed ("Last 90 Days")
@@ -1186,6 +1226,11 @@ function DashboardTab({
     // Back on OnBoarding, Today's Leads opens again -- the same list the board arrives on.
     if (key === "onboarding") onOpenCard("today");
     if (!CARD_GROUP_KEYS.includes(key)) setWantsPanels(true);
+    // A name typed on one tab means nothing on the next, and left in the box it would
+    // narrow the new tab's list to nothing while reading as empty rather than as filtered.
+    // The branch scope is the opposite case and is deliberately carried: it means the same
+    // thing on all eight.
+    setSearch("");
     // Marketing groups by source and Sales by stage, and neither key exists on the other
     // tab -- carrying the pressed one across would ask the server for a grouping it would
     // reject. The branch scope IS carried: it means the same thing on both.
@@ -1249,13 +1294,17 @@ function DashboardTab({
           past the edge of the screen with nothing saying it is there, and a toolbar that
           hides its right-hand half on a laptop is a toolbar most of this desk never sees.
 
-          Four of the controls are drawn only on the two card rows -- the search field, the
-          order dropdown and the two marks. All four narrow or order the list a card opens,
-          and on the six imported tabs there is no such list: they would sit there doing
-          nothing visible and read as broken, which is the same reason the search field
-          opens Total Leads rather than doing nothing when nothing is open. The dates and
-          the four actions stay, because every one of them means the same thing on all
-          eight. */}
+          Three of the controls are drawn only on the two card rows -- the order dropdown
+          and the two marks. All three order or narrow the list a card opens, and on the
+          six imported tabs there is no such list: they would sit there doing nothing
+          visible and read as broken, which is the same reason the search field opens Total
+          Leads rather than doing nothing when nothing is open.
+
+          The search field and the branch scope are drawn wherever they reach something --
+          see SEARCH_HINTS and SCOPED_TABS. That is what makes Revenue, Team, Clients and
+          Analytics carry this same toolbar rather than a bare row of dates and actions
+          with a filter of their own underneath. The dates and the four actions stay on all
+          eight, because every one of them means the same thing on every one of them. */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-tools">
         <span className="pl-2 pr-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Tools</span>
 
@@ -1264,14 +1313,12 @@ function DashboardTab({
             grows into whatever the other controls left, capped so a search box is not
             stretched across a 1600px board it cannot use. Full width on a phone, where it
             is the only thing on its line anyway. */}
-        {(onCards || breakdownMode) && (
+        {searchHint && (
           <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[220px] sm:flex-1">
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
             <Input
               className="h-10 pl-9"
-              placeholder={breakdownMode === "sales" ? "Search a stage or branch..."
-                : breakdownMode ? "Search a source or branch..."
-                  : "Search this list..."}
+              placeholder={searchHint}
               value={search}
               onChange={(e) => searchList(e.target.value)}
               data-testid="bd-search"
@@ -1299,42 +1346,48 @@ function DashboardTab({
           />
         </div>
 
-        {/* Marketing and Sales' own three: the vertical split, the branch, and which way
-            the table is grouped. On this row rather than above the table, so the range,
-            the scope and the grouping are read left to right as one sentence -- and so the
-            table underneath is the answer and nothing else.
+        {/* The branch scope, on six of the eight tabs: Marketing and Sales' tables, and
+            Revenue, Team, Clients and Analytics. It is on this row rather than above the
+            panel so the range, the scope and the grouping are read left to right as one
+            sentence -- and so what is underneath is the answer and nothing else. Those
+            last four each used to draw the same filter for themselves, as a chip row under
+            the toolbar; this is now the only copy and they take it as a prop.
 
-            The branch is a popover here, not the bordered row of one chip per branch that
+            A popover here, not the bordered row of one chip per branch that
             ModeBranchFilter draws. Seven branch chips need a row to themselves, which is
             the row this is trying not to have. */}
+        {scopedTab && (
+          <ModeBranchScope
+            branches={dash.branches}
+            group={scopeGroup}
+            onGroup={setScopeGroup}
+            branchId={scopeBranchId}
+            onBranch={setScopeBranchId}
+            testid="bd-scope"
+          />
+        )}
+
+        {/* The grouping stays the two tables' own. Every other tab is a fixed set of
+            figures rather than rows that could be keyed another way, so there is nothing
+            for a Source / Branch / Source x Branch to re-key there. */}
         {breakdownMode && (
-          <>
-            <ModeBranchScope
-              branches={dash.branches}
-              group={scopeGroup}
-              onGroup={setScopeGroup}
-              branchId={scopeBranchId}
-              onBranch={setScopeBranchId}
-              testid="bd-scope"
-            />
-            <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 p-0.5" data-testid="bd-group-by">
-              {BREAKDOWN_MODES[breakdownMode].groupings.map((g) => (
-                <button
-                  key={g.key}
-                  type="button"
-                  onClick={() => setGroupBy(g.key)}
-                  title={g.hint}
-                  aria-pressed={groupBy === g.key}
-                  className={`shrink-0 whitespace-nowrap rounded px-2.5 py-1.5 text-xs font-semibold transition ${
-                    groupBy === g.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
-                  }`}
-                  data-testid={`bd-group-by-${g.key}`}
-                >
-                  {g.label}
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 p-0.5" data-testid="bd-group-by">
+            {BREAKDOWN_MODES[breakdownMode].groupings.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => setGroupBy(g.key)}
+                title={g.hint}
+                aria-pressed={groupBy === g.key}
+                className={`shrink-0 whitespace-nowrap rounded px-2.5 py-1.5 text-xs font-semibold transition ${
+                  groupBy === g.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                }`}
+                data-testid={`bd-group-by-${g.key}`}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
         )}
 
         {/* The actions, held to the right edge of whichever line they end up on.
@@ -1519,7 +1572,7 @@ function DashboardTab({
               onOpenLead={onOpenLead}
             />
           ) : (
-            <DashboardTabPanel tab={openGroup} dateFilter={panelRange} dash={dash} />
+            <DashboardTabPanel tab={openGroup} dateFilter={panelRange} dash={dash} scope={panelScope} />
           )}
         </div>
       )}

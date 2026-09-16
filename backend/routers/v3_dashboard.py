@@ -1698,6 +1698,11 @@ async def dashboard_clients(
             "appointment_date": lead.get("appointment_date") or "",
             "appointment_time": lead.get("appointment_time") or "",
             "branch_name": names.get(lead.get("branch_id"), ""),
+            # The id beside the name, for a caller that filters these rows by branch
+            # rather than re-asking with ?branch_id -- the Business Development desk
+            # scopes this tab from the branch popover on its Dashboard toolbar, and both
+            # lists arrive here in one request it would otherwise have to repeat.
+            "branch_id": lead.get("branch_id") or "",
             "updated_at": lead.get("updated_at") or lead.get("created_at") or "",
         }
 
