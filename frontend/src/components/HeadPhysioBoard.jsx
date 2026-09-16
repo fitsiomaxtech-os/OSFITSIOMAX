@@ -511,7 +511,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               branchId={supervising ? effectiveBranchId : null}
               selectedDate={null}
               dateRange={dateRange}
-              compact={workTab === "all"}
               onCountChange={setReviewCount}
               onRowsChange={setReviewRows}
               autoOpenReviewId={autoOpenReview}

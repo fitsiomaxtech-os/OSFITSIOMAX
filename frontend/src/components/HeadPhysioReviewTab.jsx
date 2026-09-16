@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X, RefreshCw, AlertTriangle, Search, ChevronDown, ChevronRight } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { X, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { hpReviews, hpCompleteReview, physioSessions } from "@/lib/api";
 import { to12h } from "@/lib/time";
@@ -56,10 +54,9 @@ const StageBadge = ({ stage }) => (
  * an overdue review that fell out of Today would sit in a list nobody opens, which is
  * exactly how a patient's week-one review gets missed.
  */
-export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange = null, compact = false, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken }) => {
+export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange = null, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken }) => {
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState("");
   const [draft, setDraft] = useState(null); // { review, head_physio_notes, head_physio_suggestions }
   // A review that has already been written opens to be read, not rewritten. The board's
   // All list has a View on every row including the finished ones, and it used to open the
@@ -133,12 +130,7 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
   // Outstanding first, then what's already written — the day's reviews are one list, not
   // two tabs to check. Each row already reads differently by status, so splitting them
   // only added a control to click before seeing either half.
-  const rows = useMemo(() => {
-    const list = [...dueList, ...completedList];
-    if (!search) return list;
-    const q = search.toLowerCase();
-    return list.filter((r) => (r.lead_name || "").toLowerCase().includes(q) || (r.patient_number || "").toLowerCase().includes(q));
-  }, [dueList, completedList, search]);
+  const rows = useMemo(() => [...dueList, ...completedList], [dueList, completedList]);
 
   // Outstanding reviews only — a tab labelled "Review 2" means two still to write, not
   // two that exist.
@@ -274,20 +266,6 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
 
   return (
     <div className="space-y-4" data-testid="hp-review-tab">
-      {!compact && (
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-3 p-3">
-            <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient or number..." className="pl-9" data-testid="hp-review-search" />
-            </div>
-            <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="hp-review-refresh">
-              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
       {loading && rows.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading reviews...</p>
       ) : rows.length === 0 ? (
