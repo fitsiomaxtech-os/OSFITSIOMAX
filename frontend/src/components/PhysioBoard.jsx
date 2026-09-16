@@ -49,6 +49,13 @@ import {
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
+// A patient's contact details are not printed anywhere on this board. The physio works
+// from the name, the patient number and the course; the number itself stays with the
+// branch. Calling and WhatsApp still work from the Patients list — those buttons hand the
+// stored number straight to the phone without ever showing it — so nothing that needs the
+// number is lost. Don't add phone, alternative phone or email back to a row, a popup or a
+// search box here; Branch Admin and Pre-Sales are where those are read.
+//
 // The board's three views, rendered twice: an underlined strip along the top on a
 // desk, a fixed bar at the bottom on a phone. Treatment and Patients keep their old
 // icons; Review takes the slot Calendar used to hold — Calendar moved to the
@@ -568,9 +575,10 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
   // Matches a row against the search box — one definition because the day list and the
   // two caseload lists are searched by the same box in the same toolbar, and a name that
-  // finds a patient on one tab must find them on the others.
+  // finds a patient on one tab must find them on the others. Name only: searching by
+  // phone here would hand back a number this board deliberately does not show.
   const matches = useCallback((lead, q) => (
-    !q || (lead?.name || "").toLowerCase().includes(q) || (lead?.phone || "").toLowerCase().includes(q)
+    !q || (lead?.name || "").toLowerCase().includes(q)
   ), []);
 
   const visibleRows = useMemo(() => {
@@ -689,7 +697,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
             autoFocus
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search patient by name or phone..."
+            placeholder="Search patient by name..."
             className="h-10 pl-9 pr-9"
             data-testid="physio-treatment-search"
           />
@@ -981,7 +989,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                           {/* truncate, because table-fixed will not widen the column for a
                               long name — without it the name runs on under Day. */}
                           <p className="truncate font-medium text-slate-800">{l.name}</p>
-                          {l.phone ? <p className="truncate text-[11px] text-slate-400">{l.phone}</p> : null}
                         </td>
                         <td className="px-4 py-3 text-center text-slate-600">
                           {r.sessionNumber
@@ -1070,7 +1077,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
-                    {l.phone ? <p className="truncate text-[11px] text-slate-400">{l.phone}</p> : null}
                     {/* How far through the course, as a figure and as a bar. The figure is
                         what gets read; the bar is what gets scanned down a list of twenty. */}
                     <div className="mt-1.5 flex items-center gap-2">
@@ -1266,7 +1272,6 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
       if (bucketOf(p) !== bucket) return false;
       if (q && !(
         (p.lead_name || "").toLowerCase().includes(q)
-        || (p.phone || "").toLowerCase().includes(q)
         || (p.patient_number || "").toLowerCase().includes(q)
       )) return false;
       return true;
@@ -1300,7 +1305,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
             autoFocus
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search patient by name, phone or patient no..."
+            placeholder="Search patient by name or patient no..."
             className="h-10 pl-9 pr-9"
             data-testid="physio-review-search"
           />
@@ -1392,7 +1397,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                       <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{p.lead_name}<LeadMarks lead={p} className="ml-1.5" />
                     </p>
                     <p className="truncate text-[10px] text-slate-400">
-                      {p.phone || "—"}{p.patient_number ? ` · ${p.patient_number}` : ""}
+                      {p.patient_number || "—"}
                     </p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       {/* "11 / 7 sessions" was nonsense for anyone past their first
@@ -1453,12 +1458,11 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
 
         <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block" data-testid="physio-review-desktop">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-sm">
+            <table className="w-full min-w-[760px] text-sm">
               <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
                 <tr>
                   <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
                   <th className="px-4 py-2.5 font-semibold">Patient</th>
-                  <th className="px-4 py-2.5 font-semibold">Phone</th>
                   <th className="px-4 py-2.5 font-semibold">Days</th>
                   <th className="px-4 py-2.5 font-semibold">Review</th>
                   <th className="px-4 py-2.5 font-semibold">Status</th>
@@ -1486,7 +1490,6 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                           </div>
                         </div>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">{p.phone || "—"}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold ${
                           p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
@@ -1587,7 +1590,6 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
 
               <div className="flex-1 space-y-4 overflow-y-auto p-5">
                 <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                  <Line label="Phone">{viewing.phone}</Line>
                   <Line label="Package">{rev?.session_package_name || viewing.session_package_name}</Line>
                   <Line label="Treatment Days Done">{viewing.treatment_days}</Line>
                   <Line label="Status">
@@ -2177,7 +2179,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
         <div className="flex shrink-0 items-start justify-between gap-3 bg-white px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <h3 className="truncate text-lg font-bold text-slate-900">{lead.name}</h3>
-            <p className="truncate text-xs text-slate-500">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</p>
+            {lead.patient_number ? <p className="truncate text-xs text-slate-500">{lead.patient_number}</p> : null}
           </div>
           <div className="flex shrink-0 items-center gap-3">
             <span className="whitespace-nowrap rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-bold text-sky-700">
@@ -2333,7 +2335,6 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
           <div className="mt-4 border-t border-slate-100 pt-4" data-testid="physio-consultation-report">
             <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Consultation Report</p>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              <Row label="Alternative Phone" value={lead.alternative_phone} />
               <Row label="Address" value={lead.address} />
               <Row label="City / State" value={[lead.city, lead.state].filter(Boolean).join(", ")} />
               <Row label="Age" value={lead.age} />
@@ -2862,7 +2863,7 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
                   <p className="truncate text-sm font-semibold text-slate-800">{p.lead_name}</p>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <p className="truncate text-[10px] text-slate-400">
-                      {[p.phone, courseLine(p)].filter(Boolean).join(" · ")}
+                      {courseLine(p)}
                     </p>
                     {/* Which course this patient is on, in the same two words the
                         Treatment table and the day rows use. One badge each rather than a
@@ -2994,7 +2995,7 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
   ));
 
   // Rendered even when empty, as a dash. Dropping blank fields reflowed the grid for
-  // every patient, which is the one thing a grid is for: Age under Age, Phone under Phone.
+  // every patient, which is the one thing a grid is for: Age under Age, City under City.
   const Row = ({ label, value }) => (
     <div>
       <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
@@ -3030,7 +3031,7 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-slate-800">{patient.lead_name}</h2>
             <p className="truncate text-xs text-slate-400">
-              {[lead?.patient_number, patient.phone].filter(Boolean).join(" · ")}
+              {lead?.patient_number || ""}
             </p>
           </div>
           {/* The figures the card on the list was already showing. Opening a patient
@@ -3226,9 +3227,6 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
         {detailTab === "profile" && lead && (
           <div className="grid grid-cols-1 gap-x-6 gap-y-4 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="physio-patient-profile-tab">
             <Row label="Patient Number" value={lead.patient_number} />
-            <Row label="Phone" value={lead.phone} />
-            <Row label="Email" value={lead.email} />
-            <Row label="Alternative Phone" value={lead.alternative_phone} />
             <Row label="Age" value={lead.age} />
             <Row label="Gender" value={lead.gender} />
             <Row label="Occupation" value={lead.occupation} />
@@ -3686,7 +3684,7 @@ function ConfirmTreatmentCompleteModal({ lead, days, submitting, onCancel, onCon
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="confirm-treatment-complete-modal">
         <div className="border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">Mark treatment complete?</h3>
-          <p className="text-[10px] text-slate-400">{lead.name}{lead.phone ? ` · ${lead.phone}` : ""}</p>
+          <p className="text-[10px] text-slate-400">{lead.name}</p>
         </div>
         <div className="space-y-3 p-5">
           <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] text-emerald-800">
