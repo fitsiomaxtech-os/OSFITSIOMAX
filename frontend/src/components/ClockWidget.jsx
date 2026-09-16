@@ -29,6 +29,9 @@ import { clockToday, clockIn, clockBreakOut, clockBreakIn, clockOut, clockHistor
 // Shared with HR's register, which shows the same day from the other side.
 import { duration, prettyTime } from "@/lib/clock";
 
+// Fired after every successful press, for screens that show the same day.
+export const CLOCK_CHANGED_EVENT = "clock:changed";
+
 const fail = (e) => toast.error(e?.response?.data?.detail || e?.message || "Something went wrong");
 
 // How often the header re-reads its own numbers. A minute is the smallest unit anything
@@ -297,6 +300,9 @@ export const ClockWidget = () => {
       const d = await fn();
       setDay((prev) => ({ ...prev, ...d }));
       setFetchedAt(Date.now());
+      // The Attendance page is drawn from the same record, so tell it to read it again
+      // rather than leaving it on whatever it loaded before this press.
+      try { window.dispatchEvent(new Event(CLOCK_CHANGED_EVENT)); } catch (err) { /* noop */ }
       if (done) toast.success(done);
       setSheet((s) => (s === "break" ? null : s));
     } catch (e) {

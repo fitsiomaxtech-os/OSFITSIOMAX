@@ -240,10 +240,9 @@ def _row(iso: str, clock: Optional[dict], mark: dict, now_at: str, rules: Dict[s
     return {
         "date": iso,
         "weekday": date.fromisoformat(iso).strftime("%a"),
-        # One clock document per person per day, so a day is one session or none. Kept as a
-        # count rather than a yes/no because the register speaks in sessions, and a second
-        # one would land here unchanged if the clock ever grew them.
-        "sessions": 1 if (clock or {}).get("clock_in") else 0,
+        # How many times the person clocked in that day: clocking in again after a clock-out
+        # starts another session. Counted in day_totals, beside the gap it leaves.
+        "sessions": totals["sessions"],
         "clock_in": (clock or {}).get("clock_in") or mark.get("check_in") or "",
         "clock_out": (clock or {}).get("clock_out") or mark.get("check_out") or "",
         "login_minutes": totals["login_minutes"],

@@ -39,6 +39,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { myAttendance, myProfile } from "@/lib/api";
+import { CLOCK_CHANGED_EVENT } from "@/components/ClockWidget";
 // The third tab, in its own file. Same reason HROpsTabs.jsx lives beside HRBoard.jsx: this
 // page is already six hundred lines of two tabs, and the one that writes is the one most
 // likely to be edited on its own.
@@ -412,6 +413,18 @@ const AttendanceTab = () => {
   }, [month]);
 
   useEffect(load, [load]);
+
+  // Clock In, Clock Out and the breaks are pressed in the header, not here, so the month is
+  // read again after each press -- and when the tab is come back to -- instead of showing
+  // the day as it stood when this page first opened.
+  useEffect(() => {
+    window.addEventListener(CLOCK_CHANGED_EVENT, load);
+    window.addEventListener("focus", load);
+    return () => {
+      window.removeEventListener(CLOCK_CHANGED_EVENT, load);
+      window.removeEventListener("focus", load);
+    };
+  }, [load]);
 
   // Memoised rather than `data?.days || []`: the fallback is a fresh array on every
   // render, which would make the lookup below recompute forever.

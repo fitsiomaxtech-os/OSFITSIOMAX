@@ -121,11 +121,17 @@ def _state(day: Optional[Dict[str, Any]]) -> str:
     return ON_BREAK if _open_break(day) else WORKING
 
 
+def _is_gap(entry: Dict[str, Any]) -> bool:
+    """Whether a `breaks` entry is time spent clocked out rather than a break taken."""
+    return entry.get("reason") == CLOCKED_OUT_GAP
+
+
 def _break_minutes(day: Dict[str, Any], upto_at: str) -> int:
-    """Minutes spent on breaks, counting one still running up to `upto_at`."""
+    """Minutes spent on breaks, counting one still running up to `upto_at`. Clocked-out
+    gaps are not breaks and are left out."""
     return sum(
         _minutes_between(b.get("out_at"), b.get("in_at") or upto_at)
-        for b in (day.get("breaks") or [])
+        for b in (day.get("breaks") or []) if not _is_gap(b)
     )
 
 
@@ -137,8 +143,9 @@ def day_totals(day: Optional[Dict[str, Any]], upto_at: Optional[str] = None) -> 
     that disagreed with the widget about how long somebody worked would be worse than
     either being wrong alone.
 
-    login is the span from clocking in to clocking out; worked is that span less the
-    breaks. A day still running is measured up to `upto_at` (now, unless a caller is
+    login is the time actually on the clock: first clock-in to last clock-out, less the
+    gaps spent clocked out between sessions. worked is that less the breaks. sessions is
+    how many times the person clocked in. A day still running is measured up to `upto_at` (now, unless a caller is
     replaying a past day), which is what makes the figures move through the morning -- the
     screens label those "so far".
 
@@ -148,11 +155,16 @@ def day_totals(day: Optional[Dict[str, Any]], upto_at: Optional[str] = None) -> 
     day = day or {}
     now_at = upto_at or now_iso()
     end_at = day.get("clock_out_at") or now_at
-    breaks = day.get("breaks") or []
+    entries = day.get("breaks") or []
+    breaks = [b for b in entries if not _is_gap(b)]
+    gaps = [b for b in entries if _is_gap(b)]
     break_minutes = sum(_minutes_between(b.get("out_at"), b.get("in_at") or now_at) for b in breaks)
-    login = _minutes_between(day.get("clock_in_at"), end_at) if day.get("clock_in_at") else 0
+    gap_minutes = sum(_minutes_between(b.get("out_at"), b.get("in_at") or now_at) for b in gaps)
+    span = _minutes_between(day.get("clock_in_at"), end_at) if day.get("clock_in_at") else 0
+    login = max(span - gap_minutes, 0)
     return {
         "state": _state(day),
+        "sessions": (1 + len(gaps)) if day.get("clock_in") else 0,
         "login_minutes": login,
         # Never negative: a break left running past a clock-out would otherwise subtract
         # more than the day contained and print a worked figure below zero.
