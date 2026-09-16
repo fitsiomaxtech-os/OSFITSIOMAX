@@ -225,24 +225,24 @@ export const BdMarketingSources = ({
                 under the name. */}
             <div className="space-y-2 p-3 md:hidden" data-testid="bd-breakdown-mobile">
               {totals && (
-                <div className="rounded-xl border-2 border-slate-200 bg-slate-50 p-3" data-testid="bd-breakdown-total-mobile">
-                  <p className="text-sm font-bold text-slate-800">Total</p>
-                  <p className="text-xs text-slate-500">{num(totals.rows)} {unit}</p>
+                <div className="rounded-xl border-2 border-gray-400 bg-gray-300 p-3" data-testid="bd-breakdown-total-mobile">
+                  <p className="text-sm font-bold text-slate-900">Total</p>
+                  <p className="text-xs text-slate-600">{num(totals.rows)} {unit}</p>
                   {/* Three, not the rows' four: a "last lead" across every row is the
                       newest of them, which says nothing about whether any one has
                       stopped -- the only question that column is there to answer. */}
                   <dl className="mt-2 grid grid-cols-3 gap-2">
                     <div>
-                      <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Leads</dt>
-                      <dd className="text-sm font-bold text-slate-800">{num(totals.leads)}</dd>
+                      <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Leads</dt>
+                      <dd className="text-sm font-bold text-slate-900">{num(totals.leads)}</dd>
                     </div>
                     <div>
-                      <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Booked</dt>
-                      <dd className="text-sm font-bold text-slate-800">{num(totals.booked)}</dd>
+                      <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Booked</dt>
+                      <dd className="text-sm font-bold text-slate-900">{num(totals.booked)}</dd>
                     </div>
                     <div>
-                      <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Conv</dt>
-                      <dd className="text-sm font-bold text-slate-800">{pct(totals.conversion_rate)}</dd>
+                      <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Conv</dt>
+                      <dd className="text-sm font-bold text-slate-900">{pct(totals.conversion_rate)}</dd>
                     </div>
                   </dl>
                 </div>
@@ -314,9 +314,9 @@ export const BdMarketingSources = ({
                       column headings stay the only thing in the head, and marked off by a
                       heavier rule below it instead of above. */}
                   {totals && (
-                    <tr className="border-b-2 border-slate-200 bg-slate-50 font-bold text-slate-800" data-testid="bd-breakdown-total">
+                    <tr className="border-b-2 border-gray-400 bg-gray-300 font-bold text-gray-900" data-testid="bd-breakdown-total">
                       <td className="px-4 py-3">Total</td>
-                      <td className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      <td className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-700">
                         {num(totals.rows)} {unit}
                       </td>
                       <td className="px-4 py-3 text-right">{num(totals.leads)}</td>
