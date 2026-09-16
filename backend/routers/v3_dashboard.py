@@ -1709,57 +1709,81 @@ async def dashboard_clients(
     }
 
 
-# How a source row's "Last Lead" is judged to have gone quiet. Seven days because every
-# one of this estate's live sheets carries leads most weeks -- the smallest of them is
-# running about one a day -- so a week of silence on a sheet that was arriving daily is a
-# broken sync far more often than it is a dead channel. It is a hint and nothing else: the
-# row still reads normally, the figure just gets a mark beside it.
+# How a row's "Last Lead" is judged to have gone quiet. Seven days because every one of
+# this estate's live sheets carries leads most weeks -- the smallest of them is running
+# about one a day -- so a week of silence on a sheet that was arriving daily is a broken
+# sync far more often than it is a dead channel. It is a hint and nothing else: the row
+# still reads normally, the figure just gets a mark beside it.
 MARKETING_QUIET_DAYS = 7
 
-# What the Group by control offers, and what each one keys a row on.
+# What the Group by control offers, and what each one keys a row on. Both the Marketing
+# and the Sales tab of the Business Development Dashboard read this endpoint; they differ
+# only in which three of these five they offer.
 #
-#   source         -- one row per sheet/form, wherever its leads landed. The default: this
-#                     is the marketing question, and a sheet is a thing somebody set up.
-#   branch         -- one row per branch, whatever fed it. The same table read from the
-#                     other end, for "which place is actually converting".
+#   source         -- one row per sheet or form, wherever its leads landed. Marketing's
+#                     default: that is the marketing question, and a sheet is a thing
+#                     somebody set up and can go and fix.
+#   stage          -- one row per pre-sales stage. Sales' default: the funnel, as a table.
+#   branch         -- one row per branch, whatever fed it. Either tab read from the other
+#                     end, for "which place is actually converting".
 #   source_branch  -- one row per pairing. The only one that can answer what a shared form
 #                     did for one branch -- this estate's two biggest sources are
-#                     all-branch forms, so under "source" alone their 2,103 leads sit in
-#                     two rows that name no branch at all.
-MARKETING_GROUPINGS = {"source", "branch", "source_branch"}
+#                     all-branch forms, so under "source" alone their leads sit in two rows
+#                     that name no branch at all.
+#   stage_branch   -- the same pairing for the funnel: where each branch's leads are stuck.
+BREAKDOWN_GROUPINGS = {"source", "stage", "branch", "source_branch", "stage_branch"}
+
+# Which field a grouping's PRIMARY dimension reads, or None where the primary dimension is
+# the branch itself. The secondary is always the branch, and only on the two pairings.
+BREAKDOWN_DIMENSION = {
+    "source": "source",
+    "source_branch": "source",
+    "stage": "stage",
+    "stage_branch": "stage",
+    "branch": None,
+}
 
 
 @router.get("/dashboard/marketing-sources")
 async def v3_marketing_sources(
-    group_by: str = Query("source", description="One of MARKETING_GROUPINGS"),
+    group_by: str = Query("source", description="One of BREAKDOWN_GROUPINGS"),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     branch_ids: Optional[str] = Query(None, description="Comma-separated; omit for every branch"),
     _: V3UserOut = Depends(v3_require_roles("super_admin", "sales_head", "marketing_head", "business_dev")),
 ):
-    """Every lead source in the window, as rows: leads, booked, conversion, and when each
-    last carried anything.
+    """Every lead source -- or stage, or branch -- in the window, as rows: leads, booked,
+    conversion, and when each last carried anything.
 
     The same leads /dashboard/leads-analytics counts, over the same window, on the same
     clinic clock -- and `booked` is that endpoint's own definition (the lead has an
-    appointment_date), so the figure at the foot of this table is the Booked card's number
-    and cannot drift from it.
+    appointment_date), so the total this returns is the Booked card's number and cannot
+    drift from it.
 
-    What this is NOT is `by_source` from that endpoint. That one is ranked and capped at
-    six plus an "Other" bucket, because it feeds a pie chart and a part-to-whole read stops
-    working past about six slices. On this install that cap folds nine real sheets into one
-    653-lead row called "Other", which is fine for a chart and useless for a table: the
-    desk reading this wants the sheet's name so it can go and look at the sheet. So every
-    source is returned, named, however many there are.
+    What this is NOT is `by_source`/`by_stage` from that endpoint. Those are ranked and
+    capped at six plus an "Other" bucket, because they feed pie charts and a part-to-whole
+    read stops working past about six slices. On this install that cap folds nine real
+    sheets into one 653-lead row called "Other", which is fine for a chart and useless for
+    a table: the desk reading this wants the sheet's name so it can go and look at the
+    sheet. So every row is returned, named, however many there are.
 
-    No aggregation pipeline: this is one indexed range scan with a five-field projection,
-    counted in Python, which is what the analytics endpoint beside it already does over the
-    same rows. Grouping in Mongo would mean three pipelines to keep in step with each other
-    and with that endpoint, to save an arithmetic pass over at most a few tens of thousands
-    of small dicts.
+    One row shape for all five groupings, and `label`/`sub_label` carry whatever the
+    grouping put in them, so one table component draws all five rather than five components
+    drifting apart. `source`, `stage` and `branch_id` are filled in only where the row names
+    exactly one of each -- they are what the drill-down filters by, and a row spanning nine
+    sheets must not be drilled as if it named one.
+
+    No aggregation pipeline: one indexed range scan with a six-field projection, counted in
+    Python, which is what the analytics endpoint beside it already does over the same rows.
+    Grouping in Mongo would mean five pipelines to keep in step with each other and with
+    that endpoint, to save an arithmetic pass over at most a few tens of thousands of small
+    dicts.
     """
-    if group_by not in MARKETING_GROUPINGS:
+    if group_by not in BREAKDOWN_GROUPINGS:
         raise HTTPException(status_code=400, detail=f"Unknown grouping: {group_by}")
+
+    dimension = BREAKDOWN_DIMENSION[group_by]
+    pairs_branch = group_by.endswith("_branch")
 
     query: dict = _utc_stamp_range_query("created_at", start_date, end_date)
     wanted_branches = [b for b in (branch_ids or "").split(",") if b.strip()]
@@ -1767,7 +1791,8 @@ async def v3_marketing_sources(
         query["branch_id"] = {"$in": wanted_branches}
     leads = await v3_col("leads").find(
         query,
-        {"_id": 0, "created_at": 1, "branch_id": 1, "source_tab": 1, "source_type": 1, "appointment_date": 1},
+        {"_id": 0, "created_at": 1, "branch_id": 1, "source_tab": 1, "source_type": 1,
+         "stage": 1, "appointment_date": 1},
     ).to_list(50000)
 
     branch_rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
@@ -1776,27 +1801,23 @@ async def v3_marketing_sources(
     rows: dict = {}
     for lead in leads:
         source = _lead_source(lead)
+        stage = (lead.get("stage") or "").strip() or "No stage"
         bid = lead.get("branch_id") or ""
-        if group_by == "source":
-            key = source
-        elif group_by == "branch":
-            key = bid
-        else:
-            # Only ever a React key and a dict key -- the source and the branch are
-            # returned as their own fields beside it, so nothing downstream has to
-            # split this back apart.
-            key = f"{source}||{bid}"
+        primary = source if dimension == "source" else stage if dimension == "stage" else bid
+        key = f"{primary}||{bid}" if pairs_branch else primary
 
         row = rows.get(key)
         if row is None:
             row = rows[key] = {
                 "key": key,
-                # Both names on every row whatever the grouping, so one table component
-                # draws all three and a column is empty rather than absent. Under "branch"
-                # the source cell is filled in below, once it is known whether the branch
-                # was fed by one sheet or by nine.
-                "source": source if group_by != "branch" else None,
+                # What the row names, and what it names underneath. Filled here for every
+                # grouping but "branch", whose two labels are only knowable once all its
+                # leads have been seen -- see the finishing pass below.
+                "label": branch_names.get(bid, "Unassigned") if dimension is None else primary,
+                "sub_label": None,
+                "source": source,
                 "source_type": (lead.get("source_type") or "").strip() or None,
+                "stage": stage,
                 # The sentinel, not None, where the row IS the no-branch bucket: None is
                 # reserved below for a row that spans several branches and must not be
                 # filtered to one. The two are opposite instructions to the drill-down.
@@ -1806,11 +1827,12 @@ async def v3_marketing_sources(
                 "booked": 0,
                 "first_lead_at": None,
                 "last_lead_at": None,
-                # The sets behind the two "how many of the other thing" figures below.
-                # Dropped from the response before it goes out -- the count is the fact,
-                # and a row for an all-branch form would otherwise carry every branch id.
+                # The sets behind the "how many of the other thing" counts below. Dropped
+                # from the response before it goes out -- the count is the fact, and a row
+                # for an all-branch form would otherwise carry every branch id.
                 "_branches": set(),
                 "_sources": set(),
+                "_stages": set(),
             }
 
         row["leads"] += 1
@@ -1818,6 +1840,7 @@ async def v3_marketing_sources(
             row["booked"] += 1
         row["_branches"].add(bid)
         row["_sources"].add(source)
+        row["_stages"].add(stage)
 
         created = lead.get("created_at") or ""
         if created:
@@ -1831,19 +1854,46 @@ async def v3_marketing_sources(
     for row in rows.values():
         branches_seen = row.pop("_branches")
         sources_seen = row.pop("_sources")
+        stages_seen = row.pop("_stages")
         row["branch_count"] = len(branches_seen)
         row["source_count"] = len(sources_seen)
+        row["stage_count"] = len(stages_seen)
 
-        # A sheet that fed more than one branch has no single branch to name, and naming
-        # the first one it happened to touch would be a lie the desk cannot see. Said as a
-        # count instead, which is the true answer and also the more useful one.
-        if group_by == "source" and row["branch_count"] > 1:
-            row["branch_name"] = f"All branches ({row['branch_count']})"
-            row["branch_id"] = None
-        # The mirror of that, one grouping over: a branch fed by nine sheets names none.
-        if group_by == "branch":
-            row["source"] = next(iter(sources_seen)) if row["source_count"] == 1 else f"{row['source_count']} sources"
+        # What sits under the row's name, and which of the three filters the drill-down may
+        # actually use. A row spanning several of something has no single one to name, and
+        # naming whichever it happened to meet first would be a lie the reader cannot see --
+        # so it is said as a count, and the filter for it is cleared.
+        if dimension is None:
+            # Grouped by branch: the row is one branch, fed by however many sheets.
+            row["sub_label"] = (
+                next(iter(sources_seen)) if row["source_count"] == 1
+                else f"{row['source_count']} sources"
+            )
             if row["source_count"] > 1:
+                row["source"] = None
+                row["source_type"] = None
+            if row["stage_count"] > 1:
+                row["stage"] = None
+        elif pairs_branch:
+            # One row per pairing: both dimensions name exactly one thing by construction,
+            # so both filters stand and the branch is what goes underneath.
+            row["sub_label"] = row["branch_name"]
+            if dimension == "source" and row["stage_count"] > 1:
+                row["stage"] = None
+            if dimension == "stage" and row["source_count"] > 1:
+                row["source"] = None
+        else:
+            # Grouped by source or by stage, across whatever branches those leads landed in.
+            if row["branch_count"] > 1:
+                row["sub_label"] = f"All branches ({row['branch_count']})"
+                row["branch_name"] = row["sub_label"]
+                row["branch_id"] = None
+            else:
+                row["sub_label"] = row["branch_name"]
+            if dimension == "source" and row["stage_count"] > 1:
+                row["stage"] = None
+            if dimension == "stage" and row["source_count"] > 1:
+                row["source"] = None
                 row["source_type"] = None
 
         # Rate is returned rather than left to the caller so every screen reading this
@@ -1853,7 +1903,7 @@ async def v3_marketing_sources(
 
         # Days since the last lead, on the clinic's clock -- not a timestamp difference.
         # "Yesterday" is a day old at one minute past midnight and at eleven at night, and
-        # the desk asking whether a sheet has stopped is counting days, not hours.
+        # the desk asking whether a source has stopped is counting days, not hours.
         last_day = clinic_day_of(row["last_lead_at"])
         try:
             quiet = (date.fromisoformat(today) - date.fromisoformat(last_day)).days

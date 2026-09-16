@@ -64,13 +64,13 @@ import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard
 // other tabs on the nav above, and this one IS the Dashboard tab -- the tab this board
 // opens on. A lazy() could not carry useDashboardData in any case; a hook has to be
 // there when the component that calls it renders.
-import { DASH_TABS, DashboardTabPanel, useDashboardData } from "@/components/DashboardBoard";
+import { DASH_TABS, DashboardTabPanel, ModeBranchScope, useDashboardData } from "@/components/DashboardBoard";
 // This desk's own Marketing tab -- every lead source in the range as a row, with the leads
 // behind any one of them a click away, in place of the row of per-channel totals
 // DashboardTabPanel draws for that key. Only this board swaps it; Super Admin's Dashboard
 // > Marketing is untouched and still gets the tiles. See the note at the render below, and
 // the file's own header for why the desk wants a table rather than tiles.
-import { BdMarketingSources } from "@/components/BdMarketingSources";
+import { BREAKDOWN_MODES, BdMarketingSources } from "@/components/BdMarketingSources";
 // Finance, HR Admin, Services and Products, and the two Settings screens -- the same five
 // boards Super Admin reaches, mounted here as this desk's own tabs.
 //
@@ -1016,6 +1016,11 @@ const CARD_GROUPS = [
 const DASH_SUB_TABS = [...CARD_GROUPS, ...DASH_TABS];
 const CARD_GROUP_KEYS = CARD_GROUPS.map((g) => g.key);
 
+// The two tabs this desk reads as a table of rows rather than as Super Admin's row of
+// StatTiles -- see BdMarketingSources. Each opens on its own grouping: Marketing asks
+// which sheet the leads came from, Sales asks where in the funnel they are.
+const BREAKDOWN_TABS = { marketing: "source", sales: "stage" };
+
 // What the six imported tabs are handed when neither date control is set. They read a
 // range off `.from`/`.to` without guarding it, and this board's two controls intersect to
 // null rather than to an open range. Module-level so it is the same object on every
@@ -1107,10 +1112,22 @@ function DashboardTab({
   const [sortOrder, setSortOrder] = useState("newest");
   const [markFilter, setMarkFilter] = useState("");
 
+  // Marketing and Sales' own three scoping controls. Held up here with the rest of the
+  // toolbar rather than inside the table they scope, because that is where they are drawn:
+  // the whole point of the row below is that every control narrowing what is on screen
+  // sits on one line, and a filter that lived in the panel could only be drawn under it.
+  const [scopeGroup, setScopeGroup] = useState("all");
+  const [scopeBranchId, setScopeBranchId] = useState("");
+  const [groupBy, setGroupBy] = useState("source");
+
   // Whether the open tab is one of this desk's two card rows, or one of the six imported
   // ones. Almost everything below branches on it: the card rows read `summary` and drive
   // the drill list, and the six read their own payloads and have no list to narrow.
   const onCards = CARD_GROUP_KEYS.includes(openGroup);
+
+  // Whether the open tab is one of the two this desk draws as a table. Those two put four
+  // more controls on the toolbar and read none of the four the card rows use.
+  const breakdownMode = BREAKDOWN_TABS[openGroup] ? openGroup : null;
 
   // The six imported tabs' own payloads -- the same hook Super Admin's Dashboard runs on.
   //
@@ -1145,7 +1162,10 @@ function DashboardTab({
   // opens. Clearing a mark opens nothing: an answer being put away is not a question.
   const searchList = (v) => {
     setSearch(v);
-    if (v.trim() && !openMetric) onOpenCard("total");
+    // Only on a card row. On Marketing and Sales the same box narrows the table that is
+    // already on screen, and opening a summary card underneath it would answer a question
+    // nobody asked with a list nobody can see.
+    if (onCards && v.trim() && !openMetric) onOpenCard("total");
   };
   const toggleMark = (m) => {
     const next = markFilter === m ? "" : m;
@@ -1166,6 +1186,10 @@ function DashboardTab({
     // Back on OnBoarding, Today's Leads opens again -- the same list the board arrives on.
     if (key === "onboarding") onOpenCard("today");
     if (!CARD_GROUP_KEYS.includes(key)) setWantsPanels(true);
+    // Marketing groups by source and Sales by stage, and neither key exists on the other
+    // tab -- carrying the pressed one across would ask the server for a grouping it would
+    // reject. The branch scope IS carried: it means the same thing on both.
+    if (BREAKDOWN_TABS[key]) setGroupBy(BREAKDOWN_TABS[key]);
     setOpenGroup(key);
   };
 
@@ -1240,12 +1264,14 @@ function DashboardTab({
             grows into whatever the other controls left, capped so a search box is not
             stretched across a 1600px board it cannot use. Full width on a phone, where it
             is the only thing on its line anyway. */}
-        {onCards && (
+        {(onCards || breakdownMode) && (
           <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[220px] sm:flex-1">
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
             <Input
               className="h-10 pl-9"
-              placeholder="Search this list..."
+              placeholder={breakdownMode === "sales" ? "Search a stage or branch..."
+                : breakdownMode ? "Search a source or branch..."
+                  : "Search this list..."}
               value={search}
               onChange={(e) => searchList(e.target.value)}
               data-testid="bd-search"
@@ -1272,6 +1298,44 @@ function DashboardTab({
             showCustom={false}
           />
         </div>
+
+        {/* Marketing and Sales' own three: the vertical split, the branch, and which way
+            the table is grouped. On this row rather than above the table, so the range,
+            the scope and the grouping are read left to right as one sentence -- and so the
+            table underneath is the answer and nothing else.
+
+            The branch is a popover here, not the bordered row of one chip per branch that
+            ModeBranchFilter draws. Seven branch chips need a row to themselves, which is
+            the row this is trying not to have. */}
+        {breakdownMode && (
+          <>
+            <ModeBranchScope
+              branches={dash.branches}
+              group={scopeGroup}
+              onGroup={setScopeGroup}
+              branchId={scopeBranchId}
+              onBranch={setScopeBranchId}
+              testid="bd-scope"
+            />
+            <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 p-0.5" data-testid="bd-group-by">
+              {BREAKDOWN_MODES[breakdownMode].groupings.map((g) => (
+                <button
+                  key={g.key}
+                  type="button"
+                  onClick={() => setGroupBy(g.key)}
+                  title={g.hint}
+                  aria-pressed={groupBy === g.key}
+                  className={`shrink-0 whitespace-nowrap rounded px-2.5 py-1.5 text-xs font-semibold transition ${
+                    groupBy === g.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                  }`}
+                  data-testid={`bd-group-by-${g.key}`}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         {/* The actions, held to the right edge of whichever line they end up on.
             Wrappable, and deliberately not shrink-0: seven controls come to about 390px
@@ -1442,10 +1506,15 @@ function DashboardTab({
            desk's, not the tab's: Super Admin's own Dashboard > Marketing still draws the
            tiles, out of the same unchanged component. */
         <div data-testid={`bd-dash-panel-${openGroup}`}>
-          {openGroup === "marketing" ? (
+          {breakdownMode ? (
             <BdMarketingSources
+              mode={breakdownMode}
               branches={dash.branches}
               dateParams={panelDateParams}
+              group={scopeGroup}
+              branchId={scopeBranchId}
+              groupBy={groupBy}
+              search={search}
               rangeLabel={panelRangeLabel}
               onOpenLead={onOpenLead}
             />

@@ -3,6 +3,7 @@ import {
   Users, CalendarCheck, Activity, IndianRupee, X, RefreshCw,
   Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad, Clock,
   AlertCircle, CalendarClock, CheckCircle2, XCircle, Star, AlertTriangle, Music, HeartPulse, Building2,
+  ChevronDown, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { StatTile } from "@/components/ui/stat-tile";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/components/ui/sonner";
 import { getDashboardOverview, getDashboardLeadsTrend, getLeadsAnalytics, getRevenueOverview, mkGetTeam, getDashboardClients, hrUsers, hrEmployees, hrMeta } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
@@ -141,6 +143,89 @@ const scopedBucketValue = (bucket, group, branchId) => {
   if (branchId) return rows.find((b) => b.branch_id === branchId)?.value ?? 0;
   if (group === "all") return bucket.total || 0;
   return rows.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).reduce((s, b) => s + (b.value || 0), 0);
+};
+
+/**
+ * The same All / Offline / Online + branch filter as ModeBranchFilter below, folded into
+ * something that fits on a toolbar row beside other controls.
+ *
+ * Same state, same props, same meaning — only the branch half is drawn differently. There
+ * it is a bordered box of one chip per branch, which on this estate is seven chips and
+ * needs a row of its own; here it is a button that names the current branch and opens the
+ * same list in a popover. A board with one toolbar row to spend cannot afford the chips,
+ * and a board with room for them should not be made to hunt inside a popover.
+ *
+ * Picking a group clears any branch already chosen — the two read as one filter, not two
+ * independent ones — which is the one behaviour that would break if a caller wired the
+ * halves up separately, and the reason they stay one component.
+ */
+export const ModeBranchScope = ({ branches, group, onGroup, branchId, onBranch, testid }) => {
+  const visible = group === "all" ? branches : branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online"));
+  const current = branches.find((b) => b.branch_id === branchId);
+  const allLabel = group === "all" ? "All Branches" : `All ${group === "online" ? "Online" : "Offline"}`;
+  return (
+    <>
+      <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 p-0.5" data-testid={`${testid}-groups`}>
+        {MODE_GROUPS.map((g) => (
+          <button
+            key={g.key}
+            type="button"
+            onClick={() => { onGroup(g.key); onBranch(""); }}
+            aria-pressed={group === g.key}
+            className={`shrink-0 rounded px-2.5 py-1.5 text-xs font-semibold transition ${
+              group === g.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+            }`}
+            data-testid={`${testid}-group-${g.key}`}
+          >
+            {g.label}
+          </button>
+        ))}
+      </div>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            title="Filter by branch"
+            className={`flex h-10 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition ${
+              branchId ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+            data-testid={`${testid}-branch-button`}
+          >
+            <Building2 className="h-3.5 w-3.5 shrink-0" />
+            <span className="max-w-[130px] truncate">{current?.branch_name || allLabel}</span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="max-h-80 w-64 overflow-y-auto p-1" data-testid={`${testid}-branch-menu`}>
+          {/* The group's own "everything" row first, and it is what a cleared branch means
+              rather than a fourth group: clearing the branch inside Offline returns to
+              Offline, not to the whole estate. */}
+          <button
+            type="button"
+            onClick={() => onBranch("")}
+            className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm transition hover:bg-slate-50 ${!branchId ? "font-semibold text-sky-700" : "text-slate-700"}`}
+            data-testid={`${testid}-branch-all`}
+          >
+            <Check className={`h-3.5 w-3.5 shrink-0 ${branchId ? "opacity-0" : ""}`} />
+            <span className="truncate">{allLabel}</span>
+          </button>
+          {visible.map((b) => (
+            <button
+              key={b.branch_id}
+              type="button"
+              onClick={() => onBranch(branchId === b.branch_id ? "" : b.branch_id)}
+              className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm transition hover:bg-slate-50 ${branchId === b.branch_id ? "font-semibold text-sky-700" : "text-slate-700"}`}
+              data-testid={`${testid}-branch-${b.branch_id}`}
+            >
+              <Check className={`h-3.5 w-3.5 shrink-0 ${branchId === b.branch_id ? "" : "opacity-0"}`} />
+              <span className="truncate">{b.branch_name}</span>
+            </button>
+          ))}
+        </PopoverContent>
+      </Popover>
+    </>
+  );
 };
 
 /**
