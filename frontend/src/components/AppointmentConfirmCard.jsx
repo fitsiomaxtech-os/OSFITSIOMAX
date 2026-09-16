@@ -12,7 +12,7 @@ import { CheckCircle2, Download, Printer, Share2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
-import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
+import { apptCardPng } from "@/lib/apptCard";
 import { waNumber } from "@/lib/phone";
 import { isHandheld } from "@/lib/receipt";
 import { PRINTABLE_STYLES, docHeadHtml, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
@@ -109,27 +109,35 @@ export const downloadApptCard = async (a, prebuilt) => {
  *  minutes early" tell a patient to travel, and a patient told to travel to a video call
  *  either goes to a branch that is not expecting them or reads the message as a mistake
  *  and asks. The room is where they are being asked to be, so it is the only place named. */
+/** "14:45" -> "2.45pm", the way the branches write a time in their own messages. */
+const dotTime = (t) => to12h(t).replace(":", ".").replace(" ", "").toLowerCase();
+
 export const apptMessage = (a) => {
   const meet = (a.meetLink || "").trim();
+  const d = a.date ? new Date(`${a.date}T00:00:00`) : null;
   const lines = [
-    `Hi ${a.patient},`,
+    "Greetings from Fitsiomax",
     "",
-    "Your appointment is",
-    weekdayLabel(a.date),
-    `${to12h(a.time)} to ${endTime12h(a.time, a.duration)}`,
+    "Your appointment is confirmed",
+    "",
+    `Date ${d ? d.toLocaleDateString("en-US", { month: "long", day: "numeric" }) : "—"}`,
+    d ? d.toLocaleDateString("en-US", { weekday: "long" }) : "—",
+    dotTime(a.time),
   ];
-  // Online is a mode, not a branch, so the branch line goes with the rest of the room.
-  if (a.branch && !meet) lines.push(`at ${a.branch}`);
-  if (meet) lines.push("online, on Google Meet");
-  lines.push("", REASSURANCE, "— Team Fitsiomax", "", `CONSULTANT: ${a.headPhysio}`);
-  if (a.notes) lines.push(`Notes: ${a.notes}`);
   if (meet) {
-    lines.push("", "Join here:", meet, "", "Please join 5 minutes early.");
-    return lines.join("\n");
+    lines.push("", "Location: Online (Google Meet)", "", `Join here: ${meet}`, "",
+      "kindly join at least 5 minutes before your scheduled appointment.");
+  } else {
+    if (a.branch) lines.push("", `Location: ${a.branch}`);
+    if (a.mapLocation) lines.push("", "", `Address:  ${a.mapLocation}`);
+    if (a.branchAddress) lines.push("", a.branchAddress);
+    lines.push("", "", "kindly arrive at least 10 minutes before your scheduled appointment.");
   }
-  if (a.branchAddress) lines.push("", `Location: ${a.branchAddress}`);
-  if (a.mapLocation) lines.push(a.mapLocation);
-  lines.push("", "Please arrive 10 minutes early.");
+  // Signed by the branch's own admin and numbers, so the patient knows who to call back.
+  lines.push("", "Regards,", "Admin");
+  if (a.adminName) lines.push(a.adminName);
+  const phones = [a.adminPhone, a.branchPhone].map((p) => (p || "").trim()).filter(Boolean);
+  if (phones.length) lines.push("", ...phones);
   return lines.join("\n");
 };
 

@@ -2172,7 +2172,8 @@ async def v3_lead_appointment_card(lead_id: str, _: V3UserOut = Depends(v3_curre
 
     branch = await v3_col("branches").find_one(
         {"id": appt.get("branch_id") or lead.get("branch_id")},
-        {"_id": 0, "branch_name": 1, "address": 1, "map_location": 1},
+        {"_id": 0, "branch_name": 1, "address": 1, "map_location": 1,
+         "admin_name": 1, "admin_phone": 1, "phone": 1},
     ) or {}
 
     return {
@@ -2190,6 +2191,9 @@ async def v3_lead_appointment_card(lead_id: str, _: V3UserOut = Depends(v3_curre
         "branch": branch.get("branch_name") or "",
         "branchAddress": branch.get("address") or "",
         "mapLocation": branch.get("map_location") or "",
+        "adminName": branch.get("admin_name") or "",
+        "adminPhone": branch.get("admin_phone") or "",
+        "branchPhone": branch.get("phone") or "",
         "date": appt.get("appointment_date") or "",
         "time": appt.get("appointment_time") or "",
         "duration": appt.get("duration") or 30,
