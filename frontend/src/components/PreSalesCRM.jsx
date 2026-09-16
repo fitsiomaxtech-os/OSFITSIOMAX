@@ -18,7 +18,7 @@ import { StageTabBar } from "@/components/ui/stage-tab";
 import { MilkDateInput, MilkDateTextInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { callTimeStamp, callDateStamp } from "@/lib/time";
 
-const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+export const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
 // Deterministic avatar color per first letter so A→one hue, B→another, etc.
 // Tailwind 26-letter palette (bg + text pair) chosen for legibility on white rows.
@@ -51,7 +51,7 @@ const AVATAR_PALETTE = [
   { bg: "bg-pink-200",    fg: "text-pink-800" },    // Z
 ];
 
-const avatarColor = (name) => {
+export const avatarColor = (name) => {
   const c = (name || "?").trim().charAt(0).toUpperCase();
   const idx = c.charCodeAt(0) - 65;
   if (idx < 0 || idx > 25) return { bg: "bg-slate-100", fg: "text-slate-700" };

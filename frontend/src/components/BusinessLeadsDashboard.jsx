@@ -65,6 +65,11 @@ import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard
 // opens on. A lazy() could not carry useDashboardData in any case; a hook has to be
 // there when the component that calls it renders.
 import { DASH_TABS, DashboardTabPanel, useDashboardData } from "@/components/DashboardBoard";
+// This desk's own Marketing tab -- the leads themselves, as a list, in place of the row of
+// per-channel totals DashboardTabPanel draws for that key. Only this board swaps it; Super
+// Admin's Dashboard > Marketing is untouched and still gets the tiles. See the note at the
+// render below, and the file's own header for why the desk wants rows rather than counts.
+import { BdMarketingList } from "@/components/BdMarketingList";
 // Finance, HR Admin, Services and Products, and the two Settings screens -- the same five
 // boards Super Admin reaches, mounted here as this desk's own tabs.
 //
@@ -1116,6 +1121,11 @@ function DashboardTab({
   const [wantsPanels, setWantsPanels] = useState(false);
   const panelRange = effectiveDateFilter || ALL_DATES;
   const dash = useDashboardData(panelRange, openGroup, wantsPanels);
+  // The same range again, in the two query params the BD endpoints take rather than as the
+  // {from,to} the six imported tabs read. Marketing is the only tab below that asks the
+  // server for rows of its own. Memoised because it is a dependency of that list's fetch:
+  // rebuilt every render, it would re-ask for the leads each time anything here moved.
+  const panelDateParams = useMemo(() => dateParamsOf(effectiveDateFilter), [effectiveDateFilter]);
 
   // A name typed, or a mark pressed, with no card open has nothing to narrow -- the
   // controls would sit there doing nothing visible and read as broken. Total Leads is the
@@ -1403,9 +1413,29 @@ function DashboardTab({
       ) : (
         /* Marketing, Sales, Revenue, Team, Clients or Analytics — DashboardBoard's own
            tab, drawn from this desk's date range and its own payloads. No date row and no
-           strip come with it: both are the two bars above. */
+           strip come with it: both are the two bars above.
+
+           Marketing is the one exception on this board. Super Admin reads that tab as a
+           row of per-channel totals, which is the right shape for a desk asking where the
+           month's leads came from; this desk's Marketing day is spent working the leads a
+           channel brought in, and a total cannot be worked. So the same question is drawn
+           here as the rows behind it -- one lead per line, the channel a column and a
+           filter. The counts have not gone anywhere: they are the same figures this
+           board's own OnBoarding row carries, one tab to the left.
+
+           Swapped here rather than inside DashboardTabPanel because the change is this
+           desk's, not the tab's: Super Admin's own Dashboard > Marketing still draws the
+           tiles, out of the same unchanged component. */
         <div data-testid={`bd-dash-panel-${openGroup}`}>
-          <DashboardTabPanel tab={openGroup} dateFilter={panelRange} dash={dash} />
+          {openGroup === "marketing" ? (
+            <BdMarketingList
+              branches={dash.branches}
+              dateParams={panelDateParams}
+              onOpenLead={onOpenLead}
+            />
+          ) : (
+            <DashboardTabPanel tab={openGroup} dateFilter={panelRange} dash={dash} />
+          )}
         </div>
       )}
     </div>

@@ -125,7 +125,7 @@ const MODE_GROUPS = [
  *  out. A group that resolves to zero branches (Online, before any exist) is asked for by
  *  an id nothing can match, so it returns nothing rather than silently falling back to
  *  every branch the way an empty string would. */
-const resolveBranchIds = (branches, group, branchId) => {
+export const resolveBranchIds = (branches, group, branchId) => {
   if (branchId) return branchId;
   if (group === "all") return undefined;
   const ids = branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).map((b) => b.branch_id);
@@ -149,7 +149,7 @@ const scopedBucketValue = (bucket, group, branchId) => {
  * clears any branch already chosen — the two rows read as one filter, not two independent
  * ones — and picking the already-selected branch clears back to the group.
  */
-const ModeBranchFilter = ({ branches, group, onGroup, branchId, onBranch, testid }) => {
+export const ModeBranchFilter = ({ branches, group, onGroup, branchId, onBranch, testid }) => {
   const visible = group === "all" ? branches : branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online"));
   return (
     <div className="space-y-2" data-testid={testid}>

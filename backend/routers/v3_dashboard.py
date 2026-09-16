@@ -210,6 +210,11 @@ BD_ROWS_LIMIT = 500
 async def v3_bd_summary_rows(
     metric: str = Query(..., description="Which card was opened: one of BD_ROW_METRICS"),
     branch_id: Optional[str] = Query(None),
+    # A comma-separated set of branches, for a caller filtering by a *group* of them
+    # rather than by one -- the Business Development desk's Offline/Online split, which
+    # resolves to every branch on that side of the estate. `branch_id` still wins where
+    # both arrive: one named branch is the narrower question of the two.
+    branch_ids: Optional[str] = Query(None),
     source_tab: Optional[str] = Query(None),
     stage: Optional[str] = Query(None),
     start_date: Optional[str] = Query(None),
@@ -223,9 +228,18 @@ async def v3_bd_summary_rows(
     # rather than a shared helper for now: the summary's version also feeds the appointment
     # and revenue aggregations there, and pulling one filter out of it while leaving those
     # behind is how the two drift apart.
+    # One branch, or the set a group resolved to -- never both, and an empty set is not the
+    # same as no filter. A group holding no branches (Online, before any exist) must come
+    # back empty rather than falling through to every branch there is.
+    branch_clause = (
+        branch_id if branch_id
+        else {"$in": [b for b in branch_ids.split(",") if b]} if branch_ids is not None
+        else None
+    )
+
     lead_match: dict = {}
-    if branch_id:
-        lead_match["branch_id"] = branch_id
+    if branch_clause is not None:
+        lead_match["branch_id"] = branch_clause
     if source_tab:
         lead_match["source_tab"] = source_tab
     if stage:
@@ -239,8 +253,8 @@ async def v3_bd_summary_rows(
         lead_match["created_at"] = created_range
 
     appt_match: dict = {}
-    if branch_id:
-        appt_match["branch_id"] = branch_id
+    if branch_clause is not None:
+        appt_match["branch_id"] = branch_clause
     if start_date or end_date:
         appt_match["created_at"] = lead_match.get("created_at", {})
 
