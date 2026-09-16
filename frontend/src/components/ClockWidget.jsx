@@ -341,7 +341,7 @@ export const ClockWidget = () => {
       )}
 
       {can("clock_in") && (
-        <Button size="sm" disabled={busy} onClick={() => act(clockIn, "Clocked in — have a good day")} className="shrink-0 bg-emerald-600 px-2 hover:bg-emerald-700 sm:px-3" data-testid="clock-in-button">
+        <Button size="sm" disabled={busy} onClick={() => act(clockIn, day.state === "done" ? "Clocked in again" : "Clocked in — have a good day")} className="shrink-0 bg-emerald-600 px-2 hover:bg-emerald-700 sm:px-3" data-testid="clock-in-button">
           <LogIn className="h-4 w-4" /><span className="hidden sm:inline">Clock In</span>
         </Button>
       )}
@@ -359,7 +359,7 @@ export const ClockWidget = () => {
       )}
 
       {can("clock_out") && (
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => act(clockOut, "Clocked out — see you tomorrow")} className="shrink-0 border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3" data-testid="clock-out-button">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => act(clockOut, "Clocked out")} className="shrink-0 border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3" data-testid="clock-out-button">
           <LogOut className="h-4 w-4" /><span className="hidden sm:inline">Clock Out</span>
         </Button>
       )}

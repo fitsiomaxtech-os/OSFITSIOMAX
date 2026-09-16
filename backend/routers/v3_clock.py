@@ -19,6 +19,11 @@ A break is not a gap. "Break Out" asks what the break is for and refuses to star
 without an answer, because "where was this person for fifty minutes" is the question the
 record exists to answer, and an unlabelled hole in the day does not answer it.
 
+Clocking out is not final. Somebody who leaves and comes back clocks in again, as many
+times a day as that happens, and is asked for nothing: the time they were clocked out is
+filed as a gap in the day, labelled CLOCKED_OUT_GAP, and taken off their worked hours
+the same way a break is.
+
 One document per person per clinic day (see clinic_today in utils.py -- the server's UTC
 date rolls over at 05:30 IST, which would file the first hours of every morning under
 yesterday). The document is the state: what may be pressed next is worked out from what is
@@ -49,11 +54,15 @@ BREAK_REASONS = ["Lunch", "Tea break", "Personal", "Meeting", "Prayer", "Stepped
 
 MAX_REASON_LEN = 80
 
+# What a clock-out that was followed by another clock-in is filed as. Not asked of anybody:
+# pressing Clock In again is the whole answer.
+CLOCKED_OUT_GAP = "Clocked out"
+
 # The four states a day can be in, and what may be pressed in each.
 OUT = "out"              # not clocked in yet
 WORKING = "working"      # clocked in, at work
 ON_BREAK = "on_break"    # clocked in, away, with a reason on record
-DONE = "done"            # clocked out
+DONE = "done"            # clocked out -- for now; Clock In is still offered
 
 ACTIONS = {
     OUT: ["clock_in"],
@@ -61,7 +70,7 @@ ACTIONS = {
     # Only one. Clocking out from a break would leave the break open forever, and the
     # honest fix is the button that ends it -- see clock_out, which says so.
     ON_BREAK: ["break_in"],
-    DONE: [],
+    DONE: ["clock_in"],
 }
 
 
@@ -276,20 +285,25 @@ class BreakOut(BaseModel):
 
 @router.post("/in")
 async def clock_in(user: V3UserOut = Depends(v3_current_user)):
-    """Start the day.
+    """Start the day -- or come back to it after clocking out, as often as that happens.
 
-    The refusals name what the day already looks like rather than saying "not allowed":
-    every one of these is reached by a double tap or a second tab, and the person pressing
-    needs to know which of the two happened.
+    A second clock-in keeps the first one as the day's start and turns the clock-out it
+    follows into a gap, so the register still reads first-in to last-out and the hours
+    worked leave out the time away. No reason is asked for.
+
+    Refused only while already clocked in, which is a double tap or a second tab.
     """
     on = clinic_today()
-    state = _state(await _day_doc(user.id, on))
-    if state != OUT:
-        raise HTTPException(
-            status_code=400,
-            detail="You have already clocked out for today" if state == DONE else "You are already clocked in",
-        )
+    day = await _day_doc(user.id, on)
+    state = _state(day)
+    if state in (WORKING, ON_BREAK):
+        raise HTTPException(status_code=400, detail="You are already clocked in")
     now = _clinic_now()
+    if state == DONE:
+        return await _save(user, on, {"clock_out": "", "clock_out_at": ""}, push={"breaks": {
+            "out": day.get("clock_out") or "", "out_at": day.get("clock_out_at") or "",
+            "reason": CLOCKED_OUT_GAP, "in": now["hhmm"], "in_at": now["at"],
+        }})
     return await _save(user, on, {
         "clock_in": now["hhmm"],
         "clock_in_at": now["at"],
@@ -341,7 +355,7 @@ async def break_in(user: V3UserOut = Depends(v3_current_user)):
 
 @router.post("/out")
 async def clock_out(user: V3UserOut = Depends(v3_current_user)):
-    """End the day. Final: today cannot be clocked into again.
+    """Clock out. Not final: Clock In is offered again straight after.
 
     A break has to be closed first. Clocking out of one would leave a break with no end on
     it, and the arithmetic would then be guessing whether the rest of the day was a break
