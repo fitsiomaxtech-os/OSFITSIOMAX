@@ -348,16 +348,22 @@ export const BdMarketingSources = ({
                         <span className="truncate">{r.sub_label}</span>
                       </td>
                       <td className="px-4 py-3 text-right font-bold text-slate-800">{num(r.leads)}</td>
-                      {/* Lengths against the biggest row, not against the total: the
+                      {/* A box, not a pill: square ends, a dark track the fill is read
+                          against, and enough height to be a shape rather than a rule. A
+                          rounded bar tapers at both ends, so the two shortest rows in a
+                          table like this one -- the rows somebody is scanning for -- are
+                          drawn almost the same length whatever they actually hold.
+
+                          Lengths against the biggest row, not against the total: the
                           largest source here is a third of everything, so bars drawn as a
                           share of the whole would leave every other row a sliver and the
                           column would rank nothing. The percentage beside it IS of the
                           total, because that is the figure somebody would quote. */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <span className="block h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-slate-100 lg:w-24">
+                          <span className="block h-2.5 w-20 shrink-0 overflow-hidden bg-[#414141] lg:w-28">
                             <span
-                              className="block h-full rounded-full bg-sky-500"
+                              className="block h-full bg-[#ff5c42]"
                               style={{ width: `${max ? Math.max(2, (r.leads / max) * 100) : 0}%` }}
                             />
                           </span>
