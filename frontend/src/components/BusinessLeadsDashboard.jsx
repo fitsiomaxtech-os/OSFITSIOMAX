@@ -1266,7 +1266,6 @@ function DashboardTab({
           because every one of them is a view of this Dashboard; the tabs up there are
           other desks' boards. */}
       <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-subtabs">
-        <span className="pl-2 pr-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">View</span>
         {DASH_SUB_TABS.map((g) => {
           const Icon = g.icon;
           const active = g.key === openGroup;
@@ -1306,8 +1305,6 @@ function DashboardTab({
           with a filter of their own underneath. The dates and the four actions stay on all
           eight, because every one of them means the same thing on every one of them. */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-tools">
-        <span className="pl-2 pr-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Tools</span>
-
         {/* The open list's own field. `flex-basis: 0` (from flex-1) is what keeps it off a
             line of its own: the row is measured as if this were zero wide and it then
             grows into whatever the other controls left, capped so a search box is not
