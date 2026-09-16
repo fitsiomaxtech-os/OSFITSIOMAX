@@ -1,10 +1,12 @@
-"""The rules behind Client Reviews: what a save keeps, and how the figures are worked out.
+"""The rules behind Client Reviews: which physio days are owed stars, the consultant's weekly
+window, how old rows are read, and how the figures are worked out.
 
 Unit tests like test_hr_ops_payroll.py -- they call the functions directly, with no
 database, server or login. See backend/routers/v3_client_reviews.py.
 """
 import os
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
@@ -12,54 +14,81 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import HTTPException  # noqa: E402
 
-from routers.v3_client_reviews import ClientReviewIn, build_review, summarise  # noqa: E402
+from routers.v3_client_reviews import (  # noqa: E402
+    consultant_window, pending_physio_days, required_rating, split_legacy, summarise,
+)
 
-TEAM = {"consultant": {"id": "d1", "name": "Dr Abdul"}, "physio": {"id": "p1", "name": "Priya"}}
+
+class TestRequiredRating:
+    def test_missing_or_out_of_range_is_refused(self):
+        for bad in (None, 0, 6, "x"):
+            with pytest.raises(HTTPException):
+                required_rating(bad)
+
+    def test_keeps_valid(self):
+        assert required_rating("4") == 4
 
 
-class TestBuildReview:
-    def test_needs_at_least_one_rating(self):
-        with pytest.raises(HTTPException) as err:
-            build_review(ClientReviewIn(summary="lovely"), TEAM)
-        assert err.value.status_code == 400
+class TestPendingPhysioDays:
+    DAYS = [
+        {"id": "a", "status": "completed", "completed_at": "2026-09-20T10:00:00", "session_number": 2, "physio_name": "Priya"},
+        {"id": "b", "status": "completed", "completed_at": "2026-09-17T10:00:00", "session_number": 1, "physio_name": "Priya"},
+        {"id": "c", "status": "scheduled", "slot_time": "2026-09-21T10:00:00"},
+        {"id": "d", "status": "completed", "completed_at": "2026-09-01T10:00:00"},
+        {"id": "e", "status": "completed", "completed_at": "2026-09-18T10:00:00", "track": "rehab", "day_number": 1},
+    ]
 
-    def test_keeps_both_ratings_and_words(self):
-        row = build_review(ClientReviewIn(
-            consultant_rating=5, consultant_comment=" clear ", physio_rating=3, physio_comment="ok", summary="good",
-        ), TEAM)
-        assert row["consultant_rating"] == 5 and row["consultant_comment"] == "clear"
-        assert row["physio_rating"] == 3 and row["physio_name"] == "Priya"
-        assert row["summary"] == "good"
+    def test_completed_since_start_not_yet_reviewed_oldest_first(self):
+        out = pending_physio_days(self.DAYS, {"e"}, since="2026-09-16")
+        assert [p["session_id"] for p in out] == ["b", "a"]
 
-    def test_out_of_range_stars_are_dropped_not_clamped(self):
-        with pytest.raises(HTTPException):
-            build_review(ClientReviewIn(consultant_rating=9, physio_rating=0), TEAM)
+    def test_rehab_day_number_is_its_number(self):
+        out = pending_physio_days(self.DAYS, set(), since="2026-09-16")
+        rehab = next(p for p in out if p["session_id"] == "e")
+        assert rehab["track"] == "rehab" and rehab["session_number"] == 1
 
-    def test_no_physio_means_no_physio_rating(self):
-        team = {**TEAM, "physio": {"id": "", "name": ""}}
-        row = build_review(ClientReviewIn(consultant_rating=4, physio_rating=1, physio_comment="x"), team)
-        assert row["physio_rating"] is None and row["physio_comment"] == ""
 
-    def test_comment_without_its_rating_is_not_kept(self):
-        row = build_review(ClientReviewIn(physio_rating=4, consultant_comment="orphan"), TEAM)
-        assert row["consultant_rating"] is None and row["consultant_comment"] == ""
+class TestConsultantWindow:
+    NOW = datetime(2026, 9, 20, tzinfo=timezone.utc)
+
+    def test_open_with_nothing_yet(self):
+        assert consultant_window([], self.NOW) == {"open": True, "next_at": None}
+
+    def test_closed_for_seven_days_after_a_review_or_skip(self):
+        w = consultant_window([{"kind": "consultant", "created_at": "2026-09-16T00:00:00+00:00", "skipped": True}], self.NOW)
+        assert w["open"] is False and w["next_at"].startswith("2026-09-23")
+
+    def test_open_again_after_seven_days(self):
+        assert consultant_window([{"kind": "consultant", "created_at": "2026-09-10T00:00:00+00:00"}], self.NOW)["open"]
+
+
+class TestSplitLegacy:
+    def test_old_row_reads_as_two(self):
+        rows = split_legacy({
+            "id": "r1", "lead_id": "l1", "consultant_name": "Dr Abdul", "consultant_rating": 4,
+            "physio_name": "Priya", "physio_rating": 2, "physio_comment": "slow", "summary": "ok",
+            "created_at": "2026-09-01",
+        })
+        assert [r["kind"] for r in rows] == ["consultant", "physio"]
+        assert rows[1]["rating"] == 2 and rows[1]["person_name"] == "Priya" and "slow" in rows[1]["comment"]
+
+    def test_new_row_untouched(self):
+        row = {"id": "x", "kind": "physio", "rating": 5}
+        assert split_legacy(row) == [row]
 
 
 class TestSummarise:
     def test_empty(self):
         s = summarise([])
-        assert s["total"] == 0 and s["consultant_average"] is None and s["consultants"] == []
+        assert s["total"] == 0 and s["average"] is None and s["people"] == []
 
-    def test_averages_counts_and_low(self):
+    def test_skips_do_not_count(self):
         rows = [
-            {"consultant_name": "Dr Abdul", "consultant_rating": 5, "physio_name": "Priya", "physio_rating": 2},
-            {"consultant_name": "Dr Abdul", "consultant_rating": 4, "physio_name": "Priya", "physio_rating": None},
-            {"consultant_name": "Dr Meena", "consultant_rating": 3, "physio_name": "", "physio_rating": None},
+            {"person_name": "Dr Abdul", "rating": 5},
+            {"person_name": "Dr Abdul", "rating": 2},
+            {"person_name": "Dr Meena", "rating": 3},
+            {"person_name": "Dr Meena", "rating": None, "skipped": True},
         ]
         s = summarise(rows)
-        assert s["total"] == 3
-        assert s["consultant_average"] == 4.0 and s["consultant_count"] == 3
-        assert s["physio_average"] == 2.0 and s["physio_count"] == 1
-        assert s["low"] == 1
-        assert s["consultants"][0] == {"name": "Dr Abdul", "count": 2, "average": 4.5}
-        assert s["physios"] == [{"name": "Priya", "count": 1, "average": 2.0}]
+        assert s["total"] == 3 and s["average"] == 3.3 and s["low"] == 1 and s["skipped"] == 1
+        assert s["people"][0] == {"name": "Dr Abdul", "count": 2, "average": 3.5}

@@ -1,6 +1,7 @@
 /**
- * Client Reviews — the stars and words clients give their Consultant and Physio from the
- * Client Portal's Feedback tab.
+ * Client Reviews — the stars and words clients give from the Client Portal's Feedback tab,
+ * in two tabs: Consultant Review (optional, every 7 days; the default tab) and Physio
+ * Review (required, one per completed physio session).
  *
  * One panel, mounted in two places: HR Admin (Super Admin and BDE, every branch, with a
  * branch filter) and the Branch Admin board (one branch, passed in as branchId). The
@@ -42,14 +43,19 @@ const STAR_FILTERS = [
   { key: "low", label: "1–2 stars" },
 ];
 
-// The lower of the two ratings decides the bucket: a review that loves the consultant and
-// gives the physio one star is a low review, because that is the half somebody must act on.
-const worstOf = (r) => Math.min(r.consultant_rating || 5, r.physio_rating || 5);
 const inBucket = (r, key) => {
   if (!key) return true;
-  const w = worstOf(r);
+  const w = r.rating || 0;
   return key === "high" ? w >= 4 : key === "mid" ? w === 3 : w <= 2;
 };
+
+const KINDS = [
+  { key: "consultant", label: "Consultant Review", person: "Consultant" },
+  { key: "physio", label: "Physio Review", person: "Physio" },
+];
+
+const sessionLabel = (r) => (r.session_number != null
+  ? `${r.track === "rehab" ? "Rehab Day" : "Session"} ${r.session_number}` : "");
 
 const Figure = ({ label, value, sub, tone = "text-slate-800" }) => (
   <div className="rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5">
@@ -77,19 +83,6 @@ const PeopleCard = ({ title, people, testid }) => (
       ))}
     </CardContent>
   </Card>
-);
-
-const RatedPerson = ({ role, name, rating, comment }) => (
-  <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5">
-    <div className="flex flex-wrap items-center justify-between gap-1">
-      <p className="text-xs text-slate-500">
-        <span className="font-semibold uppercase tracking-wide">{role}</span>
-        {name ? <span className="text-slate-700"> · {name}</span> : null}
-      </p>
-      {rating ? <StarRow value={rating} /> : <span className="text-[11px] text-slate-400">Not rated</span>}
-    </div>
-    {comment && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{comment}</p>}
-  </div>
 );
 
 /**
@@ -185,11 +178,13 @@ const BranchFilter = ({ branches, value, onChange }) => {
 };
 
 export const ClientReviewsPanel = ({ branchId = null }) => {
-  const [data, setData] = useState({ reviews: [], summary: null });
+  const [data, setData] = useState({ consultant: [], physio: [], summary: {} });
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState([]);
   // Only offered where no branch was handed in — the HR Admin view across branches.
   const [branch, setBranch] = useState("");
+  // Consultant Review is the tab a review of a consultant lands in, and the one that opens.
+  const [kind, setKind] = useState("consultant");
   const [bucket, setBucket] = useState("");
   const [search, setSearch] = useState("");
 
@@ -209,28 +204,42 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
     getBranches().then((rows) => setBranches(rows || [])).catch(() => {});
   }, [branchId]);
 
-  const reviews = useMemo(() => data.reviews || [], [data]);
+  const meta = KINDS.find((k) => k.key === kind);
+  const reviews = useMemo(() => data[kind] || [], [data, kind]);
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return reviews.filter((r) => inBucket(r, bucket) && (!q || [
-      r.patient_name, r.consultant_name, r.physio_name, r.branch_name,
-      r.summary, r.consultant_comment, r.physio_comment,
+      r.patient_name, r.person_name, r.branch_name, r.comment,
     ].some((v) => String(v || "").toLowerCase().includes(q))));
   }, [reviews, bucket, search]);
 
-  const s = data.summary || {};
+  const s = (data.summary || {})[kind] || {};
 
   const exportCsv = () => downloadCsv([
-    ["Date", "Client", "Branch", "Consultant", "Consultant stars", "Consultant feedback", "Physio", "Physio stars", "Physio feedback", "Summary"],
+    ["Date", "Client", "Branch", meta.person, ...(kind === "physio" ? ["Session"] : []), "Stars", "Review"],
     ...shown.map((r) => [
-      prettyDate(r.updated_at || r.created_at), r.patient_name, r.branch_name,
-      r.consultant_name, r.consultant_rating || "", r.consultant_comment,
-      r.physio_name, r.physio_rating || "", r.physio_comment, r.summary,
+      prettyDate(r.updated_at || r.created_at), r.patient_name, r.branch_name, r.person_name,
+      ...(kind === "physio" ? [sessionLabel(r)] : []), r.rating || "", r.comment,
     ]),
-  ], "client-reviews.csv");
+  ], `${kind}-reviews.csv`);
 
   return (
     <div className="space-y-4" data-testid="client-reviews-panel">
+      <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1 sm:w-fit" data-testid="client-reviews-kind">
+        {KINDS.map((k) => (
+          <button
+            key={k.key}
+            type="button"
+            onClick={() => setKind(k.key)}
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition sm:flex-none ${kind === k.key ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+            data-testid={`client-reviews-kind-${k.key}`}
+          >
+            {k.label}
+            <span className="ml-1.5 text-xs font-normal text-slate-400">{(data[k.key] || []).length}</span>
+          </button>
+        ))}
+      </div>
+
       <Card>
         <CardContent className="flex flex-wrap items-center gap-2 p-3">
           {!branchId && (
@@ -251,7 +260,7 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
           </div>
           <div className="relative w-full sm:w-56">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search client, consultant, physio..." className="pl-9" data-testid="client-reviews-search" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search client, ${meta.person.toLowerCase()}...`} className="pl-9" data-testid="client-reviews-search" />
           </div>
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="client-reviews-refresh">
@@ -265,30 +274,31 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
       </Card>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Figure label="Total Reviews" value={s.total ?? 0} tone="text-indigo-600" />
-        <Figure label="Consultant Rating" value={s.consultant_average != null ? `${s.consultant_average} ★` : "—"} sub={`${s.consultant_count ?? 0} ratings`} tone="text-amber-500" />
-        <Figure label="Physio Rating" value={s.physio_average != null ? `${s.physio_average} ★` : "—"} sub={`${s.physio_count ?? 0} ratings`} tone="text-amber-500" />
+        <Figure label={`${meta.label}s`} value={s.total ?? 0} tone="text-indigo-600" />
+        <Figure label="Average Rating" value={s.average != null ? `${s.average} ★` : "—"} sub={`${s.total ?? 0} ratings`} tone="text-amber-500" />
         <Figure label="Low Reviews" value={s.low ?? 0} sub="2 stars or under" tone="text-rose-600" />
+        {kind === "consultant"
+          ? <Figure label="Skipped" value={s.skipped ?? 0} sub="weekly reviews skipped" tone="text-slate-500" />
+          : <Figure label="Physios Rated" value={(s.people || []).length} tone="text-slate-700" />}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <PeopleCard title="Consultants" people={s.consultants || []} testid="client-reviews-consultants" />
-        <PeopleCard title="Physiotherapists" people={s.physios || []} testid="client-reviews-physios" />
-      </div>
+      <PeopleCard title={kind === "consultant" ? "Consultants" : "Physiotherapists"} people={s.people || []} testid={`client-reviews-${kind}-people`} />
 
       <p className="text-[11px] text-slate-400">
-        Clients rate from the Client Portal&apos;s Feedback tab. Each client has one review and can change it; the date shows its latest version.
-        Only Super Admin, BDE and Branch Admin can read these.
+        {kind === "consultant"
+          ? "Clients may review their consultant once every 7 days from the Client Portal — it is optional."
+          : "Clients must review every completed physio session from the Client Portal."}
+        {" "}Only Super Admin, BDE and Branch Admin can read these.
       </p>
 
       {loading && !reviews.length ? <p className="text-sm text-slate-500">Loading...</p> : shown.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400" data-testid="client-reviews-empty">
-          {reviews.length ? "No reviews match these filters." : "No client reviews yet."}
+          {reviews.length ? "No reviews match these filters." : `No ${meta.label.toLowerCase()}s yet.`}
         </p>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2" data-testid="client-reviews-list">
           {shown.map((r) => (
-            <Card key={r.id} className={worstOf(r) <= 2 ? "border-rose-200" : ""} data-testid={`client-review-${r.id}`}>
+            <Card key={r.id} className={(r.rating || 5) <= 2 ? "border-rose-200" : ""} data-testid={`client-review-${r.id}`}>
               <CardContent className="space-y-2 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -302,14 +312,22 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
                     {r.updated_at && <span className="block text-[10px] font-semibold text-sky-600">Edited</span>}
                   </p>
                 </div>
-                <RatedPerson role="Consultant" name={r.consultant_name} rating={r.consultant_rating} comment={r.consultant_comment} />
-                <RatedPerson role="Physio work" name={r.physio_name} rating={r.physio_rating} comment={r.physio_comment} />
-                {r.summary && (
-                  <div className="flex gap-2 rounded-lg bg-indigo-50/60 p-2.5">
-                    <MessageSquareQuote className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
-                    <p className="whitespace-pre-wrap break-words text-sm text-slate-700">{r.summary}</p>
+                <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-1">
+                    <p className="text-xs text-slate-500">
+                      <span className="font-semibold uppercase tracking-wide">{meta.person}</span>
+                      {r.person_name ? <span className="text-slate-700"> · {r.person_name}</span> : null}
+                      {sessionLabel(r) ? <span> · {sessionLabel(r)}{r.session_date ? ` (${prettyDate(r.session_date)})` : ""}</span> : null}
+                    </p>
+                    <StarRow value={r.rating} />
                   </div>
-                )}
+                  {r.comment && (
+                    <div className="mt-1.5 flex gap-2">
+                      <MessageSquareQuote className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
+                      <p className="whitespace-pre-wrap break-words text-sm text-slate-700">{r.comment}</p>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}

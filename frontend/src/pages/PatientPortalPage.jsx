@@ -14,7 +14,8 @@ import {
   patientPortalForgotPassword, patientPortalVerifyResetOtp, patientPortalResetPassword,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
-  patientPortalReplyFeedback, patientPortalMyReview, patientPortalSaveReview,
+  patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewPhysio,
+  patientPortalReviewConsultant, patientPortalSkipConsultantReview,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -1615,44 +1616,32 @@ const PORTAL_TABS = [
 ];
 
 /**
- * What the patient made of it.
+ * Talk to Management — the client's chat with the people who answer for their care.
  *
- * Their words, and who reads them. There is no rating: a star out of five says something
- * happened without saying what, and a branch cannot act on four stars. The words are the
- * part somebody can do something about, so they are the part asked for -- and the only
- * part refused when empty.
- *
- * Not a thread, but not a shout into a well either: the history tab says where each one
- * got to, and a branch closing one has to say what was done, which the patient reads there.
+ * The client picks one or more of Super Admin, Branch Admin and their Consultant. Each of
+ * those is still its own conversation underneath (the Branch Admin never sees what went to
+ * Super Admin), so a message sent to two of them lands as a copy in each. On screen the
+ * chosen conversations are read together, oldest first, with each reply saying who wrote it.
  */
-// The people a patient can write to, and the difference between them in the words a
-// patient would use. Named rather than described as "escalation": somebody unhappy enough
-// to go past their branch should not have to work out which word means that.
-//
-// Built per patient rather than held as a constant, because the second one is a person. A
-// patient who has not seen a consultant yet is not offered it -- an address with no name on
-// it is a card that cannot say who reads it, which is the one thing these cards are for.
 const feedbackTo = (consultantName, hasConsultantThreads) => [
   {
+    key: "super_admin",
+    label: "Super Admin",
+    who: "Head chief · Sumaiya Naaz",
+    blurb: "Super Admin: something serious, or about the branch itself — your branch does not see it.",
+  },
+  {
     key: "branch_admin",
-    label: "My branch",
-    who: "Branch Admin",
-    blurb: "Anything about the branch, your appointments or your bill. Your branch runs your care and answers for it.",
+    label: "Branch Admin",
+    who: "My branch",
+    blurb: "Branch Admin: anything about the branch, your appointments or your bill.",
   },
   ...((consultantName || hasConsultantThreads) ? [{
     key: "consultant",
-    label: "My consultant",
-    // The name, not the role. The patient knows who they saw, and this is the card that
-    // says the words land with that person rather than in an inbox.
+    label: "Consultant",
     who: consultantName || "Your consultant",
-    blurb: "About your treatment — how a session felt, or something that is not getting better. Goes to them directly.",
+    blurb: `Consultant: about your treatment — goes to ${consultantName || "your consultant"} directly.`,
   }] : []),
-  {
-    key: "super_admin",
-    label: "Head chief",
-    who: "Sumaiya Naaz",
-    blurb: "Something serious, or something about the branch itself. Goes straight to the head chief — your branch does not see it.",
-  },
 ];
 
 const feedbackSentOn = (iso) => {
@@ -1661,41 +1650,39 @@ const feedbackSentOn = (iso) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 };
 
-/** What this patient has sent, and where each one has got to.
- *
- * A patient who says something and hears nothing assumes it went nowhere, and either sends
- * it again or stops sending. This does not promise a reply — it says somebody has it, which
- * is the smallest honest thing to say.
- */
-/** One conversation, and the box to answer it in.
- *
- *  A patient whose answer raises another question had nowhere to put it before — one
- *  message, one reply, and anything further meant opening a second piece of feedback about
- *  the same thing. Both sides can write here, and it keeps its order.
- */
-/** Everything said to one of the two, oldest first.
- *
- *  A patient talks to their branch, or to head office. They do not hold it as a stack of
- *  numbered complaints, and the portal used to make them: separate items, one reply each,
- *  and a Feedback History tab to go and look them up in. The records underneath are
- *  unchanged — a branch still works through them one at a time — but they are read here
- *  the way the person who wrote them holds it, as one conversation with each side.
- */
-const channelMessages = (rows) => rows
-  .flatMap((f) => (f.messages || []).map((m) => ({ ...m, thread_id: f.id })))
-  .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+const dayOn = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
 
-/** The thread a new message belongs to, or nothing if it starts one.
- *
- *  The most recent one still open. Writing into a conversation should carry on where it
- *  left off rather than opening a second complaint about the same thing beside the first,
- *  which is what the old form did every time somebody had more to say.
- */
+/** The thread a new message to one side belongs to, or nothing if it starts one. Rows
+    arrive newest first, so this is the most recent one still open. */
 const openThreadOf = (rows) => rows.find((f) => (f.status || "new") !== "resolved") || null;
+
+const audienceOf = (f) => f.audience || "branch_admin";
+
+/** Every message on the chosen sides, oldest first. One message the client sent to several
+    sides at once is stored once per side; it is drawn once, naming everyone it went to. */
+const mergedMessages = (rows) => {
+  const all = rows
+    .flatMap((f) => (f.messages || []).map((m) => ({ ...m, sides: [audienceOf(f)] })))
+    .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+  const out = [];
+  all.forEach((m) => {
+    const twin = m.author === "patient" && out.find((o) => o.author === "patient"
+      && o.body === m.body
+      && !o.sides.includes(m.sides[0])
+      && Math.abs(new Date(o.created_at) - new Date(m.created_at)) < 60000);
+    if (twin) twin.sides.push(m.sides[0]);
+    else out.push(m);
+  });
+  return out;
+};
 
 function FeedbackTab({ data, onSeen }) {
   const [draft, setDraft] = useState("");
-  const [audience, setAudience] = useState("branch_admin");
+  const [selected, setSelected] = useState(["branch_admin"]);
   const [sending, setSending] = useState(false);
   const [mine, setMine] = useState([]);
   const endRef = useRef(null);
@@ -1707,8 +1694,7 @@ function FeedbackTab({ data, onSeen }) {
     patientPortalMyFeedback()
       .then((data) => {
         setMine(data?.feedback || []);
-        // The GET just stamped every thread seen server-side; drop the bottom-nav badge
-        // now rather than wait for the next full /me load to catch up.
+        // The GET just stamped every thread seen server-side; drop the bottom-nav badge.
         onSeen?.();
       })
       .catch(() => { /* the conversation is a courtesy; sending works without it */ });
@@ -1716,52 +1702,38 @@ function FeedbackTab({ data, onSeen }) {
   useEffect(() => { loadMine(); }, [loadMine]);
 
   const consultantName = (data?.feedback_consultant_name || "").trim();
-  // Offered while there is a consultant to write to, and kept while there is a conversation
-  // with one. A patient who sees somebody else next would otherwise lose what they had
-  // already said, and the answer to it, the day the next appointment was booked.
   const hasConsultantThreads = mine.some((f) => f.audience === "consultant");
   const canWriteToConsultant = Boolean(consultantName || hasConsultantThreads);
   const audiences = feedbackTo(consultantName, hasConsultantThreads);
-  const chosen = audiences.find((a) => a.key === audience) || null;
-  // Rows arrive newest first, which is right for a list and backwards for a conversation.
-  const channelRows = mine.filter((f) => (f.audience || "branch_admin") === audience);
-  const messages = channelMessages([...channelRows].reverse());
-  const asked = channelRows.find((f) => (f.status || "new") === "awaiting_patient") || null;
-  const open = openThreadOf(channelRows);
-  const them = audience === "super_admin" ? "Head chief"
-    : audience === "consultant" ? (consultantName || "Your consultant")
-    : "Your branch";
-  // The same side, named mid-sentence. Two of these are descriptions and fold to lower
-  // case in "with your branch"; the third is a person, and lower-casing a name reads as a
-  // typo rather than as a sentence — which is what "with abdul azis" was doing from the
-  // day the physio card went in. The head chief takes an article here and not on the
-  // card: "Nothing sent to head chief yet" is not a sentence either.
-  const themInline = audience === "consultant" && consultantName ? consultantName
-    : audience === "super_admin" ? "the head chief"
-    : them.toLowerCase();
+  const nameOf = (key) => (key === "consultant" ? (consultantName || "Your consultant")
+    : key === "super_admin" ? "Super Admin" : "Branch Admin");
 
-  // A patient whose consultant card goes mid-visit would otherwise be left writing into a
-  // channel that is no longer on screen, with no way back to one that is.
+  // Nothing points at a Consultant card that is no longer on screen.
   useEffect(() => {
-    if (audience === "consultant" && !canWriteToConsultant) setAudience("branch_admin");
-  }, [canWriteToConsultant, audience]);
+    if (!canWriteToConsultant && selected.includes("consultant")) {
+      const rest = selected.filter((k) => k !== "consultant");
+      setSelected(rest.length ? rest : ["branch_admin"]);
+    }
+  }, [canWriteToConsultant, selected]);
 
-  // The newest message, not the top of the history. A conversation that opens scrolled to
-  // a paragraph from three weeks ago hides the answer somebody came back to read.
+  const toggle = (key) => setSelected((cur) => {
+    if (cur.includes(key)) return cur.length > 1 ? cur.filter((k) => k !== key) : cur;
+    return [...cur, key];
+  });
+
+  const channelRows = mine.filter((f) => selected.includes(audienceOf(f)));
+  const messages = mergedMessages(channelRows);
+  const askedRows = channelRows.filter((f) => (f.status || "new") === "awaiting_patient");
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, audience]);
+  }, [messages.length, selected.length]);
 
-  // Three messages showing, the rest scrolled. Measured rather than given a pixel height,
-  // because these bubbles run from one line to five: any fixed number that fits three of
-  // the short ones cuts a long one in half, and one that clears a long one shows five
-  // short ones. The last three, because the box opens at the bottom — the newest are the
-  // ones somebody came back to read.
+  // Three messages showing, the rest scrolled — measured, since bubbles run one to five lines.
   useLayoutEffect(() => {
     const box = chatRef.current;
     if (!box) return undefined;
     const measure = () => {
-      // Every child but the scroll anchor, which is an empty div with no height.
       const rows = Array.from(box.children).filter((el) => el !== endRef.current);
       if (rows.length <= 3) { setChatMax(null); return; }
       const GAP = 8;      // space-y-2
@@ -1770,36 +1742,45 @@ function FeedbackTab({ data, onSeen }) {
       const next = Math.ceil(
         last.reduce((total, el) => total + el.offsetHeight, 0) + GAP * (last.length - 1) + PADDING,
       );
-      // Only on a real change: this runs from a ResizeObserver watching the box it sizes,
-      // and writing the same number back every time would be a loop that never settles.
       setChatMax((prev) => (prev === next ? prev : next));
     };
     measure();
     if (typeof ResizeObserver === "undefined") return undefined;
-    // A bubble's height is a function of the width it wraps at, so a narrowed window is a
-    // remeasure. Watching the box rather than the window also catches its own scrollbar
-    // appearing, which takes width away from the text inside it.
     const observer = new ResizeObserver(measure);
     observer.observe(box);
     return () => observer.disconnect();
-  }, [messages.length, audience]);
+  }, [messages.length, selected.length]);
 
   const waiting = (key) => mine.some(
-    (f) => (f.audience || "branch_admin") === key && (f.status || "new") === "awaiting_patient",
+    (f) => audienceOf(f) === key && (f.status || "new") === "awaiting_patient",
   );
 
-  const send = async (resolved) => {
+  // A plain message goes to every chosen side: into its open conversation, or starting one.
+  const sendMessage = async () => {
     const body = draft.trim();
-    if (!body && resolved === undefined) { toast.error("Tell us how it went"); return; }
+    if (!body) { toast.error("Write something to send"); return; }
+    setSending(true);
+    const failed = [];
+    for (const key of selected) {
+      try {
+        const open = openThreadOf(mine.filter((f) => audienceOf(f) === key));
+        if (open) await patientPortalReplyFeedback(open.id, { body });
+        else await patientPortalSubmitFeedback({ message: body, audience: key });
+      } catch {
+        failed.push(nameOf(key));
+      }
+    }
+    if (failed.length) toast.error(`Could not send to ${failed.join(", ")}. Please try again.`);
+    else setDraft("");
+    setSending(false);
+    loadMine();
+  };
+
+  // "Has this sorted it?" is answered on the one conversation that asked.
+  const answer = async (row, resolved) => {
     setSending(true);
     try {
-      if (resolved === undefined && !open) {
-        // Nothing open on this side, so this starts the conversation off again.
-        await patientPortalSubmitFeedback({ message: body, audience });
-      } else {
-        const target = resolved === undefined ? open : asked;
-        await patientPortalReplyFeedback(target.id, { body, resolved });
-      }
+      await patientPortalReplyFeedback(row.id, { body: draft.trim(), resolved });
       setDraft("");
       loadMine();
     } catch (e) {
@@ -1809,82 +1790,78 @@ function FeedbackTab({ data, onSeen }) {
     }
   };
 
+  const chosenNames = selected.map(nameOf);
+
   return (
     <Card data-testid="portal-feedback">
       <CardContent className="space-y-4 p-5">
         <div>
-          <p className="text-sm font-semibold text-slate-800">How has it been?</p>
-          <p className="mt-0.5 text-xs text-slate-500">Tell us anything — what went well, or what did not.</p>
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+            <MessageSquareHeart className="h-4 w-4 text-sky-500" />Talk to Management
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500">Chat with the management. Pick one or more people to send to.</p>
         </div>
 
-        {/* Asked before the box rather than under the Send button: who is reading it
-            changes what somebody is willing to write, and finding that out afterwards is
-            finding it out too late. It now also picks which conversation is on screen, and
-            the two are separate — what goes to head office the branch never sees. */}
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to</p>
-          {/* Two across on a phone reads as two columns of small print; three would read
-              as three. They stack, and go side by side once there is room. */}
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to (choose one or more)</p>
           <div className={`grid gap-2 ${audiences.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`} data-testid="portal-feedback-audience">
             {audiences.map((a) => {
-              const on = audience === a.key;
+              const on = selected.includes(a.key);
               return (
                 <button
                   key={a.key}
                   type="button"
-                  onClick={() => setAudience(a.key)}
+                  onClick={() => toggle(a.key)}
                   aria-pressed={on}
-                  className={`relative rounded-lg border p-3 text-left transition ${on ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500" : "border-slate-200 bg-white hover:border-sky-300"}`}
+                  className={`relative flex items-start gap-2 rounded-lg border p-3 text-left transition ${on ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500" : "border-slate-200 bg-white hover:border-sky-300"}`}
                   data-testid={`portal-feedback-to-${a.key}`}
                 >
-                  {/* Says the other side is waiting on an answer while you are not looking
-                      at it. Without it the only way to find out is to go and check. */}
+                  <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-sky-600 bg-sky-600 text-white" : "border-slate-300 bg-white"}`}>
+                    {on && <Check className="h-3 w-3" />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className={`block text-xs font-bold ${on ? "text-sky-700" : "text-slate-700"}`}>{a.label}</span>
+                    <span className="block truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">{a.who}</span>
+                  </span>
                   {waiting(a.key) && !on && (
                     <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-violet-500" data-testid={`portal-feedback-dot-${a.key}`} />
                   )}
-                  <p className={`text-xs font-bold ${on ? "text-sky-700" : "text-slate-700"}`}>{a.label}</p>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{a.who}</p>
                 </button>
               );
             })}
           </div>
-          {/* One explanation, under all three, for whichever is open. Three of them side by
-              side was three paragraphs asking to be read before a word is written; putting
-              it back inside the open card only made that card grow and left the other two
-              ragged beside it. Here the row stays level whatever is picked, and the
-              wording still follows the choice. */}
-          {chosen?.blurb && (
-            <p className="mt-2 text-[11px] leading-snug text-slate-500" data-testid="portal-feedback-blurb">
-              {chosen.blurb}
-            </p>
-          )}
+          <div className="mt-2 space-y-0.5" data-testid="portal-feedback-blurb">
+            {audiences.filter((a) => selected.includes(a.key)).map((a) => (
+              <p key={a.key} className="text-[11px] leading-snug text-slate-500">{a.blurb}</p>
+            ))}
+          </div>
         </div>
 
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            {messages.length > 0 ? `With ${themInline}` : "In your words"}
+            {messages.length > 0 ? `Chat with ${chosenNames.join(", ")}` : "In your words"}
           </p>
           <div
             ref={chatRef}
-            // The class is the fallback and the style is the answer: until the first
-            // measurement lands — or at all, somewhere without a ResizeObserver — a long
-            // conversation still has to stop somewhere rather than run down the page.
             className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-3"
             style={chatMax ? { maxHeight: chatMax } : undefined}
-            data-testid={`portal-feedback-chat-${audience}`}
+            data-testid="portal-feedback-chat"
           >
             {messages.length === 0 ? (
               <p className="py-6 text-center text-xs text-slate-400">
-                Nothing sent to {themInline} yet. Whatever you write below starts it off.
+                Nothing sent to {chosenNames.join(", ")} yet. Whatever you write below starts the chat.
               </p>
             ) : messages.map((m) => {
               const own = m.author === "patient";
+              const who = own
+                ? `You → ${m.sides.map(nameOf).join(", ")}`
+                : (m.author_name ? `${m.author_name} (${nameOf(m.sides[0])})` : nameOf(m.sides[0]));
               return (
-                <div key={m.id} className={`flex ${own ? "justify-end" : "justify-start"}`}>
+                <div key={`${m.id}-${m.sides.join("")}`} className={`flex ${own ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${own ? "bg-sky-600 text-white" : "bg-white text-slate-700 shadow-sm"}`}>
                     <p className="whitespace-pre-wrap break-words text-xs leading-5">{m.body}</p>
                     <p className={`mt-0.5 text-[10px] ${own ? "text-sky-100" : "text-slate-400"}`}>
-                      {[own ? "You" : them, feedbackSentOn(m.created_at)].filter(Boolean).join(" · ")}
+                      {[who, feedbackSentOn(m.created_at)].filter(Boolean).join(" · ")}
                     </p>
                   </div>
                 </div>
@@ -1894,18 +1871,15 @@ function FeedbackTab({ data, onSeen }) {
           </div>
         </div>
 
-        {/* Being asked, rather than being told. Whether what they did was enough is the
-            patient's to say — a complaint marked dealt with by the people complained about
-            is how somebody learns not to bother saying anything. */}
-        {asked && (
-          <div className="rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="portal-feedback-asked">
-            <p className="text-[11px] font-semibold text-violet-900">{them} asked: has this sorted it?</p>
+        {askedRows.map((row) => (
+          <div key={row.id} className="rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="portal-feedback-asked">
+            <p className="text-[11px] font-semibold text-violet-900">{nameOf(audienceOf(row))} asked: has this sorted it?</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               <Button
                 size="sm"
                 className="h-7 bg-emerald-600 px-2 text-[11px] text-white hover:bg-emerald-700"
                 disabled={sending}
-                onClick={() => send(true)}
+                onClick={() => answer(row, true)}
                 data-testid="portal-feedback-yes"
               >
                 Yes, all sorted
@@ -1915,7 +1889,7 @@ function FeedbackTab({ data, onSeen }) {
                 variant="outline"
                 className="h-7 border-slate-200 px-2 text-[11px]"
                 disabled={sending}
-                onClick={() => send(false)}
+                onClick={() => answer(row, false)}
                 data-testid="portal-feedback-no"
               >
                 Not yet
@@ -1923,7 +1897,7 @@ function FeedbackTab({ data, onSeen }) {
             </div>
             <p className="mt-1 text-[10px] text-violet-700/70">Write a line below first if you want to say why.</p>
           </div>
-        )}
+        ))}
 
         <div>
           <textarea
@@ -1931,7 +1905,7 @@ function FeedbackTab({ data, onSeen }) {
             value={draft}
             maxLength={2000}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={messages.length > 0 ? "Write back…" : "Optional — but it is the part a branch can act on."}
+            placeholder={`Message to ${chosenNames.join(", ")}…`}
             className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
             data-testid="portal-feedback-message"
           />
@@ -1941,13 +1915,10 @@ function FeedbackTab({ data, onSeen }) {
         <Button
           className="w-full"
           disabled={sending || !draft.trim()}
-          onClick={() => send(undefined)}
+          onClick={sendMessage}
           data-testid="portal-feedback-submit"
         >
-          {sending ? "Sending…"
-            : audience === "super_admin" ? "Send to head chief"
-            : audience === "consultant" ? "Send to my consultant"
-            : "Send to my branch"}
+          {sending ? "Sending…" : `Send to ${chosenNames.join(" & ")}`}
         </Button>
       </CardContent>
     </Card>
@@ -1955,7 +1926,7 @@ function FeedbackTab({ data, onSeen }) {
 }
 
 /** Five tappable stars. Tapping the chosen star again clears it. */
-function StarPicker({ value, onChange, testid }) {
+function StarPicker({ value, onChange, testid, size = "h-7 w-7" }) {
   return (
     <div className="flex items-center gap-1" role="radiogroup" data-testid={testid}>
       {[1, 2, 3, 4, 5].map((n) => (
@@ -1965,11 +1936,12 @@ function StarPicker({ value, onChange, testid }) {
           role="radio"
           aria-checked={value === n}
           aria-label={`${n} star${n === 1 ? "" : "s"}`}
-          onClick={() => onChange(value === n ? null : n)}
+          onClick={() => onChange && onChange(value === n ? null : n)}
+          disabled={!onChange}
           className="p-0.5"
           data-testid={`${testid}-${n}`}
         >
-          <Star className={`h-7 w-7 transition ${value && n <= value ? "fill-amber-400 text-amber-400" : "text-slate-300 hover:text-amber-300"}`} />
+          <Star className={`${size} transition ${value && n <= value ? "fill-amber-400 text-amber-400" : "text-slate-300 hover:text-amber-300"}`} />
         </button>
       ))}
     </div>
@@ -1978,51 +1950,26 @@ function StarPicker({ value, onChange, testid }) {
 
 const STAR_WORDS = { 1: "Poor", 2: "Not great", 3: "Okay", 4: "Good", 5: "Excellent" };
 
-/**
- * Rate your care — the client's one star review of their Consultant and their Physio's work,
- * plus a summary in their own words. Sits above the Feedback conversation: that tab is for
- * something to be answered, this is a verdict management reads (see v3_client_reviews.py).
- * One review per client; saving again changes it.
- */
-function RateCareCard() {
-  const [team, setTeam] = useState(null);
-  const [form, setForm] = useState({ consultant_rating: null, consultant_comment: "", physio_rating: null, physio_comment: "", summary: "" });
-  const [saved, setSaved] = useState(null);
+const inputBox = "w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400";
+
+const dayTitle = (d) => `${d.track === "rehab" ? "Rehab Day" : "Session"} ${d.session_number ?? ""}`.trim();
+
+/** The stars and words for one completed physio day. Used in the Physio Review card and in
+    the pop-up that holds the client until every completed day is rated. */
+function PhysioDayReviewForm({ day, onDone, testid = "portal-physio-review" }) {
+  const [rating, setRating] = useState(null);
+  const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    patientPortalMyReview()
-      .then((d) => {
-        setTeam({ consultant: d.consultant || {}, physio: d.physio || {} });
-        if (d.review) {
-          setSaved(d.review);
-          setForm({
-            consultant_rating: d.review.consultant_rating || null,
-            consultant_comment: d.review.consultant_comment || "",
-            physio_rating: d.review.physio_rating || null,
-            physio_comment: d.review.physio_comment || "",
-            summary: d.review.summary || "",
-          });
-        }
-      })
-      .catch(() => setTeam({ consultant: {}, physio: {} }));
-  }, []);
-
-  if (!team) return null;
-  const hasConsultant = Boolean(team.consultant?.name);
-  const hasPhysio = Boolean(team.physio?.name);
-  // Nobody to rate yet — a client who has not seen a consultant or been given a physio.
-  if (!hasConsultant && !hasPhysio) return null;
-
-  const set = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
-
   const save = async () => {
-    if (!form.consultant_rating && !form.physio_rating) { toast.error("Tap the stars to give a rating"); return; }
+    if (!rating) { toast.error("Tap the stars to rate this session"); return; }
     setSaving(true);
     try {
-      const res = await patientPortalSaveReview(form);
-      setSaved(res.review);
-      toast.success(res.message || "Thank you for your review.");
+      const res = await patientPortalReviewPhysio({ session_id: day.session_id, rating, comment });
+      toast.success(res.message || "Thank you for rating your session.");
+      setRating(null);
+      setComment("");
+      onDone?.();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not save your review. Please try again.");
     } finally {
@@ -2030,64 +1977,212 @@ function RateCareCard() {
     }
   };
 
-  const box = "w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400";
-
-  const person = (role, name, ratingKey, commentKey, placeholder) => (
-    <div className="space-y-1.5 rounded-lg border border-slate-200 p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-        {role} <span className="normal-case tracking-normal text-slate-700">· {name}</span>
+  return (
+    <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-3" data-testid={testid}>
+      <p className="text-xs text-slate-600">
+        <span className="font-semibold text-slate-800">{dayTitle(day)}</span>
+        {day.physio_name ? <> · {day.physio_name}</> : null}
+        {(day.slot_time || day.completed_at) ? <> · {dayOn(day.slot_time || day.completed_at)}</> : null}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <StarPicker value={form[ratingKey]} onChange={set(ratingKey)} testid={`portal-review-${ratingKey}`} />
-        {form[ratingKey] && <span className="text-xs font-semibold text-amber-600">{STAR_WORDS[form[ratingKey]]}</span>}
+        <StarPicker value={rating} onChange={setRating} testid={`${testid}-stars`} />
+        {rating && <span className="text-xs font-semibold text-amber-600">{STAR_WORDS[rating]}</span>}
       </div>
       <textarea
         rows={2}
         maxLength={2000}
-        value={form[commentKey]}
-        onChange={(e) => set(commentKey)(e.target.value)}
-        placeholder={placeholder}
-        className={box}
-        data-testid={`portal-review-${commentKey}`}
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="How was this session? (optional)"
+        className={inputBox}
+        data-testid={`${testid}-comment`}
       />
+      <Button className="w-full" disabled={saving || !rating} onClick={save} data-testid={`${testid}-submit`}>
+        {saving ? "Saving…" : "Submit physio review"}
+      </Button>
     </div>
   );
+}
 
+/** A review already given, read-only. */
+function PastReview({ title, subtitle, rating, comment, when }) {
   return (
-    <Card data-testid="portal-review">
+    <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <p className="text-xs text-slate-500">
+          <span className="font-semibold text-slate-700">{title}</span>
+          {subtitle ? <> · {subtitle}</> : null}
+        </p>
+        <StarPicker value={rating} testid="portal-past-review" size="h-3.5 w-3.5" />
+      </div>
+      {comment && <p className="mt-1 whitespace-pre-wrap break-words text-xs text-slate-700">{comment}</p>}
+      {when && <p className="mt-0.5 text-[10px] text-slate-400">{feedbackSentOn(when)}</p>}
+    </div>
+  );
+}
+
+/** Physio Review — required. One review for every completed physio day. */
+function PhysioReviewCard({ reviews, physioName, onChanged }) {
+  const pending = reviews?.physio_pending || [];
+  const past = reviews?.physio_reviews || [];
+  if (!reviews || (!pending.length && !past.length && !physioName)) return null;
+  return (
+    <Card data-testid="portal-physio-reviews">
       <CardContent className="space-y-3 p-5">
         <div>
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />Rate your care
+          <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-800">
+            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />Physio Review
+            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-600">Required</span>
           </p>
           <p className="mt-0.5 text-xs text-slate-500">
-            Your review goes to the clinic management, not to the consultant or physio directly. You can change it any time.
+            Rate every physio session once it is completed. Your review goes to the clinic management.
           </p>
         </div>
-        {hasConsultant && person("Consultant", team.consultant.name, "consultant_rating", "consultant_comment", "What was your consultation like? (optional)")}
-        {hasPhysio && person("Physio work", team.physio.name, "physio_rating", "physio_comment", "How are your physio sessions going? (optional)")}
-        <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Overall summary</p>
-          <textarea
-            rows={3}
-            maxLength={2000}
-            value={form.summary}
-            onChange={(e) => set("summary")(e.target.value)}
-            placeholder="Your overall thoughts about your treatment (optional)"
-            className={box}
-            data-testid="portal-review-summary"
-          />
-        </div>
-        <Button className="w-full" disabled={saving} onClick={save} data-testid="portal-review-submit">
-          {saving ? "Saving…" : saved ? "Update my review" : "Submit review"}
-        </Button>
-        {saved && (
-          <p className="text-center text-[10px] text-slate-400" data-testid="portal-review-saved">
-            Last saved {feedbackSentOn(saved.updated_at || saved.created_at)}
+        {pending.length > 0 ? (
+          <>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-600">
+              {pending.length} session{pending.length === 1 ? "" : "s"} waiting for your review
+            </p>
+            <PhysioDayReviewForm key={pending[0].session_id} day={pending[0]} onDone={onChanged} />
+          </>
+        ) : (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700" data-testid="portal-physio-reviews-done">
+            {past.length ? "All your completed sessions are reviewed. Thank you." : "Once a physio session is completed, you will be asked to rate it here."}
           </p>
+        )}
+        {past.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Your physio reviews</p>
+            {past.map((r) => (
+              <PastReview
+                key={r.id}
+                title={dayTitle(r)}
+                subtitle={r.person_name}
+                rating={r.rating}
+                comment={r.comment}
+                when={r.updated_at || r.created_at}
+              />
+            ))}
+          </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Consultant Review — optional, open once every 7 days. */
+function ConsultantReviewCard({ reviews, onChanged }) {
+  const [rating, setRating] = useState(null);
+  const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
+  const consultant = reviews?.consultant || {};
+  if (!reviews || !consultant.name) return null;
+  const past = reviews.consultant_reviews || [];
+  const windowOpen = reviews.consultant_window?.open;
+
+  const run = async (fn) => {
+    setSaving(true);
+    try {
+      const res = await fn();
+      toast.success(res.message || "Saved.");
+      setRating(null);
+      setComment("");
+      onChanged?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const save = () => {
+    if (!rating) { toast.error("Tap the stars to give a rating"); return; }
+    run(() => patientPortalReviewConsultant({ rating, comment }));
+  };
+
+  return (
+    <Card data-testid="portal-consultant-reviews">
+      <CardContent className="space-y-3 p-5">
+        <div>
+          <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-800">
+            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />Consultant Review
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Optional · every 7 days</span>
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            How is it going with <span className="font-semibold text-slate-700">{consultant.name}</span>? Your review goes to the clinic management.
+          </p>
+        </div>
+        {windowOpen ? (
+          <div className="space-y-2 rounded-lg border border-slate-200 p-3" data-testid="portal-consultant-review-form">
+            <div className="flex flex-wrap items-center gap-2">
+              <StarPicker value={rating} onChange={setRating} testid="portal-consultant-review-stars" />
+              {rating && <span className="text-xs font-semibold text-amber-600">{STAR_WORDS[rating]}</span>}
+            </div>
+            <textarea
+              rows={2}
+              maxLength={2000}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="What was your consultation like? (optional)"
+              className={inputBox}
+              data-testid="portal-consultant-review-comment"
+            />
+            <div className="flex gap-2">
+              <Button className="flex-1" disabled={saving || !rating} onClick={save} data-testid="portal-consultant-review-submit">
+                {saving ? "Saving…" : "Submit consultant review"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={saving}
+                onClick={() => run(patientPortalSkipConsultantReview)}
+                data-testid="portal-consultant-review-skip"
+              >
+                Skip this week
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500" data-testid="portal-consultant-review-next">
+            Your next consultant review opens on {dayOn(reviews.consultant_window?.next_at)}.
+          </p>
+        )}
+        {past.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Your consultant reviews</p>
+            {past.map((r) => (
+              <PastReview key={r.id} title={r.person_name || "Consultant"} rating={r.rating} comment={r.comment} when={r.created_at} />
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Holds the client on the oldest unrated physio day until it is rated — Physio Review is
+    required. Logging out is the only other way off it. */
+function PhysioReviewGate({ reviews, onChanged, onLogout }) {
+  const pending = reviews?.physio_pending || [];
+  if (!pending.length) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4" data-testid="portal-physio-review-gate">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+          <Star className="h-4 w-4 fill-amber-400 text-amber-400" />Rate your physio session
+        </p>
+        <p className="mt-0.5 text-xs text-slate-500">
+          Your session is completed. Please rate it to continue
+          {pending.length > 1 ? ` — ${pending.length} sessions are waiting` : ""}.
+        </p>
+        <div className="mt-3">
+          <PhysioDayReviewForm key={pending[0].session_id} day={pending[0]} onDone={onChanged} testid="portal-physio-review-gate-form" />
+        </div>
+        <button type="button" onClick={onLogout} className="mt-3 w-full text-center text-[11px] text-slate-400 hover:text-slate-600">
+          Log out
+        </button>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -2109,6 +2204,14 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Physio Review and Consultant Review. Loaded with the dashboard, not the tab, because an
+  // unrated physio day holds the client on a pop-up wherever they land.
+  const [reviews, setReviews] = useState(null);
+  const loadReviews = useCallback(() => {
+    patientPortalMyReview().then(setReviews).catch(() => setReviews(null));
+  }, []);
+  useEffect(() => { loadReviews(); }, [loadReviews]);
 
   // Opening the Feedback tab reads its replies (the GET stamps them seen), so the
   // bottom-nav badge should clear the moment they land there rather than lag a reload.
@@ -2160,11 +2263,14 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
         {activeTab === "profile" && <ProfileTab data={data} />}
         {activeTab === "feedback" && (
           <div className="space-y-4">
-            <RateCareCard />
+            <PhysioReviewCard reviews={reviews} physioName={data.physio_name} onChanged={loadReviews} />
+            <ConsultantReviewCard reviews={reviews} onChanged={loadReviews} />
             <FeedbackTab data={data} onSeen={clearFeedbackBadge} />
           </div>
         )}
       </div>
+
+      <PhysioReviewGate reviews={reviews} onChanged={loadReviews} onLogout={onLogout} />
 
       {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal
           shows it at all widths — so the slate is reverted from md up rather than applied
@@ -2177,7 +2283,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
             // Only the Feedback tab carries one today: how many threads the clinic has
             // written back on since this patient last opened it. Clears on open — see
             // clearFeedbackBadge and patient_portal_my_feedback's seen stamp.
-            const badge = t.key === "feedback" ? (data.feedback_unread || 0) : 0;
+            const badge = t.key === "feedback" ? (data.feedback_unread || 0) + (reviews?.physio_pending?.length || 0) : 0;
             return (
               <button
                 key={t.key}
