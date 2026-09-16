@@ -145,10 +145,10 @@ export const BdMarketingSources = ({ branches, dateParams, rangeLabel, onOpenLea
 
   const max = useMemo(() => rows.reduce((m, r) => Math.max(m, r.leads), 0), [rows]);
 
-  // The foot of the table. The server's own totals when nothing is being searched for --
+  // The head of the table. The server's own totals when nothing is being searched for --
   // those count every lead in range, including any the row list does not carry -- and the
   // visible rows' own sums when it is, because a total that ignores the search would sit
-  // under nine rows claiming the fifteen.
+  // over nine rows claiming the fifteen.
   const totals = useMemo(() => {
     if (!data) return null;
     if (rows.length === sent.length) return data.totals;
@@ -265,6 +265,31 @@ export const BdMarketingSources = ({ branches, dateParams, rangeLabel, onOpenLea
                   table nobody reads, but the four figures are short enough to sit as a
                   strip under the name. */}
               <div className="space-y-2 p-3 md:hidden" data-testid="bd-marketing-sources-mobile">
+                {totals && (
+                  <div className="rounded-xl border-2 border-slate-200 bg-slate-50 p-3" data-testid="bd-marketing-sources-total-mobile">
+                    <p className="text-sm font-bold text-slate-800">Total</p>
+                    <p className="text-xs text-slate-500">
+                      {num(totals.rows)} {groupBy === "branch" ? "branches" : groupBy === "source" ? "sources" : "pairings"}
+                    </p>
+                    {/* Three, not the rows' four: a "last lead" across every source is the
+                        newest of them, which says nothing about whether any one has
+                        stopped -- the only question that column is there to answer. */}
+                    <dl className="mt-2 grid grid-cols-3 gap-2">
+                      <div>
+                        <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Leads</dt>
+                        <dd className="text-sm font-bold text-slate-800">{num(totals.leads)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Booked</dt>
+                        <dd className="text-sm font-bold text-slate-800">{num(totals.booked)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Conv</dt>
+                        <dd className="text-sm font-bold text-slate-800">{pct(totals.conversion_rate)}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                )}
                 {rows.map((r) => (
                   <button
                     key={r.key}
@@ -323,6 +348,25 @@ export const BdMarketingSources = ({ branches, dateParams, rangeLabel, onOpenLea
                     </tr>
                   </thead>
                   <tbody>
+                    {/* The total, over the rows rather than under them. It is the figure
+                        the desk checks first -- "is this table counting all 3,982?" -- and
+                        at fifteen sources the foot of the table was a scroll away from the
+                        question. Inside the body rather than a second <thead> row so the
+                        column headings stay the only thing in the head, and marked off by
+                        a heavier rule below it instead of above. */}
+                    {totals && (
+                      <tr className="border-b-2 border-slate-200 bg-slate-50 font-bold text-slate-800" data-testid="bd-marketing-sources-total">
+                        <td className="px-4 py-3">Total</td>
+                        <td className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                          {num(totals.rows)} {groupBy === "branch" ? "branches" : groupBy === "source" ? "sources" : "pairings"}
+                        </td>
+                        <td className="px-4 py-3 text-right">{num(totals.leads)}</td>
+                        <td className="px-4 py-3 text-right">{num(totals.booked)}</td>
+                        <td className="px-4 py-3 text-right">{pct(totals.conversion_rate)}</td>
+                        <td className="px-4 py-3" />
+                        <td className="px-4 py-3" />
+                      </tr>
+                    )}
                     {rows.map((r) => (
                       <tr
                         key={r.key}
@@ -367,21 +411,6 @@ export const BdMarketingSources = ({ branches, dateParams, rangeLabel, onOpenLea
                       </tr>
                     ))}
                   </tbody>
-                  {totals && (
-                    <tfoot>
-                      <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold text-slate-800">
-                        <td className="px-4 py-3">Total</td>
-                        <td className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                          {num(totals.rows)} {groupBy === "branch" ? "branches" : groupBy === "source" ? "sources" : "pairings"}
-                        </td>
-                        <td className="px-4 py-3 text-right">{num(totals.leads)}</td>
-                        <td className="px-4 py-3 text-right">{num(totals.booked)}</td>
-                        <td className="px-4 py-3 text-right">{pct(totals.conversion_rate)}</td>
-                        <td className="px-4 py-3" />
-                        <td className="px-4 py-3" />
-                      </tr>
-                    </tfoot>
-                  )}
                 </table>
               </div>
             </>

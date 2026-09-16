@@ -1869,8 +1869,8 @@ async def v3_marketing_sources(
         "applied_filters": {"start_date": start_date, "end_date": end_date, "branch_ids": wanted_branches},
         "group_by": group_by,
         "rows": out,
-        # The foot of the table, summed off the same rows it sits under rather than counted
-        # again -- a total that can disagree with the column above it is worse than none.
+        # The total row, summed off the same rows it is drawn beside rather than counted
+        # again -- a total that can disagree with the column under it is worse than none.
         "totals": {
             "leads": len(leads),
             "booked": booked_total,
