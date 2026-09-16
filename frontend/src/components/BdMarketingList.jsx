@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeft,
   CheckCircle2,
   Clock,
   Mail,
@@ -24,13 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { toast } from "@/components/ui/sonner";
-import { getBdSummaryRows, getLeadSources, stagesList } from "@/lib/api";
-// The All / Offline / Online + branch filter every Dashboard tab opens with, and the
-// reader that turns whichever of the two is picked into the ids an endpoint takes. Both
-// are DashboardBoard's own -- imported rather than rebuilt so this list is scoped by
-// exactly the control the cards it replaced were scoped by, and a branch means the same
-// thing on both.
-import { ModeBranchFilter, resolveBranchIds } from "@/components/DashboardBoard";
+import { getBdSummaryRows, stagesList } from "@/lib/api";
 // The avatar the rest of the OS already gives a lead: same two letters, same hue per
 // first letter, so one person is the same colour on this list and on Sales View.
 import { avatarColor, initials } from "@/components/PreSalesCRM";
@@ -109,75 +104,62 @@ const ALL = "__all__";
 /* ─── The list ─── */
 
 /**
- * Business Development > Dashboard > Marketing, as a list of the leads themselves rather
- * than as a row of per-channel totals.
+ * The leads behind one row of the Marketing source table — one lead per line.
  *
- * This desk's Marketing tab used to be Super Admin's — nine StatTiles counting leads per
- * source. The counts are still a click away on this same Dashboard (OnBoarding > Total
- * Leads opens the same rows), and what this desk actually does with Marketing is work the
- * leads a channel brought in, which a row of totals cannot be worked from. So here the
- * channel is a column and a filter, and the lead is the row.
+ * Opened by clicking a source (or a branch, or a source-and-branch pairing) on
+ * BdMarketingSources, which owns the range, the branch filter and the grouping and hands
+ * the answer down here as a title and a set of query params. This component asks no
+ * scoping question of its own beyond Status: the question was already asked upstairs, and
+ * a second branch filter under the first would let the two disagree about what is on
+ * screen.
  *
- * Only this desk's tab is replaced. Super Admin's own Dashboard > Marketing still draws
- * the tiles, out of the same DashboardTabPanel, unchanged — see DashboardBoard.jsx.
+ * Rows come from /dashboard/bd-summary/rows?metric=total, the endpoint this board's
+ * summary cards already drill into: same collection, same filters, same 500-row cap with
+ * the unclipped total beside it. Status is asked of the server so it narrows all of the
+ * leads rather than the capped page of them; the search box is applied here, over what
+ * came back, because that endpoint takes no text.
  *
- * Rows come from /dashboard/bd-summary/rows?metric=total, which is the endpoint the cards
- * on this board already drill into: same collection, same filters, same 500-row cap with
- * the unclipped total beside it. Branch, source and stage are asked of the server so they
- * narrow all of the leads rather than the capped page of them; the search box is applied
- * here, over what came back, because that endpoint takes no text.
- *
- * @param branches   every branch, from useDashboardData — the roster the filter picks from
+ * @param branches   every branch, from useDashboardData — for resolving a lead's branch name
  * @param dateParams the board's date range, already in the two params the endpoint takes
+ * @param params     the row's own scope: branch_id/branch_ids and source_tab, as query params
+ * @param title      what was clicked, shown in the header beside the back arrow
+ * @param subtitle   the second line under it — the branch, or how the row was grouped
+ * @param onBack     returns to the source table
  * @param onOpenLead opens a row in Sales View's own lead popup, the way a card's list does
  */
-export const BdMarketingList = ({ branches, dateParams, onOpenLead }) => {
-  const [group, setGroup] = useState("all");
-  const [branchId, setBranchId] = useState("");
-  const [source, setSource] = useState("");
+export const BdMarketingList = ({ branches, dateParams, params, title, subtitle, onBack, onOpenLead }) => {
   const [stage, setStage] = useState("");
   const [search, setSearch] = useState("");
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // The two dropdowns behind Filter. Both are lists of what exists rather than of what is
-  // on screen: a source with nothing in the current range is still a source worth being
-  // able to ask for, and asking for it is how a desk finds out it is empty.
-  const [sources, setSources] = useState([]);
+  // Every pre-sales stage, not only the ones on screen: a status with nothing under this
+  // source is still one worth being able to ask for, and asking is how a desk finds out
+  // it is empty.
   const [stages, setStages] = useState([]);
 
   useEffect(() => {
-    getLeadSources()
-      .then((rows) => setSources([...new Set((rows || []).map((r) => r.source_tab).filter(Boolean))]))
-      .catch((e) => console.warn("[BD marketing sources]", e?.message || e));
     stagesList("pre_sales")
       .then((rows) => setStages((rows || []).map((s) => s.name || s).filter(Boolean)))
       .catch((e) => console.warn("[BD marketing stages]", e?.message || e));
   }, []);
 
-  const branchParam = useMemo(() => {
-    const ids = resolveBranchIds(branches, group, branchId);
-    // resolveBranchIds answers with a single id for a named branch and a comma-joined set
-    // for a group; `undefined` is All, which the endpoint reads as unfiltered.
-    if (ids === undefined) return {};
-    return branchId ? { branch_id: branchId } : { branch_ids: ids };
-  }, [branches, group, branchId]);
-
+  // The row's scope is settled upstairs and arrives as one object, so a new selection is
+  // one changed dependency rather than three.
   useEffect(() => {
-    // Guarded: a branch pressed twice quickly leaves two requests in flight, and the
+    // Guarded: a source clicked twice quickly leaves two requests in flight, and the
     // slower one must not land on top of the newer list.
     let cancelled = false;
     setLoading(true);
-    const params = { ...dateParams, ...branchParam };
-    if (source) params.source_tab = source;
-    if (stage) params.stage = stage;
-    getBdSummaryRows("total", params)
+    const query = { ...dateParams, ...params };
+    if (stage) query.stage = stage;
+    getBdSummaryRows("total", query)
       .then((res) => { if (!cancelled) setData(res); })
-      .catch(() => { if (!cancelled) { toast.error("Failed to load Marketing"); setData(null); } })
+      .catch(() => { if (!cancelled) { toast.error("Failed to load these leads"); setData(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [dateParams, branchParam, source, stage]);
+  }, [dateParams, params, stage]);
 
   const branchName = useCallback(
     (id) => (id ? (branches.find((b) => b.branch_id === id)?.branch_name || "Unknown") : "Unassigned"),
@@ -199,21 +181,28 @@ export const BdMarketingList = ({ branches, dateParams, onOpenLead }) => {
 
   const clipped = data ? data.total - sent.length : 0;
   const narrowed = rows.length !== sent.length;
-  const filterCount = (source ? 1 : 0) + (stage ? 1 : 0);
+  const filterCount = stage ? 1 : 0;
 
   const place = (r) => r.city || r.location || branchName(r.branch_id);
   const channel = (r) => r.source_tab || r.source_type || "—";
 
   return (
     <div className="space-y-4" data-testid="bd-marketing-list-tab">
-      <ModeBranchFilter
-        branches={branches}
-        group={group}
-        onGroup={setGroup}
-        branchId={branchId}
-        onBranch={setBranchId}
-        testid="bd-marketing-list-filter"
-      />
+      {/* Where the table left off. The arrow and the title are one control, not a button
+          beside a heading: the whole bar is the way back, and a desk that has drilled into
+          a sheet reaches for the name it clicked. */}
+      <button
+        type="button"
+        onClick={onBack}
+        className="flex w-full items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-sky-300 hover:bg-sky-50/40"
+        data-testid="bd-marketing-list-back"
+      >
+        <ArrowLeft className="h-4 w-4 shrink-0 text-slate-400" />
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-bold text-slate-800">{title}</span>
+          <span className="block truncate text-xs text-slate-500">{subtitle}</span>
+        </span>
+      </button>
 
       <Card data-testid="bd-marketing-list-card">
         <CardContent className="p-0">
@@ -226,7 +215,7 @@ export const BdMarketingList = ({ branches, dateParams, onOpenLead }) => {
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name, source, email or phone..."
+                placeholder="Search by name, email, phone or place..."
                 className="h-11 rounded-xl border-slate-200 pl-9 pr-9 text-sm"
                 data-testid="bd-marketing-list-search"
               />
@@ -257,21 +246,13 @@ export const BdMarketingList = ({ branches, dateParams, onOpenLead }) => {
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-64 space-y-3 p-3" data-testid="bd-marketing-list-filter-menu">
-                {/* Native selects rather than the styled one: both lists are as long as the
-                    install has made them (this estate carries a dozen sources), and a
-                    phone's own picker holds that better than a popover inside a popover. */}
-                <label className="block">
-                  <span className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-400">Lead Source</span>
-                  <select
-                    value={source || ALL}
-                    onChange={(e) => setSource(e.target.value === ALL ? "" : e.target.value)}
-                    className="h-10 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700"
-                    data-testid="bd-marketing-list-source"
-                  >
-                    <option value={ALL}>All sources</option>
-                    {sources.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </label>
+                {/* A native select rather than the styled one: the stage list is as long
+                    as Pipeline Stage Management has made it, and a phone's own picker holds
+                    that better than a popover inside a popover.
+
+                    Lead Source is not offered here. It is what was clicked to get to this
+                    list, so a control that could change it would let the header name one
+                    sheet while the rows came from another. Going back is how you change it. */}
                 <label className="block">
                   <span className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-400">Status</span>
                   <select
@@ -287,11 +268,11 @@ export const BdMarketingList = ({ branches, dateParams, onOpenLead }) => {
                 {filterCount > 0 && (
                   <button
                     type="button"
-                    onClick={() => { setSource(""); setStage(""); }}
+                    onClick={() => setStage("")}
                     className="w-full rounded-md border border-slate-200 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                     data-testid="bd-marketing-list-filter-clear"
                   >
-                    Clear filters
+                    Clear the status filter
                   </button>
                 )}
               </PopoverContent>

@@ -199,6 +199,16 @@ BD_ROW_METRICS = {
     "converted", "revenue", "conversion", "branches", "sheets",
 }
 
+# The branch a lead has when it has none -- an online arm's leads carry no branch at all,
+# and so do any whose branch has since been deleted. Spelled as a sentinel rather than as
+# an empty string because every branch param in here is falsy-tested, so "" would read as
+# "no filter" and quietly answer a question about one bucket with every lead there is.
+#
+# Returned by /dashboard/marketing-sources on a row keyed to that bucket, and understood
+# by /dashboard/bd-summary/rows below, so a desk can click the row and get its leads. The
+# two must agree on the spelling; they are the only two that use it.
+UNASSIGNED_BRANCH = "__unassigned__"
+
 # A cap, not a page. These lists are read to answer "which ones are they", and a desk
 # scrolling past a few hundred rows has stopped reading and wants a filter instead. The
 # total is returned alongside so the table can say what it is not showing rather than
@@ -232,7 +242,8 @@ async def v3_bd_summary_rows(
     # same as no filter. A group holding no branches (Online, before any exist) must come
     # back empty rather than falling through to every branch there is.
     branch_clause = (
-        branch_id if branch_id
+        {"$in": [None, ""]} if branch_id == UNASSIGNED_BRANCH
+        else branch_id if branch_id
         else {"$in": [b for b in branch_ids.split(",") if b]} if branch_ids is not None
         else None
     )
@@ -1695,4 +1706,175 @@ async def dashboard_clients(
     return {
         "premium": [shape(l) for l in rows if l.get("is_vip")],
         "attention": [shape(l) for l in rows if l.get("needs_attention")],
+    }
+
+
+# How a source row's "Last Lead" is judged to have gone quiet. Seven days because every
+# one of this estate's live sheets carries leads most weeks -- the smallest of them is
+# running about one a day -- so a week of silence on a sheet that was arriving daily is a
+# broken sync far more often than it is a dead channel. It is a hint and nothing else: the
+# row still reads normally, the figure just gets a mark beside it.
+MARKETING_QUIET_DAYS = 7
+
+# What the Group by control offers, and what each one keys a row on.
+#
+#   source         -- one row per sheet/form, wherever its leads landed. The default: this
+#                     is the marketing question, and a sheet is a thing somebody set up.
+#   branch         -- one row per branch, whatever fed it. The same table read from the
+#                     other end, for "which place is actually converting".
+#   source_branch  -- one row per pairing. The only one that can answer what a shared form
+#                     did for one branch -- this estate's two biggest sources are
+#                     all-branch forms, so under "source" alone their 2,103 leads sit in
+#                     two rows that name no branch at all.
+MARKETING_GROUPINGS = {"source", "branch", "source_branch"}
+
+
+@router.get("/dashboard/marketing-sources")
+async def v3_marketing_sources(
+    group_by: str = Query("source", description="One of MARKETING_GROUPINGS"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    branch_ids: Optional[str] = Query(None, description="Comma-separated; omit for every branch"),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "sales_head", "marketing_head", "business_dev")),
+):
+    """Every lead source in the window, as rows: leads, booked, conversion, and when each
+    last carried anything.
+
+    The same leads /dashboard/leads-analytics counts, over the same window, on the same
+    clinic clock -- and `booked` is that endpoint's own definition (the lead has an
+    appointment_date), so the figure at the foot of this table is the Booked card's number
+    and cannot drift from it.
+
+    What this is NOT is `by_source` from that endpoint. That one is ranked and capped at
+    six plus an "Other" bucket, because it feeds a pie chart and a part-to-whole read stops
+    working past about six slices. On this install that cap folds nine real sheets into one
+    653-lead row called "Other", which is fine for a chart and useless for a table: the
+    desk reading this wants the sheet's name so it can go and look at the sheet. So every
+    source is returned, named, however many there are.
+
+    No aggregation pipeline: this is one indexed range scan with a five-field projection,
+    counted in Python, which is what the analytics endpoint beside it already does over the
+    same rows. Grouping in Mongo would mean three pipelines to keep in step with each other
+    and with that endpoint, to save an arithmetic pass over at most a few tens of thousands
+    of small dicts.
+    """
+    if group_by not in MARKETING_GROUPINGS:
+        raise HTTPException(status_code=400, detail=f"Unknown grouping: {group_by}")
+
+    query: dict = _utc_stamp_range_query("created_at", start_date, end_date)
+    wanted_branches = [b for b in (branch_ids or "").split(",") if b.strip()]
+    if wanted_branches:
+        query["branch_id"] = {"$in": wanted_branches}
+    leads = await v3_col("leads").find(
+        query,
+        {"_id": 0, "created_at": 1, "branch_id": 1, "source_tab": 1, "source_type": 1, "appointment_date": 1},
+    ).to_list(50000)
+
+    branch_rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    branch_names = {b["id"]: b.get("branch_name") or "-" for b in branch_rows}
+
+    rows: dict = {}
+    for lead in leads:
+        source = _lead_source(lead)
+        bid = lead.get("branch_id") or ""
+        if group_by == "source":
+            key = source
+        elif group_by == "branch":
+            key = bid
+        else:
+            # Only ever a React key and a dict key -- the source and the branch are
+            # returned as their own fields beside it, so nothing downstream has to
+            # split this back apart.
+            key = f"{source}||{bid}"
+
+        row = rows.get(key)
+        if row is None:
+            row = rows[key] = {
+                "key": key,
+                # Both names on every row whatever the grouping, so one table component
+                # draws all three and a column is empty rather than absent. Under "branch"
+                # the source cell is filled in below, once it is known whether the branch
+                # was fed by one sheet or by nine.
+                "source": source if group_by != "branch" else None,
+                "source_type": (lead.get("source_type") or "").strip() or None,
+                # The sentinel, not None, where the row IS the no-branch bucket: None is
+                # reserved below for a row that spans several branches and must not be
+                # filtered to one. The two are opposite instructions to the drill-down.
+                "branch_id": bid or UNASSIGNED_BRANCH,
+                "branch_name": branch_names.get(bid, "Unassigned") if bid else "Unassigned",
+                "leads": 0,
+                "booked": 0,
+                "first_lead_at": None,
+                "last_lead_at": None,
+                # The sets behind the two "how many of the other thing" figures below.
+                # Dropped from the response before it goes out -- the count is the fact,
+                # and a row for an all-branch form would otherwise carry every branch id.
+                "_branches": set(),
+                "_sources": set(),
+            }
+
+        row["leads"] += 1
+        if str(lead.get("appointment_date") or "").strip():
+            row["booked"] += 1
+        row["_branches"].add(bid)
+        row["_sources"].add(source)
+
+        created = lead.get("created_at") or ""
+        if created:
+            if not row["first_lead_at"] or created < row["first_lead_at"]:
+                row["first_lead_at"] = created
+            if not row["last_lead_at"] or created > row["last_lead_at"]:
+                row["last_lead_at"] = created
+
+    today = clinic_day_of(datetime.now(timezone.utc).isoformat())
+    out = []
+    for row in rows.values():
+        branches_seen = row.pop("_branches")
+        sources_seen = row.pop("_sources")
+        row["branch_count"] = len(branches_seen)
+        row["source_count"] = len(sources_seen)
+
+        # A sheet that fed more than one branch has no single branch to name, and naming
+        # the first one it happened to touch would be a lie the desk cannot see. Said as a
+        # count instead, which is the true answer and also the more useful one.
+        if group_by == "source" and row["branch_count"] > 1:
+            row["branch_name"] = f"All branches ({row['branch_count']})"
+            row["branch_id"] = None
+        # The mirror of that, one grouping over: a branch fed by nine sheets names none.
+        if group_by == "branch":
+            row["source"] = next(iter(sources_seen)) if row["source_count"] == 1 else f"{row['source_count']} sources"
+            if row["source_count"] > 1:
+                row["source_type"] = None
+
+        # Rate is returned rather than left to the caller so every screen reading this
+        # rounds it the same way, and so a zero-lead row (which cannot occur here, but the
+        # shape has to be total) is never a division.
+        row["conversion_rate"] = round(row["booked"] / row["leads"] * 100, 1) if row["leads"] else 0.0
+
+        # Days since the last lead, on the clinic's clock -- not a timestamp difference.
+        # "Yesterday" is a day old at one minute past midnight and at eleven at night, and
+        # the desk asking whether a sheet has stopped is counting days, not hours.
+        last_day = clinic_day_of(row["last_lead_at"])
+        try:
+            quiet = (date.fromisoformat(today) - date.fromisoformat(last_day)).days
+        except (ValueError, TypeError):
+            quiet = None
+        row["quiet_days"] = quiet
+        row["is_quiet"] = quiet is not None and quiet >= MARKETING_QUIET_DAYS
+        out.append(row)
+
+    out.sort(key=lambda r: -r["leads"])
+    booked_total = sum(r["booked"] for r in out)
+    return {
+        "applied_filters": {"start_date": start_date, "end_date": end_date, "branch_ids": wanted_branches},
+        "group_by": group_by,
+        "rows": out,
+        # The foot of the table, summed off the same rows it sits under rather than counted
+        # again -- a total that can disagree with the column above it is worse than none.
+        "totals": {
+            "leads": len(leads),
+            "booked": booked_total,
+            "conversion_rate": round(booked_total / len(leads) * 100, 1) if leads else 0.0,
+            "rows": len(out),
+        },
     }

@@ -223,6 +223,13 @@ export const getBdSummaryRows = async (metric, params = {}) => (
   await api.get("/dashboard/bd-summary/rows", { params: { ...params, metric } })
 ).data;
 export const getLeadSources = async () => (await api.get("/lead-sources")).data;
+// Every lead source in a window as table rows -- leads, booked, conversion rate, and when
+// each last carried anything -- grouped by source, by branch, or by the pairing. NOT the
+// `by_source` on getLeadsAnalytics: that one is capped at six plus an "Other" bucket
+// because it draws a pie, and this is a table that has to name every sheet.
+export const getMarketingSources = async (params = {}) => (
+  await api.get("/dashboard/marketing-sources", { params })
+).data;
 
 export const getLeadRemarks = async (leadId) => (await api.get(`/leads/${leadId}/remarks`)).data;
 export const addLeadRemark = async (leadId, payload) => (await api.post(`/leads/${leadId}/remarks`, payload)).data;

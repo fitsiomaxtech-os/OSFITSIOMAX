@@ -65,11 +65,12 @@ import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard
 // opens on. A lazy() could not carry useDashboardData in any case; a hook has to be
 // there when the component that calls it renders.
 import { DASH_TABS, DashboardTabPanel, useDashboardData } from "@/components/DashboardBoard";
-// This desk's own Marketing tab -- the leads themselves, as a list, in place of the row of
-// per-channel totals DashboardTabPanel draws for that key. Only this board swaps it; Super
-// Admin's Dashboard > Marketing is untouched and still gets the tiles. See the note at the
-// render below, and the file's own header for why the desk wants rows rather than counts.
-import { BdMarketingList } from "@/components/BdMarketingList";
+// This desk's own Marketing tab -- every lead source in the range as a row, with the leads
+// behind any one of them a click away, in place of the row of per-channel totals
+// DashboardTabPanel draws for that key. Only this board swaps it; Super Admin's Dashboard
+// > Marketing is untouched and still gets the tiles. See the note at the render below, and
+// the file's own header for why the desk wants a table rather than tiles.
+import { BdMarketingSources } from "@/components/BdMarketingSources";
 // Finance, HR Admin, Services and Products, and the two Settings screens -- the same five
 // boards Super Admin reaches, mounted here as this desk's own tabs.
 //
@@ -1123,9 +1124,20 @@ function DashboardTab({
   const dash = useDashboardData(panelRange, openGroup, wantsPanels);
   // The same range again, in the two query params the BD endpoints take rather than as the
   // {from,to} the six imported tabs read. Marketing is the only tab below that asks the
-  // server for rows of its own. Memoised because it is a dependency of that list's fetch:
-  // rebuilt every render, it would re-ask for the leads each time anything here moved.
+  // server for rows of its own. Memoised because it is a dependency of that table's fetch:
+  // rebuilt every render, it would re-ask for the sources each time anything here moved.
   const panelDateParams = useMemo(() => dateParamsOf(effectiveDateFilter), [effectiveDateFilter]);
+
+  // That range in words, for the caption over the Marketing table. Both halves, because
+  // neither is enough on its own: the label says which button is pressed ("Last 90 Days")
+  // and the dates say what that resolved to, which is the thing a desk copies into a
+  // report. An open range names itself and has no dates to give.
+  const panelRangeLabel = useMemo(() => {
+    const f = effectiveDateFilter;
+    if (!f?.from || !f?.to) return "All time";
+    const day = (d) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    return `${f.label ? `${f.label} · ` : ""}${day(f.from)} → ${day(f.to)}`;
+  }, [effectiveDateFilter]);
 
   // A name typed, or a mark pressed, with no card open has nothing to narrow -- the
   // controls would sit there doing nothing visible and read as broken. Total Leads is the
@@ -1416,21 +1428,25 @@ function DashboardTab({
            strip come with it: both are the two bars above.
 
            Marketing is the one exception on this board. Super Admin reads that tab as a
-           row of per-channel totals, which is the right shape for a desk asking where the
-           month's leads came from; this desk's Marketing day is spent working the leads a
-           channel brought in, and a total cannot be worked. So the same question is drawn
-           here as the rows behind it -- one lead per line, the channel a column and a
-           filter. The counts have not gone anywhere: they are the same figures this
-           board's own OnBoarding row carries, one tab to the left.
+           row of per-channel tiles, capped at six with the rest folded into "Other" --
+           right for a chart, wrong for a desk whose job is the sheets themselves. The
+           sheets it most needs to check on are the small and the newly broken, which are
+           exactly the ones that cap leaves unnamed, and a count on its own ranks channels
+           by a size the desk already knows.
+
+           So the same question is drawn here as a table: every source named, with Booked
+           and Conversion beside the count and Last Lead to catch a sync that has stopped,
+           and the leads behind any row a click away.
 
            Swapped here rather than inside DashboardTabPanel because the change is this
            desk's, not the tab's: Super Admin's own Dashboard > Marketing still draws the
            tiles, out of the same unchanged component. */
         <div data-testid={`bd-dash-panel-${openGroup}`}>
           {openGroup === "marketing" ? (
-            <BdMarketingList
+            <BdMarketingSources
               branches={dash.branches}
               dateParams={panelDateParams}
+              rangeLabel={panelRangeLabel}
               onOpenLead={onOpenLead}
             />
           ) : (
