@@ -177,10 +177,16 @@ export const CenteredPicker = ({ title, onClose, testid, children }) => (
  */
 export const MilkDateInput = ({
   value, onChange, min, max, disabled, className = "", accent = "amber",
-  placeholder = "Select date", centered = false, title = "Select Date", iconOnly = false, ...rest
+  placeholder = "Select date", centered = false, title = "Select Date", iconOnly = false,
+  confirm = false, ...rest
 }) => {
   const [open, setOpen] = useState(false);
+  // With `confirm`, a tapped day is only a draft until Confirm is pressed — a date that
+  // books a patient in should not be set by a stray tap on the grid.
+  const [draft, setDraft] = useState(value || "");
   const ref = useRef(null);
+
+  useEffect(() => { if (open) setDraft(value || ""); }, [open, value]);
 
   useEffect(() => {
     // A centred dialog is dismissed by its own backdrop; a document listener here would
@@ -220,7 +226,28 @@ export const MilkDateInput = ({
           and wrong inside a popup, where the card's own clipping cuts the grid off. */}
       {open && (centered ? (
         <CenteredPicker title={title} onClose={() => setOpen(false)} testid={`${rest["data-testid"] || "milk-date"}-modal`}>
-          <MilkCalendar value={value} min={min} max={max} accent={accent} onChange={pick} />
+          <MilkCalendar value={confirm ? draft : value} min={min} max={max} accent={accent} onChange={confirm ? setDraft : pick} />
+          {confirm && (
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="h-9 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                data-testid={`${rest["data-testid"] || "milk-date"}-cancel`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!draft}
+                onClick={() => pick(draft)}
+                className={`h-9 rounded-md px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${(TONES[accent] || TONES.amber).on}`}
+                data-testid={`${rest["data-testid"] || "milk-date"}-confirm`}
+              >
+                Confirm
+              </button>
+            </div>
+          )}
         </CenteredPicker>
       ) : (
         // Right-aligned and above/below by container flow; w-max keeps the grid from being
