@@ -205,6 +205,28 @@ const CONSULTATION_ADDONS = [
 ];
 
 /**
+ * The services that run long term, and the only two a long-term note can be written on.
+ *
+ * Every service used to carry a Short Term / Long Term dropdown on its row in Selected,
+ * which asked the wrong question twice over. There is no short term to choose -- a
+ * patient is either going away on a long-term plan or they are not -- and Treatment, Diet
+ * and Zumba are sold as a course and finished, so the question had no answer there at
+ * all. What is left is Rehab and Fitness, and what is asked of them is not which of two
+ * boxes but what the long term actually looks like for this patient, in words, in the
+ * same popup where the rest of that service is decided.
+ *
+ * A service is long term when there is a note on it. Nothing else records the mark, so a
+ * note and the mark can never disagree.
+ */
+const LONG_TERM_SERVICES = ["rehab", "fitness"];
+
+// The services a lead is actually going away long term on, read off a saved lead rather
+// than the draft. Used only inside the patient's own popup -- the board's rows say where
+// a patient stands in the pipeline, and a plan's length is not that.
+const longTermServices = (lead) =>
+  LONG_TERM_SERVICES.filter((k) => String(lead?.long_term_notes?.[k] || "").trim());
+
+/**
  * The two things a Diet referral can actually be, revealed once Diet is ticked.
  *
  * Independent ticks rather than a choice of one: a patient can be booked in with a
@@ -2686,7 +2708,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // have to be written first, but no add-on has to be picked — every toggle starts off,
   // which submits as a plain Consultation, the same as a patient who needs nothing else.
   // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
-  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "", service_terms: {} });
+  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "", long_term_notes: {} });
   const [savingDecision, setSavingDecision] = useState(false);
   // Which service's picker is open over the form, by addon key, or null for none.
   // The pickers used to stack down the form, one block per ticked service, which is what
@@ -3240,7 +3262,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setTreatmentFeeDraft(null);
     setTreatmentConfirmDraft(null);
     setTreatmentBalanceChoice(null);
-    setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "", service_terms: {} });
+    setDecisionDraft({ treatment: false, diet: false, dietConsultation: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "", long_term_notes: {} });
     setDecisionReceipt(null);
     setEditingDecision(false);
     setAddonPicker(null);
@@ -3366,10 +3388,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       zumba_recommended: decisionDraft.zumba,
       zumba_item_id: decisionDraft.zumba ? decisionDraft.zumba_item_id || null : null,
       mode: decisionDraft.mode,
-      // Short / Long Term per ticked service; unticked services are left out.
-      service_terms: Object.fromEntries(
-        CONSULTATION_ADDONS.filter((a) => decisionDraft[a.key])
-          .map((a) => [a.key, decisionDraft.service_terms?.[a.key] || "short"]),
+      // What was written about the long term, for the two services that run long term
+      // and only where they are ticked and something was actually written. Blank notes
+      // are left out rather than sent empty: the note is the mark, so an empty one would
+      // mark a patient long term on nothing.
+      long_term_notes: Object.fromEntries(
+        LONG_TERM_SERVICES.filter((k) => decisionDraft[k] && (decisionDraft.long_term_notes?.[k] || "").trim())
+          .map((k) => [k, decisionDraft.long_term_notes[k].trim()]),
       ),
     };
     if (decisionDraft.treatment) {
@@ -3453,7 +3478,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       zumba_item_id: lead.zumba_package_id || "",
       mode: lead.consultation_mode || "offline",
       sessionsPerWeek: weeks && total ? String(Math.round(total / weeks)) : "",
-      service_terms: lead.service_terms || {},
+      long_term_notes: lead.long_term_notes || {},
     });
     setDecisionReceipt(null);
     setEditingDecision(true);
@@ -6425,6 +6450,32 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                   {selectedLead.patient_number && (
                     <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-500" data-testid="cons-detail-patient-number">{selectedLead.patient_number}</span>
                   )}
+                  {/* Long Term, against the name, and only here.
+
+                      It belongs to the patient rather than to a row: the board's list says
+                      where somebody stands in the pipeline today, and how long their plan
+                      runs is not that -- a mark there would be a fifth badge competing with
+                      the stage everybody is actually reading the list for. Whoever opens
+                      this patient sees it at the top of them, beside the number that
+                      identifies them, before reading a word of the case.
+
+                      What was written is on the badge itself, so the mark is never just an
+                      assertion somebody has to go hunting through the form to explain. */}
+                  {(() => {
+                    const marked = longTermServices(selectedLead);
+                    if (!marked.length) return null;
+                    return (
+                      <span
+                        className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-700 ring-1 ring-indigo-200"
+                        title={marked
+                          .map((k) => `${CONSULTATION_ADDONS.find((a) => a.key === k)?.label || k}: ${selectedLead.long_term_notes[k]}`)
+                          .join("\n")}
+                        data-testid="cons-detail-long-term"
+                      >
+                        Long Term
+                      </span>
+                    );
+                  })()}
                 </h3>
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
                   <span className="flex items-center gap-1.5"><Phone className="h-3 w-3 shrink-0" /> {selectedLead.phone || "—"}</span>
@@ -6893,10 +6944,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                 // disagree about what is selected.
                 const selectedAddons = CONSULTATION_ADDONS.filter((a) => decisionDraft[a.key]);
 
-                // Whether ticking a service opens a picker at all. Fitness has nothing to
-                // decide, so clicking it selects and stops there rather than opening a popup
-                // whose only content is a line saying there is nothing in it.
-                const hasPicker = (key) => key !== "fitness";
+                // Whether ticking a service opens a picker at all. All five do now: Fitness
+                // carries no package, but it is one of the two services that runs long term,
+                // and the long-term note is asked for in the same popup as everything else
+                // about a service rather than on the row beside it.
+                const hasPicker = () => true;
 
                 // Taking a service off clears whatever was picked under it, so an abandoned
                 // choice can't be submitted once the picker holding it is gone.
@@ -6908,6 +6960,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     ...(key === "rehab" ? { rehab_item_id: "" } : {}),
                     ...(key === "zumba" ? { zumba_item_id: "" } : {}),
                     ...(key === "diet" ? { dietConsultation: false } : {}),
+                    // The long-term note goes with the service it was written about.
+                    long_term_notes: Object.fromEntries(
+                      Object.entries(d.long_term_notes || {}).filter(([k]) => k !== key),
+                    ),
                   }));
                   setAddonPicker((cur) => (cur === key ? null : cur));
                 };
@@ -6984,6 +7040,43 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                  * card. Fitness is a referral and nothing else, and a card with a blank body
                  * reads as a picker that failed to load.
                  */
+                /**
+                 * The long-term note, for the two services that run long term.
+                 *
+                 * One block used by both pickers rather than a copy in each, because what is
+                 * being asked is the same question in both places and a patient's Rehab and
+                 * Fitness plans must not be able to be asked for in two different wordings.
+                 *
+                 * Optional: a patient can be referred to Rehab or Fitness for a course and
+                 * nothing more. Writing here is what marks them long term, which is why the
+                 * field says so rather than sitting under a bare "Notes" label -- what goes
+                 * in it ends up against this patient's name for everyone who opens them.
+                 */
+                const longTermField = (key) => {
+                  const addon = CONSULTATION_ADDONS.find((a) => a.key === key);
+                  return (
+                    <div className="mt-3" data-testid={`cons-decision-long-term-${key}`}>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">
+                        Long Term <span className="font-normal text-slate-400">(optional)</span>
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={decisionDraft.long_term_notes?.[key] || ""}
+                        onChange={(e) => {
+                          const text = e.target.value;
+                          setDecisionDraft((d) => ({ ...d, long_term_notes: { ...(d.long_term_notes || {}), [key]: text } }));
+                        }}
+                        placeholder={`Information about the long term ${addon?.label || key}...`}
+                        className="w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                        data-testid={`cons-decision-long-term-input-${key}`}
+                      />
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Written here, this patient is marked Long Term on their own page. Leave it empty if they are not.
+                      </p>
+                    </div>
+                  );
+                };
+
                 const addonDetail = (key) => {
                   if (key === "diet") {
                     return (
@@ -7054,6 +7147,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                             </p>
                           );
                         })()}
+                        {longTermField("rehab")}
                       </div>
                     );
                   }
@@ -7175,9 +7269,24 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     );
                   }
 
-                  // Fitness, and anything added to the shelf later that carries no picker.
-                  // Names itself, because the coloured edge is the only other thing marking
-                  // this block and a colour on its own is not a label.
+                  // Fitness. No package to pick -- the referral is the whole of it -- but it
+                  // is one of the two services that runs long term, so its popup is where
+                  // that is written rather than a popup that opens on nothing.
+                  if (key === "fitness") {
+                    return (
+                      <div data-testid="cons-decision-fitness-detail">
+                        <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-[11px] leading-relaxed text-violet-800" data-testid="cons-decision-fitness-note">
+                          Fitness carries no package here — the referral is the whole of it.
+                          What the patient is working towards goes below.
+                        </p>
+                        {longTermField("fitness")}
+                      </div>
+                    );
+                  }
+
+                  // Anything added to the shelf later that carries no picker. Names itself,
+                  // because the coloured edge is the only other thing marking this block and
+                  // a colour on its own is not a label.
                   const addon = CONSULTATION_ADDONS.find((a) => a.key === key);
                   return (
                     <p className="text-xs text-slate-500" data-testid={`cons-decision-detail-none-${key}`}>
@@ -7226,6 +7335,17 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                           Zumba Plan: <span className="font-semibold">{selectedLead.zumba_package_name}</span>
                         </p>
                       )}
+                      {/* What was written about the long term, read back in full. The badge
+                          against the patient's name says they are marked; this is the only
+                          place the words themselves are on screen without reopening the
+                          form, and a mark nobody can read the reason for is a mark nobody
+                          can act on. */}
+                      {longTermServices(selectedLead).map((k) => (
+                        <p key={k} className="mt-0.5 text-xs text-slate-600" data-testid={`cons-decision-summary-long-term-${k}`}>
+                          Long Term · {CONSULTATION_ADDONS.find((a) => a.key === k)?.label || k}:{" "}
+                          <span className="font-medium text-slate-700">{selectedLead.long_term_notes[k]}</span>
+                        </p>
+                      ))}
                       <p className="mt-1.5 text-[11px] text-slate-500">Sent to Branch Admin — Consultation Visit.</p>
                       {/* Reopens the form on the choice and package already saved, rather
                           than on a blank one — see beginEditDecision. */}
@@ -7365,19 +7485,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                                       {summary.text}
                                     </span>
                                   </button>
-                                  <select
-                                    value={decisionDraft.service_terms?.[a.key] || "short"}
-                                    onChange={(e) => {
-                                      const term = e.target.value;
-                                      setDecisionDraft((d) => ({ ...d, service_terms: { ...(d.service_terms || {}), [a.key]: term } }));
-                                    }}
-                                    className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-sky-400"
-                                    title={`${a.label} term`}
-                                    data-testid={`cons-decision-term-${a.key}`}
-                                  >
-                                    <option value="short">Short Term</option>
-                                    <option value="long">Long Term</option>
-                                  </select>
                                   <button
                                     type="button"
                                     onClick={() => clearAddon(a.key)}

@@ -433,8 +433,10 @@ class V3LeadOut(BaseModel):
     needs_attention: Optional[bool] = False
     fitness_recommended: Optional[bool] = False
     zumba_recommended: Optional[bool] = False
-    # Short / Long Term per service, set at Move to Admin.
-    service_terms: Optional[Dict[str, str]] = None
+    # Long Term, per service, set at Move to Admin. Only Rehab and Fitness run long
+    # term, and a service is long term when there is something written about it here --
+    # there is no short/long pair to choose between, so the note IS the mark.
+    long_term_notes: Optional[Dict[str, str]] = None
     # Who is actually delivering that diet plan, set by branch/assign-diet. This model
     # ignores extras, so without these three the Consultations board could never tell an
     # already-assigned patient from a new one and its Reassign control would never appear.
@@ -901,8 +903,11 @@ class V3ConsultationDecisionInput(BaseModel):
     rehab_item_id: Optional[str] = None
     # The Zumba membership, when one is picked alongside it. Optional on the same terms.
     zumba_item_id: Optional[str] = None
-    # Short or Long Term per ticked service, keyed treatment/diet/rehab/fitness/zumba.
-    service_terms: Dict[Literal["treatment", "diet", "rehab", "fitness", "zumba"], Literal["short", "long"]] = {}
+    # What the Consultant wrote about the long term, keyed by service. Only Rehab and
+    # Fitness carry one: those are the two that run on past the package being sold, and
+    # the others are bought, delivered and finished. Writing a note here is what marks
+    # the service long term -- an empty one is dropped, so nothing is marked by accident.
+    long_term_notes: Dict[Literal["rehab", "fitness"], str] = {}
 
 
 class V3AssignPhysioSessionsInput(BaseModel):

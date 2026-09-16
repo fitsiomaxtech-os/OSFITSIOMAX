@@ -494,19 +494,21 @@ async def hp_consultation_decision(
         chosen += " + Zumba"
     detail = f"Consultation decision: {chosen}"
 
-    # Short / Long Term, kept only for the services actually ticked.
+    # Long Term. Only Rehab and Fitness run long term, and only what the Consultant
+    # actually wrote is kept -- a blank note on a service is no note at all, and a note
+    # on a service that ended up unticked is an answer to a question no longer asked.
     ticked = {
-        "treatment": payload.decision == "consultation_treatment",
-        "diet": bool(payload.diet_recommended),
         "rehab": bool(payload.rehab_referred),
         "fitness": bool(payload.fitness_recommended),
-        "zumba": bool(payload.zumba_recommended),
     }
-    service_terms = {k: v for k, v in payload.service_terms.items() if ticked.get(k)}
-    updates["service_terms"] = service_terms
-    long_term = [k.title() for k, v in service_terms.items() if v == "long"]
-    if long_term:
-        detail += f" · Long Term: {', '.join(long_term)}"
+    long_term_notes = {
+        k: v.strip()
+        for k, v in payload.long_term_notes.items()
+        if ticked.get(k) and (v or "").strip()
+    }
+    updates["long_term_notes"] = long_term_notes
+    if long_term_notes:
+        detail += f" · Long Term: {', '.join(k.title() for k in long_term_notes)}"
 
     # Consultation Fee has a single fixed price (FITSIO STORE > Consultation) — there's
     # nothing for the Head Physio to pick, so it's auto-assigned the first time a lead
