@@ -25,7 +25,7 @@ import { ConsultationsBoard, leadPlanParts, PlanLine } from "@/components/Consul
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
 import { todayIso } from "@/components/WeekStrip";
 import { RescheduledTag } from "@/components/ui/lead-marks";
-import { QuickDateFilterBar, QUICK_DATE_PRESETS, quickDatePreset } from "@/components/QuickDateFilterBar";
+import { DayStripFilter, todayFilter, isDayKey } from "@/components/DayStripFilter";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   getHPMyCalendar,
@@ -97,9 +97,9 @@ const isDone = (...stages) => stages.some((s) => /complete/i.test(String(s || ""
  */
 export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, mine = false, search = "", onSearchChange }) => {
   const [workTab, setWorkTab] = useState("consultations");
-  // The one date scope every list answers to, from the preset row (All, Today, This Week,
-  // This Month, Last 90 Days, Custom). Starts on Today; null is All.
-  const [dateRange, setDateRange] = useState(() => quickDatePreset("today"));
+  // The one date scope every list answers to, from the day strip (All, then a day either
+  // side of today) or the calendar. Starts on Today; null is All.
+  const [dateRange, setDateRange] = useState(() => todayFilter());
   const allTime = !dateRange;
   // Which of the three queues All is showing. Lives on the All card itself.
   const [allKind, setAllKind] = useState("all");
@@ -198,7 +198,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
   // a number that moved when you filtered under it would be reporting the filter.
   // What the empty All list is empty *of*. "Nothing on this day" under an all-time count
   // of zero names a day the board was not looking at.
-  const emptyAllText = allTime ? "Nothing on record." : dateRange ? "Nothing in this range." : "Nothing on this day.";
+  const emptyAllText = allTime ? "Nothing on record." : isDayKey(dateRange.key) ? "Nothing on this day." : "Nothing in this range.";
 
   const visibleAllRows = useMemo(
     () => (allKind === "all" ? allRows : allRows.filter((r) => r.kind === allKind)),
@@ -373,12 +373,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
             simply leaves none of the preset buttons lit. */}
         {/* ml-auto opens the gap after the search, so the ranges, calendar and Refresh sit
             together on the right. */}
-        <div className="w-full sm:ml-auto sm:w-auto sm:shrink-0">
-          <QuickDateFilterBar value={dateRange} onChange={setDateRange} testid="hp-date-filter" inline showCustom={false} />
+        <div className="w-full min-w-0 sm:flex-1">
+          <DayStripFilter value={dateRange} onChange={setDateRange} testid="hp-date-filter" />
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
           <DateFilterPopover
-            value={dateRange && !QUICK_DATE_PRESETS.some((p) => p.key === dateRange.key) ? dateRange : null}
+            value={dateRange && !isDayKey(dateRange.key) ? dateRange : null}
             onChange={setDateRange}
             testid="hp-date-custom"
             centered
@@ -415,9 +415,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               // The caption names the scope the figure was counted over, so it has to
               // move with it — a count of every review ever raised sitting under the words
               // "on this day" is the card reporting a day it did not count.
+              // A day off the strip names itself: "today" and "yesterday" read as they
+              // are, a date needs the preposition or the card says "everything Sep 10".
               const when = allTime ? "all time"
-                : ["today", "this_week", "this_month", "last_90"].includes(dateRange.key) ? dateRange.label.toLowerCase()
-                : "in this range";
+                : !isDayKey(dateRange.key) ? "in this range"
+                : /^(Today|Yesterday|Tomorrow)$/.test(dateRange.label) ? dateRange.label.toLowerCase()
+                : `on ${dateRange.label}`;
               const sub = t.key === "consultations" ? (firstStage ? `in ${firstStage}` : when)
                 : t.key === "review" ? when
                 : `everything ${when}`;
