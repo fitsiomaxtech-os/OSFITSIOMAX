@@ -4,6 +4,7 @@ import { Camera, ChevronLeft, ChevronRight, Eye, FileText, Image as ImageIcon, T
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { ZoomableImage } from "@/components/ui/zoomable-view";
 import { leadDocuments, uploadLeadDocument, deleteLeadDocument, openLeadDocument, setDocumentShared } from "@/lib/api";
 
 /**
@@ -508,7 +509,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, canUpload = canEdit, kin
               is itself a dialog, and a sheet edge to edge loses where it was opened from —
               closing it felt like leaving the patient rather than shutting a picture. */}
           <div
-            className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-slate-900 p-4 shadow-2xl"
+            className="flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-slate-900 p-4 shadow-2xl"
             onMouseDown={(e) => e.stopPropagation()}
           >
           <div className="flex items-start gap-3 text-white">
@@ -537,17 +538,17 @@ export const LeadDocuments = ({ leadId, canEdit = true, canUpload = canEdit, kin
               </button>
             )}
             <div
-              className="flex min-h-0 min-w-0 flex-1 items-center justify-center"
+              className="flex min-h-0 min-w-0 flex-1 items-center justify-center self-stretch"
               onMouseDown={(e) => { if (e.target === e.currentTarget) setViewing(null); }}
             >
               {viewBusy || !viewSrc ? (
                 <p className="text-sm text-white/70">Loading…</p>
               ) : (
-                <img
+                <ZoomableImage
                   src={viewSrc}
                   alt={viewDoc.label || viewDoc.original_name}
-                  className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
-                  data-testid="lead-doc-viewer-image"
+                  dark
+                  testid="lead-doc-viewer-image"
                 />
               )}
             </div>

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { LeadMarks } from "@/components/ui/lead-marks";
+import { ZoomableImage, ZoomablePdf } from "@/components/ui/zoomable-view";
 import { dietChartUrl, dietConsultations, dietPatients, dietSessions, recommendDietChart, saveDietConsultationReport, sendDietChart } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
@@ -612,11 +613,9 @@ function DietChartPanel({ patient, chart, onSent }) {
             </div>
             <div className="min-h-0 flex-1 bg-slate-100">
               {preview.pdf ? (
-                <iframe src={preview.url} title={preview.name} className="h-full w-full border-0" />
+                <ZoomablePdf src={preview.url} title={preview.name} testid="diet-chart-pdf" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center overflow-auto p-3">
-                  <img src={preview.url} alt={preview.name} className="max-h-full max-w-full object-contain" />
-                </div>
+                <ZoomableImage src={preview.url} alt={preview.name} testid="diet-chart-image" />
               )}
             </div>
           </div>

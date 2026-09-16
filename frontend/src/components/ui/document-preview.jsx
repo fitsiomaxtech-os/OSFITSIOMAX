@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FileText, X } from "lucide-react";
+import { ZoomableImage, ZoomablePdf } from "@/components/ui/zoomable-view";
 
 /**
  * A patient's document, read on the page that listed it.
@@ -130,11 +131,9 @@ export const DocumentPreview = ({ preview, onClose, icon: Icon = FileText, testi
         </div>
         <div className="min-h-0 flex-1 bg-slate-100">
           {preview.pdf ? (
-            <iframe src={preview.url} title={preview.name} className="h-full w-full border-0" />
+            <ZoomablePdf src={preview.url} title={preview.name} testid={`${testid}-pdf`} />
           ) : preview.image ? (
-            <div className="flex h-full w-full items-center justify-center overflow-auto p-3">
-              <img src={preview.url} alt={preview.name} className="max-h-full max-w-full object-contain" />
-            </div>
+            <ZoomableImage src={preview.url} alt={preview.name} testid={`${testid}-image`} />
           ) : (
             // Anything else — a scan filed as a .doc, a spreadsheet. Saying so beats an
             // empty frame that looks like the document failed to load.

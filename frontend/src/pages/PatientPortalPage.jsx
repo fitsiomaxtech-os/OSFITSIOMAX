@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
+import { ZoomableImage, ZoomablePdf } from "@/components/ui/zoomable-view";
 import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
@@ -773,19 +774,19 @@ function FileViewer({ file, onClose }) {
 
         <div className="min-h-0 flex-1 overflow-auto bg-slate-50 p-3">
           {kind === "image" && (
-            <img
+            <ZoomableImage
               src={file.url}
               alt={file.name || "Document"}
-              className="mx-auto h-auto max-w-full rounded-lg"
-              data-testid="patient-portal-file-viewer-image"
+              className="!h-[70vh]"
+              testid="patient-portal-file-viewer-image"
             />
           )}
           {kind === "pdf" && (
-            <iframe
+            <ZoomablePdf
               src={file.url}
               title={file.name || "Document"}
-              className="h-[70vh] w-full rounded-lg border-0 bg-white"
-              data-testid="patient-portal-file-viewer-pdf"
+              className="h-[70vh] w-full overflow-hidden rounded-lg bg-white"
+              testid="patient-portal-file-viewer-pdf"
             />
           )}
           {kind === "other" && (
