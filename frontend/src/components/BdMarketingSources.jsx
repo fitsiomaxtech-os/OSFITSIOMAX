@@ -303,7 +303,11 @@ export const BdMarketingSources = ({
                     <th className="px-4 py-3 text-right">Booked</th>
                     <th className="px-4 py-3 text-right">Conv %</th>
                     <th className="px-4 py-3">Last Lead</th>
-                    <th className="px-4 py-3" />
+                    {/* Named, not the blank it was. The arrow under it is now the only
+                        thing in the row that opens anything, and an unlabelled column of
+                        chevrons reads as decoration -- the heading is what says the
+                        column is a control. */}
+                    <th className="px-4 py-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -330,9 +334,7 @@ export const BdMarketingSources = ({
                   {rows.map((r) => (
                     <tr
                       key={r.key}
-                      onClick={() => setDrill(r)}
-                      title="Open the leads behind this row"
-                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                      className="border-t border-slate-100 hover:bg-slate-50"
                       data-testid={`bd-breakdown-row-${r.key}`}
                     >
                       <td className="px-4 py-3">
@@ -384,8 +386,22 @@ export const BdMarketingSources = ({
                           {r.is_quiet && <span className="text-xs font-normal">· quiet {r.quiet_days}d</span>}
                         </span>
                       </td>
+                      {/* The one click target in the row. The whole row used to open the
+                          list, which made every cell in it a trap: a branch name half-read,
+                          a figure somebody wanted to select, a stray click anywhere on
+                          eight columns, and the table was gone. Narrowing it to the arrow
+                          leaves the rest of the row inert to read and to copy from. */}
                       <td className="px-4 py-3 text-right">
-                        <ChevronRight className="inline h-4 w-4 text-slate-300" />
+                        <button
+                          type="button"
+                          onClick={() => setDrill(r)}
+                          title={`Open the leads behind ${r.label}`}
+                          aria-label={`Open the leads behind ${r.label}`}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-sky-50 hover:text-sky-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                          data-testid={`bd-breakdown-open-${r.key}`}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}
