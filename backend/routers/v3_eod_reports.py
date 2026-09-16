@@ -215,30 +215,48 @@ async def submit_eod_today(payload: EodReportIn, user: V3UserOut = Depends(v3_cu
 @router.get("/eod-reports")
 async def list_eod_reports(
     date: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
     user: V3UserOut = Depends(v3_require_roles("super_admin")),
 ):
-    """Every report filed on one clinic day, and the Physios and Consultants who clocked
-    in that day without filing one."""
-    on = date or clinic_today()
-    if len(on) != 10:
-        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
-    reports = await v3_col(COLLECTION).find({"date": on}, {"_id": 0}).sort("user_name", 1).to_list(1000)
-    filed = {r["user_id"] for r in reports}
+    """Every report filed between two clinic days (inclusive), and each day a Physio or
+    Consultant clocked in on without filing one.
+
+    `date` is one day. `date_from`/`date_to` are a range, either end open. Nothing at all
+    is every report there is -- the "All" filter.
+    """
+    if date:
+        date_from = date_to = date
+    for value in (date_from, date_to):
+        if value and len(value) != 10:
+            raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    span: Dict[str, str] = {}
+    if date_from:
+        span["$gte"] = date_from
+    if date_to:
+        span["$lte"] = date_to
+    where: Dict[str, Any] = {"date": span} if span else {}
+
+    reports = await v3_col(COLLECTION).find(where, {"_id": 0}).sort([("date", -1), ("user_name", 1)]).to_list(5000)
+    filed = {(r["user_id"], r["date"]) for r in reports}
 
     clocked = await v3_col("clock_days").find(
-        {"date": on, "clock_in": {"$nin": ["", None]}}, {"_id": 0, "user_id": 1},
-    ).to_list(2000)
-    clocked_ids = [c["user_id"] for c in clocked if c.get("user_id") and c["user_id"] not in filed]
+        {**where, "clock_in": {"$nin": ["", None]}}, {"_id": 0, "user_id": 1, "date": 1},
+    ).to_list(20000)
+    missing = [c for c in clocked if c.get("user_id") and (c["user_id"], c.get("date")) not in filed]
+    user_ids = sorted({c["user_id"] for c in missing})
     staff = await v3_col("users").find(
-        {"id": {"$in": clocked_ids}, "role": {"$in": sorted(PHYSIO_ROLES | HEAD_PHYSIO_ROLES)}},
+        {"id": {"$in": user_ids}, "role": {"$in": sorted(PHYSIO_ROLES | HEAD_PHYSIO_ROLES)}},
         {"_id": 0, "id": 1, "full_name": 1, "role": 1, "branch_id": 1},
-    ).to_list(2000) if clocked_ids else []
+    ).to_list(5000) if user_ids else []
+    by_id = {s["id"]: s for s in staff}
     pending = [
-        {"user_id": s["id"], "user_name": s.get("full_name") or "", "role": s.get("role") or "",
-         "kind": report_kind(s.get("role")), "branch_id": s.get("branch_id") or ""}
-        for s in staff
+        {"user_id": c["user_id"], "date": c.get("date") or "", "user_name": by_id[c["user_id"]].get("full_name") or "",
+         "role": by_id[c["user_id"]].get("role") or "", "kind": report_kind(by_id[c["user_id"]].get("role")),
+         "branch_id": by_id[c["user_id"]].get("branch_id") or ""}
+        for c in missing if c["user_id"] in by_id
     ]
-    pending.sort(key=lambda p: p["user_name"])
+    pending.sort(key=lambda p: (-int(p["date"].replace("-", "") or 0), p["user_name"]))
 
     branch_ids = {r.get("branch_id") for r in reports + pending if r.get("branch_id")}
     branches = await v3_col("branches").find(
@@ -248,4 +266,8 @@ async def list_eod_reports(
     for row in reports + pending:
         row["branch_name"] = names.get(row.get("branch_id"), "")
 
-    return {"date": on, "reports": [{**_public(r), "branch_name": r["branch_name"]} for r in reports], "pending": pending}
+    return {
+        "date_from": date_from or "", "date_to": date_to or "",
+        "reports": [{**_public(r), "branch_name": r["branch_name"]} for r in reports],
+        "pending": pending,
+    }

@@ -1,81 +1,128 @@
 /**
  * HR Admin > EOD Report — Super Admin's read of every Physio's and Consultant's day.
  *
- * One clinic day at a time: the reports filed on it (treatment or consultation count,
- * the clients, a note on each, and what they said about the day), and below them the
- * Physios and Consultants who clocked in that day without filing one. The server only
- * answers Super Admin. See backend/routers/v3_eod_reports.py.
+ * A period at a time — All, Today (the default), Yesterday, This Week, or a day or range
+ * picked from the calendar icon. The four figures are also the way into their lists:
+ * Reports lists every report filed, Not submitted lists each day somebody clocked in
+ * without filing one, and Treatments / Consultations narrow the reports to Physios or
+ * Consultants. The server only answers Super Admin. See backend/routers/v3_eod_reports.py.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, ClipboardList, Download, RefreshCw, Search } from "lucide-react";
+import { ChevronDown, ChevronUp, ClipboardList, Download, RefreshCw, Search, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { downloadCsv } from "@/lib/printable";
 import { roleLabel } from "@/lib/roles";
 import { eodReports } from "@/lib/api";
 
-const todayIso = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+/** The preset chips, each resolved to an ISO from/to — both empty for All. */
+const PRESETS = [
+  { key: "all", label: "All" },
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "week", label: "This Week" },
+];
+const presetRange = (key) => {
+  const today = new Date();
+  if (key === "today") return { from: iso(today), to: iso(today) };
+  if (key === "yesterday") { const y = addDays(today, -1); return { from: iso(y), to: iso(y) }; }
+  if (key === "week") {
+    // Monday to today.
+    const back = (today.getDay() + 6) % 7;
+    return { from: iso(addDays(today, -back)), to: iso(today) };
+  }
+  return { from: "", to: "" };
 };
 
-const KIND_FILTERS = [
-  { key: "", label: "All" },
-  { key: "physio", label: "Physio" },
-  { key: "consultant", label: "Consultant" },
-];
+// The four figures, and what clicking each one lists.
+const VIEWS = {
+  reports: { label: "Reports", tone: "text-slate-800", ring: "border-slate-400 ring-slate-200" },
+  pending: { label: "Not submitted", tone: "text-rose-600", ring: "border-rose-400 ring-rose-100" },
+  physio: { label: "Treatments", tone: "text-emerald-600", ring: "border-emerald-400 ring-emerald-100" },
+  consultant: { label: "Consultations", tone: "text-sky-600", ring: "border-sky-400 ring-sky-100" },
+};
 
 const countLabel = (kind) => (kind === "consultant" ? "Consultations" : "Treatments");
-const prettyTime = (iso) => {
-  if (!iso) return "";
-  const d = new Date(iso);
+const prettyTime = (stamp) => {
+  if (!stamp) return "";
+  const d = new Date(stamp);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 };
+const prettyDay = (day) => (day ? new Date(`${day}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "");
 
-const Figure = ({ label, value, tone = "text-slate-800" }) => (
-  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</span>
-    <span className={`mt-0.5 block text-xl font-extrabold ${tone}`}>{value}</span>
-  </div>
+const Figure = ({ view, value, active, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`rounded-lg border bg-white px-3 py-2 text-left transition hover:border-slate-300 hover:shadow-sm ${active ? `${VIEWS[view].ring} ring-2` : "border-slate-200"}`}
+    data-testid={`eod-card-${view}`}
+  >
+    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">{VIEWS[view].label}</span>
+    <span className={`mt-0.5 block text-xl font-extrabold ${VIEWS[view].tone}`}>{value}</span>
+  </button>
 );
 
 export const EodReportsPanel = () => {
-  const [date, setDate] = useState(todayIso);
+  const [preset, setPreset] = useState("today");
+  // Set by the calendar icon; overrides the chips while it is set.
+  const [custom, setCustom] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [kind, setKind] = useState("");
+  const [view, setView] = useState("reports");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(null);
 
+  const range = useMemo(
+    () => (custom ? { from: iso(custom.from), to: iso(custom.to || custom.from) } : presetRange(preset)),
+    [custom, preset],
+  );
+  const singleDay = range.from && range.from === range.to;
+
   const load = useCallback(async () => {
     setLoading(true);
-    try { setData(await eodReports(date)); }
+    try { setData(await eodReports(range)); }
     catch (e) { toast.error(e?.response?.data?.detail || e?.message || "Could not load EOD reports"); }
     finally { setLoading(false); }
-  }, [date]);
+  }, [range]);
 
   useEffect(() => { load(); }, [load]);
 
-  const match = useCallback((r) => {
-    if (kind && r.kind !== kind) return false;
+  const matches = useCallback((r) => {
     const needle = q.trim().toLowerCase();
     if (!needle) return true;
     return [r.user_name, r.branch_name, ...(r.entries || []).map((e) => e.client_name)]
       .some((v) => String(v || "").toLowerCase().includes(needle));
-  }, [kind, q]);
+  }, [q]);
 
-  const reports = useMemo(() => (data?.reports || []).filter(match), [data, match]);
-  const pending = useMemo(() => (data?.pending || []).filter(match), [data, match]);
+  const allReports = useMemo(() => (data?.reports || []).filter(matches), [data, matches]);
+  const pending = useMemo(() => (data?.pending || []).filter(matches), [data, matches]);
   const totals = useMemo(() => ({
-    treatments: reports.filter((r) => r.kind === "physio").reduce((n, r) => n + (r.count || 0), 0),
-    consultations: reports.filter((r) => r.kind === "consultant").reduce((n, r) => n + (r.count || 0), 0),
-  }), [reports]);
+    reports: allReports.length,
+    pending: pending.length,
+    physio: allReports.filter((r) => r.kind === "physio").reduce((n, r) => n + (r.count || 0), 0),
+    consultant: allReports.filter((r) => r.kind === "consultant").reduce((n, r) => n + (r.count || 0), 0),
+  }), [allReports, pending]);
+  const reports = useMemo(
+    () => (view === "physio" || view === "consultant" ? allReports.filter((r) => r.kind === view) : allReports),
+    [allReports, view],
+  );
+
+  const pickPreset = (key) => { setCustom(null); setPreset(key); };
+  const pickCard = (key) => setView((v) => (v === key && key !== "reports" ? "reports" : key));
 
   const exportCsv = () => {
+    if (view === "pending") {
+      downloadCsv([["Date", "Name", "Role", "Branch"], ...pending.map((p) => [p.date, p.user_name, roleLabel(p.role), p.branch_name])],
+        `eod-not-submitted-${range.from || "all"}.csv`);
+      return;
+    }
     const rows = [["Date", "Name", "Role", "Branch", "Type", "Count", "Client", "Client note", "About the day", "Submitted"]];
     for (const r of reports) {
       const entries = r.entries?.length ? r.entries : [{ client_name: "", notes: "" }];
@@ -83,44 +130,57 @@ export const EodReportsPanel = () => {
         rows.push([r.date, r.user_name, roleLabel(r.role), r.branch_name, countLabel(r.kind), r.count, e.client_name, e.notes, r.summary, prettyTime(r.updated_at)]);
       }
     }
-    downloadCsv(rows, `eod-reports-${date}.csv`);
+    downloadCsv(rows, `eod-reports-${range.from || "all"}.csv`);
   };
+
+  const listTitle = view === "pending" ? "Clocked in, no report"
+    : view === "physio" ? "Physio reports" : view === "consultant" ? "Consultant reports" : "All reports";
 
   return (
     <Card data-testid="eod-reports-panel">
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <CardTitle className="flex items-center gap-2 text-base">
           <ClipboardList className="h-5 w-5 text-sky-600" />EOD Report
         </CardTitle>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="w-40"><MilkDateInput value={date} max={todayIso()} accent="sky" onChange={(e) => e.target.value && setDate(e.target.value)} data-testid="eod-date" /></div>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="eod-refresh"><RefreshCw className="h-4 w-4" /></Button>
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!reports.length} data-testid="eod-export"><Download className="h-4 w-4" />CSV</Button>
+          <div className="flex rounded-lg bg-slate-100 p-0.5" data-testid="eod-presets">
+            {PRESETS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => pickPreset(p.key)}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${!custom && preset === p.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                data-testid={`eod-preset-${p.key}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <DateFilterPopover value={custom} onChange={setCustom} testid="eod-date-filter" centered iconOnly />
+          {custom && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700" data-testid="eod-custom-chip">
+              {custom.label}
+              <button type="button" onClick={() => setCustom(null)} className="rounded-full p-0.5 hover:bg-sky-100" aria-label="Clear date">
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          )}
+          <Button variant="outline" size="sm" onClick={load} disabled={loading} aria-label="Refresh" data-testid="eod-refresh"><RefreshCw className="h-4 w-4" /></Button>
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={view === "pending" ? !pending.length : !reports.length} data-testid="eod-export"><Download className="h-4 w-4" />CSV</Button>
         </div>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Figure label="Reports" value={reports.length} />
-          <Figure label="Not submitted" value={pending.length} tone="text-rose-600" />
-          <Figure label="Treatments" value={totals.treatments} tone="text-emerald-600" />
-          <Figure label="Consultations" value={totals.consultations} tone="text-sky-600" />
+          {Object.keys(VIEWS).map((key) => (
+            <Figure key={key} view={key} value={totals[key]} active={view === key} onClick={() => pickCard(key)} />
+          ))}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <div className="flex rounded-lg bg-slate-100 p-0.5">
-            {KIND_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setKind(f.key)}
-                className={`rounded-md px-3 py-1 text-xs font-semibold ${kind === f.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}
-                data-testid={`eod-kind-${f.key || "all"}`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <div className="relative min-w-0 flex-1 sm:max-w-xs">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="eod-list-title">
+            {listTitle} <span className="text-slate-400">· {view === "pending" ? pending.length : reports.length}</span>
+          </p>
+          <div className="relative w-full min-w-0 sm:w-72">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search staff, branch or client" className="pl-8" data-testid="eod-search" />
           </div>
@@ -128,16 +188,35 @@ export const EodReportsPanel = () => {
 
         {loading && !data ? (
           <p className="py-10 text-center text-sm text-slate-400">Loading…</p>
+        ) : view === "pending" ? (
+          pending.length === 0 ? (
+            <p className="mt-3 rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">Everybody who clocked in filed a report.</p>
+          ) : (
+            <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200" data-testid="eod-pending-list">
+              {pending.map((p) => (
+                <li key={`${p.user_id}-${p.date}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-slate-800">{p.user_name}</span>
+                    <span className="block truncate text-[11px] text-slate-500">{[roleLabel(p.role), p.branch_name].filter(Boolean).join(" · ")}</span>
+                  </span>
+                  {!singleDay && <span className="shrink-0 text-xs text-slate-500">{prettyDay(p.date)}</span>}
+                  <span className="shrink-0 rounded bg-rose-50 px-2 py-0.5 text-xs font-bold text-rose-600">Not submitted</span>
+                </li>
+              ))}
+            </ul>
+          )
         ) : reports.length === 0 ? (
-          <p className="mt-4 rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No EOD reports for this day.</p>
+          <p className="mt-3 rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No EOD reports for this period.</p>
         ) : (
-          <ul className="mt-4 divide-y divide-slate-100 rounded-lg border border-slate-200" data-testid="eod-report-list">
+          <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200" data-testid="eod-report-list">
             {reports.map((r) => (
               <li key={r.id} data-testid={`eod-report-${r.id}`}>
                 <button type="button" onClick={() => setOpen(open === r.id ? null : r.id)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left hover:bg-slate-50">
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-slate-800">{r.user_name}</span>
-                    <span className="block truncate text-[11px] text-slate-500">{[roleLabel(r.role), r.branch_name, prettyTime(r.updated_at) && `Submitted ${prettyTime(r.updated_at)}`].filter(Boolean).join(" · ")}</span>
+                    <span className="block truncate text-[11px] text-slate-500">
+                      {[roleLabel(r.role), r.branch_name, !singleDay && prettyDay(r.date), prettyTime(r.updated_at) && `Submitted ${prettyTime(r.updated_at)}`].filter(Boolean).join(" · ")}
+                    </span>
                   </span>
                   <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-bold ${r.kind === "consultant" ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700"}`}>
                     {countLabel(r.kind)}: {r.count}
@@ -146,7 +225,7 @@ export const EodReportsPanel = () => {
                 </button>
                 {open === r.id && (
                   <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-3">
-                    {r.entries?.length > 0 && (
+                    {r.entries?.length > 0 ? (
                       <ol className="space-y-1.5">
                         {r.entries.map((e, i) => (
                           <li key={i} className="text-sm text-slate-700">
@@ -155,6 +234,8 @@ export const EodReportsPanel = () => {
                           </li>
                         ))}
                       </ol>
+                    ) : (
+                      <p className="text-xs text-slate-400">No clients listed.</p>
                     )}
                     {r.summary && (
                       <div className="mt-3">
@@ -167,19 +248,6 @@ export const EodReportsPanel = () => {
               </li>
             ))}
           </ul>
-        )}
-
-        {pending.length > 0 && (
-          <div className="mt-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Clocked in, no report</p>
-            <ul className="mt-1 flex flex-wrap gap-2" data-testid="eod-pending-list">
-              {pending.map((p) => (
-                <li key={p.user_id} className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs text-rose-700">
-                  {p.user_name} <span className="text-rose-400">· {[roleLabel(p.role), p.branch_name].filter(Boolean).join(" · ")}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
         )}
       </CardContent>
     </Card>

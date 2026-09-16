@@ -668,7 +668,8 @@ export const clockHistory = async (month) => (await api.get("/clock/history", { 
 // EOD Report — asked at Clock Out of Physios and Consultants; read by Super Admin in HR Admin.
 export const eodToday = async () => (await api.get("/eod/today")).data;
 export const eodSubmit = async (payload) => (await api.post("/eod/today", payload)).data;
-export const eodReports = async (date) => (await api.get("/eod-reports", { params: date ? { date } : {} })).data;
+// Both ends optional; neither is every report ("All").
+export const eodReports = async ({ from, to } = {}) => (await api.get("/eod-reports", { params: { ...(from ? { date_from: from } : {}), ...(to ? { date_to: to } : {}) } })).data;
 
 // ---------- my own page: profile, month, and time off ----------
 //
