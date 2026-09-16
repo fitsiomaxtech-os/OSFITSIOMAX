@@ -485,7 +485,7 @@ function InOrderNote({ nextNumber, noun }) {
 // Exported (Sessions/Treatment/Payment only — pure renders off `data`, nothing
 // auth-bound) so Operations' Client tab can show a staff-side preview of a patient's
 // own portal without duplicating three tabs' worth of markup.
-export function SessionsTab({ data }) {
+export function SessionsTab({ data, reviews = null, onReviewed }) {
   const rehab = data.rehab;
   const rehabDays = rehab?.days || [];
   // Only a patient actually on a rehab course gets the choice. Everybody else sees the
@@ -526,13 +526,15 @@ export function SessionsTab({ data }) {
         </div>
       )}
 
-      {showing === "treatment" ? <TreatmentCourse data={data} /> : <RehabCourse rehab={rehab} />}
+      {showing === "treatment"
+        ? <TreatmentCourse data={data} reviews={reviews} onReviewed={onReviewed} />
+        : <RehabCourse rehab={rehab} reviews={reviews} onReviewed={onReviewed} />}
     </div>
   );
 }
 
 /** The treatment package: its days, and the physio's weekly notes on them. */
-function TreatmentCourse({ data }) {
+function TreatmentCourse({ data, reviews, onReviewed }) {
   const sessions = data.sessions || [];
   const openIdx = firstOpenDay(sessions);
 
@@ -567,16 +569,23 @@ function TreatmentCourse({ data }) {
                 open={i === openIdx}
                 testid={`patient-portal-session-${s.session_number}`}
                 meetTestid={`patient-portal-session-meet-${s.session_number}`}
-                remarks={(s.jr_physio_remarks || s.rehab_remarks) ? (
-                  <div className="mt-1.5 space-y-1 rounded border border-emerald-100 bg-emerald-50 p-2">
-                    {s.jr_physio_remarks && (
-                      <p className="text-[10px] text-emerald-600"><span className="font-semibold">Treatment: </span>{s.jr_physio_remarks}</p>
-                    )}
-                    {s.rehab_remarks && (
-                      <p className="text-[10px] text-emerald-600"><span className="font-semibold">Rehab: </span>{s.rehab_remarks}</p>
-                    )}
-                  </div>
-                ) : null}
+                remarks={<>
+                  {(s.jr_physio_remarks || s.rehab_remarks) ? (
+                    <div className="mt-1.5 space-y-1 rounded border border-emerald-100 bg-emerald-50 p-2">
+                      {s.jr_physio_remarks && (
+                        <p className="text-[10px] text-emerald-600"><span className="font-semibold">Treatment: </span>{s.jr_physio_remarks}</p>
+                      )}
+                      {s.rehab_remarks && (
+                        <p className="text-[10px] text-emerald-600"><span className="font-semibold">Rehab: </span>{s.rehab_remarks}</p>
+                      )}
+                    </div>
+                  ) : null}
+                  <DayReview
+                    reviews={reviews}
+                    onReviewed={onReviewed}
+                    day={{ session_id: s.id, track: "treatment", session_number: s.session_number, slot_time: s.slot_time, status: s.status, physio_name: data.physio_name }}
+                  />
+                </>}
               />
             ))
           )}
@@ -620,7 +629,7 @@ function TreatmentCourse({ data }) {
  *  while the Payment tab showed them the Rehab Fee they had paid, which is a charge with
  *  no course behind it on the one screen whose job is telling them what they bought.
  */
-function RehabCourse({ rehab }) {
+function RehabCourse({ rehab, reviews, onReviewed }) {
   const days = rehab?.days || [];
   const openIdx = firstOpenDay(days);
 
@@ -661,13 +670,20 @@ function RehabCourse({ rehab }) {
                 tone="violet"
                 testid={`patient-portal-rehab-day-${r.day_number}`}
                 meetTestid={`patient-portal-rehab-meet-${r.day_number}`}
-                remarks={r.physio_remarks ? (
-                  <div className="mt-1.5 rounded border border-emerald-100 bg-emerald-50 p-2">
-                    <p className="text-[10px] text-emerald-600">
-                      <span className="font-semibold">Rehab: </span>{r.physio_remarks}
-                    </p>
-                  </div>
-                ) : null}
+                remarks={<>
+                  {r.physio_remarks ? (
+                    <div className="mt-1.5 rounded border border-emerald-100 bg-emerald-50 p-2">
+                      <p className="text-[10px] text-emerald-600">
+                        <span className="font-semibold">Rehab: </span>{r.physio_remarks}
+                      </p>
+                    </div>
+                  ) : null}
+                  <DayReview
+                    reviews={reviews}
+                    onReviewed={onReviewed}
+                    day={{ session_id: r.id, track: "rehab", session_number: r.day_number, slot_time: r.slot_time, status: r.status, physio_name: rehab?.physio_name }}
+                  />
+                </>}
               />
             ))
           )}
@@ -1956,9 +1972,9 @@ const dayTitle = (d) => `${d.track === "rehab" ? "Rehab Day" : "Session"} ${d.se
 
 /** The stars and words for one completed physio day. Used in the Physio Review card and in
     the pop-up that holds the client until every completed day is rated. */
-function PhysioDayReviewForm({ day, onDone, testid = "portal-physio-review" }) {
-  const [rating, setRating] = useState(null);
-  const [comment, setComment] = useState("");
+function PhysioDayReviewForm({ day, onDone, initial = null, compact = false, testid = "portal-physio-review" }) {
+  const [rating, setRating] = useState(initial?.rating || null);
+  const [comment, setComment] = useState(initial?.comment || "");
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -1979,11 +1995,12 @@ function PhysioDayReviewForm({ day, onDone, testid = "portal-physio-review" }) {
 
   return (
     <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-3" data-testid={testid}>
-      <p className="text-xs text-slate-600">
+      {!compact && <p className="text-xs text-slate-600">
         <span className="font-semibold text-slate-800">{dayTitle(day)}</span>
         {day.physio_name ? <> · {day.physio_name}</> : null}
         {(day.slot_time || day.completed_at) ? <> · {dayOn(day.slot_time || day.completed_at)}</> : null}
-      </p>
+      </p>}
+      {compact && <p className="text-[11px] font-semibold text-amber-800">{initial ? "Edit your review" : "Rate this session"} <span className="font-normal text-rose-600">· required</span></p>}
       <div className="flex flex-wrap items-center gap-2">
         <StarPicker value={rating} onChange={setRating} testid={`${testid}-stars`} />
         {rating && <span className="text-xs font-semibold text-amber-600">{STAR_WORDS[rating]}</span>}
@@ -1998,7 +2015,7 @@ function PhysioDayReviewForm({ day, onDone, testid = "portal-physio-review" }) {
         data-testid={`${testid}-comment`}
       />
       <Button className="w-full" disabled={saving || !rating} onClick={save} data-testid={`${testid}-submit`}>
-        {saving ? "Saving…" : "Submit physio review"}
+        {saving ? "Saving…" : initial ? "Update review" : "Submit review"}
       </Button>
     </div>
   );
@@ -2021,52 +2038,40 @@ function PastReview({ title, subtitle, rating, comment, when }) {
   );
 }
 
-/** Physio Review — required. One review for every completed physio day. */
-function PhysioReviewCard({ reviews, physioName, onChanged }) {
-  const pending = reviews?.physio_pending || [];
-  const past = reviews?.physio_reviews || [];
-  if (!reviews || (!pending.length && !past.length && !physioName)) return null;
+/** Physio Review on one day of the Session History: the form once the day is completed,
+    and the stars the client gave once it is rated. Nothing without `reviews` — the staff
+    preview of this tab draws the days alone. */
+function DayReview({ day, reviews, onReviewed }) {
+  const [editing, setEditing] = useState(false);
+  if (!reviews || day.status !== "completed" || !day.session_id) return null;
+  const saved = (reviews.physio_reviews || []).find((r) => r.session_id === day.session_id);
+  const testid = `portal-day-review-${day.track}-${day.session_number}`;
+  if (!saved || editing) {
+    return (
+      <div className="mt-1.5">
+        <PhysioDayReviewForm
+          key={saved?.id || day.session_id}
+          day={day}
+          initial={saved}
+          compact
+          testid={testid}
+          onDone={() => { setEditing(false); onReviewed?.(); }}
+        />
+      </div>
+    );
+  }
   return (
-    <Card data-testid="portal-physio-reviews">
-      <CardContent className="space-y-3 p-5">
-        <div>
-          <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-800">
-            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />Physio Review
-            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-600">Required</span>
-          </p>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Rate every physio session once it is completed. Your review goes to the clinic management.
-          </p>
-        </div>
-        {pending.length > 0 ? (
-          <>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-600">
-              {pending.length} session{pending.length === 1 ? "" : "s"} waiting for your review
-            </p>
-            <PhysioDayReviewForm key={pending[0].session_id} day={pending[0]} onDone={onChanged} />
-          </>
-        ) : (
-          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700" data-testid="portal-physio-reviews-done">
-            {past.length ? "All your completed sessions are reviewed. Thank you." : "Once a physio session is completed, you will be asked to rate it here."}
-          </p>
-        )}
-        {past.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Your physio reviews</p>
-            {past.map((r) => (
-              <PastReview
-                key={r.id}
-                title={dayTitle(r)}
-                subtitle={r.person_name}
-                rating={r.rating}
-                comment={r.comment}
-                when={r.updated_at || r.created_at}
-              />
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <div className="mt-1.5 rounded border border-amber-100 bg-amber-50/50 p-2" data-testid={testid}>
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-800">
+          Your review <StarPicker value={saved.rating} testid={`${testid}-stars`} size="h-3.5 w-3.5" />
+        </span>
+        <button type="button" onClick={() => setEditing(true)} className="text-[10px] font-semibold text-sky-600 hover:underline">
+          Edit
+        </button>
+      </div>
+      {saved.comment && <p className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-slate-600">{saved.comment}</p>}
+    </div>
   );
 }
 
@@ -2257,13 +2262,12 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
       </div>
 
       <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
-        {activeTab === "sessions" && <SessionsTab data={data} />}
+        {activeTab === "sessions" && <SessionsTab data={data} reviews={reviews} onReviewed={loadReviews} />}
         {activeTab === "treatment" && <TreatmentTab data={data} />}
         {activeTab === "payment" && <PaymentTab data={data} />}
         {activeTab === "profile" && <ProfileTab data={data} />}
         {activeTab === "feedback" && (
           <div className="space-y-4">
-            <PhysioReviewCard reviews={reviews} physioName={data.physio_name} onChanged={loadReviews} />
             <ConsultantReviewCard reviews={reviews} onChanged={loadReviews} />
             <FeedbackTab data={data} onSeen={clearFeedbackBadge} />
           </div>
@@ -2283,7 +2287,8 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
             // Only the Feedback tab carries one today: how many threads the clinic has
             // written back on since this patient last opened it. Clears on open — see
             // clearFeedbackBadge and patient_portal_my_feedback's seen stamp.
-            const badge = t.key === "feedback" ? (data.feedback_unread || 0) + (reviews?.physio_pending?.length || 0) : 0;
+            const badge = t.key === "feedback" ? (data.feedback_unread || 0)
+              : t.key === "sessions" ? (reviews?.physio_pending?.length || 0) : 0;
             return (
               <button
                 key={t.key}
@@ -2297,7 +2302,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
                   {badge > 0 && (
                     <span
                       className="absolute -right-2.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full border border-slate-500 bg-rose-500 px-1 text-[9px] font-bold leading-none text-white md:border-white"
-                      data-testid="patient-portal-tab-badge-feedback"
+                      data-testid={`patient-portal-tab-badge-${t.key}`}
                     >
                       {badge > 9 ? "9+" : badge}
                     </span>

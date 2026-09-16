@@ -1382,6 +1382,8 @@ async def _build_portal_payload(lead: dict) -> dict:
         "remaining_sessions": total - completed,
         "sessions": [
             {
+                # The day's id, so the portal can attach the client's Physio Review to it.
+                "id": s.get("id"),
                 "session_number": s.get("session_number"),
                 "week_number": s.get("week_number"),
                 "slot_time": s.get("slot_time"),
@@ -1479,6 +1481,7 @@ async def _build_portal_payload(lead: dict) -> dict:
             "completed_days": len([r for r in rehab_days if r.get("status") == "completed"]),
             "days": [
                 {
+                    "id": r.get("id"),
                     "day_number": r.get("day_number"),
                     "total_days": r.get("total_days"),
                     "slot_time": r.get("slot_time"),
