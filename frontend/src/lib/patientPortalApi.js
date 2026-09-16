@@ -102,8 +102,7 @@ export const patientPortalSubmitFeedback = async ({ rating, message, audience })
   return data;
 };
 
-/** Physio days waiting for stars, past Physio and Consultant Reviews, and the consultant's
-    weekly window. */
+/** Physio days waiting for stars, and past Physio, Consultant and anytime reviews. */
 export const patientPortalMyReview = async () => {
   const { data } = await portalApi.get("/patient-portal/review", { headers: authHeaders() });
   return data;
@@ -115,15 +114,15 @@ export const patientPortalReviewPhysio = async ({ session_id, rating, comment })
   return data;
 };
 
-/** The optional weekly Consultant Review. */
-export const patientPortalReviewConsultant = async ({ rating, comment }) => {
-  const { data } = await portalApi.post("/patient-portal/review/consultant", { rating, comment }, { headers: authHeaders() });
+/** Stars for the Consultant on one completed 7-day Review. */
+export const patientPortalReviewConsultant = async ({ review_id, rating, comment }) => {
+  const { data } = await portalApi.post("/patient-portal/review/consultant", { review_id, rating, comment }, { headers: authHeaders() });
   return data;
 };
 
-/** Skip this week's Consultant Review. */
-export const patientPortalSkipConsultantReview = async () => {
-  const { data } = await portalApi.post("/patient-portal/review/consultant/skip", {}, { headers: authHeaders() });
+/** A review of the Consultant or Physio from the Feedback tab, any time. */
+export const patientPortalReviewAnytime = async ({ target, rating, comment }) => {
+  const { data } = await portalApi.post("/patient-portal/review/anytime", { target, rating, comment }, { headers: authHeaders() });
   return data;
 };
 

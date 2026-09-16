@@ -1,12 +1,10 @@
-"""The rules behind Client Reviews: which physio days are owed stars, the consultant's weekly
-window, how old rows are read, and how the figures are worked out.
+"""The rules behind Client Reviews: which physio days are owed stars, how old rows are read, and how the figures are worked out.
 
 Unit tests like test_hr_ops_payroll.py -- they call the functions directly, with no
 database, server or login. See backend/routers/v3_client_reviews.py.
 """
 import os
 import sys
-from datetime import datetime, timezone
 
 import pytest
 
@@ -15,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import HTTPException  # noqa: E402
 
 from routers.v3_client_reviews import (  # noqa: E402
-    consultant_window, pending_physio_days, required_rating, split_legacy, summarise,
+    pending_physio_days, required_rating, split_legacy, summarise,
 )
 
 
@@ -48,20 +46,6 @@ class TestPendingPhysioDays:
         assert rehab["track"] == "rehab" and rehab["session_number"] == 1
 
 
-class TestConsultantWindow:
-    NOW = datetime(2026, 9, 20, tzinfo=timezone.utc)
-
-    def test_open_with_nothing_yet(self):
-        assert consultant_window([], self.NOW) == {"open": True, "next_at": None}
-
-    def test_closed_for_seven_days_after_a_review_or_skip(self):
-        w = consultant_window([{"kind": "consultant", "created_at": "2026-09-16T00:00:00+00:00", "skipped": True}], self.NOW)
-        assert w["open"] is False and w["next_at"].startswith("2026-09-23")
-
-    def test_open_again_after_seven_days(self):
-        assert consultant_window([{"kind": "consultant", "created_at": "2026-09-10T00:00:00+00:00"}], self.NOW)["open"]
-
-
 class TestSplitLegacy:
     def test_old_row_reads_as_two(self):
         rows = split_legacy({
@@ -82,13 +66,13 @@ class TestSummarise:
         s = summarise([])
         assert s["total"] == 0 and s["average"] is None and s["people"] == []
 
-    def test_skips_do_not_count(self):
+    def test_averages_low_and_anytime(self):
         rows = [
             {"person_name": "Dr Abdul", "rating": 5},
             {"person_name": "Dr Abdul", "rating": 2},
             {"person_name": "Dr Meena", "rating": 3},
-            {"person_name": "Dr Meena", "rating": None, "skipped": True},
+            {"person_name": "Dr Meena", "rating": 4, "source": "anytime"},
         ]
         s = summarise(rows)
-        assert s["total"] == 3 and s["average"] == 3.3 and s["low"] == 1 and s["skipped"] == 1
+        assert s["total"] == 4 and s["average"] == 3.5 and s["low"] == 1 and s["anytime"] == 1
         assert s["people"][0] == {"name": "Dr Abdul", "count": 2, "average": 3.5}

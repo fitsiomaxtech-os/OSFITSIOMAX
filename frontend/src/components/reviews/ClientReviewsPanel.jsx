@@ -1,7 +1,7 @@
 /**
- * Client Reviews — the stars and words clients give from the Client Portal's Feedback tab,
- * in two tabs: Consultant Review (optional, every 7 days; the default tab) and Physio
- * Review (required, one per completed physio session).
+ * Client Reviews — the stars and words clients give from the Client Portal, in two tabs:
+ * Consultant Review (the default tab: from each completed 7-day Review, optional) and Physio
+ * Review (from each completed session, required). Both also take anytime reviews.
  *
  * One panel, mounted in two places: HR Admin (Super Admin and BDE, every branch, with a
  * branch filter) and the Branch Admin board (one branch, passed in as branchId). The
@@ -54,8 +54,14 @@ const KINDS = [
   { key: "physio", label: "Physio Review", person: "Physio" },
 ];
 
-const sessionLabel = (r) => (r.session_number != null
-  ? `${r.track === "rehab" ? "Rehab Day" : "Session"} ${r.session_number}` : "");
+const ORDINAL = ["", "1st", "2nd", "3rd"];
+// What prompted the review: a session day, a completed 7-day Review, or the Feedback tab.
+const sessionLabel = (r) => {
+  if (r.source === "anytime") return "Anytime";
+  if (r.review_number != null) return `${ORDINAL[r.review_number] || `${r.review_number}th`} Review`;
+  if (r.session_number != null) return `${r.track === "rehab" ? "Rehab Day" : "Session"} ${r.session_number}`;
+  return "";
+};
 
 const Figure = ({ label, value, sub, tone = "text-slate-800" }) => (
   <div className="rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5">
@@ -216,10 +222,10 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
   const s = (data.summary || {})[kind] || {};
 
   const exportCsv = () => downloadCsv([
-    ["Date", "Client", "Branch", meta.person, ...(kind === "physio" ? ["Session"] : []), "Stars", "Review"],
+    ["Date", "Client", "Branch", meta.person, "For", "Stars", "Review"],
     ...shown.map((r) => [
       prettyDate(r.updated_at || r.created_at), r.patient_name, r.branch_name, r.person_name,
-      ...(kind === "physio" ? [sessionLabel(r)] : []), r.rating || "", r.comment,
+      sessionLabel(r), r.rating || "", r.comment,
     ]),
   ], `${kind}-reviews.csv`);
 
@@ -277,17 +283,15 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
         <Figure label={`${meta.label}s`} value={s.total ?? 0} tone="text-indigo-600" />
         <Figure label="Average Rating" value={s.average != null ? `${s.average} ★` : "—"} sub={`${s.total ?? 0} ratings`} tone="text-amber-500" />
         <Figure label="Low Reviews" value={s.low ?? 0} sub="2 stars or under" tone="text-rose-600" />
-        {kind === "consultant"
-          ? <Figure label="Skipped" value={s.skipped ?? 0} sub="weekly reviews skipped" tone="text-slate-500" />
-          : <Figure label="Physios Rated" value={(s.people || []).length} tone="text-slate-700" />}
+        <Figure label="Anytime" value={s.anytime ?? 0} sub="from the Feedback tab" tone="text-slate-600" />
       </div>
 
       <PeopleCard title={kind === "consultant" ? "Consultants" : "Physiotherapists"} people={s.people || []} testid={`client-reviews-${kind}-people`} />
 
       <p className="text-[11px] text-slate-400">
         {kind === "consultant"
-          ? "Clients may review their consultant once every 7 days from the Client Portal — it is optional."
-          : "Clients must review every completed physio session from the Client Portal."}
+          ? "Clients review their consultant from the Review button on each completed 7-day Review (optional), or any time from the Feedback tab."
+          : "Clients must review every completed physio session from its Review button in Sessions, or any time from the Feedback tab."}
         {" "}Only Super Admin, BDE and Branch Admin can read these.
       </p>
 
@@ -317,7 +321,7 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
                     <p className="text-xs text-slate-500">
                       <span className="font-semibold uppercase tracking-wide">{meta.person}</span>
                       {r.person_name ? <span className="text-slate-700"> · {r.person_name}</span> : null}
-                      {sessionLabel(r) ? <span> · {sessionLabel(r)}{r.session_date ? ` (${prettyDate(r.session_date)})` : ""}</span> : null}
+                      {sessionLabel(r) ? <span> · {sessionLabel(r)}{(r.session_date || r.review_date) ? ` (${prettyDate(r.session_date || r.review_date)})` : ""}</span> : null}
                     </p>
                     <StarRow value={r.rating} />
                   </div>

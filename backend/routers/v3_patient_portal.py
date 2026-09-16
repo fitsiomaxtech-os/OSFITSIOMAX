@@ -1417,6 +1417,7 @@ async def _build_portal_payload(lead: dict) -> dict:
         # and, having no floor of 1, numbered a course shorter than a week "review 0".
         "reviews": [
             {
+                "id": r.get("id"),
                 "review_number": review_numbers.get(r.get("id"), 1),
                 "status": r.get("status"),
                 "review_date": r.get("review_date"),

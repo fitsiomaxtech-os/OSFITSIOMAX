@@ -2,22 +2,22 @@
 
 Kept apart from two things with a similar name:
 
-  * routers/v3_reviews.py is the clinical Review pipeline, a hand-off between a branch and
-    a Consultant about a patient's progress. Nothing to do with what the client thought.
+  * routers/v3_reviews.py is the clinical Review pipeline, the Consultant's review of a
+    patient's progress every 7 days of treatment. Nothing to do with what the client thought
+    -- though a completed one is what the client's Consultant Review hangs off.
   * routers/v3_feedback.py is the client's conversation with their branch, consultant or
     head office ("Talk to Management"). That is words to be answered; this is a verdict.
 
-Two kinds of review, each its own row:
+Every review is its own row, with a `kind` (who is rated) and a `source` (what prompted it):
 
-  * Physio Review (kind "physio") -- one per completed physio day, treatment or rehab.
-    Mandatory: the portal holds the client on a prompt until every day completed since
-    PHYSIO_REVIEW_START is rated. Days before that date are not asked about, so a client
-    thirty sessions in is not handed thirty forms the day this went live.
-  * Consultant Review (kind "consultant") -- optional, and open once every 7 days. The
-    client may rate, or skip that week; a skip is a row too (skipped=True) so the window
-    moves on, and it never counts towards an average.
+  * kind "physio",     source "session" -- one per completed physio day, treatment or rehab.
+    Required: the portal holds the client on a pop-up until every day completed since
+    PHYSIO_REVIEW_START is rated. Opened from the Review button on the day in Sessions.
+  * kind "consultant", source "review"  -- one per completed 7-day clinical Review, opened
+    from the Review button beside it on the Treatment tab. Optional.
+  * either kind,       source "anytime" -- from the Feedback tab, whenever the client wants.
 
-Rows written by the old flow (one row per client with both ratings, no `kind`) are still
+Rows written by the first flow (one row per client with both ratings, no `kind`) are still
 read by management: list_client_reviews splits each into its consultant and physio halves.
 
 Read by management only: Super Admin and BDE across every branch, a Branch Admin for their
@@ -25,7 +25,6 @@ own branch.
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,6 +35,7 @@ from deps import v3_require_roles, is_branch_admin_role
 from physio_scope import consultant_of_lead
 from routers.v3_feedback import _rating
 from routers.v3_patient_portal import _current_patient_lead_id, _lead_or_404
+from routers.v3_reviews import review_numbers_for_lead
 from schemas.v3 import V3UserOut
 from utils import now_iso
 
@@ -46,10 +46,12 @@ MAX_TEXT = 2000
 
 KIND_PHYSIO = "physio"
 KIND_CONSULTANT = "consultant"
+SOURCE_SESSION = "session"
+SOURCE_REVIEW = "review"
+SOURCE_ANYTIME = "anytime"
 
 # Physio days completed on or after this are the ones a client must rate.
 PHYSIO_REVIEW_START = "2026-09-16"
-CONSULTANT_REVIEW_EVERY_DAYS = 7
 
 
 class PhysioReviewIn(BaseModel):
@@ -59,20 +61,19 @@ class PhysioReviewIn(BaseModel):
 
 
 class ConsultantReviewIn(BaseModel):
+    review_id: str
+    rating: Optional[int] = None
+    comment: Optional[str] = ""
+
+
+class AnytimeReviewIn(BaseModel):
+    target: str
     rating: Optional[int] = None
     comment: Optional[str] = ""
 
 
 def _text(value) -> str:
     return str(value or "").strip()[:MAX_TEXT]
-
-
-def _parse(iso: str) -> Optional[datetime]:
-    try:
-        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
-    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
 def required_rating(value) -> int:
@@ -108,21 +109,6 @@ def pending_physio_days(days: List[dict], reviewed_ids: set, since: str = PHYSIO
     return out
 
 
-def consultant_window(rows: List[dict], now: Optional[datetime] = None) -> dict:
-    """Whether the weekly Consultant Review is open, and when it next opens if not.
-
-    Any consultant row -- rated or skipped -- closes the window for 7 days from when it was
-    written.
-    """
-    now = now or datetime.now(timezone.utc)
-    stamps = [_parse(r.get("created_at")) for r in rows if r.get("kind") == KIND_CONSULTANT]
-    stamps = [s for s in stamps if s]
-    if not stamps:
-        return {"open": True, "next_at": None}
-    next_at = max(stamps) + timedelta(days=CONSULTANT_REVIEW_EVERY_DAYS)
-    return {"open": now >= next_at, "next_at": next_at.isoformat()}
-
-
 async def _physio_days(lead_id: str) -> List[dict]:
     fields = {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "slot_time": 1, "session_number": 1,
               "day_number": 1, "physio_id": 1, "physio_name": 1, "completed_by": 1}
@@ -131,10 +117,31 @@ async def _physio_days(lead_id: str) -> List[dict]:
     return [{**d, "track": "treatment"} for d in treatment] + [{**d, "track": "rehab"} for d in rehab]
 
 
-def _base_row(lead: dict, kind: str) -> dict:
+async def care_team(lead: dict) -> Dict[str, Dict[str, str]]:
+    """The consultant who saw this client and the physio treating them -- who an anytime
+    review can be about. The physio is the one on the lead, else the newest session's."""
+    consultant = await consultant_of_lead(lead)
+    physio_id = _text(lead.get("assigned_physio_id"))
+    physio_name = _text(lead.get("assigned_physio_name"))
+    if not physio_name:
+        session = await v3_col("sessions").find_one(
+            {"lead_id": lead.get("id"), "physio_name": {"$nin": [None, ""]}},
+            {"_id": 0, "physio_name": 1, "physio_id": 1},
+            sort=[("slot_time", -1)],
+        ) or {}
+        physio_name = _text(session.get("physio_name"))
+        physio_id = physio_id or _text(session.get("physio_id"))
+    return {
+        "consultant": {"id": consultant["id"], "name": consultant["name"]},
+        "physio": {"id": physio_id, "name": physio_name},
+    }
+
+
+def _base_row(lead: dict, kind: str, source: str) -> dict:
     return {
         "id": str(uuid.uuid4()),
         "kind": kind,
+        "source": source,
         "lead_id": lead.get("id"),
         "branch_id": lead.get("branch_id"),
         "patient_name": _text(lead.get("name")),
@@ -142,6 +149,18 @@ def _base_row(lead: dict, kind: str) -> dict:
         "patient_number": lead.get("patient_number"),
         "created_at": now_iso(),
     }
+
+
+async def _upsert(lead: dict, kind: str, source: str, match: dict, fields: dict) -> dict:
+    """One row per thing reviewed: saving the same session or clinical Review again changes it."""
+    existing = await v3_col(COLLECTION).find_one({"lead_id": lead["id"], "kind": kind, **match}, {"_id": 0})
+    if existing:
+        changes = {**fields, "updated_at": now_iso()}
+        await v3_col(COLLECTION).update_one({"id": existing["id"]}, {"$set": changes})
+        return {**existing, **changes}
+    row = {**_base_row(lead, kind, source), **match, **fields}
+    await v3_col(COLLECTION).insert_one(dict(row))
+    return row
 
 
 def _average(values: List[int]) -> Optional[float]:
@@ -161,7 +180,7 @@ def split_legacy(row: dict) -> List[dict]:
             if row.get("summary"):
                 comment = f"{comment}\n\nSummary: {row['summary']}".strip()
             out.append({
-                **common, "id": f"{row.get('id')}-{kind}", "kind": kind, "legacy": True,
+                **common, "id": f"{row.get('id')}-{kind}", "kind": kind, "source": SOURCE_ANYTIME, "legacy": True,
                 "person_id": row.get(f"{kind}_id") or "", "person_name": row.get(f"{kind}_name") or "",
                 "rating": row.get(f"{kind}_rating"), "comment": comment, "created_at": when,
             })
@@ -188,7 +207,7 @@ def summarise(rows: List[dict]) -> dict:
         "total": len(rated),
         "average": _average([r["rating"] for r in rated]),
         "low": sum(1 for r in rated if r["rating"] <= 2),
-        "skipped": sum(1 for r in rows if r.get("skipped")),
+        "anytime": sum(1 for r in rated if r.get("source") == SOURCE_ANYTIME),
         "people": by_person,
     }
 
@@ -197,22 +216,19 @@ def summarise(rows: List[dict]) -> dict:
 
 @router.get("/patient-portal/review")
 async def portal_my_review(lead_id: str = Depends(_current_patient_lead_id)):
-    """Everything the portal's two review sections draw: who can be rated, the physio days
-    still waiting for stars, past reviews of each kind, and the consultant's weekly window."""
+    """Everything the portal's Review buttons and pop-ups draw from."""
     lead = await _lead_or_404(lead_id)
     rows = await v3_col(COLLECTION).find(
-        {"lead_id": lead_id, "kind": {"$in": [KIND_PHYSIO, KIND_CONSULTANT]}}, {"_id": 0}
+        {"lead_id": lead_id, "kind": {"$in": [KIND_PHYSIO, KIND_CONSULTANT]}, "skipped": {"$ne": True}}, {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
     physio_rows = [r for r in rows if r["kind"] == KIND_PHYSIO]
-    consultant_rows = [r for r in rows if r["kind"] == KIND_CONSULTANT]
-    reviewed = {r.get("session_id") for r in physio_rows}
-    consultant = await consultant_of_lead(lead)
+    reviewed = {r.get("session_id") for r in physio_rows if r.get("session_id")}
     return {
-        "consultant": {"id": consultant["id"], "name": consultant["name"]},
+        **(await care_team(lead)),
         "physio_pending": pending_physio_days(await _physio_days(lead_id), reviewed),
-        "physio_reviews": physio_rows,
-        "consultant_reviews": [r for r in consultant_rows if not r.get("skipped")],
-        "consultant_window": consultant_window(consultant_rows),
+        "physio_reviews": [r for r in physio_rows if r.get("session_id")],
+        "consultant_reviews": [r for r in rows if r["kind"] == KIND_CONSULTANT and r.get("clinical_review_id")],
+        "anytime_reviews": [r for r in rows if r.get("source") == SOURCE_ANYTIME],
     }
 
 
@@ -230,63 +246,61 @@ async def portal_review_physio_day(payload: PhysioReviewIn, lead_id: str = Depen
     if not day:
         raise HTTPException(status_code=404, detail="Session not found")
     if day.get("status") != "completed":
-        raise HTTPException(status_code=400, detail="This session is not completed yet")
-
-    fields = {
+        raise HTTPException(status_code=400, detail="You can review this session once it is completed")
+    row = await _upsert(lead, KIND_PHYSIO, SOURCE_SESSION, {"session_id": day["id"]}, {
         "rating": rating,
         "comment": _text(payload.comment),
-        "session_id": day["id"],
         "track": day["track"],
         "session_number": day.get("session_number") or day.get("day_number"),
         "session_date": day.get("slot_time"),
         "person_id": _text(day.get("physio_id")),
         "person_name": _text(day.get("physio_name") or day.get("completed_by")),
-    }
-    existing = await v3_col(COLLECTION).find_one(
-        {"lead_id": lead_id, "kind": KIND_PHYSIO, "session_id": day["id"]}, {"_id": 0}
-    )
-    if existing:
-        changes = {**fields, "updated_at": now_iso()}
-        await v3_col(COLLECTION).update_one({"id": existing["id"]}, {"$set": changes})
-        return {"message": "Your physio review is updated.", "review": {**existing, **changes}}
-    row = {**_base_row(lead, KIND_PHYSIO), **fields}
-    await v3_col(COLLECTION).insert_one(dict(row))
-    return {"message": "Thank you for rating your session.", "review": row}
-
-
-async def _consultant_row(lead_id: str, skipped: bool, payload: Optional[ConsultantReviewIn] = None) -> dict:
-    lead = await _lead_or_404(lead_id)
-    consultant = await consultant_of_lead(lead)
-    if not consultant["id"] and not consultant["name"]:
-        raise HTTPException(status_code=400, detail="You have not seen a consultant yet")
-    past = await v3_col(COLLECTION).find(
-        {"lead_id": lead_id, "kind": KIND_CONSULTANT}, {"_id": 0, "kind": 1, "created_at": 1}
-    ).to_list(1000)
-    window = consultant_window(past)
-    if not window["open"]:
-        raise HTTPException(status_code=400, detail="Your next consultant review opens 7 days after the last one")
-    row = {
-        **_base_row(lead, KIND_CONSULTANT),
-        "person_id": consultant["id"],
-        "person_name": consultant["name"],
-        "rating": None if skipped else required_rating(payload.rating),
-        "comment": "" if skipped else _text(payload.comment),
-        "skipped": skipped,
-    }
-    await v3_col(COLLECTION).insert_one(dict(row))
-    return row
+    })
+    return {"message": "Thank you for reviewing your session.", "review": row}
 
 
 @router.post("/patient-portal/review/consultant")
 async def portal_review_consultant(payload: ConsultantReviewIn, lead_id: str = Depends(_current_patient_lead_id)):
-    row = await _consultant_row(lead_id, False, payload)
+    """Stars for the Consultant on one completed 7-day Review. Saving again changes it."""
+    lead = await _lead_or_404(lead_id)
+    rating = required_rating(payload.rating)
+    clinical = await v3_col("reviews").find_one({"id": payload.review_id, "lead_id": lead_id}, {"_id": 0})
+    if not clinical:
+        raise HTTPException(status_code=404, detail="Review not found")
+    if clinical.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="You can review your consultant once this review is completed")
+    all_reviews = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).sort("raised_at", 1).to_list(50)
+    consultant = await consultant_of_lead(lead)
+    row = await _upsert(lead, KIND_CONSULTANT, SOURCE_REVIEW, {"clinical_review_id": clinical["id"]}, {
+        "rating": rating,
+        "comment": _text(payload.comment),
+        "review_number": review_numbers_for_lead(all_reviews).get(clinical["id"], 1),
+        "review_date": clinical.get("review_date") or clinical.get("completed_at"),
+        "person_id": consultant["id"],
+        "person_name": _text(clinical.get("completed_by")) or consultant["name"],
+    })
     return {"message": "Thank you for reviewing your consultant.", "review": row}
 
 
-@router.post("/patient-portal/review/consultant/skip")
-async def portal_skip_consultant_review(lead_id: str = Depends(_current_patient_lead_id)):
-    row = await _consultant_row(lead_id, True)
-    return {"message": "Skipped for this week.", "review": row}
+@router.post("/patient-portal/review/anytime")
+async def portal_review_anytime(payload: AnytimeReviewIn, lead_id: str = Depends(_current_patient_lead_id)):
+    """A review of the Consultant or the Physio from the Feedback tab, whenever the client wants."""
+    if payload.target not in (KIND_CONSULTANT, KIND_PHYSIO):
+        raise HTTPException(status_code=400, detail="Choose who you are reviewing")
+    lead = await _lead_or_404(lead_id)
+    rating = required_rating(payload.rating)
+    person = (await care_team(lead))[payload.target]
+    if not person["name"]:
+        raise HTTPException(status_code=400, detail=f"You do not have a {payload.target} yet")
+    row = {
+        **_base_row(lead, payload.target, SOURCE_ANYTIME),
+        "rating": rating,
+        "comment": _text(payload.comment),
+        "person_id": person["id"],
+        "person_name": person["name"],
+    }
+    await v3_col(COLLECTION).insert_one(dict(row))
+    return {"message": "Thank you for your review.", "review": row}
 
 
 # ------------------------------------------------------------------ Management side
@@ -301,7 +315,7 @@ async def list_client_reviews(
     A Branch Admin is always held to their own branch, whatever they pass. Super Admin and
     BDE read every branch and may narrow to one.
     """
-    query: dict = {}
+    query: dict = {"skipped": {"$ne": True}}
     if is_branch_admin_role(user.role):
         if not user.branch_id:
             empty = summarise([])
@@ -327,7 +341,7 @@ async def list_client_reviews(
     consultant = [r for r in rows if r.get("kind") == KIND_CONSULTANT]
     physio = [r for r in rows if r.get("kind") == KIND_PHYSIO]
     return {
-        "consultant": [r for r in consultant if not r.get("skipped")],
+        "consultant": consultant,
         "physio": physio,
         "summary": {"consultant": summarise(consultant), "physio": summarise(physio)},
     }
