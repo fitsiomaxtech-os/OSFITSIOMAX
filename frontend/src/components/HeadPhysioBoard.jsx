@@ -350,33 +350,39 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
     // Bottom padding on phones clears the fixed bottom bar, so the last row of any list
     // is still reachable instead of sitting underneath it.
     <div className="space-y-4 pb-20 sm:pb-0" data-testid="head-physio-board-root">
-      {/* Two regions. The left is deliberately left empty — reserved space, not a gap to
-          be filled later by whatever comes along. The day filter takes only the width it
-          needs on the right, divided off from it. */}
-      {/* Laid out like the Branch Admin toolbar: a capped search, the one-tap ranges beside
-          it, then the calendar icon (custom range) and Refresh pinned to the right. */}
+      {/* Three regions, and the day strip is the middle one — centred in the toolbar
+          rather than pushed against the search or the buttons.
+
+          Centring is done by the two rails, not by the strip: both are flex-1 basis-0,
+          so whatever width is left over after the strip has taken what it needs is split
+          equally between them, which puts the strip's centre on the toolbar's centre at
+          every width. The strip itself is left at the flex default (0 1 auto) — it must
+          not grow into that space, and it must still shrink onto its own scroller when
+          the toolbar runs out of room. */}
       <div className="flex flex-wrap items-center gap-2 bg-white p-2 lg:flex-nowrap">
         {/* One search for the whole board, so it works on Review, Rehab and All and not
             only on Consultations. Hidden on a phone, where the header's magnifier does the
-            same job without costing a row of vertical space above the lists. */}
-        <div className="relative hidden min-w-0 flex-1 sm:block sm:max-w-xs" data-testid="hp-header-search">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={search}
-            onChange={(e) => onSearchChange && onSearchChange(e.target.value)}
-            placeholder="Search patients..."
-            className="h-10 w-full rounded-md border border-slate-200 pl-9 pr-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
-            data-testid="hp-search-input"
-          />
+            same job without costing a row of vertical space above the lists.
+            The rail carries the width; the field inside is what stays capped, so the rail
+            can go on balancing the right one after the field has stopped growing. */}
+        <div className="hidden min-w-0 sm:block sm:flex-1 sm:basis-0">
+          <div className="relative max-w-xs" data-testid="hp-header-search">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => onSearchChange && onSearchChange(e.target.value)}
+              placeholder="Search patients..."
+              className="h-10 w-full rounded-md border border-slate-200 pl-9 pr-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+              data-testid="hp-search-input"
+            />
+          </div>
         </div>
-        {/* The presets and the calendar icon drive the same single scope; a custom range
-            simply leaves none of the preset buttons lit. */}
-        {/* ml-auto opens the gap after the search, so the ranges, calendar and Refresh sit
-            together on the right. */}
-        <div className="w-full min-w-0 sm:flex-1">
+        {/* The strip and the calendar icon drive the same single scope; a range typed into
+            the calendar simply leaves none of the day buttons lit. */}
+        <div className="flex w-full min-w-0 justify-center sm:w-auto">
           <DayStripFilter value={dateRange} onChange={setDateRange} testid="hp-date-filter" />
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
+        <div className="ml-auto flex shrink-0 items-center justify-end gap-2 sm:ml-0 sm:flex-1 sm:basis-0">
           <DateFilterPopover
             value={dateRange && !isDayKey(dateRange.key) ? dateRange : null}
             onChange={setDateRange}

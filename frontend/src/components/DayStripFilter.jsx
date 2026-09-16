@@ -3,10 +3,12 @@ import { useEffect, useMemo, useRef } from "react";
 /**
  * DayStripFilter
  *
- * A row of single days instead of a row of ranges: All, then a window of dates
- * around today — Sep 10 … Yesterday, Today, Tomorrow … Sep 21. One tap narrows the
- * board to that one day, which is how a Consultant actually reads their queue: they
- * are looking at a day's appointments, not at a quarter's.
+ * A row of single days instead of a row of ranges: All, then four days back and four
+ * forward — Sep 12 … Yesterday, Today, Tomorrow … Sep 20. One tap narrows the board
+ * to that one day, which is how a Consultant actually reads their queue: they are
+ * looking at a day's appointments, not at a quarter's. Anything outside that fortnight
+ * is the calendar's job, which is why the window stays short enough to read at a
+ * glance rather than long enough to need scrolling.
  *
  * It emits the same { key, label, from, to } | null shape DateFilterPopover and
  * QuickDateFilterBar emit, so a board can swap one for the other without anything
@@ -22,7 +24,9 @@ import { useEffect, useMemo, useRef } from "react";
  *  - value: { key, label, from: Date, to: Date } | null. null means All.
  *  - onChange: (next) => void. Emits null for All.
  *  - testid: string prefix for the row's test ids.
- *  - back / forward: how many days either side of today to offer.
+ *  - back / forward: how many days either side of today to offer. Four each way, so
+ *    Yesterday is the last of the past four and Tomorrow the first of the next four —
+ *    the two named days sit against Today rather than adrift in a longer run.
  */
 
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
@@ -33,16 +37,21 @@ const shift = (d, n) => { const x = startOfDay(d); x.setDate(x.getDate() + n); r
 // midnight comes back as the day before, so every key would name the wrong day.
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+// Written out rather than taken from toLocaleDateString, which formats to the browser's
+// locale: an en-GB machine renders the same day as "12 Sept", so the row read one way on
+// one laptop and another way on the next. One spelling everywhere, and it is short.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 /**
  * The three days either side of now get their names rather than their dates, because
  * that is what someone is looking for when they come to this row — nobody scans for
- * "Sep 16", they scan for Today. Everything else is "Sep 10".
+ * "Sep 16", they scan for Today. Everything else is "Sep 12".
  */
 const dayLabel = (d, offset) => (
   offset === 0 ? "Today"
     : offset === -1 ? "Yesterday"
       : offset === 1 ? "Tomorrow"
-        : d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+        : `${MONTHS[d.getMonth()]} ${d.getDate()}`
 );
 
 /** The filter value for one day. Exported so a board can open on a day. */
@@ -59,7 +68,7 @@ export const todayFilter = () => dayFilter(new Date(), 0);
 /** True for a value this strip produced, as opposed to a range from the calendar. */
 export const isDayKey = (key) => /^day_\d{4}-\d{2}-\d{2}$/.test(String(key || ""));
 
-export const DayStripFilter = ({ value, onChange, testid = "day-strip", back = 6, forward = 5 }) => {
+export const DayStripFilter = ({ value, onChange, testid = "day-strip", back = 4, forward = 4 }) => {
   const activeKey = value?.key || "all";
 
   // Rebuilt only when the window changes, not on every keystroke elsewhere on the board.
