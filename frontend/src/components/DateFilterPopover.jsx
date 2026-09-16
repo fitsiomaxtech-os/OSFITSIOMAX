@@ -95,7 +95,7 @@ export const manualToIso = (text) => {
  * once you know where the button is; "Last 90 Days" is the state of the screen you are
  * reading, and hiding that would leave numbers filtered with nothing saying so.
  */
-export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false, placeholder = "Date Filter", iconOnly = false }) => {
+export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false, placeholder = "Date Filter", iconOnly = false, large = false }) => {
   const [open, setOpen] = useState(false);
   const [showRange, setShowRange] = useState(false);
   const [rangeFrom, setRangeFrom] = useState("");
@@ -171,7 +171,15 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
   if (centered) {
     // One row on a phone, so the five share the width evenly and centre their labels;
     // a left-aligned column from sm up, where the rail runs down the side.
-    const railBtn = (on) => `min-w-0 flex-1 truncate rounded-md px-1 py-2 text-center text-[11px] transition-colors sm:w-full sm:flex-none sm:px-3 sm:text-left sm:text-sm ${
+    //
+    // `large` is the same dialog with more room in it: a wider panel, a wider rail and a
+    // calendar whose day cells are worth aiming at. It exists for the Consultant board,
+    // where picking a date is the whole reason the toolbar's calendar button is there and
+    // the compact dialog read as a footnote in the middle of the screen. Off by default,
+    // so every other board keeps the size it has.
+    const railBtn = (on) => `min-w-0 flex-1 truncate rounded-md px-1 py-2 text-center text-[11px] transition-colors sm:w-full sm:flex-none sm:px-3 sm:text-left ${
+      large ? "sm:py-2.5 sm:text-base" : "sm:text-sm"
+    } ${
       on ? "bg-amber-100 font-semibold text-amber-800" : "text-slate-700 hover:bg-[#F3EFE6]"
     }`;
     return (
@@ -206,9 +214,11 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
             onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
             data-testid={`${testid}-modal`}
           >
-            <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-2xl sm:max-w-lg" data-testid={`${testid}-panel`}>
-              <div className="flex items-center justify-between border-b border-[#EFEAE0] px-4 py-3">
-                <p className="text-sm font-bold text-slate-800">Filter by Date</p>
+            <div className={`max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-2xl ${
+              large ? "max-w-lg sm:max-w-3xl" : "max-w-md sm:max-w-lg"
+            }`} data-testid={`${testid}-panel`}>
+              <div className={`flex items-center justify-between border-b border-[#EFEAE0] ${large ? "px-5 py-4" : "px-4 py-3"}`}>
+                <p className={`font-bold text-slate-800 ${large ? "text-base" : "text-sm"}`}>Filter by Date</p>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
@@ -231,7 +241,9 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
                     it. flex, not a one-column grid, from sm up: grid rows stretch to fill
                     the dialog's height, which spread five presets over the whole calendar
                     beside them. */}
-                <div className="flex gap-1 border-b border-[#EFEAE0] p-2 sm:w-40 sm:shrink-0 sm:flex-col sm:gap-0.5 sm:border-b-0 sm:border-r" data-testid={`${testid}-presets`}>
+                <div className={`flex gap-1 border-b border-[#EFEAE0] p-2 sm:shrink-0 sm:flex-col sm:gap-0.5 sm:border-b-0 sm:border-r ${
+                  large ? "sm:w-48 sm:p-3" : "sm:w-40"
+                }`} data-testid={`${testid}-presets`}>
                   {list.map((p) => (
                     <button key={p.key} type="button" onClick={() => apply(p)} className={railBtn(value?.key === p.key)} data-testid={`${testid}-preset-${p.key}`}>
                       <span className="sm:hidden">{p.short}</span>
@@ -244,7 +256,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
                   </button>
                 </div>
 
-                <div className="min-w-0 flex-1 p-3">
+                <div className={`min-w-0 flex-1 ${large ? "p-4" : "p-3"}`}>
                   {showRange ? (
                     /* Typed, not picked. A picker here opened a second calendar on top of
                        the one this dialog already is, and a range is two dates — quicker to
@@ -301,6 +313,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
                     <MilkCalendar
                       value={value?.key === "exact" ? toInputValue(value.from) : ""}
                       accent="amber"
+                      size={large ? "lg" : "md"}
                       onChange={(d) => applyExact(new Date(`${d}T00:00:00`))}
                       testid={`${testid}-calendar`}
                     />

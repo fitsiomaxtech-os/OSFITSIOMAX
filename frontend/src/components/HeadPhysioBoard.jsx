@@ -383,12 +383,16 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
           <DayStripFilter value={dateRange} onChange={setDateRange} testid="hp-date-filter" />
         </div>
         <div className="ml-auto flex shrink-0 items-center justify-end gap-2 sm:ml-0 sm:flex-1 sm:basis-0">
+          {/* `large` only here: this board's calendar button is the only way to reach a
+              date the day strip doesn't cover, so the dialog it opens is sized to be read
+              and aimed at rather than squeezed. Other boards keep the compact dialog. */}
           <DateFilterPopover
             value={dateRange && !isDayKey(dateRange.key) ? dateRange : null}
             onChange={setDateRange}
             testid="hp-date-custom"
             centered
             iconOnly
+            large
           />
           <button
             type="button"

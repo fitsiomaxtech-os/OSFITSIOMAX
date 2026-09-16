@@ -39,8 +39,13 @@ export const formatSlotLabel = (hhmm) => {
  * Milk white rather than pure white so it reads as a distinct surface against the white
  * popup behind it without needing a heavy border. `accent` lets a popup carry its own
  * colour through the picker: amber for Follow Up, teal elsewhere.
+ *
+ * `size="lg"` grows the day cells and the type for the popups that have room for it — the
+ * default stays exactly as it was, so every existing caller is untouched. Only the cells
+ * and the text scale; the month grid is still seven columns that fill their container.
  */
-export const MilkCalendar = ({ value, onChange, min, accent = "amber", testid = "milk-calendar" }) => {
+export const MilkCalendar = ({ value, onChange, min, accent = "amber", testid = "milk-calendar", size = "md" }) => {
+  const lg = size === "lg";
   const today = todayIso();
   const [cursor, setCursor] = useState(() => {
     const base = value || today;
@@ -56,24 +61,25 @@ export const MilkCalendar = ({ value, onChange, min, accent = "amber", testid = 
   });
 
   const TONE = TONES[accent] || TONES.amber;
+  const cellH = lg ? "h-11" : "h-8";
 
   return (
-    <div className="rounded-xl border border-[#EFEAE0] bg-[#FDFCF8] p-3 shadow-sm" data-testid={testid}>
-      <div className="mb-2 flex items-center justify-between">
+    <div className={`rounded-xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-sm ${lg ? "p-4" : "p-3"}`} data-testid={testid}>
+      <div className={`flex items-center justify-between ${lg ? "mb-3" : "mb-2"}`}>
         <button type="button" onClick={() => step(-1)} className="rounded-lg p-1.5 text-slate-500 hover:bg-[#F3EFE6]" aria-label="Previous month" data-testid={`${testid}-prev`}>
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className={lg ? "h-5 w-5" : "h-4 w-4"} />
         </button>
-        <p className="text-sm font-bold text-slate-800" data-testid={`${testid}-month`}>{MONTHS[cursor.m]} {cursor.y}</p>
+        <p className={`font-bold text-slate-800 ${lg ? "text-base" : "text-sm"}`} data-testid={`${testid}-month`}>{MONTHS[cursor.m]} {cursor.y}</p>
         <button type="button" onClick={() => step(1)} className="rounded-lg p-1.5 text-slate-500 hover:bg-[#F3EFE6]" aria-label="Next month" data-testid={`${testid}-next`}>
-          <ChevronRight className="h-4 w-4" />
+          <ChevronRight className={lg ? "h-5 w-5" : "h-4 w-4"} />
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-0.5">
+      <div className={`grid grid-cols-7 ${lg ? "gap-1" : "gap-0.5"}`}>
         {DOW.map((d) => (
-          <div key={d} className="py-1 text-center text-[10px] font-bold uppercase tracking-wide text-slate-400">{d}</div>
+          <div key={d} className={`py-1 text-center font-bold uppercase tracking-wide text-slate-400 ${lg ? "text-[11px]" : "text-[10px]"}`}>{d}</div>
         ))}
-        {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className="h-8" />)}
+        {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className={cellH} />)}
         {Array.from({ length: daysInMonth }, (_, i) => {
           const day = i + 1;
           const d = iso(cursor.y, cursor.m, day);
@@ -86,7 +92,7 @@ export const MilkCalendar = ({ value, onChange, min, accent = "amber", testid = 
               type="button"
               disabled={disabled}
               onClick={() => onChange(d)}
-              className={`h-8 rounded-lg text-[13px] font-semibold transition ${
+              className={`${cellH} rounded-lg font-semibold transition ${lg ? "text-[15px]" : "text-[13px]"} ${
                 selected ? TONE.on
                   : disabled ? "cursor-not-allowed text-slate-300"
                   : isToday ? TONE.today
@@ -100,16 +106,16 @@ export const MilkCalendar = ({ value, onChange, min, accent = "amber", testid = 
         })}
       </div>
 
-      <div className="mt-2 flex items-center justify-between border-t border-[#EFEAE0] pt-2">
+      <div className={`flex items-center justify-between border-t border-[#EFEAE0] ${lg ? "mt-3 pt-3" : "mt-2 pt-2"}`}>
         <button
           type="button"
           onClick={() => { setCursor({ y: new Date().getFullYear(), m: new Date().getMonth() }); onChange(today); }}
-          className={`rounded-md px-2 py-1 text-[11px] font-bold ${TONE.link}`}
+          className={`rounded-md px-2 py-1 font-bold ${lg ? "text-[13px]" : "text-[11px]"} ${TONE.link}`}
           data-testid={`${testid}-today`}
         >
           Today
         </button>
-        <p className="text-[11px] font-medium text-slate-500" data-testid={`${testid}-selected`}>
+        <p className={`font-medium text-slate-500 ${lg ? "text-[13px]" : "text-[11px]"}`} data-testid={`${testid}-selected`}>
           {value
             ? new Date(`${value}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric" })
             : "No date picked"}
