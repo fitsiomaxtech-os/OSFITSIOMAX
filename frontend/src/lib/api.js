@@ -665,6 +665,10 @@ export const clockBreakOut = async (reason) => (await api.post("/clock/break-out
 export const clockBreakIn = async () => (await api.post("/clock/break-in")).data;
 export const clockOut = async () => (await api.post("/clock/out")).data;
 export const clockHistory = async (month) => (await api.get("/clock/history", { params: month ? { month } : {} })).data;
+// EOD Report — asked at Clock Out of Physios and Consultants; read by Super Admin in HR Admin.
+export const eodToday = async () => (await api.get("/eod/today")).data;
+export const eodSubmit = async (payload) => (await api.post("/eod/today", payload)).data;
+export const eodReports = async (date) => (await api.get("/eod-reports", { params: date ? { date } : {} })).data;
 
 // ---------- my own page: profile, month, and time off ----------
 //

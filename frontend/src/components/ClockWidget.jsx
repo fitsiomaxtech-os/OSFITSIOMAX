@@ -22,10 +22,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CalendarDays, ChevronLeft, ChevronRight, Coffee, LogIn, LogOut, Play, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Coffee, LogIn, LogOut, Play, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import { clockToday, clockIn, clockBreakOut, clockBreakIn, clockOut, clockHistory } from "@/lib/api";
+import { clockToday, clockIn, clockBreakOut, clockBreakIn, clockOut, clockHistory, eodToday } from "@/lib/api";
+import { EodReportSheet } from "@/components/eod/EodReportSheet";
 // Shared with HR's register, which shows the same day from the other side.
 import { duration, prettyTime } from "@/lib/clock";
 
@@ -127,7 +128,7 @@ const BreakReasonSheet = ({ presets, busy, onStart, onClose }) => {
 };
 
 /** Today, in full: when it started, every break and why, and where the hours went. */
-const TodaySheet = ({ day, live, onClose, onHistory }) => (
+const TodaySheet = ({ day, live, onClose, onHistory, onReport, reportFiled }) => (
   <Sheet title="Your day" subtitle={day.date} onClose={onClose} testid="clock-today-sheet">
     <div className="grid grid-cols-2 gap-2">
       <Figure label="Clocked in" value={prettyTime(day.clock_in) || "—"} testid="clock-today-in" />
@@ -160,6 +161,12 @@ const TodaySheet = ({ day, live, onClose, onHistory }) => (
     <Button variant="outline" onClick={onHistory} className="mt-4 w-full" data-testid="clock-today-history">
       <CalendarDays className="h-4 w-4" />My attendance history
     </Button>
+    {/* Physios and Consultants only: a report skipped at Clock Out can still be filed. */}
+    {onReport && (
+      <Button variant="outline" onClick={onReport} className="mt-2 w-full" data-testid="clock-today-eod">
+        <ClipboardList className="h-4 w-4" />{reportFiled ? "Edit EOD report" : "Submit EOD report"}
+      </Button>
+    )}
   </Sheet>
 );
 
@@ -265,7 +272,10 @@ export const ClockWidget = () => {
   const [day, setDay] = useState(null);
   const [fetchedAt, setFetchedAt] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
-  const [sheet, setSheet] = useState(null); // null | "break" | "today" | "history"
+  const [sheet, setSheet] = useState(null); // null | "break" | "today" | "history" | "eod"
+  // Today's EOD report state, for Physios and Consultants — null until read, and
+  // eligible:false for everybody else, who never see the popup.
+  const [eod, setEod] = useState(null);
   const [, setTick] = useState(0);
   const mounted = useRef(true);
 
@@ -294,7 +304,23 @@ export const ClockWidget = () => {
 
   const live = useMemo(() => elapsed(day, fetchedAt, Date.now()), [day, fetchedAt]);
 
-  const act = async (fn, done) => {
+  // Asked after Clock Out, and read once on load so "Your day" can offer the report.
+  const loadEod = useCallback(async () => {
+    try {
+      const info = await eodToday();
+      if (mounted.current) setEod(info);
+      return info;
+    } catch { return null; }
+  }, []);
+
+  useEffect(() => { loadEod(); }, [loadEod]);
+
+  const openEod = async () => {
+    const info = await loadEod();
+    if (info?.eligible) setSheet("eod");
+  };
+
+  const act = async (fn, done, after) => {
     setBusy(true);
     try {
       const d = await fn();
@@ -305,6 +331,7 @@ export const ClockWidget = () => {
       try { window.dispatchEvent(new Event(CLOCK_CHANGED_EVENT)); } catch (err) { /* noop */ }
       if (done) toast.success(done);
       setSheet((s) => (s === "break" ? null : s));
+      if (after) after();
     } catch (e) {
       fail(e);
       // Whatever was refused, the day on screen was not what the server had — so take its
@@ -365,7 +392,11 @@ export const ClockWidget = () => {
       )}
 
       {can("clock_out") && (
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => act(clockOut, "Clocked out")} className="shrink-0 border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3" data-testid="clock-out-button">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => act(clockOut, "Clocked out", async () => {
+          // The end-of-day report, for Physios and Consultants who have not filed one yet.
+          const info = await loadEod();
+          if (info?.eligible && !info.report) setSheet("eod");
+        })} className="shrink-0 border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3" data-testid="clock-out-button">
           <LogOut className="h-4 w-4" /><span className="hidden sm:inline">Clock Out</span>
         </Button>
       )}
@@ -379,9 +410,19 @@ export const ClockWidget = () => {
         />
       )}
       {sheet === "today" && (
-        <TodaySheet day={day} live={live} onClose={() => setSheet(null)} onHistory={() => setSheet("history")} />
+        <TodaySheet
+          day={day}
+          live={live}
+          onClose={() => setSheet(null)}
+          onHistory={() => setSheet("history")}
+          onReport={eod?.eligible ? openEod : null}
+          reportFiled={!!eod?.report}
+        />
       )}
       {sheet === "history" && <HistorySheet onClose={() => setSheet(null)} />}
+      {sheet === "eod" && eod?.eligible && (
+        <EodReportSheet info={eod} onClose={() => setSheet(null)} onSaved={(report) => setEod((e) => ({ ...e, report }))} />
+      )}
     </>
   );
 };

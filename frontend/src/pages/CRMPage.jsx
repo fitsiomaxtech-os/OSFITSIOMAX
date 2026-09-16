@@ -1291,7 +1291,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         <Suspense fallback={<BoardFallback />}>
 
         {showSuperAdminBoard && superAdminView === "hr" && (
-          <HRBoard />
+          <HRBoard isSuperAdmin={role === "super_admin"} />
         )}
 
         {showSuperAdminBoard && superAdminView === "operations" && (

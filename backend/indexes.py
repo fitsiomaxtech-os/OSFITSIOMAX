@@ -110,6 +110,9 @@ CORE_INDEXES = [
     # management boards.
     ("client_reviews", [("lead_id", 1)], "lead"),
     ("client_reviews", [("branch_id", 1)], "branch"),
+    # EOD Reports: one per person per clinic day, read back by day on Super Admin's list.
+    ("eod_reports", [("user_id", 1), ("date", 1)], "user_date"),
+    ("eod_reports", [("date", 1)], "date"),
     # Client Portal sign-in. A login is matched on phone or on email, and several accounts
     # can share either (one family, one number), so both are scanned rather than found once.
     # The staff panel reaches a patient's account by lead_id, and every portal request
