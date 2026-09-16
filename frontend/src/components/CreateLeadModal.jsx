@@ -221,7 +221,7 @@ export const CreateLeadModal = ({ onClose, onSaved, branchId = null, lockedDepar
               <Field label="Age"><Input type="number" min="0" placeholder="e.g. 32" value={form.age} onChange={(e) => set("age", e.target.value)} data-testid="lead-create-age" /></Field>
               <Field label="Gender"><Select value={form.gender} onChange={(v) => set("gender", v)} options={["", ...GENDER_OPTIONS]} testid="lead-create-gender" /></Field>
               <Field label="Occupation"><Input placeholder="e.g. Software Engineer" value={form.occupation} onChange={(e) => set("occupation", e.target.value)} data-testid="lead-create-occupation" /></Field>
-              <Field label="Expected Consultation Date" className="sm:col-span-2"><MilkDateInput  value={form.expected_consultation_date} onChange={(e) => set("expected_consultation_date", e.target.value)} data-testid="lead-create-consultdate" /></Field>
+              <Field label="Expected Consultation Date" className="sm:col-span-2"><MilkDateInput centered title="Expected Consultation Date" value={form.expected_consultation_date} onChange={(e) => set("expected_consultation_date", e.target.value)} data-testid="lead-create-consultdate" /></Field>
             </div>
 
             {!branchId && ["offline_physio", "offline_fitness"].includes(form.department) && (

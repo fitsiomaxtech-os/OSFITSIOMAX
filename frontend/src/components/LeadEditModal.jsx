@@ -188,7 +188,7 @@ export const LeadEditModal = ({ lead, onClose, onSaved, allowBranchChange = true
                 </select>
               </Field>
               <Field label="Occupation"><Input value={form.occupation} onChange={(e) => set("occupation", e.target.value)} data-testid="lead-edit-occupation" /></Field>
-              <Field label="Expected Consultation Date" className="sm:col-span-2"><MilkDateInput value={form.expected_consultation_date} onChange={(e) => set("expected_consultation_date", e.target.value)} data-testid="lead-edit-consultdate" /></Field>
+              <Field label="Expected Consultation Date" className="sm:col-span-2"><MilkDateInput centered title="Expected Consultation Date" value={form.expected_consultation_date} onChange={(e) => set("expected_consultation_date", e.target.value)} data-testid="lead-edit-consultdate" /></Field>
             </div>
           </Section>
 
