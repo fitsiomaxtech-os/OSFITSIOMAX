@@ -12,7 +12,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, Check, ChevronDown, ChevronRight, Clock, MessageSquareQuote, RefreshCw, Search, Star, ThumbsDown, X } from "lucide-react";
+import { Activity, Building2, CalendarCheck, Check, ChevronDown, ChevronRight, Clock, MessageSquareQuote, RefreshCw, Search, Star, X } from "lucide-react";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -64,7 +65,7 @@ const sessionLabel = (r) => {
   return "";
 };
 
-const SOURCE_LABEL = { session: "After a session", review: "After a 7-day Review", anytime: "Anytime (Feedback tab)" };
+const SOURCE_LABEL = { session: "After a session day", review: "After a 7-day Review", anytime: "Anytime (Feedback tab)" };
 
 const matchesSearch = (r, q) => !q || [
   r.patient_name, r.patient_number, r.person_name, r.branch_name, r.comment,
@@ -225,6 +226,148 @@ const BranchFilter = ({ branches, value, onChange }) => {
   );
 };
 
+// What a review was given for, as the pill in the Type column.
+const TYPE_PILL = {
+  review: { label: "7-day Review", color: "#059669" },
+  session: { label: "Session", color: "#0284c7" },
+  rehab: { label: "Rehab", color: "#7c3aed" },
+  anytime: { label: "Anytime", color: "#64748b" },
+};
+const typeOf = (r) => (r.source === "session" && r.track === "rehab" ? "rehab" : r.source);
+
+const TypePill = ({ review }) => {
+  const t = TYPE_PILL[typeOf(review)];
+  if (!t) return <span className="text-slate-400">—</span>;
+  return (
+    <span
+      className="inline-flex shrink-0 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold"
+      style={{ color: t.color, borderColor: `${t.color}55`, backgroundColor: `${t.color}14` }}
+    >
+      {t.label}
+    </span>
+  );
+};
+
+/**
+ * The tiles over the list, per kind. Each one is also the list's filter by where the review
+ * came from; `rated` is every review carrying stars, which is every review there is, and
+ * reads as the average rather than a count.
+ */
+const TILES = {
+  consultant: [
+    { key: "", label: "All", figure: "total", sub: () => "Every consultant review", icon: MessageSquareQuote, color: "#4f46e5" },
+    { key: "rated", label: "Consultation Review", figure: "average", sub: (f) => `${f.rated} ratings · 7-day + anytime`, icon: Star, color: "#f59e0b" },
+    { key: "review", label: "7 Days Review", figure: "review", sub: (f) => `Avg ${f.reviewAvg ?? "—"} ★ · from a 7-day Review`, icon: CalendarCheck, color: "#059669" },
+    { key: "anytime", label: "Anytime", figure: "anytime", sub: () => "From the Feedback tab", icon: Clock, color: "#0284c7" },
+  ],
+  physio: [
+    { key: "", label: "All", figure: "total", sub: () => "Every physio review", icon: MessageSquareQuote, color: "#4f46e5" },
+    { key: "session", label: "Session Review", figure: "session", sub: () => "Every treatment and rehab day", icon: Activity, color: "#059669" },
+    { key: "rated", label: "Average Rating", figure: "average", sub: (f) => `${f.rated} ratings`, icon: Star, color: "#f59e0b" },
+    { key: "anytime", label: "Anytime", figure: "anytime", sub: () => "From the Feedback tab", icon: Clock, color: "#0284c7" },
+  ],
+};
+
+const inSource = (r, key) => !key || (key === "rated" ? !!r.rating : r.source === key);
+
+const inDates = (r, range) => {
+  if (!range?.from || !range?.to) return true;
+  const d = new Date(r.created_at || r.updated_at || "");
+  return !Number.isNaN(d.getTime()) && d >= range.from && d <= range.to;
+};
+
+/** Table from tablet up, the same rows as cards on a phone — the shape of the HR candidate list. */
+const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
+  if (!rows.length) {
+    return (
+      <p className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-14 text-center text-sm text-slate-400" data-testid="client-reviews-empty">
+        {loading ? "Loading reviews..." : empty}
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-2 sm:hidden" data-testid="client-reviews-list-mobile">
+        {rows.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => onOpen(r)}
+            className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left"
+            data-testid={`client-review-card-${r.id}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-800">{r.patient_name || "Client"}</p>
+                <p className="truncate text-xs text-slate-500">{r.person_name || `${meta.person} not set`}</p>
+              </div>
+              <TypePill review={r} />
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <StarRow value={r.rating} size="h-3.5 w-3.5" />
+              <span className="text-[11px] text-slate-400">{prettyDate(r.created_at || r.updated_at)}</span>
+            </div>
+            {r.comment && <p className="mt-1.5 line-clamp-2 text-xs text-slate-500">{r.comment}</p>}
+          </button>
+        ))}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="client-reviews-list">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold">Client</th>
+                <th className="px-4 py-2.5 font-semibold">{meta.person}</th>
+                <th className="px-4 py-2.5 font-semibold">For</th>
+                <th className="px-4 py-2.5 font-semibold">Rating</th>
+                <th className="px-4 py-2.5 font-semibold">Review</th>
+                <th className="px-4 py-2.5 font-semibold">Type</th>
+                <th className="px-4 py-2.5 font-semibold">Date</th>
+                <th className="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => (
+                <tr key={r.id} onClick={() => onOpen(r)} className="cursor-pointer hover:bg-slate-50" data-testid={`client-review-${r.id}`}>
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-800">{r.patient_name || "Client"}</p>
+                    <p className="text-[11px] text-slate-400">{r.patient_number || "—"}</p>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {r.person_name || "—"}
+                    {r.branch_name ? <span className="block text-[11px] text-slate-400">{r.branch_name}</span> : null}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {sessionLabel(r) || "—"}
+                    {(r.session_date || r.review_date) ? <span className="block text-[11px] text-slate-400">{prettyDate(r.session_date || r.review_date)}</span> : null}
+                  </td>
+                  <td className="px-4 py-3">
+                    <StarRow value={r.rating} size="h-3.5 w-3.5" />
+                    <span className={`block text-[11px] font-bold ${(r.rating || 0) <= 2 ? "text-red-500" : r.rating === 3 ? "text-amber-500" : "text-slate-400"}`}>
+                      {r.rating ? `${r.rating} / 5` : "Not rated"}
+                    </span>
+                  </td>
+                  <td className="max-w-[260px] px-4 py-3 text-slate-600">
+                    <p className="truncate">{r.comment || <span className="text-slate-400">—</span>}</p>
+                  </td>
+                  <td className="px-4 py-3"><TypePill review={r} /></td>
+                  <td className="px-4 py-3 text-slate-500">
+                    <span className="whitespace-nowrap">{prettyDate(r.created_at || r.updated_at) || "—"}</span>
+                    {r.updated_at ? <span className="block text-[11px] font-semibold text-sky-600">Edited</span> : null}
+                  </td>
+                  <td className="px-4 py-3 text-right"><ChevronRight className="ml-auto h-4 w-4 text-slate-300" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+};
+
 export const ClientReviewsPanel = ({ branchId = null }) => {
   const [data, setData] = useState({ consultant: [], physio: [], summary: {} });
   const [loading, setLoading] = useState(true);
@@ -233,12 +376,12 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
   const [branch, setBranch] = useState("");
   // Consultant Review is the tab a review of a consultant lands in, and the one that opens.
   const [kind, setKind] = useState("consultant");
-  // The star bucket is set from the star pills and from the Average / Low tiles alike, so
-  // the two always agree; Anytime and a person are narrower filters laid on top of it.
   const [bucket, setBucket] = useState("");
-  const [anytimeOnly, setAnytimeOnly] = useState(false);
+  // Set only by the tiles: where the review came from (see TILES).
+  const [source, setSource] = useState("");
   const [person, setPerson] = useState("");
   const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState(null);
   const [open, setOpen] = useState(null);
 
   const scope = branchId || branch || null;
@@ -261,23 +404,28 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
   const reviews = useMemo(() => data[kind] || [], [data, kind]);
   const q = search.trim().toLowerCase();
 
-  // The tiles and the people card count what the branch and search leave, but not the tile
-  // filters themselves: a tile that zeroes the other three when pressed leaves nothing to
-  // press next. They used to show the server's summary, which ignored every filter here.
-  const base = useMemo(() => reviews.filter((r) => matchesSearch(r, q)), [reviews, q]);
-  const inPerson = useMemo(() => (person ? base.filter((r) => (r.person_name || "") === person) : base), [base, person]);
-  const shown = useMemo(
-    () => inPerson.filter((r) => inBucket(r, bucket) && (!anytimeOnly || r.source === "anytime")),
-    [inPerson, bucket, anytimeOnly],
+  // The tiles and the people card count what the bar leaves (branch, stars, search, date),
+  // but not the tile filter itself: a tile that zeroes the other three when pressed leaves
+  // nothing to press next.
+  const base = useMemo(
+    () => reviews.filter((r) => inBucket(r, bucket) && matchesSearch(r, q) && inDates(r, dateFilter)),
+    [reviews, bucket, q, dateFilter],
   );
+  const inPerson = useMemo(() => (person ? base.filter((r) => (r.person_name || "") === person) : base), [base, person]);
+  const shown = useMemo(() => inPerson.filter((r) => inSource(r, source)), [inPerson, source]);
 
-  const figures = useMemo(() => ({
-    total: inPerson.length,
-    average: average(inPerson),
-    high: inPerson.filter((r) => (r.rating || 0) >= 4).length,
-    low: inPerson.filter((r) => r.rating && r.rating <= 2).length,
-    anytime: inPerson.filter((r) => r.source === "anytime").length,
-  }), [inPerson]);
+  const figures = useMemo(() => {
+    const from = (key) => inPerson.filter((r) => inSource(r, key));
+    return {
+      total: inPerson.length,
+      average: average(inPerson),
+      rated: from("rated").length,
+      review: from("review").length,
+      reviewAvg: average(from("review")),
+      session: from("session").length,
+      anytime: from("anytime").length,
+    };
+  }, [inPerson]);
 
   const people = useMemo(() => {
     const by = {};
@@ -291,15 +439,14 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
       .sort((a, b) => (b.average || 0) - (a.average || 0) || b.count - a.count || a.name.localeCompare(b.name));
   }, [base]);
 
-  const filtered = Boolean(bucket || anytimeOnly || person || q);
-  const clearFilters = () => { setBucket(""); setAnytimeOnly(false); setPerson(""); setSearch(""); };
-  // Consultants and physios are different people, so a chosen name does not carry across.
-  const switchKind = (key) => { setKind(key); setPerson(""); };
-  const toggleBucket = (key) => setBucket((b) => (b === key ? "" : key));
+  const filtered = Boolean(bucket || source || person || q || dateFilter);
+  const clearFilters = () => { setBucket(""); setSource(""); setPerson(""); setSearch(""); setDateFilter(null); };
+  // Consultants and physios are different people with different tiles, so neither carries across.
+  const switchKind = (key) => { setKind(key); setPerson(""); setSource(""); };
 
   return (
     <div className="space-y-4" data-testid="client-reviews-panel">
-      {/* One bar, in the order it is read: which reviews, where, how many stars, who. */}
+      {/* One bar, in the order it is read: which reviews, where, how many stars, who, when. */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-2 p-2.5">
           <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" data-testid="client-reviews-kind">
@@ -336,6 +483,11 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search client, ${meta.person.toLowerCase()}...`} className="h-9 pl-9" data-testid="client-reviews-search" />
           </div>
+          {/* The shared Date Filter, pinned to the bar's height from out here rather than by
+              a prop on a control other boards share. Filters on the day the review was given. */}
+          <span className="[&>div>button]:h-9">
+            <DateFilterPopover value={dateFilter} onChange={setDateFilter} centered testid="client-reviews-date" />
+          </span>
           <Button
             onClick={load}
             disabled={loading}
@@ -350,46 +502,19 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
       </Card>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile
-          label={`${meta.label}s`}
-          value={figures.total}
-          sub={bucket || anytimeOnly ? "Tap to show all" : "Every review"}
-          icon={MessageSquareQuote}
-          color="#4f46e5"
-          active={!bucket && !anytimeOnly}
-          onClick={() => { setBucket(""); setAnytimeOnly(false); }}
-          testid="client-reviews-tile-total"
-        />
-        <StatTile
-          label="Average Rating"
-          value={figures.average != null ? `${figures.average} ★` : "—"}
-          sub={`${figures.high} rated 4–5 stars`}
-          icon={Star}
-          color="#f59e0b"
-          active={bucket === "high"}
-          onClick={() => toggleBucket("high")}
-          testid="client-reviews-tile-average"
-        />
-        <StatTile
-          label="Low Reviews"
-          value={figures.low}
-          sub="2 stars or under"
-          icon={ThumbsDown}
-          color="#e11d48"
-          active={bucket === "low"}
-          onClick={() => toggleBucket("low")}
-          testid="client-reviews-tile-low"
-        />
-        <StatTile
-          label="Anytime"
-          value={figures.anytime}
-          sub="From the Feedback tab"
-          icon={Clock}
-          color="#0284c7"
-          active={anytimeOnly}
-          onClick={() => setAnytimeOnly((v) => !v)}
-          testid="client-reviews-tile-anytime"
-        />
+        {TILES[kind].map((t) => (
+          <StatTile
+            key={t.key || "all"}
+            label={t.label}
+            value={t.figure === "average" ? (figures.average != null ? `${figures.average} ★` : "—") : figures[t.figure]}
+            sub={t.sub(figures)}
+            icon={t.icon}
+            color={t.color}
+            active={source === t.key}
+            onClick={() => setSource((cur) => (cur === t.key ? "" : t.key))}
+            testid={`client-reviews-tile-${t.key || "all"}`}
+          />
+        ))}
       </div>
 
       <Card data-testid={`client-reviews-${kind}-people`}>
@@ -421,8 +546,8 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
         </CardContent>
       </Card>
 
-      <Card data-testid="client-reviews-list-card">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <p className="text-sm font-semibold text-slate-700">
             Reviews <span className="ml-1 font-normal text-slate-400">{shown.length} of {reviews.length}</span>
           </p>
@@ -432,53 +557,19 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
             </button>
           )}
         </div>
-
-        {loading && !reviews.length ? (
-          <p className="px-4 py-10 text-center text-sm text-slate-500">Loading...</p>
-        ) : shown.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="client-reviews-empty">
-            {reviews.length ? "No reviews match these filters." : `No ${meta.label.toLowerCase()}s yet.`}
-          </p>
-        ) : (
-          <ul className="divide-y divide-slate-100" data-testid="client-reviews-list">
-            {shown.map((r) => {
-              const w = r.rating || 0;
-              return (
-                <li key={r.id}>
-                  <button
-                    type="button"
-                    onClick={() => setOpen(r)}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50"
-                    data-testid={`client-review-${r.id}`}
-                  >
-                    <span className={`h-9 w-1 shrink-0 rounded-full ${w >= 4 ? "bg-emerald-400" : w === 3 ? "bg-amber-300" : "bg-rose-400"}`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex min-w-0 items-baseline gap-2">
-                        <span className="truncate font-semibold text-slate-800">{r.patient_name || "Client"}</span>
-                        <span className="hidden truncate text-xs text-slate-400 sm:inline">{[r.patient_number, r.branch_name].filter(Boolean).join(" · ")}</span>
-                      </span>
-                      <span className="mt-0.5 block truncate text-xs text-slate-500">
-                        {[r.person_name, sessionLabel(r)].filter(Boolean).join(" · ")}
-                        {r.comment && <span className="text-slate-400"> — {r.comment}</span>}
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 flex-col items-end gap-1">
-                      <StarRow value={r.rating} size="h-3.5 w-3.5" />
-                      <span className="text-[11px] text-slate-400">{prettyDate(r.updated_at || r.created_at)}</span>
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Card>
+        <ReviewList
+          rows={shown}
+          meta={meta}
+          loading={loading && !reviews.length}
+          empty={reviews.length ? "No reviews match these filters." : `No ${meta.label.toLowerCase()}s yet.`}
+          onOpen={setOpen}
+        />
+      </div>
 
       <p className="text-[11px] text-slate-400">
         {kind === "consultant"
           ? "Clients review their consultant from the Review button on each completed 7-day Review (optional), or any time from the Feedback tab."
-          : "Clients must review every completed physio session from its Review button in Sessions, or any time from the Feedback tab."}
+          : "Clients must review every completed physio session, treatment or rehab, from its Review button in Sessions, or any time from the Feedback tab."}
         {" "}Only Super Admin, BDE and Branch Admin can read these.
       </p>
 
