@@ -9,8 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertOctagon, ChevronDown, ChevronUp, ClipboardList, HeartPulse, RefreshCw, Search, Stethoscope, X } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertOctagon, ChevronDown, ChevronUp, ClipboardList, HeartPulse, RefreshCw, Search, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -44,10 +43,10 @@ const presetRange = (key) => {
 
 // The four figures, and what clicking each one lists.
 const VIEWS = [
-  { key: "reports", label: "Reports", icon: ClipboardList, hint: "Filed for this period", title: "All reports" },
-  { key: "pending", label: "Not submitted", icon: AlertOctagon, hint: "Clocked in, no report", title: "Clocked in, no report" },
-  { key: "physio", label: "Treatments", icon: HeartPulse, hint: "Clients treated by Physios", title: "Physio reports" },
-  { key: "consultant", label: "Consultations", icon: Stethoscope, hint: "Clients seen by Consultants", title: "Consultant reports" },
+  { key: "reports", label: "Reports", icon: ClipboardList, title: "All reports" },
+  { key: "pending", label: "Not submitted", icon: AlertOctagon, title: "Clocked in, no report" },
+  { key: "physio", label: "Treatments", icon: HeartPulse, title: "Physio reports" },
+  { key: "consultant", label: "Consultations", icon: Stethoscope, title: "Consultant reports" },
 ];
 
 const countLabel = (kind) => (kind === "consultant" ? "Consultations" : "Treatments");
@@ -59,6 +58,7 @@ const prettyTime = (stamp) => {
 const prettyDay = (day) => (day ? new Date(`${day}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "");
 
 export const EodReportsPanel = () => {
+  // Today, every time the tab is opened -- nothing remembers the last range picked.
   const [preset, setPreset] = useState("today");
   // Set by the calendar icon; overrides the chips while it is set.
   const [custom, setCustom] = useState(null);
@@ -109,60 +109,76 @@ export const EodReportsPanel = () => {
   const listTitle = VIEWS.find((v) => v.key === view)?.title || "All reports";
 
   return (
-    <Card data-testid="eod-reports-panel">
-      <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <ClipboardList className="h-5 w-5 text-sky-600" />EOD Report
-        </CardTitle>
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Search sits with the period controls: both narrow the same list, so they read
-              as one toolbar rather than a filter above the figures and another below. */}
-          <div className="relative w-full min-w-0 sm:w-56">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search staff, branch or client" className="pl-8" data-testid="eod-search" />
-          </div>
-          <div className="flex rounded-lg bg-slate-100 p-0.5" data-testid="eod-presets">
-            {PRESETS.map((p) => (
+    <div className="space-y-3" data-testid="eod-reports-panel">
+      {/* The toolbar, in the same bordered bar and the same controls as the Business
+          Leads Dashboard's: search, the one-tap ranges, then the calendar and Refresh
+          pushed to the right. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="eod-toolbar">
+        <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[240px] sm:flex-1">
+          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+          <Input
+            className="h-10 pl-9"
+            placeholder="Search staff, branch or client..."
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            data-testid="eod-search"
+          />
+        </div>
+
+        <div className="flex w-full shrink-0 items-center gap-1 sm:w-auto" data-testid="eod-presets">
+          {PRESETS.map((p) => {
+            const active = !custom && preset === p.key;
+            return (
               <button
                 key={p.key}
                 type="button"
                 onClick={() => pickPreset(p.key)}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${!custom && preset === p.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                aria-pressed={active}
+                className={`h-10 min-w-0 flex-1 truncate rounded-md px-2 text-xs font-medium transition sm:flex-none sm:px-3 sm:text-sm ${
+                  active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
                 data-testid={`eod-preset-${p.key}`}
               >
                 {p.label}
               </button>
-            ))}
-          </div>
-          <DateFilterPopover value={custom} onChange={setCustom} testid="eod-date-filter" centered iconOnly />
-          {custom && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700" data-testid="eod-custom-chip">
-              {custom.label}
-              <button type="button" onClick={() => setCustom(null)} className="rounded-full p-0.5 hover:bg-sky-100" aria-label="Clear date">
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          )}
-          <Button variant="outline" size="sm" onClick={load} disabled={loading} aria-label="Refresh" data-testid="eod-refresh"><RefreshCw className="h-4 w-4" /></Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {VIEWS.map((v) => (
-            <KPI
-              key={v.key}
-              icon={v.icon}
-              label={v.label}
-              value={totals[v.key]}
-              hint={v.hint}
-              active={view === v.key}
-              onClick={() => pickCard(v.key)}
-              testid={`eod-card-${v.key}`}
-            />
-          ))}
+            );
+          })}
         </div>
 
-        <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="eod-list-title">
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* Lit with the picked day or range while one is set, with its own clear. */}
+          <DateFilterPopover value={custom} onChange={setCustom} testid="eod-date-filter" centered iconOnly />
+          <Button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+            data-testid="eod-refresh"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {VIEWS.map((v) => (
+          <KPI
+            key={v.key}
+            icon={v.icon}
+            label={v.label}
+            value={totals[v.key]}
+            active={view === v.key}
+            onClick={() => pickCard(v.key)}
+            testid={`eod-card-${v.key}`}
+          />
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="eod-list-title">
+          <ClipboardList className="h-4 w-4 text-sky-600" />
           {listTitle} <span className="text-slate-400">· {view === "pending" ? pending.length : reports.length}</span>
         </p>
 
@@ -229,7 +245,7 @@ export const EodReportsPanel = () => {
             ))}
           </ul>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 };
