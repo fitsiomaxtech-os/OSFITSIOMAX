@@ -31,17 +31,10 @@ const ALL_BRANCHES = "__all__";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
-  // The running month, straight after the Dashboard whose figures come off it. Attendance
-  // (inside Staff), Payroll and Approvals are one chain -- an approved leave is an attendance
-  // mark, and attendance is what payroll pro-rates against -- so they sit together, ahead of
-  // the three org-chart tabs below. Their screens live in HROpsTabs.jsx.
-  //
-  // Staff holds everything read about the people day to day -- the register, what clients
-  // say about them, what they filed, and Quotes -- behind its own bar (STAFF_TABS below),
-  // so the top bar stays at seven.
+  // Staff holds the running month -- attendance, payroll, approvals -- and everything read
+  // about the people day to day, behind its own bar (STAFF_TABS below), ahead of the three
+  // org-chart tabs. Their screens live in HROpsTabs.jsx.
   { key: "staff", label: "Staff", icon: UserCheck },
-  { key: "payroll", label: "Payroll", icon: Wallet },
-  { key: "approvals", label: "Approvals", short: "Approve", icon: ClipboardCheck },
   { key: "employees", label: "Employees", icon: Users },
   { key: "roles", label: "Credentials", icon: ShieldCheck },
   // One screen over one set of records. The tab that used to carry this name was a second
@@ -54,7 +47,7 @@ const TABS = [
 ];
 
 // The bar inside Staff. superAdminOnly works as it does on TABS: BDE mounts this same board
-// and gets Attendance, Review and Quotes only.
+// and gets everything except Performance and EOD Report.
 const STAFF_TABS = [
   { key: "attendance", label: "Attendance", short: "Attend", icon: CalendarCheck },
   { key: "performance", label: "Performance", short: "Perform", icon: TrendingUp, superAdminOnly: true },
@@ -64,6 +57,9 @@ const STAFF_TABS = [
   // What each Physio and Consultant did with their day, filed at Clock Out. The endpoint
   // behind it answers super_admin alone.
   { key: "eod_report", label: "EOD Report", short: "EOD", icon: ClipboardList, superAdminOnly: true },
+  // An approved leave is an attendance mark, and attendance is what payroll pro-rates against.
+  { key: "payroll", label: "Payroll", icon: Wallet },
+  { key: "approvals", label: "Approvals", short: "Approve", icon: ClipboardCheck },
   { key: "quotes", label: "Quotes", icon: Quote },
 ];
 
@@ -71,11 +67,13 @@ const StaffTab = ({ isSuperAdmin, sub, onSubChange }) => {
   const tabs = useMemo(() => STAFF_TABS.filter((t) => !t.superAdminOnly || isSuperAdmin), [isSuperAdmin]);
   return (
     <div className="flex flex-col gap-4" data-testid="hr-staff-tab">
-      <SegmentedTabs tabs={tabs} value={sub} onChange={onSubChange} testid="hr-staff-subtab" size="sm" mobileCols={3} />
+      <SegmentedTabs tabs={tabs} value={sub} onChange={onSubChange} testid="hr-staff-subtab" size="sm" mobileCols={4} />
       {sub === "attendance" && <AttendanceTab />}
       {sub === "performance" && isSuperAdmin && <PerformancePanel />}
       {sub === "client_reviews" && <ClientReviewsPanel />}
       {sub === "eod_report" && isSuperAdmin && <EodReportsPanel />}
+      {sub === "payroll" && <PayrollTab />}
+      {sub === "approvals" && <ApprovalsTab />}
       {sub === "quotes" && <QuotesTab />}
     </div>
   );
@@ -268,15 +266,13 @@ export const HRBoard = ({ isSuperAdmin = false }) => {
         <DashboardTab
           onNavigate={(t, f) => {
             setEmpFilter(f || null);
-            // Attendance lives inside Staff now; the Dashboard cards still name it directly.
-            if (t === "attendance") { setStaffSub("attendance"); setTab("staff"); }
+            // Attendance and Approvals live inside Staff now; the Dashboard cards still name them.
+            if (STAFF_TABS.some((s) => s.key === t)) { setStaffSub(t); setTab("staff"); }
             else setTab(t);
           }}
         />
       )}
       {tab === "staff" && <StaffTab isSuperAdmin={isSuperAdmin} sub={staffSub} onSubChange={setStaffSub} />}
-      {tab === "payroll" && <PayrollTab />}
-      {tab === "approvals" && <ApprovalsTab />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
       {tab === "structure" && <StructureTab meta={meta} reloadMeta={reloadMeta} />}
