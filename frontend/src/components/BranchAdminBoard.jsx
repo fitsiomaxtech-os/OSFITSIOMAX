@@ -3318,6 +3318,8 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   // doesn't move the lead off RNR, so the modal stays open and just refreshes in place,
   // same as scheduling or rescheduling a follow-up does.
   const logRnrAttempt = async () => {
+    const next = (lead.rnr_attempts || 0) + 1;
+    if (!window.confirm(`Log a No Answer for ${lead.name || "this client"}?\n\nThis records attempt #${next}.`)) return;
     try {
       const updated = await rnrAttempt(lead.id);
       toast.success(`Attempt logged (#${updated.rnr_attempts})`);

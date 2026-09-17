@@ -2412,6 +2412,8 @@ export const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = n
               <Button
                 size="sm"
                 onClick={async () => {
+                  const next = (currentLead.rnr_attempts || 0) + 1;
+                  if (!window.confirm(`Log a No Answer for ${currentLead.name || "this client"}?\n\nThis records attempt #${next}.`)) return;
                   try {
                     const updated = await rnrAttempt(currentLead.id);
                     setCurrentLead(updated);
