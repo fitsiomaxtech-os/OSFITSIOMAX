@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Users, CalendarCheck, Activity, IndianRupee, X, RefreshCw,
-  Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad, Clock,
+  Users, CalendarCheck, Activity, IndianRupee, RefreshCw,
+  Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad,
   AlertCircle, CalendarClock, CheckCircle2, XCircle, Star, AlertTriangle, Music, HeartPulse, Building2,
   ChevronDown, Check,
 } from "lucide-react";
@@ -132,17 +132,6 @@ export const resolveBranchIds = (branches, group, branchId) => {
   if (group === "all") return undefined;
   const ids = branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).map((b) => b.branch_id);
   return ids.length ? ids.join(",") : "__none__";
-};
-
-/** Same read for buckets that already carry every branch's own value (getDashboardOverview
- *  buckets) rather than needing a fresh request per filter — a specific branch wins
- *  outright, otherwise the group's branches summed, or the bucket's own total for All. */
-const scopedBucketValue = (bucket, group, branchId) => {
-  if (!bucket) return 0;
-  const rows = bucket.branches || [];
-  if (branchId) return rows.find((b) => b.branch_id === branchId)?.value ?? 0;
-  if (group === "all") return bucket.total || 0;
-  return rows.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).reduce((s, b) => s + (b.value || 0), 0);
 };
 
 /**
@@ -380,10 +369,9 @@ const SalesTab = ({ branches, dateFilter }) => {
 };
 
 /**
- * Dashboard > Revenue — the money buckets getDashboardOverview already carries, summed
- * per branch, scoped the same All/Offline/Online way. Picking a specific branch also opens
- * its full breakdown underneath (BranchRevenueCards) — the same drill /finance/
- * revenue-overview has always given this board, kept rather than dropped in the redesign.
+ * Dashboard > Revenue — the full money breakdown (RevenueSummaryCards) from
+ * /finance/revenue-overview, shown by default for the whole business and narrowed by the
+ * same All/Offline/Online chips and branch pick as every other tab.
  */
 const RevenueTab = ({ data, loading, dateFilter, scope }) => {
   const [ownGroup, setOwnGroup] = useState("all");
@@ -394,7 +382,6 @@ const RevenueTab = ({ data, loading, dateFilter, scope }) => {
   // second time under it saying the same thing.
   const group = scope ? scope.group : ownGroup;
   const branchId = scope ? scope.branchId : ownBranchId;
-  const setBranchId = scope ? scope.onBranch : setOwnBranchId;
   const branches = data?.leads?.branches || [];
   const selectedBranch = branches.find((b) => b.branch_id === branchId);
 
@@ -402,26 +389,12 @@ const RevenueTab = ({ data, loading, dateFilter, scope }) => {
     return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
   }
 
-  const cards = [
-    { key: "total", label: "Total Revenue", value: scopedBucketValue(data.revenue, group, branchId), color: "#059669", icon: Wallet },
-    { key: "consultation", label: "Consultations Revenue", value: scopedBucketValue(data.consultation_revenue, group, branchId), color: "#0284c7", icon: Stethoscope },
-    { key: "session", label: "Session Amount Collected", value: scopedBucketValue(data.session_revenue, group, branchId), color: "#7c3aed", icon: Activity },
-    { key: "pending", label: "Pending Session Amount", value: scopedBucketValue(data.pending_session_amount, group, branchId), color: "#d97706", icon: Clock },
-  ];
-
   return (
     <div className="space-y-4" data-testid="dashboard-revenue-tab">
       {!scope && (
         <ModeBranchFilter branches={branches} group={group} onGroup={setOwnGroup} branchId={branchId} onBranch={setOwnBranchId} testid="dashboard-revenue-filter" />
       )}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-revenue-cards">
-        {cards.map((c) => (
-          <StatTile key={c.key} label={c.label} value={fmtValue("revenue", c.value)} icon={c.icon} color={c.color} testid={`dashboard-revenue-${c.key}`} />
-        ))}
-      </div>
-      {selectedBranch && (
-        <BranchRevenueCards branch={selectedBranch} dateFilter={dateFilter} onClose={() => setBranchId("")} />
-      )}
+      <RevenueSummaryCards branch={selectedBranch} group={group} dateFilter={dateFilter} />
     </div>
   );
 };
@@ -1225,7 +1198,8 @@ export const fullyUnpaid = (outstanding = []) =>
   outstanding.filter((o) => amt(o.paid_amount) <= 0 && amt(o.balance) > 0);
 
 /**
- * One branch's money, opened from its card on the Revenue tab.
+ * The Revenue tab's cards — one branch's money when a branch is picked, otherwise the
+ * whole business (or its Online/Offline half).
  *
  * Every figure comes from /finance/revenue-overview scoped to this branch — the same
  * payload Accountant Manage reads — so a branch's numbers here and on that board cannot
@@ -1236,14 +1210,16 @@ export const fullyUnpaid = (outstanding = []) =>
  * is the Pre Sales and BRANCHS question, and on a tab named Revenue it answered one
  * nobody had asked.
  */
-const BranchRevenueCards = ({ branch, dateFilter, onClose }) => {
+const RevenueSummaryCards = ({ branch, group = "all", dateFilter }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const params = { branch_id: branch.branch_id };
+    const params = {};
+    if (branch) params.branch_id = branch.branch_id;
+    else if (group !== "all") params.vertical_mode = group;
     if (dateFilter?.from && dateFilter?.to) {
       params.start_date = toIso(dateFilter.from);
       params.end_date = toIso(dateFilter.to);
@@ -1253,7 +1229,7 @@ const BranchRevenueCards = ({ branch, dateFilter, onClose }) => {
       .catch(() => { if (!cancelled) setData(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [branch.branch_id, dateFilter]);
+  }, [branch?.branch_id, group, dateFilter]);
 
   const b = data?.breakdown || {};
   const transactions = data?.transactions || [];
@@ -1289,14 +1265,12 @@ const BranchRevenueCards = ({ branch, dateFilter, onClose }) => {
   ];
 
   return (
-    <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/40 p-4" data-testid="branch-revenue-cards">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-4" data-testid="branch-revenue-cards">
+      <div className="mb-3">
         <p className="text-sm font-bold text-sky-700">
-          {branch.branch_name} <span className="font-normal text-slate-400">{dateFilter?.label || "All"}</span>
+          {branch ? branch.branch_name : group === "online" ? "Online Branches" : group === "offline" ? "Offline Branches" : "All Branches"}{" "}
+          <span className="font-normal text-slate-400">{dateFilter?.label || "All"}</span>
         </p>
-        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-white" data-testid="branch-revenue-close">
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
       {loading ? (
