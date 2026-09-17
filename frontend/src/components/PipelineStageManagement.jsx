@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, Flag, GripVertical, AlertTriangle, Lock, KeyRound } from "lucide-react";
+import { Plus, Pencil, Trash2, Flag, GripVertical, AlertTriangle, Lock, Unlock, KeyRound } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone } from "@/lib/api";
+import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone, getPhysioDayLock, setPhysioDayLock } from "@/lib/api";
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
@@ -76,6 +76,9 @@ export const PipelineStageManagement = ({ leading = null }) => {
   const [askingPassword, setAskingPassword] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [unlocking, setUnlocking] = useState(false);
+  // Physio Treatment Days date lock: null until read, then true (locked) or false.
+  const [dayLock, setDayLock] = useState(null);
+  const [savingDayLock, setSavingDayLock] = useState(false);
 
   // The tab being looked at, resolved once: `type` is this table's tab id, and for the
   // Branch pair it is not the same string as the pipeline's API type — both tabs are
@@ -128,6 +131,12 @@ export const PipelineStageManagement = ({ leading = null }) => {
     load();
   };
 
+  // Read once the zone is open, with the password it was opened with.
+  useEffect(() => {
+    if (!devPassword) { setDayLock(null); return; }
+    getPhysioDayLock(devPassword).then((r) => setDayLock(!!r.locked)).catch(() => setDayLock(null));
+  }, [devPassword]);
+
   const lockDangerZone = () => {
     setDevPassword(null);
     setAskingPassword(false);
@@ -156,6 +165,23 @@ export const PipelineStageManagement = ({ leading = null }) => {
     const status = e?.response?.status;
     if (status === 403 || status === 429 || status === 503) lockDangerZone();
     toast.error(e?.response?.data?.detail || "Reset failed");
+  };
+
+  const toggleDayLock = async () => {
+    const next = !dayLock;
+    const ok = window.confirm(next
+      ? "Lock Physio Treatment Days?\n\nA day can then only be marked Complete or Absent on its booked date."
+      : "Unlock Physio Treatment Days?\n\nThe next open day can then be marked Complete or Absent on any date. Days still have to be done in order.");
+    if (!ok) return;
+    setSavingDayLock(true);
+    try {
+      const r = await setPhysioDayLock(devPassword, next);
+      setDayLock(!!r.locked);
+      toast.success(r.locked ? "Physio Treatment Days locked to their booked date" : "Physio Treatment Days unlocked");
+    } catch (e) {
+      resetFailed(e);
+    }
+    setSavingDayLock(false);
   };
 
   const handleResetAllLeads = async () => {
@@ -421,6 +447,35 @@ export const PipelineStageManagement = ({ leading = null }) => {
             whose description takes the slack, so every button sits on the same line however
             much longer one description runs than another. */}
         <CardContent className="grid gap-3 lg:grid-cols-3">
+          <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center lg:col-span-3" data-testid="physio-day-lock-card">
+            <div className="flex-1">
+              <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                Physio Treatment Days lock
+                {dayLock !== null && (
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${dayLock ? "bg-slate-200 text-slate-700" : "bg-amber-100 text-amber-700"}`}>
+                    {dayLock ? "LOCKED" : "UNLOCKED"}
+                  </span>
+                )}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Locked: each treatment day can only be marked Complete or Absent on its own booked date.
+                Unlocked: the next open day can be marked on any date (for example an overdue day). Days are
+                always done in order.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              className="self-start sm:self-center"
+              onClick={toggleDayLock}
+              disabled={dayLock === null || savingDayLock}
+              data-testid="physio-day-lock-toggle"
+            >
+              {dayLock === null ? "Loading..."
+                : savingDayLock ? "Saving..."
+                : dayLock ? (<><Unlock className="mr-1 h-4 w-4" /> Unlock</>)
+                : (<><Lock className="mr-1 h-4 w-4" /> Lock</>)}
+            </Button>
+          </div>
           <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
             <p className="text-sm font-semibold text-red-800">Reset all leads to a fresh state</p>
             <p className="mt-1 flex-1 text-xs text-red-700">

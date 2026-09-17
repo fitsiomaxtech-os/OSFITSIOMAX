@@ -482,7 +482,16 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
         "review_after_days": REVIEW_AFTER_DAYS,
         "review_hold": hold,
         "review_hold_message": review_hold_message(hold) if hold else "",
+        # Whether a day may be worked only on its booked date. Switched from the Danger Zone.
+        "day_date_lock": await _physio_day_lock_enabled(),
     }
+
+
+async def _physio_day_lock_enabled() -> bool:
+    """Read straight off the settings row rather than imported from v3_config, which pulls
+    in half the routers. Same row and same default (locked) as the Danger Zone switch."""
+    row = await v3_col("app_settings").find_one({"id": "physio_day_lock"}, {"_id": 0})
+    return True if not row else bool(row.get("locked", True))
 
 
 async def _resolve_physio_treatments(names) -> list:

@@ -627,6 +627,8 @@ const developerHeaders = (password) => ({ "X-Developer-Password": encodeURICompo
 export const unlockDangerZone = async (password) => (await api.post("/admin/danger-zone/unlock", null, { headers: developerHeaders(password) })).data;
 export const resetAllLeads = async (password) => (await api.post("/admin/reset-all-leads", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
 export const resetAllPayments = async (password) => (await api.post("/admin/reset-all-payments", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
+export const getPhysioDayLock = async (password) => (await api.get("/admin/physio-day-lock", { headers: developerHeaders(password) })).data;
+export const setPhysioDayLock = async (password, locked) => (await api.put("/admin/physio-day-lock", { locked }, { headers: developerHeaders(password) })).data;
 export const resetAllUsers = async (password) => (await api.post("/admin/reset-all-users", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
 
 // HR

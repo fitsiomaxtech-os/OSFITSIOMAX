@@ -1085,6 +1085,45 @@ async def v3_unlock_danger_zone(_: V3UserOut = Depends(require_developer_passwor
     return {"unlocked": True}
 
 
+# The Treatment Days popup offers Complete and Absent only on the date a day was booked for.
+# In production that strands a day whose date went by unrecorded, so a developer can switch
+# the date lock off here. The order lock (Day 2 after Day 1) is the server's and stays on.
+PHYSIO_DAY_LOCK_ID = "physio_day_lock"
+
+
+class PhysioDayLockInput(BaseModel):
+    locked: bool
+
+
+async def physio_day_lock_enabled() -> bool:
+    """On unless a developer has switched it off -- a missing row is the old behaviour."""
+    row = await v3_col("app_settings").find_one({"id": PHYSIO_DAY_LOCK_ID}, {"_id": 0})
+    return True if not row else bool(row.get("locked", True))
+
+
+@router.get("/admin/physio-day-lock")
+async def v3_get_physio_day_lock(_: V3UserOut = Depends(require_developer_password)):
+    return {"locked": await physio_day_lock_enabled()}
+
+
+@router.put("/admin/physio-day-lock")
+async def v3_set_physio_day_lock(
+    payload: PhysioDayLockInput,
+    user: V3UserOut = Depends(require_developer_password),
+):
+    await v3_col("app_settings").update_one(
+        {"id": PHYSIO_DAY_LOCK_ID},
+        {"$set": {
+            "id": PHYSIO_DAY_LOCK_ID,
+            "locked": payload.locked,
+            "updated_by": user.full_name,
+            "updated_at": now_iso(),
+        }},
+        upsert=True,
+    )
+    return {"locked": payload.locked}
+
+
 # What a consultation's Zumba and Fitness referral leaves on a lead. Cleared with the rest of
 # the pipeline, or a reset lead goes on being read as a live referral by both tabs.
 LEAD_ZUMBA_FITNESS_RESET_FIELDS = {

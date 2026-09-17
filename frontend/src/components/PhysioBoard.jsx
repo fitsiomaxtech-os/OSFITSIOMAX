@@ -1694,6 +1694,9 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   // to mark someone present or absent, and Overview first meant a tab change before every
   // single one of those. Overview is reference; this is the work.
   const [tab, setTab] = useState("days");
+  // On: a day is worked only on its booked date. Off (Danger Zone): the open day can be
+  // worked on any date. Days still go in order either way -- the server enforces that.
+  const [dayDateLock, setDayDateLock] = useState(true);
   const isComplete = lead.physio_stage === "Complete";
 
   const loadSessions = useCallback(async () => {
@@ -1708,6 +1711,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
       // the popup would otherwise wall off every day on a deploy that has not landed yet.
       setReviewHold(data.review_hold || null);
       setReviewHoldMessage(data.review_hold_message || "");
+      setDayDateLock(data.day_date_lock !== false);
     } catch { /* silent */ }
   }, [lead.id]);
 
@@ -1948,7 +1952,10 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
     // offering an action.
     const dayIso = (s.slot_time || "").slice(0, 10);
     const isToday = !!dayIso && dayIso === todayIso;
-    const canWork = isOpenDay && isToday;
+    // With the date lock switched off in the Danger Zone, the open day is workable
+    // whatever its date, and every other row stays a plain list entry.
+    const workable = dayDateLock ? isToday : isOpenDay;
+    const canWork = isOpenDay && workable;
     // The day the course stands on, on a date that has already gone by. Named
     // rather than left blank: an "Opened" day with no buttons on it reads as a
     // broken screen rather than a day whose date came and went. Distinct from
@@ -2109,7 +2116,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
           >
             <AlertCircle className="h-3 w-3" /> Needs a date
           </span>
-        ) : !isToday ? (
+        ) : !workable ? (
           // Not today. Complete and Absent belong to the day being worked, and
           // only one date is being worked, so this row is a list entry and
           // nothing more. The title line already says which day it is and
