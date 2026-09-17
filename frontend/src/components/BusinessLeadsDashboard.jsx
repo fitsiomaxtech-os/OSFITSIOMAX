@@ -1013,7 +1013,10 @@ const CARD_GROUPS = [
 //
 // They sit after the two card rows, not before: this desk's own nine figures are what it
 // opens for, and these six are the group-wide read behind them.
-const DASH_SUB_TABS = [...CARD_GROUPS, ...DASH_TABS];
+//
+// Sales is left off this desk's copy: the BDE board doesn't read it. Super Admin's own
+// Dashboard still draws it.
+const DASH_SUB_TABS = [...CARD_GROUPS, ...DASH_TABS.filter((t) => t.key !== "sales")];
 const CARD_GROUP_KEYS = CARD_GROUPS.map((g) => g.key);
 
 // The two tabs this desk reads as a table of rows rather than as Super Admin's row of
