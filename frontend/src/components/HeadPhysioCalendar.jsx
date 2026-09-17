@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import {
   addCalendarSlots,
+  getBranchMonthCalendar,
   getDoctorCalendar,
   getCalendarExperts,
   listShifts,
@@ -441,12 +442,34 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   }, [slotDuration]);
 
 
+  // The branch's leave days for the month on screen (CALENDAR → MONTHLY CALENDAR). A leave
+  // day cannot be opened here — the server refuses it too — so it is drawn as closed.
+  const [leaveDays, setLeaveDays] = useState({});
+  useEffect(() => {
+    if (!branchId) return undefined;
+    let cancelled = false;
+    const month = `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
+    getBranchMonthCalendar(branchId, month)
+      .then((res) => {
+        if (cancelled) return;
+        const map = {};
+        (res?.days || []).forEach((day) => { if (day.status === "leave") map[day.date] = day; });
+        setLeaveDays(map);
+      })
+      .catch(() => { if (!cancelled) setLeaveDays({}); });
+    return () => { cancelled = true; };
+  }, [branchId, currentYear, currentMonth]);
+
   // Picking a date IS the availability confirmation — the whole working day fills in
   // straight away rather than making the Branch Admin click every slot by hand. Clicking
   // it again deselects that day and drops its staged slots. Everything lands staged, not
   // saved, so the Save / Unsave pair still governs what actually reaches the calendar.
   const toggleDate = (d) => {
     const already = selectedDates.includes(d);
+    if (!already && leaveDays[d]) {
+      toast.error(`The branch is on leave on ${shortDate(d)}${leaveDays[d].note ? ` (${leaveDays[d].note})` : ""} — mark it Working in CALENDAR → MONTHLY CALENDAR first`);
+      return;
+    }
     if (already) {
       setSelectedDates((prev) => prev.filter((x) => x !== d));
       setPendingSlots((prev) => prev.filter((s) => !s.slot_time.startsWith(`${d}T`)));
@@ -598,7 +621,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
         await removeCalendarSlots(selectedDoctor.id, { slot_times: toRemove.map((s) => s.slot_time) });
       }
       if (toAdd.length > 0) {
-        await addCalendarSlots(selectedDoctor.id, { slots: toAdd.map((s) => ({ slot_time: s.slot_time, duration: s.duration, consultation_type: s.consultation_type })) });
+        await addCalendarSlots(selectedDoctor.id, { slots: toAdd.map((s) => ({ slot_time: s.slot_time, duration: s.duration, consultation_type: s.consultation_type })) }, branchId);
       }
       toast.success(`Saved ${toAdd.length} added, ${toRemove.length} removed`);
       setPendingSlots([]);
@@ -920,6 +943,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                     const isFocused = selectedDate === d;
                     const isToday = d === todayStr;
                     const slotCount = countSlotsForDay(day);
+                    const leave = leaveDays[d];
                     return (
                       <button
                         key={day}
@@ -931,7 +955,9 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         // Violet still wins for days picked in this editing session, since
                         // that is what Save Changes is about to act on.
                         className={`h-11 rounded-lg text-sm font-medium relative transition-all ${
-                          isPicked
+                          leave && !isPicked
+                            ? `bg-rose-50 text-rose-400 line-through decoration-rose-300 border border-rose-200${isToday ? " ring-2 ring-rose-200 ring-offset-1" : ""}`
+                            : isPicked
                             ? `bg-violet-600 text-white shadow-sm${isFocused ? " ring-2 ring-violet-300 ring-offset-1" : ""}`
                             : slotCount > 0
                             ? `bg-green-800 text-white shadow-sm hover:bg-green-900${isToday ? " ring-2 ring-green-300 ring-offset-1" : ""}`
@@ -940,7 +966,8 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                             : "text-slate-600 hover:bg-slate-100"
                         }`}
                         title={
-                          dayShifts[d] ? `Works ${labelOf(dayShifts[d])} on this day`
+                          leave ? `Branch leave day${leave.note ? ` — ${leave.note}` : ""}${slotCount > 0 ? ` · ${slotCount} booked slot${slotCount === 1 ? "" : "s"} kept` : ""}`
+                            : dayShifts[d] ? `Works ${labelOf(dayShifts[d])} on this day`
                             : isPicked ? "Click again to deselect"
                             : slotCount > 0 ? `${slotCount} slot${slotCount === 1 ? "" : "s"} open`
                             : undefined
@@ -961,6 +988,12 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                     );
                   })}
                 </div>
+                {Object.keys(leaveDays).length > 0 && (
+                  <p className="mt-2 flex items-center gap-1.5 text-[10px] text-slate-400" data-testid="calendar-leave-legend">
+                    <span className="inline-block h-2.5 w-2.5 rounded border border-rose-200 bg-rose-50" />
+                    Branch leave day — set in CALENDAR → MONTHLY CALENDAR
+                  </p>
+                )}
 
                 {selectedDate && (
                   <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400" data-testid="calendar-day-hint">

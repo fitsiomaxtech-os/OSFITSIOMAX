@@ -6,6 +6,7 @@ from database import v3_col
 from utils import now_iso, normalize_slot_time, slot_capacity_of, MAX_PHYSIO_SLOT_CAPACITY
 from shift_utils import day_windows_of, overrides_of, shift_map, window_of
 from deps import v3_require_roles
+from branch_calendar import is_leave
 from schemas.v3 import (
     V3UserOut, V3DoctorOut,
     V3CalendarSlotsInput, V3RemoveSlotsInput,
@@ -159,10 +160,34 @@ async def set_slot_capacity(
 
 
 @router.post("/doctors/{doctor_id}/calendar-slots")
-async def add_calendar_slots(doctor_id: str, payload: V3CalendarSlotsInput, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
+async def add_calendar_slots(
+    doctor_id: str,
+    payload: V3CalendarSlotsInput,
+    branch_id: Optional[str] = None,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
+
+    # A day the branch is on leave (MANAGEMENT → CALENDAR → MONTHLY CALENDAR) takes no slots.
+    # The branch is the one whose calendar is publishing — passed by the calendar, because a
+    # Consultant's record is branchless — else the expert's own.
+    leave_branch = branch_id or (doctor.get("branch_id") if doctor.get("profile_type") != "head_physio" else None)
+    if leave_branch:
+        branch = await v3_col("branches").find_one(
+            {"id": leave_branch}, {"_id": 0, "holidays": 1, "working_overrides": 1, "weekly_hours": 1, "holiday_notes": 1},
+        )
+        if branch:
+            closed = sorted({
+                s.slot_time[:10] for s in payload.slots
+                if len(s.slot_time or "") >= 10 and is_leave(branch, s.slot_time[:10])
+            })
+            if closed:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"The branch is on leave on {', '.join(closed)} — mark the day Working in Monthly Calendar first",
+                )
 
     existing_slots = set(doctor.get("slots", []))
     existing_details = doctor.get("slot_details", [])

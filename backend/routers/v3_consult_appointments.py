@@ -18,6 +18,7 @@ import uuid
 from database import v3_col
 from utils import now_iso, normalize_slot_time, active_doctor_query
 from deps import v3_require_roles
+from branch_calendar import day_status
 from schemas.v3 import V3UserOut
 
 router = APIRouter(prefix="/api/v3")
@@ -68,18 +69,18 @@ async def _get_doctor(doctor_id: str) -> dict:
 
 
 def _hours_for(branch: dict, date_str: str):
-    """(is_open, open_time, close_time, reason). reason is set only when closed."""
-    if date_str in (branch.get("holidays") or []):
-        return (False, None, None, "This date is a branch holiday")
-    key = _day_key(date_str)
-    if key is None:
+    """(is_open, open_time, close_time, reason). reason is set only when closed.
+
+    Read off branch_calendar.day_status, which the Monthly Calendar writes, so a day marked
+    Leave there is closed here and a normally-closed weekday marked Working is open."""
+    if _day_key(date_str) is None:
         return (False, None, None, "Invalid date")
-    cfg = (branch.get("weekly_hours") or {}).get(key)
-    if cfg is None:
-        return (True, "09:00", "20:00", None)  # no config → default open
-    if cfg.get("is_open") is False:
-        return (False, None, None, "The branch is closed on this day")
-    return (True, cfg.get("open") or "09:00", cfg.get("close") or "20:00", None)
+    day = day_status(branch, date_str)
+    if day["status"] == "leave":
+        if day["source"] == "weekly":
+            return (False, None, None, "The branch is closed on this day")
+        return (False, None, None, "This date is a branch leave day" + (f" ({day['note']})" if day["note"] else ""))
+    return (True, day["open"], day["close"], None)
 
 
 async def _validate_slot(branch: dict, date_str: str, time_str: str, doctor_id: str, exclude_id: Optional[str] = None) -> str:

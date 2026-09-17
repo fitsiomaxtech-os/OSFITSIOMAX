@@ -1,0 +1,174 @@
+import { useCallback, useEffect, useState } from "react";
+import { CalendarCheck, CalendarX, ChevronLeft, ChevronRight, Lock, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/sonner";
+import { getBranchMonthCalendar, setBranchDayStatus } from "@/lib/api";
+import { to12h } from "@/lib/time";
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+const iso = (d) => `${monthKey(d)}-${String(d.getDate()).padStart(2, "0")}`;
+const shortDate = (s) => new Date(`${s}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
+// MANAGEMENT → CALENDAR → MONTHLY CALENDAR. Which days this branch works and which it is on
+// leave, one month at a time.
+//
+// What is set here is what the Consultant and Physiotherapist calendars obey: a Leave day
+// cannot have slots published on it, its open slots are taken off, and the consultation
+// booking popup does not offer it. Changed by the branch's Branch Admin, Super Admin and
+// BDE only — the server says which through `can_edit`, and everyone else sees it read-only.
+export const BranchMonthlyCalendar = ({ branchId }) => {
+  const [month, setMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [picked, setPicked] = useState([]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!branchId) return;
+    setLoading(true);
+    try {
+      setData(await getBranchMonthCalendar(branchId, monthKey(month)));
+    } catch (e) {
+      setData(null);
+      toast.error(e?.response?.data?.detail || "Could not load the monthly calendar");
+    }
+    setLoading(false);
+  }, [branchId, month]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setPicked([]); setNote(""); }, [branchId, month]);
+
+  const canEdit = !!data?.can_edit;
+  const days = data?.days || [];
+  const todayIso = iso(new Date());
+  const leadBlanks = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
+  const workingCount = days.filter((d) => d.status === "working").length;
+  const leaveCount = days.length - workingCount;
+  const monthLabel = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  const shiftMonth = (delta) => setMonth((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1));
+  const toggle = (date) => {
+    if (!canEdit) return;
+    setPicked((p) => (p.includes(date) ? p.filter((x) => x !== date) : [...p, date].sort()));
+  };
+
+  const apply = async (status) => {
+    if (picked.length === 0) return;
+    const label = picked.length === 1 ? shortDate(picked[0]) : `${picked.length} days`;
+    if (status === "leave" && !window.confirm(
+      `Mark ${label} as Leave?\n\nOpen (unbooked) Consultant and Physiotherapist slots on ${picked.length === 1 ? "this day" : "these days"} will be removed, and no new slots or consultations can be booked. Booked slots are kept.`,
+    )) return;
+    setSaving(true);
+    try {
+      const res = await setBranchDayStatus(branchId, picked, status, status === "leave" ? note : undefined);
+      if (status === "leave") {
+        const parts = [`${label} marked Leave`];
+        if (res?.slots_removed) parts.push(`${res.slots_removed} open slot${res.slots_removed === 1 ? "" : "s"} removed`);
+        if (res?.booked_slots_kept) parts.push(`${res.booked_slots_kept} booked slot${res.booked_slots_kept === 1 ? "" : "s"} still need moving`);
+        (res?.booked_slots_kept ? toast.warning : toast.success)(parts.join(" · "));
+      } else {
+        toast.success(`${label} marked Working — publish slots in the Consultant / Physiotherapist Calendar`);
+      }
+      setPicked([]);
+      setNote("");
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not update the calendar");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-4" data-testid="branch-monthly-calendar">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => shiftMonth(-1)} data-testid="mcal-prev"><ChevronLeft className="h-4 w-4" /></Button>
+          <p className="w-40 text-center text-base font-semibold text-slate-700" data-testid="mcal-month">{monthLabel}</p>
+          <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} data-testid="mcal-next"><ChevronRight className="h-4 w-4" /></Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700" data-testid="mcal-working-count">{workingCount} working</span>
+          <span className="rounded-full bg-rose-50 px-2.5 py-1 font-semibold text-rose-600" data-testid="mcal-leave-count">{leaveCount} leave</span>
+          {!canEdit && data && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-500"><Lock className="h-3 w-3" />View only</span>
+          )}
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-500">
+        {canEdit
+          ? "Tap days to select them, then mark them Working or Leave. Leave days are closed on the Consultant and Physiotherapist calendars and for consultation bookings."
+          : "Set by this branch's Branch Admin, Super Admin or BDE. Leave days are closed on the Consultant and Physiotherapist calendars."}
+      </p>
+
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
+          {WEEKDAYS.map((w) => (
+            <div key={w} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">{w}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7">
+          {Array.from({ length: leadBlanks }, (_, i) => <div key={`b-${i}`} className="min-h-[4.5rem] border-b border-r border-slate-100 bg-slate-50/40 sm:min-h-[6rem]" />)}
+          {days.map((day) => {
+            const n = Number(day.date.slice(8));
+            const isLeave = day.status === "leave";
+            const isPicked = picked.includes(day.date);
+            const isToday = day.date === todayIso;
+            const chosen = day.source !== "weekly";
+            return (
+              <button
+                key={day.date}
+                type="button"
+                onClick={() => toggle(day.date)}
+                disabled={!canEdit}
+                title={isLeave ? `Leave${day.note ? ` — ${day.note}` : day.source === "weekly" ? " — weekly off" : ""}` : `Working · ${to12h(day.open)} – ${to12h(day.close)}`}
+                className={`relative flex min-h-[4.5rem] flex-col items-start gap-0.5 border-b border-r border-slate-100 p-1.5 text-left transition sm:min-h-[6rem] sm:p-2 ${
+                  isPicked ? "bg-sky-100 ring-2 ring-inset ring-sky-500"
+                    : isLeave ? "bg-rose-50/70" : "bg-white"
+                } ${canEdit ? "cursor-pointer hover:bg-sky-50" : "cursor-default"}`}
+                data-testid={`mcal-day-${day.date}`}
+              >
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold sm:text-sm ${isToday ? "bg-sky-600 text-white" : isLeave ? "text-rose-600" : "text-slate-700"}`}>{n}</span>
+                <span className={`rounded px-1 py-0.5 text-[9px] font-bold uppercase leading-none sm:text-[10px] ${isLeave ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-700"}`}>
+                  {isLeave ? (day.source === "weekly" ? "Off" : "Leave") : "Working"}
+                </span>
+                {!isLeave && <span className="hidden text-[10px] text-slate-400 sm:block">{to12h(day.open)} – {to12h(day.close)}</span>}
+                {day.note && <span className="line-clamp-2 w-full break-words text-[10px] font-medium text-rose-500">{day.note}</span>}
+                {chosen && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-amber-400" title="Set on this calendar" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded bg-emerald-100" />Working</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded bg-rose-100" />Leave / weekly off</span>
+        <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" />Changed on this calendar</span>
+      </div>
+
+      {loading && <p className="text-center text-xs text-slate-400">Loading…</p>}
+
+      {canEdit && picked.length > 0 && (
+        <div className="sticky bottom-20 z-10 flex flex-col gap-2 rounded-xl border border-sky-200 bg-white p-3 shadow-lg sm:flex-row sm:items-center md:bottom-3" data-testid="mcal-actions">
+          <div className="flex items-center gap-2">
+            <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{picked.length} day{picked.length === 1 ? "" : "s"} selected</span>
+            <button type="button" onClick={() => setPicked([])} className="rounded-full p-1 text-slate-400 hover:bg-slate-100" title="Clear selection" data-testid="mcal-clear"><X className="h-4 w-4" /></button>
+          </div>
+          <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} placeholder="Leave reason (optional), e.g. Diwali" className="h-9 sm:flex-1" data-testid="mcal-note" />
+          <div className="flex gap-2">
+            <Button size="sm" disabled={saving} onClick={() => apply("working")} className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700" data-testid="mcal-mark-working">
+              <CalendarCheck className="mr-1.5 h-4 w-4" />Working
+            </Button>
+            <Button size="sm" disabled={saving} onClick={() => apply("leave")} className="flex-1 bg-rose-600 text-white hover:bg-rose-700" data-testid="mcal-mark-leave">
+              <CalendarX className="mr-1.5 h-4 w-4" />Leave
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

@@ -8,6 +8,7 @@ import logging
 import uuid
 
 from database import v3_col
+from branch_calendar import is_leave
 from utils import now_iso, active_doctor_query
 from deps import (
     v3_require_roles, v3_current_user, is_head_physio_role, consultants_serving_branch,
@@ -1276,6 +1277,14 @@ async def v3_available_experts(
     """
     if not date:
         raise HTTPException(status_code=400, detail="date is required")
+    # Nobody is offered on a day this branch is on leave (Monthly Calendar).
+    leave_branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
+    if leave_branch and is_leave(leave_branch, date):
+        return {
+            "date": date, "time": time, "slot_minutes": None, "branch_id": branch_id,
+            "total_branch_experts": 0, "available_count": 0, "busy_count": 0, "experts": [],
+            "branch_leave": True,
+        }
     # Every consultant record, then narrowed to the ones posted here. Two steps because the
     # answer is not on the record — it is the branch list on the login behind it, and the
     # record itself stays branchless so one person keeps one calendar. See
@@ -1405,6 +1414,11 @@ async def v3_available_dates(
             free = len(_consultant_day(d, day, bookings.get((d["id"], day), []), slot_minutes)["free_slots"])
             if free:
                 dates[day] = dates.get(day, 0) + free
+    # A day this branch is on leave (Monthly Calendar) is not offered, even where a
+    # Consultant shared with another branch still has hours published on it.
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
+    if branch:
+        dates = {day: n for day, n in dates.items() if not is_leave(branch, day)}
     return {"month": month, "branch_id": branch_id, "dates": dates}
 
 

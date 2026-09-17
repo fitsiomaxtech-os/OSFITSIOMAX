@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, User, X, Pencil } from "lucide-react";
+import { Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, Clock, User, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { BranchMonthlyCalendar } from "@/components/branch/BranchMonthlyCalendar";
 
 // weekly_hours is keyed mon..sun; JS getDay() is 0=Sun..6=Sat.
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -42,7 +43,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const [monthDate, setMonthDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
   const [stripStart, setStripStart] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() - MONTH_STRIP_LEAD, 1); });
   const [loading, setLoading] = useState(false);
-  const [subTab, setSubTab] = useState("schedule");
+  const [subTab, setSubTab] = useState("monthly");
 
   // Booking / edit modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -241,6 +242,11 @@ export const BranchCalendarPanel = ({ branchId }) => {
     <div className="space-y-4" data-testid="branch-calendar-panel">
       {/* Sub-tabs */}
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="cal-subtabs">
+        {/* First, because it is the setting the rest of this panel and the Consultant and
+            Physiotherapist calendars obey: which days the branch works at all. */}
+        <button type="button" onClick={() => setSubTab("monthly")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "monthly" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-monthly">
+          <CalendarDays className="h-4 w-4" />Monthly Calendar
+        </button>
         <button type="button" onClick={() => setSubTab("schedule")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "schedule" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-schedule">
           <CalendarIcon className="h-4 w-4" />Calendar by Booked Lists
         </button>
@@ -248,6 +254,8 @@ export const BranchCalendarPanel = ({ branchId }) => {
           <Clock className="h-4 w-4" />Upcoming Appointments
         </button>
       </div>
+
+      {subTab === "monthly" && <BranchMonthlyCalendar branchId={branchId} />}
 
       {subTab === "schedule" && (
       <>

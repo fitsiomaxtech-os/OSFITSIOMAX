@@ -410,7 +410,10 @@ export const openLeadDocument = async (leadId, docId) => {
   const res = await api.get(`/leads/${leadId}/documents/${docId}/download`, { responseType: "blob" });
   return URL.createObjectURL(res.data);
 };
-export const addCalendarSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/calendar-slots`, payload)).data;
+export const addCalendarSlots = async (doctorId, payload, branchId) => (await api.post(`/doctors/${doctorId}/calendar-slots`, payload, { params: branchId ? { branch_id: branchId } : {} })).data;
+// MANAGEMENT → CALENDAR → MONTHLY CALENDAR: which days a branch works and which it is on leave.
+export const getBranchMonthCalendar = async (branchId, month) => (await api.get(`/branches/${branchId}/month-calendar`, { params: { month } })).data;
+export const setBranchDayStatus = async (branchId, dates, status, note) => (await api.put(`/branches/${branchId}/month-calendar`, { dates, status, note })).data;
 export const removeCalendarSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/remove-slots`, payload)).data;
 
 export const getBranchFinance = async (params = {}) => {
