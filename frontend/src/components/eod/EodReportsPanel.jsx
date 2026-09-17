@@ -9,8 +9,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertOctagon, Building2, Check, ChevronDown, ChevronUp, ClipboardList, HeartPulse, RefreshCw, Search, Stethoscope } from "lucide-react";
+import { AlertOctagon, ArrowRight, Building2, Check, ChevronDown, ClipboardList, HeartPulse, RefreshCw, Search, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/components/ui/sonner";
@@ -52,6 +53,15 @@ const VIEWS = [
 ];
 
 const countLabel = (kind) => (kind === "consultant" ? "Consultations" : "Treatments");
+const kindLabel = (kind) => (kind === "consultant" ? "Consultant" : "Physio");
+const TABLE_HEADERS = ["Name", "Short Report", "Staff Type", "Branch", "Date", "Submitted Time", "Action"];
+// One line for the table: what they wrote about the day, else who they saw.
+const shortReport = (r) => {
+  const summary = String(r.summary || "").trim();
+  if (summary) return summary;
+  const names = (r.entries || []).map((e) => e.client_name).filter(Boolean);
+  return names.length ? names.join(", ") : "—";
+};
 const prettyTime = (stamp) => {
   if (!stamp) return "";
   const d = new Date(stamp);
@@ -125,6 +135,7 @@ export const EodReportsPanel = () => {
   // period's rows are already on screen, and the four figures follow the same filter.
   const [branchId, setBranchId] = useState("");
   const [branches, setBranches] = useState([]);
+  // The report shown in the popup.
   const [open, setOpen] = useState(null);
   // The moment the presets are measured from, moved on by Refresh -- so a tab left open
   // past midnight asks for the new Today rather than the day it was opened on.
@@ -284,48 +295,123 @@ export const EodReportsPanel = () => {
         ) : reports.length === 0 ? (
           <p className="mt-3 rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No EOD reports for this period.</p>
         ) : (
-          <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200" data-testid="eod-report-list">
-            {reports.map((r) => (
-              <li key={r.id} data-testid={`eod-report-${r.id}`}>
-                <button type="button" onClick={() => setOpen(open === r.id ? null : r.id)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left hover:bg-slate-50">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-slate-800">{r.user_name}</span>
-                    <span className="block truncate text-[11px] text-slate-500">
-                      {[roleLabel(r.role), r.branch_name, !singleDay && prettyDay(r.date), prettyTime(r.updated_at) && `Submitted ${prettyTime(r.updated_at)}`].filter(Boolean).join(" · ")}
-                    </span>
+          <>
+            {/* Phones: one card per report. */}
+            <div className="mt-3 space-y-2 sm:hidden" data-testid="eod-report-list-mobile">
+              {reports.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setOpen(r)}
+                  className="block w-full rounded-lg border border-slate-200 bg-white p-3 text-left text-sm hover:bg-slate-50"
+                >
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 truncate font-semibold text-slate-800">{r.user_name}</span>
+                    <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" />
                   </span>
-                  <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-bold ${r.kind === "consultant" ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700"}`}>
-                    {countLabel(r.kind)}: {r.count}
+                  <span className="mt-1 block truncate text-xs text-slate-600">{shortReport(r)}</span>
+                  <span className="mt-1 block text-[11px] text-slate-500">
+                    {[kindLabel(r.kind), r.branch_name, prettyDay(r.date), prettyTime(r.updated_at)].filter(Boolean).join(" · ")}
                   </span>
-                  {open === r.id ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
                 </button>
-                {open === r.id && (
-                  <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-3">
-                    {r.entries?.length > 0 ? (
-                      <ol className="space-y-1.5">
-                        {r.entries.map((e, i) => (
-                          <li key={i} className="text-sm text-slate-700">
-                            <span className="font-medium">{i + 1}. {e.client_name}</span>
-                            {e.notes && <span className="block pl-4 text-xs text-slate-500">{e.notes}</span>}
-                          </li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <p className="text-xs text-slate-400">No clients listed.</p>
-                    )}
-                    {r.summary && (
-                      <div className="mt-3">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">About the day</p>
-                        <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">{r.summary}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+              ))}
+            </div>
+
+            <div className="mt-3 hidden overflow-hidden rounded-lg border border-slate-200 bg-white sm:block" data-testid="eod-report-list">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px] text-sm">
+                  <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                    <tr>
+                      {TABLE_HEADERS.map((h) => (
+                        <th key={h} className={`px-4 py-2.5 font-semibold ${h === "Action" ? "text-right" : ""}`}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {reports.map((r) => (
+                      <tr key={r.id} onClick={() => setOpen(r)} className="cursor-pointer hover:bg-slate-50" data-testid={`eod-report-${r.id}`}>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-slate-800">{r.user_name || "—"}</p>
+                          {r.role && <p className="truncate text-[11px] text-slate-400">{roleLabel(r.role)}</p>}
+                        </td>
+                        <td className="max-w-[280px] px-4 py-3 text-slate-600">
+                          <p className="truncate">{shortReport(r)}</p>
+                          <p className="text-[11px] text-slate-400">{countLabel(r.kind)}: {r.count}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded px-2 py-0.5 text-xs font-bold ${r.kind === "consultant" ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700"}`}>
+                            {kindLabel(r.kind)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{r.branch_name || "—"}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">{prettyDay(r.date) || "—"}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">{prettyTime(r.updated_at) || "—"}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setOpen(r); }}
+                            title="View report"
+                            aria-label="View report"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
+                            data-testid={`eod-report-view-${r.id}`}
+                          >
+                            <ArrowRight className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
         )}
       </div>
+
+      <Dialog open={!!open} onOpenChange={(v) => { if (!v) setOpen(null); }}>
+        <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto" data-testid="eod-report-detail">
+          {open && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{open.user_name}</DialogTitle>
+                <DialogDescription>{[roleLabel(open.role), open.branch_name].filter(Boolean).join(" · ")}</DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                {[
+                  ["Staff Type", kindLabel(open.kind)],
+                  ["Date", prettyDay(open.date)],
+                  ["Submitted", prettyTime(open.updated_at)],
+                  [countLabel(open.kind), String(open.count ?? 0)],
+                ].map(([k, v]) => (
+                  <div key={k} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{k}</p>
+                    <p className="font-medium text-slate-800">{v || "—"}</p>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{open.kind === "consultant" ? "Consultations" : "Clients treated"}</p>
+                {open.entries?.length > 0 ? (
+                  <ol className="mt-1.5 space-y-1.5">
+                    {open.entries.map((e, i) => (
+                      <li key={i} className="rounded-md border border-slate-100 px-2.5 py-1.5 text-sm text-slate-700">
+                        <span className="font-medium">{i + 1}. {e.client_name}</span>
+                        {e.notes && <span className="mt-0.5 block whitespace-pre-wrap pl-4 text-xs text-slate-500">{e.notes}</span>}
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-400">No clients listed.</p>
+                )}
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">About the day</p>
+                <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">{open.summary || "—"}</p>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
