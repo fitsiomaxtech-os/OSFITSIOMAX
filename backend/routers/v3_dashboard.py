@@ -97,7 +97,10 @@ async def v3_bd_summary(
     total_appointments = await v3_col("appointments").count_documents(appt_match)
     completed_appointments = await v3_col("appointments").count_documents({**appt_match, "status": "completed"})
     total_branches = await v3_col("branches").count_documents(live_branch_query())
-    total_connections = await v3_col("sheet_connections").count_documents({})
+    # Lead Sources (marketing_sources) is where sheets are actually connected now. The old
+    # sheet_connections collection is only written by the API test suite, so counting it
+    # showed ~20 "connected sheets" against the 9 cards on Marketing > Lead Sources.
+    total_connections = await v3_col("marketing_sources").count_documents(LIVE_SOURCE_QUERY)
 
     recent_leads = await v3_col("leads").find(lead_match, {"_id": 0}).sort("created_at", -1).to_list(10)
     recent_out = [V3LeadOut(**r) for r in recent_leads]
@@ -194,6 +197,9 @@ async def v3_bd_summary(
 # `kind` tells the caller which shape came back -- one of "lead", "appointment", "branch"
 # or "connection" -- because the four carry different columns. The caller owns the column
 # set; this owns which rows belong to which card.
+# A Lead Source card that is still on the Active tab of Marketing > Lead Sources.
+LIVE_SOURCE_QUERY = {"is_archived": {"$ne": True}}
+
 BD_ROW_METRICS = {
     "total", "today", "followup", "appointments",
     "converted", "revenue", "conversion", "branches", "sheets",
@@ -332,12 +338,24 @@ async def v3_bd_summary_rows(
         return {"metric": metric, "kind": "branch", "total": total, "rows": rows}
 
     # metric == "sheets"
-    total = await v3_col("sheet_connections").count_documents({})
-    rows = await v3_col("sheet_connections").find(
-        {},
-        {"_id": 0, "id": 1, "connection_name": 1, "spreadsheet_id": 1,
-         "sync_interval_minutes": 1, "last_synced_at": 1, "created_at": 1},
+    total = await v3_col("marketing_sources").count_documents(LIVE_SOURCE_QUERY)
+    sources = await v3_col("marketing_sources").find(
+        LIVE_SOURCE_QUERY,
+        {"_id": 0, "id": 1, "name": 1, "spreadsheet_id": 1, "auto_sync_enabled": 1,
+         "auto_sync_interval_minutes": 1, "last_synced": 1, "created_at": 1},
     ).sort("created_at", -1).to_list(BD_ROWS_LIMIT)
+    # Same column keys the drill table already reads.
+    rows = [
+        {
+            "id": s.get("id"),
+            "connection_name": s.get("name"),
+            "spreadsheet_id": s.get("spreadsheet_id"),
+            "sync_interval_minutes": s.get("auto_sync_interval_minutes") if s.get("auto_sync_enabled") else None,
+            "last_synced_at": s.get("last_synced"),
+            "created_at": s.get("created_at"),
+        }
+        for s in sources
+    ]
     return {"metric": metric, "kind": "connection", "total": total, "rows": rows}
 
 

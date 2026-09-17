@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FileSpreadsheet, Users,
-  Plus, RefreshCw, Archive, ArchiveRestore, Link as LinkIcon, ArrowRightLeft, X, Pencil,
+  Plus, RefreshCw, Archive, ArchiveRestore, Link as LinkIcon, ArrowRightLeft, X, Pencil, Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
   mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkUnassignedCount, mkDistributeUnassigned,
   mkGetTeam, mkCreateTeamMember,
-  mkGetSources, mkLeadFieldCatalogue, gsSheetHeaders, leadFieldsCreate, mkCreateSource, mkUpdateSource, mkSyncSource,
+  mkGetSources, mkLeadFieldCatalogue, gsSheetHeaders, leadFieldsCreate, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull, gsListTabs,
   getBranches,
 } from "@/lib/api";
@@ -202,6 +202,21 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
     load();
   };
 
+  // Only offered on the Archived tab. Removes the card and its sheet link/mapping; leads
+  // it already imported stay where they are.
+  const deleteSource = async (s) => {
+    if (!window.confirm(`Permanently delete "${s.name}"?
+
+Its Google Sheet link and column mapping are removed and cannot be restored. Leads it already imported are kept.`)) return;
+    try {
+      await mkDeleteSource(s.id);
+      toast.success("Source deleted");
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Delete failed");
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="mk-sources-tab">
       <Card data-testid="gs-bar" className="border-slate-200 bg-white">
@@ -326,6 +341,11 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
                 <Button size="sm" variant="outline" onClick={() => setShowSync(s)} data-testid={`mk-source-sync-${s.id}`}><RefreshCw className="mr-1 h-3 w-3" />Manual Sync (JSON)</Button>
                 <Button size="sm" variant="outline" onClick={() => setShowMap(s)} data-testid={`mk-source-map-${s.id}`}>Edit Mapping</Button>
                 <Button size="sm" variant="outline" onClick={() => toggleActive(s)} data-testid={`mk-source-toggle-${s.id}`}>{s.is_active ? "Deactivate" : "Activate"}</Button>
+                {s.is_archived && (
+                  <Button size="sm" variant="outline" onClick={() => deleteSource(s)} className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700" data-testid={`mk-source-delete-${s.id}`}>
+                    <Trash2 className="mr-1 h-3 w-3" />Delete Permanently
+                  </Button>
+                )}
               </div>
               {pullResult && pullResult.source.id === s.id && (
                 <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-800" data-testid={`gs-pull-result-${s.id}`}>
