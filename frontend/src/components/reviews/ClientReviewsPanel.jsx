@@ -38,18 +38,25 @@ export const StarRow = ({ value, size = "h-4 w-4" }) => (
   </span>
 );
 
-const STAR_FILTERS = [
-  { key: "", label: "All ratings" },
-  { key: "high", label: "4–5 stars" },
-  { key: "mid", label: "3 stars" },
-  { key: "low", label: "1–2 stars" },
-];
+// The date pills in the bar. "All" is null, the same as a cleared Date Filter; anything
+// else is the { key, label, from, to } the Date Filter itself hands back, so the pills and
+// its dialog share one piece of state. The week runs Monday to Sunday, as on the Zumba board.
+const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
+const endOfDay = (d) => { const n = new Date(d); n.setHours(23, 59, 59, 999); return n; };
+const shiftDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 
-const inBucket = (r, key) => {
-  if (!key) return true;
-  const w = r.rating || 0;
-  return key === "high" ? w >= 4 : key === "mid" ? w === 3 : w <= 2;
-};
+const DATE_PRESETS = [
+  { key: "all", label: "All", range: () => null },
+  { key: "today", label: "Today", range: (t) => ({ from: startOfDay(t), to: endOfDay(t) }) },
+  { key: "yesterday", label: "Yesterday", range: (t) => ({ from: startOfDay(shiftDays(t, -1)), to: endOfDay(shiftDays(t, -1)) }) },
+  { key: "this_week", label: "This Week", range: (t) => { const m = shiftDays(startOfDay(t), -((t.getDay() + 6) % 7)); return { from: m, to: endOfDay(shiftDays(m, 6)) }; } },
+  { key: "this_month", label: "This Month", range: (t) => ({ from: new Date(t.getFullYear(), t.getMonth(), 1), to: endOfDay(new Date(t.getFullYear(), t.getMonth() + 1, 0)) }) },
+  { key: "last_month", label: "Last Month", range: (t) => ({ from: new Date(t.getFullYear(), t.getMonth() - 1, 1), to: endOfDay(new Date(t.getFullYear(), t.getMonth(), 0)) }) },
+];
+const presetFilter = (p) => { const r = p.range(new Date()); return r ? { key: p.key, label: p.label, ...r } : null; };
+// Keys the Date Filter dialog also uses (today, this_month...) count as pills only when the
+// pill row has one, so a dialog pick lights its pill rather than the calendar button.
+const presetKey = (f) => (!f ? "all" : DATE_PRESETS.some((p) => p.key === f.key) ? f.key : null);
 
 const KINDS = [
   { key: "consultant", label: "Consultant Review", person: "Consultant" },
@@ -376,7 +383,6 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
   const [branch, setBranch] = useState("");
   // Consultant Review is the tab a review of a consultant lands in, and the one that opens.
   const [kind, setKind] = useState("consultant");
-  const [bucket, setBucket] = useState("");
   // Set only by the tiles: where the review came from (see TILES).
   const [source, setSource] = useState("");
   const [person, setPerson] = useState("");
@@ -404,12 +410,12 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
   const reviews = useMemo(() => data[kind] || [], [data, kind]);
   const q = search.trim().toLowerCase();
 
-  // The tiles and the people card count what the bar leaves (branch, stars, search, date),
+  // The tiles and the people card count what the bar leaves (branch, search, date),
   // but not the tile filter itself: a tile that zeroes the other three when pressed leaves
   // nothing to press next.
   const base = useMemo(
-    () => reviews.filter((r) => inBucket(r, bucket) && matchesSearch(r, q) && inDates(r, dateFilter)),
-    [reviews, bucket, q, dateFilter],
+    () => reviews.filter((r) => matchesSearch(r, q) && inDates(r, dateFilter)),
+    [reviews, q, dateFilter],
   );
   const inPerson = useMemo(() => (person ? base.filter((r) => (r.person_name || "") === person) : base), [base, person]);
   const shown = useMemo(() => inPerson.filter((r) => inSource(r, source)), [inPerson, source]);
@@ -439,8 +445,8 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
       .sort((a, b) => (b.average || 0) - (a.average || 0) || b.count - a.count || a.name.localeCompare(b.name));
   }, [base]);
 
-  const filtered = Boolean(bucket || source || person || q || dateFilter);
-  const clearFilters = () => { setBucket(""); setSource(""); setPerson(""); setSearch(""); setDateFilter(null); };
+  const filtered = Boolean(source || person || q || dateFilter);
+  const clearFilters = () => { setSource(""); setPerson(""); setSearch(""); setDateFilter(null); };
   // Consultants and physios are different people with different tiles, so neither carries across.
   const switchKind = (key) => { setKind(key); setPerson(""); setSource(""); };
 
@@ -466,27 +472,35 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
           {!branchId && (
             <BranchFilter branches={branches} value={branch} onChange={setBranch} />
           )}
-          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" data-testid="client-reviews-stars">
-            {STAR_FILTERS.map((f) => (
-              <button
-                key={f.key || "all"}
-                type="button"
-                onClick={() => setBucket(f.key)}
-                className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${bucket === f.key ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
-                data-testid={`client-reviews-stars-${f.key || "all"}`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
           <div className="relative min-w-[180px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search client, ${meta.person.toLowerCase()}...`} className="h-9 pl-9" data-testid="client-reviews-search" />
           </div>
-          {/* The shared Date Filter, pinned to the bar's height from out here rather than by
-              a prop on a control other boards share. Filters on the day the review was given. */}
-          <span className="[&>div>button]:h-9">
-            <DateFilterPopover value={dateFilter} onChange={setDateFilter} centered testid="client-reviews-date" />
+          {/* Filters on the day the review was given. */}
+          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" data-testid="client-reviews-dates">
+            {DATE_PRESETS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => setDateFilter(presetFilter(p))}
+                className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${presetKey(dateFilter) === p.key ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+                data-testid={`client-reviews-date-${p.key}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {/* The shared Date Filter, as the calendar icon for an exact day or a range. Handed
+              null while a pill is lit so it does not echo the pill beside it, and pinned to
+              the bar's height from out here rather than by a prop other boards share. */}
+          <span className="[&>div>button]:h-9 [&>div>button:first-child]:min-w-9">
+            <DateFilterPopover
+              value={presetKey(dateFilter) ? null : dateFilter}
+              onChange={setDateFilter}
+              centered
+              iconOnly
+              testid="client-reviews-date"
+            />
           </span>
           <Button
             onClick={load}
