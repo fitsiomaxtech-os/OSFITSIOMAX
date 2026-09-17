@@ -609,24 +609,8 @@ export const AttendanceTab = () => {
         <Stat label="On Permission" value={tiles.on_permission ?? 0} tone="text-sky-600" testid="hr-att-k-permission" />
       </div>
 
-      {/* Work from Home is read off the person, not the day: Online vs Offline is the only
-          thing the OS records about where somebody works, and nothing marks it per-day. */}
-      <p className="text-[11px] text-slate-400" data-testid="hr-att-wfh-note">
-        Work from Home counts the people whose work mode is Online — set on the employee record, not per day.
-      </p>
-
       {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
-              Employee Attendance — {data?.label || ""}
-            </CardTitle>
-            <p className="text-xs text-slate-500">
-              {single
-                ? "Times are what each person pressed on their own clock. Open a row to see their breaks, or to overrule the day."
-                : `${data?.days_in_span || 0} days. Hours are the total each person was on the clock across the span.`}
-            </p>
-          </CardHeader>
+        <Card className="overflow-hidden">
           <CardContent className="p-0">
             <div className="overflow-auto">
               <table className="min-w-full text-sm">
