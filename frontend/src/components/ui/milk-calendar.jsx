@@ -178,7 +178,7 @@ export const CenteredPicker = ({ title, onClose, testid, children }) => (
 export const MilkDateInput = ({
   value, onChange, min, max, disabled, className = "", accent = "amber",
   placeholder = "Select date", centered = false, title = "Select Date", iconOnly = false,
-  confirm = false, ...rest
+  confirm = false, iconLeft = false, ...rest
 }) => {
   const [open, setOpen] = useState(false);
   // With `confirm`, a tapped day is only a draft until Confirm is pressed — a date that
@@ -211,12 +211,14 @@ export const MilkDateInput = ({
         onClick={() => setOpen((o) => !o)}
         className={iconOnly
           ? `flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input bg-transparent shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${className}`
-          : `flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${value ? "text-slate-800" : "text-muted-foreground"} ${className}`}
+          : `flex h-9 w-full items-center ${iconLeft ? "justify-start" : "justify-between"} gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${value ? "text-slate-800" : "text-muted-foreground"} ${className}`}
         aria-label={iconOnly ? title : undefined}
         {...rest}
       >
+        {/* `iconLeft` puts the glyph before the date instead of after it. */}
+        {iconLeft && !iconOnly && <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />}
         {!iconOnly && <span className="truncate">{label}</span>}
-        <CalendarDays className={`h-4 w-4 shrink-0 ${iconOnly && value ? "text-sky-600" : "text-slate-400"}`} />
+        {(iconOnly || !iconLeft) && <CalendarDays className={`h-4 w-4 shrink-0 ${iconOnly && value ? "text-sky-600" : "text-slate-400"}`} />}
       </button>
 
       {/* `centered` opens the calendar as a normal dialog in the middle of the screen

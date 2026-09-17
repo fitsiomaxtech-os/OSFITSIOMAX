@@ -514,27 +514,8 @@ export const AttendanceTab = () => {
     };
   }, [filtered, k, shown, single]);
 
-  const exportCsv = () => {
-    // The same columns the table shows, so a spreadsheet of this and a screenshot of it
-    // do not carry different figures.
-    const head = single
-      ? ["Employee", "Code", "Department", "Designation", "Branch", "Status", "Check in", "Check out", "Worked hours", "Break minutes", "Breaks", "Permission minutes", "Permission hours"]
-      : ["Employee", "Code", "Department", "Designation", "Branch", "Days present", "Days away", "Worked hours", "Break minutes", "Breaks", "Permission minutes", "Permission days"];
-    downloadCsv([
-      head,
-      ...shown.map((r) => (single
-        ? [r.full_name, r.employee_code, r.department, r.designation, r.branch_name,
-           (BOARD_STATUS[r.status] || {}).label || r.status, r.check_in, r.check_out,
-           (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count,
-           r.permission_minutes || 0,
-           r.permission ? `${r.permission.from} to ${r.permission.to}` : ""]
-        : [r.full_name, r.employee_code, r.department, r.designation, r.branch_name,
-           r.present_days, r.away_days,
-           (r.worked_minutes / 60).toFixed(2), r.break_minutes, r.break_count,
-           r.permission_minutes || 0, r.permission_days || 0])),
-    ], `attendance-${data?.from || ""}${single ? "" : `_to_${data?.to || ""}`}.csv`);
-  };
-
+  // Period, date, filters and Refresh share one row; it wraps only when the screen is too
+  // narrow to hold them.
   return (
     <div className="space-y-4" data-testid="hr-attendance-tab">
       <Card>
@@ -542,18 +523,18 @@ export const AttendanceTab = () => {
           <PeriodPicker value={period} onChange={setPeriod} testid="hr-att-period" />
 
           {period === "day" && (
-            <div className="w-[190px]">
-              <MilkDateInput value={day} max={data?.today || todayIso()} accent="sky" onChange={(e) => setDay(e.target.value)} data-testid="hr-att-date" />
+            <div className="w-[170px]">
+              <MilkDateInput value={day} max={data?.today || todayIso()} accent="sky" iconLeft onChange={(e) => setDay(e.target.value)} data-testid="hr-att-date" />
             </div>
           )}
           {period === "range" && (
             <div className="flex items-center gap-2">
-              <div className="w-[170px]">
-                <MilkDateInput value={from} max={data?.today || todayIso()} accent="sky" onChange={(e) => setFrom(e.target.value)} data-testid="hr-att-from" />
+              <div className="w-[160px]">
+                <MilkDateInput value={from} max={data?.today || todayIso()} accent="sky" iconLeft onChange={(e) => setFrom(e.target.value)} data-testid="hr-att-from" />
               </div>
               <span className="text-xs text-slate-400">to</span>
-              <div className="w-[170px]">
-                <MilkDateInput value={to} min={from} max={data?.today || todayIso()} accent="sky" onChange={(e) => setTo(e.target.value)} data-testid="hr-att-to" />
+              <div className="w-[160px]">
+                <MilkDateInput value={to} min={from} max={data?.today || todayIso()} accent="sky" iconLeft onChange={(e) => setTo(e.target.value)} data-testid="hr-att-to" />
               </div>
             </div>
           )}
@@ -594,17 +575,6 @@ export const AttendanceTab = () => {
             </div>
           )}
 
-          <Button variant="outline" size="sm" onClick={() => load(params)} disabled={loading} data-testid="hr-att-refresh">
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
-          </Button>
-
-          <div className="ml-auto">
-            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!shown.length} data-testid="hr-att-csv">
-              <Download className="h-4 w-4" />CSV
-            </Button>
-          </div>
-        </CardContent>
-        <CardContent className="border-t border-slate-100 p-3 pt-3">
           <RosterFilterBar
             rows={rows}
             filters={filters}
@@ -613,6 +583,16 @@ export const AttendanceTab = () => {
             total={rows.length}
             testid="hr-att-filters"
           />
+
+          <Button
+            size="sm"
+            onClick={() => load(params)}
+            disabled={loading}
+            className="ml-auto border border-slate-200 bg-slate-100 text-slate-700 shadow-none hover:bg-slate-200"
+            data-testid="hr-att-refresh"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
+          </Button>
         </CardContent>
       </Card>
 
