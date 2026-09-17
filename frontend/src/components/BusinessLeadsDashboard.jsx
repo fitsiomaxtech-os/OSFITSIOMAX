@@ -81,7 +81,6 @@ import { BREAKDOWN_MODES, BdMarketingSources } from "@/components/BdMarketingSou
 // Dashboard, which is the tab it opens on and the only one most days need.
 const FinanceWiseBoard = lazy(() => import("@/components/branch/FinanceWiseBoard").then((m) => ({ default: m.FinanceWiseBoard })));
 const HRBoard = lazy(() => import("@/components/hr/HRBoard").then((m) => ({ default: m.HRBoard })));
-const ClientReviewsPanel = lazy(() => import("@/components/reviews/ClientReviewsPanel").then((m) => ({ default: m.ClientReviewsPanel })));
 const PackagesBoard = lazy(() => import("@/components/PackagesBoard").then((m) => ({ default: m.PackagesBoard })));
 const MarketingBoard = lazy(() => import("@/components/marketing/MarketingBoard").then((m) => ({ default: m.MarketingBoard })));
 const PipelineStageManagement = lazy(() => import("@/components/PipelineStageManagement").then((m) => ({ default: m.PipelineStageManagement })));
@@ -131,11 +130,6 @@ const TABS = [
   { key: "sales_view", label: "Sales View", icon: Headphones },
   { key: "finance", label: "Finance", icon: BadgeIndianRupee },
   { key: "hr", label: "HR Admin", icon: Users },
-  // The stars clients give their Consultant and their Physio, across every branch. The
-  // same panel HR Admin carries as a sub-tab and Branch Admin has for its own branch —
-  // a tab of its own here because this desk reads them as a figure on the company, not
-  // as one of HR's eight screens.
-  { key: "client_reviews", label: "Review", icon: Star },
   // Treatments and Physiotherapy Treatment are sub-tabs inside it, not peers of it --
   // the same shape Super Admin's own copy has.
   { key: "packages", label: "Services and Products", icon: Store },
@@ -168,7 +162,7 @@ const isTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.incl
 // Where the strip's own Refresh is not drawn -- see the note on the button itself. Dashboard
 // because its toolbar carries the same one, and the three mounted boards because each
 // carries its own and this one would not touch what they show.
-const REFRESH_WITHHELD_TABS = ["dashboard", "finance", "hr", "client_reviews", "packages"];
+const REFRESH_WITHHELD_TABS = ["dashboard", "finance", "hr", "packages"];
 
 function formatMoney(v) {
   const n = Number(v || 0);
@@ -463,12 +457,6 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
 
         {activeTab === "hr" && (
           <HRBoard />
-        )}
-
-        {/* Every branch, since nothing narrows it: the server hands this desk the company,
-            exactly as it does Super Admin. */}
-        {activeTab === "client_reviews" && (
-          <ClientReviewsPanel />
         )}
 
         {activeTab === "packages" && (
