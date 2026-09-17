@@ -204,6 +204,14 @@ const CONSULTATION_ADDONS = [
   { key: "zumba", label: "Zumba", tone: "#db2777", icon: Music2 },
 ];
 
+// How the Services column is headed up on the Move to Admin form. Every key in
+// CONSULTATION_ADDONS belongs to exactly one group, and the groups keep the shelf's order.
+const CONSULTATION_ADDON_GROUPS = [
+  { label: "Treatments", keys: ["treatment", "diet"] },
+  { label: "Long Term", keys: ["rehab", "fitness"] },
+  { label: "Others", keys: ["zumba"] },
+];
+
 /**
  * The services that run long term, and the only two a long-term note can be written on.
  *
@@ -7463,27 +7471,34 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         {/* A column rather than the row of five this was, so each service
                             lines up with its own answer opposite and the words are never
                             squeezed to a fifth of half the panel. */}
-                        <div className="space-y-1.5" data-testid="cons-decision-plan-options">
-                          {CONSULTATION_ADDONS.map((p) => {
-                            const selected = !!decisionDraft[p.key];
-                            const Icon = p.icon;
-                            return (
-                              <button
-                                key={p.key}
-                                type="button"
-                                onClick={() => pickAddon(p.key)}
-                                className="flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold transition hover:brightness-95"
-                                style={selected
-                                  ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
-                                  : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
-                                data-testid={`cons-decision-plan-${p.key}`}
-                              >
-                                <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
-                                <span className="truncate">{p.label}</span>
-                                {selected && <CheckCircle2 aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0" />}
-                              </button>
-                            );
-                          })}
+                        <div className="space-y-2.5" data-testid="cons-decision-plan-options">
+                          {CONSULTATION_ADDON_GROUPS.map((g) => (
+                            <div key={g.label} data-testid={`cons-decision-plan-group-${g.keys[0]}`}>
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{g.label}</p>
+                              <div className="space-y-1.5">
+                                {CONSULTATION_ADDONS.filter((p) => g.keys.includes(p.key)).map((p) => {
+                                  const selected = !!decisionDraft[p.key];
+                                  const Icon = p.icon;
+                                  return (
+                                    <button
+                                      key={p.key}
+                                      type="button"
+                                      onClick={() => pickAddon(p.key)}
+                                      className="flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold transition hover:brightness-95"
+                                      style={selected
+                                        ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
+                                        : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
+                                      data-testid={`cons-decision-plan-${p.key}`}
+                                    >
+                                      <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                                      <span className="truncate">{p.label}</span>
+                                      {selected && <CheckCircle2 aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
 
