@@ -537,8 +537,6 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
       .sort((a, b) => (b.average || 0) - (a.average || 0) || b.count - a.count || a.name.localeCompare(b.name));
   }, [base]);
 
-  const filtered = Boolean(source || person || q || dateFilter);
-  const clearFilters = () => { setSource(""); setPerson(""); setSearch(""); setDateFilter(null); };
   // Consultants and physios are different people with different tiles, so neither carries across.
   const switchKind = (key) => { setKind(key); setPerson(""); setSource(""); };
 
@@ -624,32 +622,13 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
         ))}
       </div>
 
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-          <p className="text-sm font-semibold text-slate-700">
-            Reviews <span className="ml-1 font-normal text-slate-400">{shown.length} of {reviews.length}</span>
-          </p>
-          {filtered && (
-            <button type="button" onClick={clearFilters} className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800" data-testid="client-reviews-clear">
-              <X className="h-3.5 w-3.5" />Clear filters
-            </button>
-          )}
-        </div>
-        <ReviewList
-          rows={shown}
-          meta={meta}
-          loading={loading && !reviews.length}
-          empty={reviews.length ? "No reviews match these filters." : `No ${meta.label.toLowerCase()}s yet.`}
-          onOpen={setOpen}
-        />
-      </div>
-
-      <p className="text-[11px] text-slate-400">
-        {kind === "consultant"
-          ? "Clients review their consultant from the Review button on each completed 7-day Review (optional), or any time from the Feedback tab."
-          : "Clients must review every completed physio session, treatment or rehab, from its Review button in Sessions, or any time from the Feedback tab."}
-        {" "}Only Super Admin, BDE and Branch Admin can read these.
-      </p>
+      <ReviewList
+        rows={shown}
+        meta={meta}
+        loading={loading && !reviews.length}
+        empty={reviews.length ? "No reviews match these filters." : `No ${meta.label.toLowerCase()}s yet.`}
+        onOpen={setOpen}
+      />
 
       <ReviewDetail review={open} meta={meta} onClose={() => setOpen(null)} />
     </div>
