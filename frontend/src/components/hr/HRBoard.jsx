@@ -20,6 +20,7 @@ import { ROLE_META, roleLabel, roleClasses, setCustomRoleClasses } from "@/lib/r
 import { AttendanceTab, PayrollTab, ApprovalsTab, QuotesTab } from "@/components/hr/HROpsTabs";
 import { ClientReviewsPanel } from "@/components/reviews/ClientReviewsPanel";
 import { EodReportsPanel } from "@/components/eod/EodReportsPanel";
+import { PerformancePanel } from "@/components/hr/PerformancePanel";
 // The HR figure tile, shared with the EOD Report tab — see components/ui/kpi-card.jsx.
 import { KPI } from "@/components/ui/kpi-card";
 
@@ -72,24 +73,13 @@ const StaffTab = ({ isSuperAdmin, sub, onSubChange }) => {
     <div className="flex flex-col gap-4" data-testid="hr-staff-tab">
       <SegmentedTabs tabs={tabs} value={sub} onChange={onSubChange} testid="hr-staff-subtab" size="sm" mobileCols={3} />
       {sub === "attendance" && <AttendanceTab />}
-      {sub === "performance" && isSuperAdmin && <PerformancePlaceholder />}
+      {sub === "performance" && isSuperAdmin && <PerformancePanel />}
       {sub === "client_reviews" && <ClientReviewsPanel />}
       {sub === "eod_report" && isSuperAdmin && <EodReportsPanel />}
       {sub === "quotes" && <QuotesTab />}
     </div>
   );
 };
-
-// Held until what Performance measures is agreed.
-const PerformancePlaceholder = () => (
-  <Card data-testid="hr-performance-tab">
-    <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
-      <TrendingUp className="h-8 w-8 text-sky-600" />
-      <p className="text-base font-semibold text-slate-800">Performance</p>
-      <p className="text-sm text-slate-500">Coming soon.</p>
-    </CardContent>
-  </Card>
-);
 
 // The practices a branch can run, and so the services an employee can be tagged to.
 // "both" is not a third practice — it is the answer that declines to narrow.

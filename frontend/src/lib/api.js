@@ -704,6 +704,8 @@ export const withdrawMyRequest = async (id) => (await api.delete("/me/requests/"
 export const hrAttendanceDay = async (date) => (await api.get("/hr/attendance", { params: date ? { date } : {} })).data;
 export const hrMarkAttendance = async (date, entries) => (await api.post("/hr/attendance", { date, entries })).data;
 export const hrAttendanceMonth = async (month) => (await api.get("/hr/attendance/month", { params: month ? { month } : {} })).data;
+// Staff > Performance. period is week | month | quarter; date is any day inside it.
+export const hrPerformance = async (period, date) => (await api.get("/hr/performance", { params: { period, ...(date ? { date } : {}) } })).data;
 // The attendance board. `params` carries the span being asked for: { period: "day", date }
 // for one day, or period range/month/year with from+to, month, or year beside it. The
 // server decides the span and sends back what it settled on, so the screen never has to
