@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, RefreshCw, Search, Star, X } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Search, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/components/ui/sonner";
 import { hrPerformance } from "@/lib/api";
 
@@ -13,23 +14,123 @@ import { hrPerformance } from "@/lib/api";
  * Resource Master View's candidate list, so the two HR lists read the same way.
  */
 
-const PERIODS = [
+const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const thisMonth = () => toIso(new Date()).slice(0, 7);
+const lastMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return toIso(d).slice(0, 7); };
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const prettyMonth = (ym) => new Date(`${ym}-01T00:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+
+// Weekly and Quarterly are the ones holding today; the two month pills and the month picker
+// all land on period "month" with a month beside it.
+const PERIOD_PILLS = [
   { key: "week", label: "Weekly" },
-  { key: "month", label: "Monthly" },
+  { key: "this_month", label: "This Month" },
+  { key: "last_month", label: "Last Month" },
   { key: "quarter", label: "Quarterly" },
 ];
 
-const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const ROLE_FILTERS = [
+  { key: "", label: "All Roles" },
+  { key: "physio", label: "Physio" },
+  { key: "consultant", label: "Consultant" },
+  { key: "branch_admin", label: "Branch Admin" },
+];
 
-/** A day inside the period before or after the one holding `iso`. */
-const shiftAnchor = (iso, period, step) => {
-  const d = new Date(`${iso}T00:00:00`);
-  if (period === "week") d.setDate(d.getDate() + 7 * step);
-  else {
-    d.setDate(1);
-    d.setMonth(d.getMonth() + (period === "quarter" ? 3 : 1) * step);
-  }
-  return toIso(d);
+/** Picks a month, and only a month: a year header and twelve buttons. Future months are off. */
+const MonthPicker = ({ value, label, active, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [year, setYear] = useState(Number((value || thisMonth()).slice(0, 4)));
+  const now = thisMonth();
+  useEffect(() => { if (open) setYear(Number((value || now).slice(0, 4))); }, [open, value, now]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Pick a month"
+          className={`flex h-10 items-center gap-2 rounded-md border px-3 text-xs font-semibold transition ${
+            active ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+          }`}
+          data-testid="hr-perf-month"
+        >
+          <CalendarDays className="h-4 w-4 shrink-0" />
+          <span className="whitespace-nowrap">{label}</span>
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-3" data-testid="hr-perf-month-panel">
+        <div className="mb-2 flex items-center justify-between">
+          <button type="button" onClick={() => setYear(year - 1)} className="rounded p-1 text-slate-500 hover:bg-slate-100" aria-label="Previous year">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="text-sm font-bold text-slate-800">{year}</span>
+          <button type="button" onClick={() => setYear(year + 1)} disabled={year >= Number(now.slice(0, 4))} className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30" aria-label="Next year">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          {MONTHS.map((m, i) => {
+            const ym = `${year}-${String(i + 1).padStart(2, "0")}`;
+            const selected = active && ym === value;
+            return (
+              <button
+                key={m}
+                type="button"
+                disabled={ym > now}
+                onClick={() => { onChange(ym); setOpen(false); }}
+                className={`rounded-md py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-30 ${
+                  selected ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-sky-50 hover:text-sky-700"
+                }`}
+                data-testid={`hr-perf-month-${ym}`}
+              >
+                {m}
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+/** Physio / Consultant / Branch Admin, as the same popover the rest of HR filters with. */
+const RoleFilter = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const current = ROLE_FILTERS.find((r) => r.key === value) || ROLE_FILTERS[0];
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Filter by role"
+          className={`flex h-10 w-40 items-center justify-between gap-2 rounded-md border px-3 text-xs font-semibold transition ${
+            value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+          }`}
+          data-testid="hr-perf-role"
+        >
+          <span className="truncate">{current.label}</span>
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-44 p-1" data-testid="hr-perf-role-panel">
+        {ROLE_FILTERS.map((r) => (
+          <button
+            key={r.key || "all"}
+            type="button"
+            onClick={() => { onChange(r.key); setOpen(false); }}
+            className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm transition ${
+              r.key === value ? "bg-sky-600 font-semibold text-white" : "text-slate-700 hover:bg-sky-50 hover:text-sky-800"
+            }`}
+            data-testid={`hr-perf-role-${r.key || "all"}`}
+          >
+            {r.label}
+            {r.key === value && <Check className="h-3.5 w-3.5 shrink-0" />}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
 };
 
 const GRADE_COLORS = { A: "#16a34a", B: "#d97706", C: "#dc2626" };
@@ -78,10 +179,22 @@ const Rating = ({ r }) => (r.rating === null ? <span className="text-slate-300">
 
 export const PerformancePanel = () => {
   const [period, setPeriod] = useState("month");
-  const [anchor, setAnchor] = useState(() => toIso(new Date()));
+  const [month, setMonth] = useState(thisMonth);
+  const [role, setRole] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+
+  const anchor = period === "month" ? `${month}-01` : toIso(new Date());
+  const pill = period !== "month" ? period : month === thisMonth() ? "this_month" : month === lastMonth() ? "last_month" : "";
+  const pickPill = (key) => {
+    if (key === "this_month" || key === "last_month") {
+      setPeriod("month");
+      setMonth(key === "this_month" ? thisMonth() : lastMonth());
+    } else {
+      setPeriod(key);
+    }
+  };
 
   const load = useCallback(() => {
     setLoading(true);
@@ -94,14 +207,11 @@ export const PerformancePanel = () => {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const all = data?.rows || [];
+    const all = (data?.rows || []).filter((r) => !role || r.group === role);
     if (!q) return all;
     return all.filter((r) => [r.full_name, r.employee_code, r.role_label, r.designation, r.branch_name]
       .some((v) => String(v || "").toLowerCase().includes(q)));
-  }, [data, search]);
-
-  // Nothing past the period holding today: its figures would all be blank.
-  const atLatest = data ? data.end >= toIso(new Date()) : true;
+  }, [data, search, role]);
 
   return (
     <div className="flex flex-col gap-4" data-testid="hr-performance-tab">
@@ -123,14 +233,16 @@ export const PerformancePanel = () => {
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-          <div className="flex overflow-hidden rounded-md border border-slate-200 bg-white" role="group" aria-label="Period">
-            {PERIODS.map((p) => (
+          <RoleFilter value={role} onChange={setRole} />
+
+          <div className="flex h-10 overflow-hidden rounded-md border border-slate-200 bg-white" role="group" aria-label="Period">
+            {PERIOD_PILLS.map((p) => (
               <button
                 key={p.key}
                 type="button"
-                onClick={() => setPeriod(p.key)}
-                aria-pressed={period === p.key}
-                className={`px-3 py-2 text-xs font-semibold transition ${period === p.key ? "bg-sky-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+                onClick={() => pickPill(p.key)}
+                aria-pressed={pill === p.key}
+                className={`whitespace-nowrap px-3 text-xs font-semibold transition ${pill === p.key ? "bg-sky-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}
                 data-testid={`hr-perf-period-${p.key}`}
               >
                 {p.label}
@@ -138,22 +250,20 @@ export const PerformancePanel = () => {
             ))}
           </div>
 
-          <div className="flex h-10 items-center rounded-md border border-slate-200 bg-white">
-            <button type="button" onClick={() => setAnchor(shiftAnchor(anchor, period, -1))} className="flex h-full w-8 items-center justify-center text-slate-500 hover:text-sky-600" aria-label="Previous period" data-testid="hr-perf-prev">
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="min-w-[9.5rem] px-1 text-center text-xs font-semibold text-slate-700" data-testid="hr-perf-label">{data?.label || "…"}</span>
-            <button type="button" onClick={() => setAnchor(shiftAnchor(anchor, period, 1))} disabled={atLatest} className="flex h-full w-8 items-center justify-center text-slate-500 hover:text-sky-600 disabled:opacity-30" aria-label="Next period" data-testid="hr-perf-next">
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
+          {/* Any month, and only a month. Weekly and Quarterly show their span here instead. */}
+          <MonthPicker
+            value={month}
+            active={period === "month"}
+            label={period === "month" ? prettyMonth(month) : (data?.label || "…")}
+            onChange={(ym) => { setPeriod("month"); setMonth(ym); }}
+          />
 
           <Button
             onClick={load}
             disabled={loading}
             title="Refresh"
             aria-label="Refresh"
-            className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+            className="h-10 w-10 shrink-0 border border-slate-200 bg-slate-100 p-0 text-slate-700 shadow-none hover:bg-slate-200"
             data-testid="hr-perf-refresh"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
