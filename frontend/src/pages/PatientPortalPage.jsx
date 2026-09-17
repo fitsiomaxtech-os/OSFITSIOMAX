@@ -1631,8 +1631,8 @@ const PORTAL_TABS = [
  *
  * The client picks one or more of Super Admin, Branch Admin and their Consultant. Each of
  * those is still its own conversation underneath (the Branch Admin never sees what went to
- * Super Admin), so a message sent to two of them lands as a copy in each. On screen the
- * chosen conversations are read together, oldest first, with each reply saying who wrote it.
+ * Super Admin). Each chosen person gets their own chat and message box; one Send button
+ * sends every written message to its own person.
  */
 const feedbackTo = (consultantName, hasConsultantThreads) => [
   {
@@ -1685,15 +1685,123 @@ const mergedMessages = (rows) => {
   return out;
 };
 
-function FeedbackTab({ data, onSeen }) {
-  const [draft, setDraft] = useState("");
-  const [selected, setSelected] = useState(["branch_admin"]);
-  const [sending, setSending] = useState(false);
-  const [mine, setMine] = useState([]);
+/** One chosen person's own conversation and message box inside Talk to Management. */
+function PersonChat({ audience, name, rows, draft, onDraft, sending, onAnswer }) {
   const endRef = useRef(null);
   const chatRef = useRef(null);
   // How tall three messages happen to be, once they are on screen.
   const [chatMax, setChatMax] = useState(null);
+  const messages = mergedMessages(rows);
+  const askedRows = rows.filter((f) => (f.status || "new") === "awaiting_patient");
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "nearest" });
+  }, [messages.length]);
+
+  // Three messages showing, the rest scrolled — measured, since bubbles run one to five lines.
+  useLayoutEffect(() => {
+    const box = chatRef.current;
+    if (!box) return undefined;
+    const measure = () => {
+      const items = Array.from(box.children).filter((el) => el !== endRef.current);
+      if (items.length <= 3) { setChatMax(null); return; }
+      const GAP = 8;      // space-y-2
+      const PADDING = 24; // p-3, top and bottom
+      const last = items.slice(-3);
+      const next = Math.ceil(
+        last.reduce((total, el) => total + el.offsetHeight, 0) + GAP * (last.length - 1) + PADDING,
+      );
+      setChatMax((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [messages.length]);
+
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 p-3" data-testid={`portal-feedback-person-${audience.key}`}>
+      <div>
+        <p className="text-xs font-bold text-slate-700">{audience.label}</p>
+        <p className="text-[11px] leading-snug text-slate-500">{audience.blurb}</p>
+      </div>
+
+      {messages.length > 0 && (
+        <div
+          ref={chatRef}
+          className="max-h-80 space-y-2 overflow-y-auto rounded-lg bg-slate-50/80 p-3"
+          style={chatMax ? { maxHeight: chatMax } : undefined}
+          data-testid={`portal-feedback-chat-${audience.key}`}
+        >
+          {messages.map((m) => {
+            const own = m.author === "patient";
+            const who = own ? "You" : (m.author_name || name);
+            return (
+              <div key={m.id} className={`flex ${own ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${own ? "bg-sky-600 text-white" : "bg-white text-slate-700 shadow-sm"}`}>
+                  <p className="whitespace-pre-wrap break-words text-xs leading-5">{m.body}</p>
+                  <p className={`mt-0.5 text-[10px] ${own ? "text-sky-100" : "text-slate-400"}`}>
+                    {[who, feedbackSentOn(m.created_at)].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+          <div ref={endRef} />
+        </div>
+      )}
+
+      {askedRows.map((row) => (
+        <div key={row.id} className="rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="portal-feedback-asked">
+          <p className="text-[11px] font-semibold text-violet-900">{name} asked: has this sorted it?</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <Button
+              size="sm"
+              className="h-7 bg-emerald-600 px-2 text-[11px] text-white hover:bg-emerald-700"
+              disabled={sending}
+              onClick={() => onAnswer(row, true)}
+              data-testid="portal-feedback-yes"
+            >
+              Yes, all sorted
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 border-slate-200 px-2 text-[11px]"
+              disabled={sending}
+              onClick={() => onAnswer(row, false)}
+              data-testid="portal-feedback-no"
+            >
+              Not yet
+            </Button>
+          </div>
+          <p className="mt-1 text-[10px] text-violet-700/70">Write a line below first if you want to say why.</p>
+        </div>
+      ))}
+
+      <div>
+        <textarea
+          rows={3}
+          value={draft}
+          maxLength={2000}
+          onChange={(e) => onDraft(e.target.value)}
+          placeholder={`Message to ${name}…`}
+          className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+          data-testid={`portal-feedback-message-${audience.key}`}
+        />
+        <p className="mt-0.5 text-right text-[10px] text-slate-400">{draft.length}/2000</p>
+      </div>
+    </div>
+  );
+}
+
+function FeedbackTab({ data, onSeen }) {
+  // One draft per person, so each chosen person gets their own message.
+  const [drafts, setDrafts] = useState({});
+  const [selected, setSelected] = useState(["branch_admin"]);
+  const [sending, setSending] = useState(false);
+  const [mine, setMine] = useState([]);
 
   const loadMine = useCallback(() => {
     patientPortalMyFeedback()
@@ -1735,68 +1843,49 @@ function FeedbackTab({ data, onSeen }) {
     loadMine();
   }, [selectedKey, loadMine]);
 
-  const channelRows = mine.filter((f) => selected.includes(audienceOf(f)));
-  const messages = mergedMessages(channelRows);
-  const askedRows = channelRows.filter((f) => (f.status || "new") === "awaiting_patient");
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, selected.length]);
-
-  // Three messages showing, the rest scrolled — measured, since bubbles run one to five lines.
-  useLayoutEffect(() => {
-    const box = chatRef.current;
-    if (!box) return undefined;
-    const measure = () => {
-      const rows = Array.from(box.children).filter((el) => el !== endRef.current);
-      if (rows.length <= 3) { setChatMax(null); return; }
-      const GAP = 8;      // space-y-2
-      const PADDING = 24; // p-3, top and bottom
-      const last = rows.slice(-3);
-      const next = Math.ceil(
-        last.reduce((total, el) => total + el.offsetHeight, 0) + GAP * (last.length - 1) + PADDING,
-      );
-      setChatMax((prev) => (prev === next ? prev : next));
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(measure);
-    observer.observe(box);
-    return () => observer.disconnect();
-  }, [messages.length, selected.length]);
+  const setDraft = (key, value) => setDrafts((d) => ({ ...d, [key]: value }));
+  const chosen = audiences.filter((a) => selected.includes(a.key));
+  // Only the chosen people with something written are sent to.
+  const toSend = chosen.filter((a) => (drafts[a.key] || "").trim());
 
   const waiting = (key) => mine.some(
     (f) => audienceOf(f) === key && (f.status || "new") === "awaiting_patient",
   );
 
-  // A plain message goes to every chosen side: into its open conversation, or starting one.
+  // One Send for everyone: each person's own message goes into their open conversation, or starts one.
   const sendMessage = async () => {
-    const body = draft.trim();
-    if (!body) { toast.error("Write something to send"); return; }
-    if (!selected.length) { toast.error("Choose who to send to"); return; }
+    if (!toSend.length) { toast.error("Write a message to send"); return; }
     setSending(true);
     const failed = [];
-    for (const key of selected) {
+    const sent = [];
+    for (const a of toSend) {
+      const body = drafts[a.key].trim();
       try {
-        const open = openThreadOf(mine.filter((f) => audienceOf(f) === key));
+        const open = openThreadOf(mine.filter((f) => audienceOf(f) === a.key));
         if (open) await patientPortalReplyFeedback(open.id, { body });
-        else await patientPortalSubmitFeedback({ message: body, audience: key });
+        else await patientPortalSubmitFeedback({ message: body, audience: a.key });
+        sent.push(a.key);
       } catch {
-        failed.push(nameOf(key));
+        failed.push(nameOf(a.key));
       }
     }
+    setDrafts((d) => {
+      const next = { ...d };
+      sent.forEach((k) => { delete next[k]; });
+      return next;
+    });
     if (failed.length) toast.error(`Could not send to ${failed.join(", ")}. Please try again.`);
-    else setDraft("");
     setSending(false);
     loadMine();
   };
 
-  // "Has this sorted it?" is answered on the one conversation that asked.
+  // "Has this sorted it?" is answered on the one conversation that asked, with that person's draft.
   const answer = async (row, resolved) => {
+    const key = audienceOf(row);
     setSending(true);
     try {
-      await patientPortalReplyFeedback(row.id, { body: draft.trim(), resolved });
-      setDraft("");
+      await patientPortalReplyFeedback(row.id, { body: (drafts[key] || "").trim(), resolved });
+      setDraft(key, "");
       loadMine();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not send that. Please try again.");
@@ -1804,8 +1893,6 @@ function FeedbackTab({ data, onSeen }) {
       setSending(false);
     }
   };
-
-  const chosenNames = selected.map(nameOf);
 
   return (
     <Card data-testid="portal-feedback">
@@ -1855,99 +1942,28 @@ function FeedbackTab({ data, onSeen }) {
               );
             })}
           </div>
-          <div className="mt-2 space-y-0.5" data-testid="portal-feedback-blurb">
-            {audiences.filter((a) => selected.includes(a.key)).map((a) => (
-              <p key={a.key} className="text-[11px] leading-snug text-slate-500">{a.blurb}</p>
-            ))}
-          </div>
         </div>
 
-        <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            {messages.length > 0 ? `Chat with ${chosenNames.join(", ")}` : "In your words"}
-          </p>
-          <div
-            ref={chatRef}
-            className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-3"
-            style={chatMax ? { maxHeight: chatMax } : undefined}
-            data-testid="portal-feedback-chat"
-          >
-            {selected.length === 0 ? (
-              <p className="py-6 text-center text-xs text-slate-400" data-testid="portal-feedback-none-chosen">
-                No one chosen. Tick one or more people above to see the chat and send.
-              </p>
-            ) : messages.length === 0 ? (
-              <p className="py-6 text-center text-xs text-slate-400">
-                Nothing sent to {chosenNames.join(", ")} yet. Whatever you write below starts the chat.
-              </p>
-            ) : messages.map((m) => {
-              const own = m.author === "patient";
-              const who = own
-                ? `You → ${m.sides.map(nameOf).join(", ")}`
-                : (m.author_name ? `${m.author_name} (${nameOf(m.sides[0])})` : nameOf(m.sides[0]));
-              return (
-                <div key={`${m.id}-${m.sides.join("")}`} className={`flex ${own ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${own ? "bg-sky-600 text-white" : "bg-white text-slate-700 shadow-sm"}`}>
-                    <p className="whitespace-pre-wrap break-words text-xs leading-5">{m.body}</p>
-                    <p className={`mt-0.5 text-[10px] ${own ? "text-sky-100" : "text-slate-400"}`}>
-                      {[who, feedbackSentOn(m.created_at)].filter(Boolean).join(" · ")}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-            <div ref={endRef} />
-          </div>
-        </div>
-
-        {askedRows.map((row) => (
-          <div key={row.id} className="rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="portal-feedback-asked">
-            <p className="text-[11px] font-semibold text-violet-900">{nameOf(audienceOf(row))} asked: has this sorted it?</p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              <Button
-                size="sm"
-                className="h-7 bg-emerald-600 px-2 text-[11px] text-white hover:bg-emerald-700"
-                disabled={sending}
-                onClick={() => answer(row, true)}
-                data-testid="portal-feedback-yes"
-              >
-                Yes, all sorted
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 border-slate-200 px-2 text-[11px]"
-                disabled={sending}
-                onClick={() => answer(row, false)}
-                data-testid="portal-feedback-no"
-              >
-                Not yet
-              </Button>
-            </div>
-            <p className="mt-1 text-[10px] text-violet-700/70">Write a line below first if you want to say why.</p>
-          </div>
-        ))}
-
-        <div>
-          <textarea
-            rows={4}
-            value={draft}
-            maxLength={2000}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={chosenNames.length ? `Message to ${chosenNames.join(", ")}…` : "Choose who to send to first…"}
-            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-            data-testid="portal-feedback-message"
+        {chosen.map((a) => (
+          <PersonChat
+            key={a.key}
+            audience={a}
+            name={nameOf(a.key)}
+            rows={mine.filter((f) => audienceOf(f) === a.key)}
+            draft={drafts[a.key] || ""}
+            onDraft={(value) => setDraft(a.key, value)}
+            sending={sending}
+            onAnswer={answer}
           />
-          <p className="mt-1 text-right text-[10px] text-slate-400">{draft.length}/2000</p>
-        </div>
+        ))}
 
         <Button
           className="w-full"
-          disabled={sending || !draft.trim() || !selected.length}
+          disabled={sending || !toSend.length}
           onClick={sendMessage}
           data-testid="portal-feedback-submit"
         >
-          {sending ? "Sending…" : chosenNames.length ? `Send to ${chosenNames.join(" & ")}` : "Choose who to send to"}
+          {sending ? "Sending…" : toSend.length ? `Send to ${toSend.map((a) => nameOf(a.key)).join(" & ")}` : "Send"}
         </Button>
       </CardContent>
     </Card>
