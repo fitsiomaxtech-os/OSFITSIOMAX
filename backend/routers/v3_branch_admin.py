@@ -2278,6 +2278,75 @@ async def v3_transfer_eligibility(
     }
 
 
+@router.get("/branch-admin/transfer-records/{branch_id}")
+async def v3_branch_transfer_records(
+    branch_id: str,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
+):
+    """Every branch transfer this branch was party to, newest first — the Records tab.
+
+    One row per move rather than per patient: a patient sent out and later sent back is two
+    things that happened, and the list is a record of transfers. Both directions are here,
+    marked, because "who did we lose" and "who did we receive" are read off the same list.
+    """
+    leads = await v3_col("leads").find(
+        {"$or": [
+            {"branch_transfer_history.from_branch_id": branch_id},
+            {"branch_transfer_history.to_branch_id": branch_id},
+        ]},
+        {"_id": 0},
+    ).to_list(5000)
+
+    current_ids = {l.get("branch_id") for l in leads if l.get("branch_id")}
+    branch_names = {
+        b["id"]: b.get("branch_name") or ""
+        async for b in v3_col("branches").find({"id": {"$in": list(current_ids)}}, {"_id": 0, "id": 1, "branch_name": 1})
+    }
+
+    records = []
+    for lead in leads:
+        history = lead.get("branch_transfer_history") or []
+        splits = lead.get("revenue_branch_splits") or []
+        for index, move in enumerate(history):
+            if branch_id not in (move.get("from_branch_id"), move.get("to_branch_id")):
+                continue
+            # The money pinned to the old branch is written in the same update as the move,
+            # with the same timestamp, so that is how the two are paired back up.
+            split = next((s for s in splits if s.get("until") == move.get("at")), {}) or {}
+            records.append({
+                "id": f"{lead.get('id')}:{index}",
+                "direction": "outgoing" if move.get("from_branch_id") == branch_id else "incoming",
+                **move,
+                "collected_before_transfer": round(
+                    (split.get("consultation_fee") or 0) + (split.get("package_paid") or 0), 2
+                ),
+                "lead": {
+                    "id": lead.get("id"),
+                    "patient_number": lead.get("patient_number") or "",
+                    "name": lead.get("name") or "",
+                    "phone": lead.get("phone") or "",
+                    "email": lead.get("email") or "",
+                    "vertical": lead.get("vertical") or "",
+                    "source_type": lead.get("source_type") or "",
+                    "stage": lead.get("stage") or "",
+                    "branch_stage": lead.get("branch_stage") or "",
+                    "consultation_stage": lead.get("consultation_stage") or "",
+                    "current_branch_id": lead.get("branch_id") or "",
+                    "current_branch_name": branch_names.get(lead.get("branch_id"), ""),
+                    "assigned_physio_name": lead.get("assigned_physio_name") or "",
+                    "consultation_fee": lead.get("consultation_fee") or 0,
+                    "package_name": lead.get("package_name") or "",
+                    "package_paid": lead.get("package_paid") or 0,
+                    "treatment_fee_paid": lead.get("treatment_fee_paid") or 0,
+                    "notes": lead.get("notes") or "",
+                    "created_at": lead.get("created_at") or "",
+                    "transfer_history": history,
+                },
+            })
+    records.sort(key=lambda r: r.get("at") or "", reverse=True)
+    return {"records": records}
+
+
 @router.post("/leads/{lead_id}/transfer-branch")
 async def v3_transfer_branch(
     lead_id: str,

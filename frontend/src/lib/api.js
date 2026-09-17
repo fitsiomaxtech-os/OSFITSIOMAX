@@ -901,6 +901,7 @@ export const getLeadPhysioProgress = async (leadId) => (await api.get(`/leads/${
 // the move would cost -- days released, money staying behind -- before it is made.
 export const getLeadTransferEligibility = async (leadId) => (await api.get(`/leads/${leadId}/transfer-eligibility`)).data;
 export const transferLeadBranch = async (leadId, payload) => (await api.post(`/leads/${leadId}/transfer-branch`, payload)).data;
+export const getBranchTransferRecords = async (branchId) => (await api.get(`/branch-admin/transfer-records/${branchId}`)).data;
 // Rehab — a parallel course on the same physio's calendar. Its own endpoint and its own
 // collection: a rehab day is not a day of the treatment package (see backend/v3_rehab).
 export const assignRehab = async (payload) => (await api.post("/branch/assign-rehab", payload)).data;
