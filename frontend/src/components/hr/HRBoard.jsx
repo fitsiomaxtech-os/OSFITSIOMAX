@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, AlertTriangle, MailCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, ClipboardList, Quote, Star } from "lucide-react";
+import { Users, ShieldCheck, AlertTriangle, MailCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, ClipboardList, Quote, Star, UserCheck, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,25 +30,17 @@ const ALL_BRANCHES = "__all__";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
-  // The running month, straight after the Dashboard whose figures come off it. These four
-  // are one chain -- an approved leave is an attendance mark, and attendance is what
-  // payroll pro-rates against -- so they sit together, and ahead of the three org-chart
-  // tabs below, which describe the company rather than the month. Their screens live in
-  // HROpsTabs.jsx; this file is already the org chart at four thousand lines.
+  // The running month, straight after the Dashboard whose figures come off it. Attendance
+  // (inside Staff), Payroll and Approvals are one chain -- an approved leave is an attendance
+  // mark, and attendance is what payroll pro-rates against -- so they sit together, ahead of
+  // the three org-chart tabs below. Their screens live in HROpsTabs.jsx.
   //
-  // Eight tabs is two rows of four on a phone, which is the same width per tab the bar
-  // has always had -- so only the two labels that outrun it carry a `short`.
-  { key: "attendance", label: "Attendance", short: "Attend", icon: CalendarCheck },
-  // What each Physio and Consultant did with their day, filed at Clock Out. Super Admin
-  // only: BDE mounts this same board and does not get the tab (see HRBoard's prop), and
-  // the endpoint behind it answers super_admin alone.
-  { key: "eod_report", label: "EOD Report", short: "EOD", icon: ClipboardList, superAdminOnly: true },
-  // The stars clients give their Consultant and Physio from the Client Portal. Read by
-  // Super Admin and BDE across every branch; Branch Admin has the same panel on its board.
-  { key: "client_reviews", label: "Review", icon: Star },
+  // Staff holds everything read about the people day to day -- the register, what clients
+  // say about them, what they filed, and Quotes -- behind its own bar (STAFF_TABS below),
+  // so the top bar stays at seven.
+  { key: "staff", label: "Staff", icon: UserCheck },
   { key: "payroll", label: "Payroll", icon: Wallet },
   { key: "approvals", label: "Approvals", short: "Approve", icon: ClipboardCheck },
-  { key: "quotes", label: "Quotes", icon: Quote },
   { key: "employees", label: "Employees", icon: Users },
   { key: "roles", label: "Credentials", icon: ShieldCheck },
   // One screen over one set of records. The tab that used to carry this name was a second
@@ -59,6 +51,45 @@ const TABS = [
   // the tab somebody happens to have open.
   { key: "structure", label: "Department & Designation", short: "Depts", icon: Network },
 ];
+
+// The bar inside Staff. superAdminOnly works as it does on TABS: BDE mounts this same board
+// and gets Attendance, Review and Quotes only.
+const STAFF_TABS = [
+  { key: "attendance", label: "Attendance", short: "Attend", icon: CalendarCheck },
+  { key: "performance", label: "Performance", short: "Perform", icon: TrendingUp, superAdminOnly: true },
+  // The stars clients give their Consultant and Physio from the Client Portal. Read by
+  // Super Admin and BDE across every branch; Branch Admin has the same panel on its board.
+  { key: "client_reviews", label: "Review", icon: Star },
+  // What each Physio and Consultant did with their day, filed at Clock Out. The endpoint
+  // behind it answers super_admin alone.
+  { key: "eod_report", label: "EOD Report", short: "EOD", icon: ClipboardList, superAdminOnly: true },
+  { key: "quotes", label: "Quotes", icon: Quote },
+];
+
+const StaffTab = ({ isSuperAdmin, sub, onSubChange }) => {
+  const tabs = useMemo(() => STAFF_TABS.filter((t) => !t.superAdminOnly || isSuperAdmin), [isSuperAdmin]);
+  return (
+    <div className="flex flex-col gap-4" data-testid="hr-staff-tab">
+      <SegmentedTabs tabs={tabs} value={sub} onChange={onSubChange} testid="hr-staff-subtab" size="sm" mobileCols={3} />
+      {sub === "attendance" && <AttendanceTab />}
+      {sub === "performance" && isSuperAdmin && <PerformancePlaceholder />}
+      {sub === "client_reviews" && <ClientReviewsPanel />}
+      {sub === "eod_report" && isSuperAdmin && <EodReportsPanel />}
+      {sub === "quotes" && <QuotesTab />}
+    </div>
+  );
+};
+
+// Held until what Performance measures is agreed.
+const PerformancePlaceholder = () => (
+  <Card data-testid="hr-performance-tab">
+    <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+      <TrendingUp className="h-8 w-8 text-sky-600" />
+      <p className="text-base font-semibold text-slate-800">Performance</p>
+      <p className="text-sm text-slate-500">Coming soon.</p>
+    </CardContent>
+  </Card>
+);
 
 // The practices a branch can run, and so the services an employee can be tagged to.
 // "both" is not a third practice — it is the answer that declines to narrow.
@@ -222,7 +253,8 @@ const BRANCHLESS_OK_ROLES = new Set([]);
 
 export const HRBoard = ({ isSuperAdmin = false }) => {
   const [tab, setTab] = useState("dashboard");
-  const tabs = useMemo(() => TABS.filter((t) => !t.superAdminOnly || isSuperAdmin), [isSuperAdmin]);
+  const [staffSub, setStaffSub] = useState("attendance");
+  const tabs =useMemo(() => TABS.filter((t) => !t.superAdminOnly || isSuperAdmin), [isSuperAdmin]);
   // Set by a Dashboard card or a department bar, consumed once by the Employees tab. Held
   // here rather than inside EmployeesTab because the thing that decides the filter and the
   // thing that applies it are on opposite sides of the tab switch.
@@ -242,13 +274,19 @@ export const HRBoard = ({ isSuperAdmin = false }) => {
     <div className="flex flex-col gap-5" data-testid="hr-board">
       {/* No heading. The nav tab above already reads HR Admin. */}
       <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={4} />
-      {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
-      {tab === "attendance" && <AttendanceTab />}
-      {tab === "eod_report" && isSuperAdmin && <EodReportsPanel />}
-      {tab === "client_reviews" && <ClientReviewsPanel />}
+      {tab === "dashboard" && (
+        <DashboardTab
+          onNavigate={(t, f) => {
+            setEmpFilter(f || null);
+            // Attendance lives inside Staff now; the Dashboard cards still name it directly.
+            if (t === "attendance") { setStaffSub("attendance"); setTab("staff"); }
+            else setTab(t);
+          }}
+        />
+      )}
+      {tab === "staff" && <StaffTab isSuperAdmin={isSuperAdmin} sub={staffSub} onSubChange={setStaffSub} />}
       {tab === "payroll" && <PayrollTab />}
       {tab === "approvals" && <ApprovalsTab />}
-      {tab === "quotes" && <QuotesTab />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
       {tab === "structure" && <StructureTab meta={meta} reloadMeta={reloadMeta} />}
