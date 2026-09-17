@@ -1985,46 +1985,27 @@ const weekRange = (w) => {
   return w.first_number === w.last_number ? `${noun.replace(/s$/, "")} ${w.first_number}` : `${noun} ${w.first_number}–${w.last_number}`;
 };
 
-/** The client's saved Physio and Consultant rows for one week. */
-const savedForWeek = (reviews, w) => {
-  const rows = (reviews?.week_reviews || []).filter((r) => r.track === w.track && r.week_number === w.week_number);
-  return { physio: rows.find((r) => r.kind === "physio"), consultant: rows.find((r) => r.kind === "consultant") };
-};
+/** The client's saved Physio review for one week, if any. */
+const savedForWeek = (reviews, w) => (reviews?.week_reviews || []).find(
+  (r) => r.kind === "physio" && r.track === w.track && r.week_number === w.week_number,
+);
 
-/** Who a week's review rates: its physio always, the consultant on treatment weeks only. */
-const weekPeople = (reviews, w) => [
-  { key: "physio", label: "Physio", name: w.physio_name || reviews?.physio?.name || "" },
-  w.track === "treatment" && reviews?.consultant?.name && { key: "consultant", label: "Consultant", name: reviews.consultant.name },
-].filter(Boolean);
-
-/** Every 7 days of treatment: 1–5 stars and written feedback for the Physio and the
-    Consultant, the same for both, saved together. */
+/** Every 7 days of treatment: the Physio's star rating and the client's written feedback,
+    each in its own box. */
 function WeekReviewForm({ week, reviews, onDone, testid }) {
-  const people = weekPeople(reviews, week);
   const saved = savedForWeek(reviews, week);
-  const [values, setValues] = useState(() => Object.fromEntries(people.map((p) => [
-    p.key, { rating: saved[p.key]?.rating || null, comment: saved[p.key]?.comment || "" },
-  ])));
+  const physioName = week.physio_name || reviews?.physio?.name || "";
+  const [rating, setRating] = useState(saved?.rating || null);
+  const [comment, setComment] = useState(saved?.comment || "");
   const [saving, setSaving] = useState(false);
-  const set = (key, patch) => setValues((v) => ({ ...v, [key]: { ...v[key], ...patch } }));
-  const missing = people.find((p) => !values[p.key]?.rating || !values[p.key]?.comment.trim());
-  const everSaved = people.every((p) => saved[p.key]);
+  const ready = !!rating && !!comment.trim();
 
   const save = async () => {
-    if (missing) {
-      toast.error(!values[missing.key]?.rating
-        ? `Tap the stars for your ${missing.label.toLowerCase()}`
-        : `Write a few words of feedback for your ${missing.label.toLowerCase()}`);
-      return;
-    }
+    if (!rating) { toast.error("Tap the stars to rate your physio"); return; }
+    if (!comment.trim()) { toast.error("Write a few words of feedback"); return; }
     setSaving(true);
     try {
-      const payload = { track: week.track, week_number: week.week_number };
-      people.forEach((p) => {
-        payload[`${p.key}_rating`] = values[p.key].rating;
-        payload[`${p.key}_comment`] = values[p.key].comment;
-      });
-      const res = await patientPortalReviewWeek(payload);
+      const res = await patientPortalReviewWeek({ track: week.track, week_number: week.week_number, rating, comment });
       toast.success(res?.message || "Thank you for your review.");
       onDone?.();
     } catch (e) {
@@ -2034,34 +2015,33 @@ function WeekReviewForm({ week, reviews, onDone, testid }) {
     }
   };
 
+  const box = "space-y-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3";
+  const heading = "text-[11px] font-semibold uppercase tracking-wide text-slate-500";
   return (
-    <div className="space-y-4" data-testid={testid}>
-      {people.map((p) => {
-        const v = values[p.key] || {};
-        return (
-          <div key={p.key} className="space-y-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3" data-testid={`${testid}-${p.key}`}>
-            <p className="text-xs text-slate-500">
-              <span className="font-semibold text-slate-800">{p.label}</span>
-              {p.name ? <> · {p.name}</> : null}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <StarPicker value={v.rating} onChange={(rating) => set(p.key, { rating })} testid={`${testid}-${p.key}-stars`} />
-              {v.rating && <span className="text-xs font-semibold text-amber-600">{STAR_WORDS[v.rating]}</span>}
-            </div>
-            <textarea
-              rows={3}
-              maxLength={2000}
-              value={v.comment}
-              onChange={(e) => set(p.key, { comment: e.target.value })}
-              placeholder={`Your feedback on your ${p.label.toLowerCase()} this week`}
-              className={`${inputBox} bg-white`}
-              data-testid={`${testid}-${p.key}-comment`}
-            />
-          </div>
-        );
-      })}
-      <Button className="w-full" disabled={saving || !!missing} onClick={save} data-testid={`${testid}-submit`}>
-        {saving ? "Saving…" : everSaved ? "Update review" : "Submit review"}
+    <div className="space-y-3" data-testid={testid}>
+      <div className={box} data-testid={`${testid}-rating`}>
+        <p className={heading}>
+          Star Rating{physioName ? <span className="font-normal normal-case tracking-normal text-slate-400"> · {physioName}</span> : null}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <StarPicker value={rating} onChange={setRating} testid={`${testid}-stars`} />
+          {rating && <span className="text-xs font-semibold text-amber-600">{STAR_WORDS[rating]}</span>}
+        </div>
+      </div>
+      <div className={box} data-testid={`${testid}-feedback`}>
+        <p className={heading}>Feedback</p>
+        <textarea
+          rows={4}
+          maxLength={2000}
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder="How was your physio this week?"
+          className={`${inputBox} bg-white`}
+          data-testid={`${testid}-comment`}
+        />
+      </div>
+      <Button className="w-full" disabled={saving || !ready} onClick={save} data-testid={`${testid}-submit`}>
+        {saving ? "Saving…" : saved ? "Update review" : "Submit review"}
       </Button>
     </div>
   );
@@ -2069,15 +2049,14 @@ function WeekReviewForm({ week, reviews, onDone, testid }) {
 
 /** The Review button on the Session History row of a week's last day (e.g. Session 7).
     Appears only once every day in that week is completed: amber while not yet reviewed,
-    then "Reviewed" (tap to change it). Opens the Physio and Consultant review pop-up.
+    then "Reviewed" (tap to change it). Opens the Physio review pop-up.
     Nothing without `reviews`: the staff preview of this tab draws the days alone. */
 function WeekReviewButton({ track, number, reviews, onReviewed }) {
   const [open, setOpen] = useState(false);
   if (!reviews || number == null) return null;
   const week = (reviews.weeks || []).find((w) => w.track === track && w.complete && w.last_number === number);
   if (!week) return null;
-  const saved = savedForWeek(reviews, week);
-  const done = weekPeople(reviews, week).every((p) => saved[p.key]);
+  const done = !!savedForWeek(reviews, week);
   const testid = `portal-week-review-${track}-${week.week_number}`;
   return (
     <>
@@ -2090,7 +2069,7 @@ function WeekReviewButton({ track, number, reviews, onReviewed }) {
       {open && (
         <ReviewDialog
           title={`Review ${weekTitle(week)}`}
-          subtitle={`${weekRange(week)} · rate your ${track === "rehab" ? "physio" : "physio and consultant"}`}
+          subtitle={`${weekRange(week)} · rate your physio`}
           onClose={() => setOpen(false)}
           testid={`${testid}-dialog`}
         >
@@ -2130,7 +2109,7 @@ function WeekReviewGate({ reviews, onChanged }) {
   return (
     <ReviewDialog
       title={`Review ${weekTitle(week)}`}
-      subtitle={`${weekRange(week) ? `${weekRange(week)} completed. ` : ""}How was your week? Rate your care${pending.length > 1 ? ` — ${pending.length} weeks are waiting` : ""}.`}
+      subtitle={`${weekRange(week) ? `${weekRange(week)} completed. ` : ""}How was your week? Rate your physio${pending.length > 1 ? ` — ${pending.length} weeks are waiting` : ""}.`}
       onClose={skipping ? undefined : skip}
       testid="portal-week-review-gate"
       footer={(

@@ -62,22 +62,18 @@ class TestPendingWeeks:
         + [_day(1, None, track="rehab")]
     )
 
-    def test_complete_weeks_since_start_owe_both_halves(self):
-        out = pending_weeks(self.WEEKS, [], has_consultant=True, since="2026-09-16")
+    def test_complete_weeks_since_start_are_due_oldest_first(self):
+        out = pending_weeks(self.WEEKS, [], since="2026-09-16")
         assert [(w["track"], w["week_number"]) for w in out] == [("rehab", 1), ("treatment", 1)]
-        treatment = out[1]
-        assert treatment["needs_physio"] and treatment["needs_consultant"]
-        assert out[0]["needs_physio"] and not out[0]["needs_consultant"]
 
-    def test_given_halves_drop_out(self):
+    def test_physio_review_given_drops_out_consultant_rows_do_not_count(self):
         rows = [{"source": "week", "kind": "physio", "track": "treatment", "week_number": 1},
-                {"source": "week", "kind": "physio", "track": "rehab", "week_number": 1}]
-        out = pending_weeks(self.WEEKS, rows, has_consultant=True, since="2026-09-16")
-        assert len(out) == 1 and not out[0]["needs_physio"] and out[0]["needs_consultant"]
-        assert pending_weeks(self.WEEKS, rows, has_consultant=False, since="2026-09-16") == []
+                {"source": "week", "kind": "consultant", "track": "rehab", "week_number": 1}]
+        out = pending_weeks(self.WEEKS, rows, since="2026-09-16")
+        assert [(w["track"], w["week_number"]) for w in out] == [("rehab", 1)]
 
     def test_skipped_weeks_are_not_asked_again(self):
-        out = pending_weeks(self.WEEKS, [], has_consultant=True, skipped={("treatment", 1)}, since="2026-09-16")
+        out = pending_weeks(self.WEEKS, [], skipped={("treatment", 1)}, since="2026-09-16")
         assert [(w["track"], w["week_number"]) for w in out] == [("rehab", 1)]
 
 
