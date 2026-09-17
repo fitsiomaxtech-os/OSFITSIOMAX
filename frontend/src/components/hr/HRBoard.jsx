@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, AlertTriangle, MailCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, ClipboardList, Quote, Star, UserCheck, TrendingUp } from "lucide-react";
+import { Users, ShieldCheck, AlertTriangle, MailCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network, CalendarCheck, Wallet, ClipboardCheck, ClipboardList, Quote, Star, UserCheck, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,8 +21,6 @@ import { AttendanceTab, PayrollTab, ApprovalsTab, QuotesTab } from "@/components
 import { ClientReviewsPanel } from "@/components/reviews/ClientReviewsPanel";
 import { EodReportsPanel } from "@/components/eod/EodReportsPanel";
 import { PerformancePanel } from "@/components/hr/PerformancePanel";
-// The HR figure tile, shared with the EOD Report tab — see components/ui/kpi-card.jsx.
-import { KPI } from "@/components/ui/kpi-card";
 
 // Matches ALL_BRANCHES in backend/routers/v3_hr.py, which resolves it to a name on the way
 // out. Held in branch_id where a real branch id would go, so everything that already reads
@@ -288,64 +286,51 @@ const DashboardTab = ({ onNavigate }) => {
   if (!data) return <p className="text-sm text-slate-500">Loading...</p>;
   const k = data.kpis;
 
-  // Sorted, so the biggest department is the one the eye lands on. Share is taken against
-  // the sum of the departments rather than active_employees: the two count different
-  // things (one is every employee record, the other only active ones), and dividing by the
-  // wrong one would print percentages that don't reach 100.
+  // Sorted, so the biggest department is the one the eye lands on.
   const depts = [...(data.department_strength || [])].sort((a, b) => b.count - a.count);
-  const headcount = depts.reduce((n, d) => n + (d.count || 0), 0);
+
+  // One row of summary cards in the HR Admin Master View's shape (StageCard in
+  // HumanResourceBoard.jsx): label over count, left aligned, white and bordered -- but in
+  // slate throughout, no per-card colour. The departments follow the five headline figures
+  // in the same row rather than in a Department Strength panel of their own, biggest first.
+  // Every card still opens the rows behind it.
+  const cards = [
+    { key: "active", label: "Active Employees", value: k.active_employees, go: () => onNavigate("employees", { status: "active" }) },
+    { key: "users", label: "Total Users", value: k.total_users, go: () => onNavigate("roles") },
+    { key: "present", label: "Today Present", value: k.present_today, go: () => onNavigate("attendance") },
+    { key: "absent", label: "Today Absent", value: k.absent_today ?? 0, go: () => onNavigate("attendance") },
+    { key: "leaves", label: "Pending Approvals", value: k.pending_leaves, go: () => onNavigate("approvals") },
+    ...depts.map((d) => ({ key: `dept-${d.name}`, label: d.name, value: d.count, go: () => onNavigate("employees", { department: d.name }) })),
+  ];
 
   return (
-    <div className="space-y-5" data-testid="hr-dashboard-tab">
-      {/* All five open the rows behind them now. The last three used to be literal zeroes
-          with a caption saying so -- there was no register anywhere in the OS -- and they
-          are read off one now: Attendance for the two day figures, Approvals for the
-          third. Present counts the late arrivals inside it, the way /hr/dashboard does,
-          so the two tiles don't read as if a late employee never turned up. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <KPI icon={Users} label="Active Employees" value={k.active_employees} onClick={() => onNavigate("employees", { status: "active" })} testid="hr-kpi-active" />
-        <KPI icon={ShieldCheck} label="Total Users" value={k.total_users} onClick={() => onNavigate("roles")} testid="hr-kpi-users" />
-        <KPI icon={CheckCircle2} label="Present Today" value={k.present_today} hint="Late arrivals included" onClick={() => onNavigate("attendance")} testid="hr-kpi-present" />
-        <KPI icon={AlertOctagon} label="Late Today" value={k.late_today} hint="Marked late on today's register" onClick={() => onNavigate("attendance")} testid="hr-kpi-late" />
-        <KPI icon={CalendarOff} label="Pending Approvals" value={k.pending_leaves} hint="Leave, advances and claims" onClick={() => onNavigate("approvals")} testid="hr-kpi-leaves" />
+    <div data-testid="hr-dashboard-tab">
+      {/* Five to a row on a phone, as the Master View does, so nine cards land as 5 + 4. */}
+      <div
+        className="flex flex-wrap justify-center gap-1.5 sm:grid sm:grid-cols-3 sm:gap-3 lg:grid-cols-5 xl:grid-cols-9"
+        style={{ fontFamily: "Lexend, sans-serif" }}
+        data-testid="hr-dashboard-cards"
+      >
+        {cards.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={c.go}
+            className="w-[calc(20%-0.3rem)] min-w-0 rounded-lg border-2 border-slate-200 bg-white px-1 py-1.5 text-center transition hover:border-slate-300 hover:shadow-sm sm:w-full sm:rounded-xl sm:px-4 sm:py-4 sm:text-left"
+            data-testid={`hr-kpi-${c.key}`}
+          >
+            <span
+              className="block break-words text-[9px] font-bold uppercase leading-[1.15] text-slate-600 [hyphens:auto] sm:truncate sm:text-xs sm:tracking-wider"
+              title={c.label}
+            >
+              {c.label}
+            </span>
+            <span className="mt-0.5 block text-lg font-extrabold leading-tight text-slate-800 sm:mt-1 sm:text-3xl">
+              {c.value ?? 0}
+            </span>
+          </button>
+        ))}
       </div>
-
-      {/* Cards, in the same shape as the KPI row above so the page reads as one set of
-          controls rather than two. Ordered biggest first — the original grid was in
-          whatever order the aggregation returned, which put the largest department
-          wherever it happened to land.
-
-          Each card carries its share of headcount as well as the count. That is the one
-          thing the count alone cannot tell you, and it is what the bars were really for:
-          11 means little until you know whether it is most of the company or a corner
-          of it. */}
-      <Card data-testid="hr-dept-strength">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Department Strength</CardTitle>
-          <p className="text-xs text-slate-500">Open a department to see its people.</p>
-        </CardHeader>
-        <CardContent>
-          {depts.length === 0 ? <p className="text-sm text-slate-400">No employees yet.</p> : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {depts.map((d) => (
-                <button
-                  key={d.name}
-                  type="button"
-                  onClick={() => onNavigate("employees", { department: d.name })}
-                  className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-left transition hover:border-sky-300 hover:shadow-sm"
-                  data-testid={`hr-dept-${d.name}`}
-                >
-                  <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-slate-500">{d.name}</span>
-                  <span className="mt-1 block text-3xl font-extrabold text-sky-600">{d.count}</span>
-                  <span className="mt-0.5 block text-[10px] text-slate-400">
-                    {headcount ? `${Math.round((d.count / headcount) * 100)}% of staff` : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 };

@@ -565,7 +565,7 @@ async def hr_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin", "m
     # marks these count and the statuses they are named after. Imported inside the handler
     # because that module imports resolve_employee_branches from this one at module scope,
     # so a top-level import here would close the loop and neither would load.
-    from routers.v3_hr_ops import LATE, PENDING, PRESENT
+    from routers.v3_hr_ops import ABSENT, LATE, PENDING, PRESENT
     from utils import clinic_today
 
     today = clinic_today()
@@ -574,6 +574,9 @@ async def hr_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin", "m
     # otherwise the two tiles would read as if the late ones never turned up at all.
     present_today = await v3_col("attendance").count_documents({"date": today, "status": {"$in": [PRESENT, LATE]}})
     late_today = await v3_col("attendance").count_documents({"date": today, "status": LATE})
+    # Only people marked absent on today's register -- nobody is counted absent for simply
+    # not having been marked yet, or the tile would read high every morning.
+    absent_today = await v3_col("attendance").count_documents({"date": today, "status": ABSENT})
     pending_leaves = await v3_col("approvals").count_documents({"status": PENDING})
 
     return {
@@ -582,6 +585,7 @@ async def hr_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin", "m
             "total_users": total_users,
             "present_today": present_today,
             "late_today": late_today,
+            "absent_today": absent_today,
             "pending_leaves": pending_leaves,
             "monthly_salary_budget": monthly_salary,
             "departments": departments_count,
