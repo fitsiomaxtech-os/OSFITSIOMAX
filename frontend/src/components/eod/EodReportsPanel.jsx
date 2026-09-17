@@ -81,7 +81,7 @@ const BranchScope = ({ branches, value, onChange }) => {
           data-testid="eod-branch-button"
         >
           <Building2 className="h-3.5 w-3.5 shrink-0" />
-          <span className="max-w-[130px] truncate">{current?.name || "All Branches"}</span>
+          <span className="max-w-[130px] truncate">{current?.branch_name || "All Branches"}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
@@ -104,7 +104,7 @@ const BranchScope = ({ branches, value, onChange }) => {
             data-testid={`eod-branch-${b.id}`}
           >
             <Check className={`h-3.5 w-3.5 shrink-0 ${value === b.id ? "" : "opacity-0"}`} />
-            <span className="truncate">{b.name}</span>
+            <span className="truncate">{b.branch_name}</span>
           </button>
         ))}
       </PopoverContent>
@@ -134,7 +134,10 @@ export const EodReportsPanel = () => {
   const latest = useRef(0);
 
   useEffect(() => {
-    getBranches().then((rows) => setBranches((rows || []).filter((b) => b?.id && b?.name))).catch(() => {});
+    // Branches carry their name as `branch_name` (V3BranchOut), not `name`.
+    getBranches()
+      .then((rows) => setBranches((rows || []).filter((b) => b?.id && b?.branch_name).sort((a, b) => a.branch_name.localeCompare(b.branch_name))))
+      .catch(() => toast.error("Could not load branches"));
   }, []);
 
   const range = useMemo(

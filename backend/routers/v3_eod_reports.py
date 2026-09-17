@@ -273,9 +273,9 @@ async def list_eod_reports(
 
     branch_ids = {b for row in reports + pending for b in row["branch_ids"]}
     branches = await v3_col("branches").find(
-        {"id": {"$in": list(branch_ids)}}, {"_id": 0, "id": 1, "name": 1},
+        {"id": {"$in": list(branch_ids)}}, {"_id": 0, "id": 1, "branch_name": 1},
     ).to_list(500) if branch_ids else []
-    names = {b["id"]: b.get("name") or "" for b in branches}
+    names = {b["id"]: b.get("branch_name") or "" for b in branches}
     for row in reports + pending:
         row["branch_name"] = ", ".join(n for n in (names.get(b) for b in row["branch_ids"]) if n)
 
