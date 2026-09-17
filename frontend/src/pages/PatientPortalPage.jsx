@@ -2145,14 +2145,17 @@ function WeekReviewForm({ week, reviews, onDone, testid }) {
   );
 }
 
-/** One row per week of the course, with its Review button: grey until every day in the
-    week is completed, amber while due, then the stars given. Nothing without `reviews`:
-    the staff preview of this tab draws the days alone. */
+/** The week reviews the client can see: only weeks whose every day is completed, amber
+    while due and the stars once given. Weeks still running are not listed; the next one
+    is named with the date its review opens. Nothing without `reviews`: the staff preview
+    of this tab draws the days alone. */
 function WeeklyReviewCard({ track, reviews, onReviewed }) {
   const [openKey, setOpenKey] = useState(null);
   if (!reviews) return null;
-  const weeks = (reviews.weeks || []).filter((w) => w.track === track);
-  if (!weeks.length) return null;
+  const all = (reviews.weeks || []).filter((w) => w.track === track);
+  if (!all.length) return null;
+  const weeks = all.filter((w) => w.complete);
+  const next = all.find((w) => !w.complete);
   const opened = weeks.find((w) => w.week_number === openKey);
   const rehab = track === "rehab";
 
@@ -2166,19 +2169,25 @@ function WeeklyReviewCard({ track, reviews, onReviewed }) {
           Every 7 days, rate your {rehab ? "physio" : "physio and consultant"} from 1 to 5 stars and tell us how it went.
         </p>
       </div>
+      {next && (
+        <p className="border-b border-slate-100 px-4 py-2 text-[11px] text-slate-500" data-testid={`portal-weekly-reviews-${track}-next`}>
+          Your <span className="font-semibold text-slate-700">{weekTitle(next)}</span> review opens
+          {next.opens_on ? <> on <span className="font-semibold text-slate-700">{next.opens_on}</span></> : null}
+          {next.last_number != null ? <>, once {rehab ? "Rehab Day" : "Session"} {next.last_number} is completed</> : null}.
+        </p>
+      )}
       <div className="divide-y divide-slate-50">
         {weeks.map((w) => {
           const saved = savedForWeek(reviews, w);
           const people = weekPeople(reviews, w);
-          const allGiven = people.every((p) => saved[p.key]);
-          const state = !w.complete ? "locked" : allGiven ? "done" : "due";
+          const state = people.every((p) => saved[p.key]) ? "done" : "due";
           const testid = `portal-week-review-${track}-${w.week_number}`;
           return (
             <div key={w.week_number} className="flex items-center gap-3 px-4 py-3" data-testid={testid}>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-slate-800">{weekTitle(w)}</p>
                 <p className="text-[10px] text-slate-400">
-                  {[weekRange(w), `${w.completed_days}/${w.days} completed`].filter(Boolean).join(" · ")}
+                  {[weekRange(w), w.opens_on].filter(Boolean).join(" · ")}
                 </p>
                 {people.some((p) => saved[p.key]) && (
                   <p className="mt-0.5 text-[10px] text-amber-600">
@@ -2191,9 +2200,7 @@ function WeeklyReviewCard({ track, reviews, onReviewed }) {
                 rating={saved.physio?.rating}
                 required
                 testid={`${testid}-button`}
-                onClick={() => (state === "locked"
-                  ? toast.info(`You can review ${weekTitle(w)} once all its sessions are completed`)
-                  : setOpenKey(w.week_number))}
+                onClick={() => setOpenKey(w.week_number)}
               />
             </div>
           );

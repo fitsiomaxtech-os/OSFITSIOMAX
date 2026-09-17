@@ -40,6 +40,10 @@ class TestCourseWeeks:
         assert weeks[0]["first_number"] == 1 and weeks[0]["last_number"] == 7 and weeks[0]["finished_at"].startswith("2026-09-23")
         assert weeks[1]["finished_at"] == ""
 
+    def test_opens_on_is_the_last_day_of_the_week(self):
+        days = [{**_day(n, 1, status="upcoming"), "slot_time": f"2026-09-{16 + n:02d}T10:00:00"} for n in range(1, 8)]
+        assert course_weeks(days)[0]["opens_on"] == "2026-09-23"
+
     def test_rehab_weeks_are_every_seven_days(self):
         days = [{"id": f"r{n}", "track": "rehab", "day_number": n, "status": "completed",
                  "completed_at": "2026-09-20T10:00:00"} for n in range(1, 9)]

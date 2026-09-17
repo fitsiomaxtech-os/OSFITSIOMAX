@@ -117,7 +117,10 @@ def course_weeks(days: List[dict]) -> List[dict]:
         complete = len(done) == len(rows)
         last = max(done, key=lambda r: str(r.get("completed_at") or r.get("slot_time") or "")) if done else {}
         numbers = [n for n in (r.get("session_number") or r.get("day_number") for r in rows) if n is not None]
+        slots = [str(r.get("slot_time") or "") for r in rows if r.get("slot_time")]
         out.append({
+            # The last day's date: the review opens once that day is done.
+            "opens_on": max(slots)[:10] if slots else "",
             "track": track,
             "week_number": week,
             "first_number": min(numbers) if numbers else None,
