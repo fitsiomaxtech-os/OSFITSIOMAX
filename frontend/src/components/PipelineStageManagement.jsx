@@ -442,30 +442,20 @@ export const PipelineStageManagement = ({ leading = null }) => {
             <Lock className="mr-1 h-4 w-4" /> Lock
           </Button>
         </CardHeader>
-        {/* The resets side by side, one row on a wide screen and stacked below that -- three
-            descriptions this long do not fit three-across on a tablet. Each box is a column
-            whose description takes the slack, so every button sits on the same line however
-            much longer one description runs than another. */}
-        <CardContent className="grid gap-3 lg:grid-cols-3">
-          <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center lg:col-span-3" data-testid="physio-day-lock-card">
-            <div className="flex-1">
-              <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                Physio Treatment Days lock
-                {dayLock !== null && (
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${dayLock ? "bg-slate-200 text-slate-700" : "bg-amber-100 text-amber-700"}`}>
-                    {dayLock ? "LOCKED" : "UNLOCKED"}
-                  </span>
-                )}
-              </p>
-              <p className="mt-1 text-xs text-slate-600">
-                Locked: each treatment day can only be marked Complete or Absent on its own booked date.
-                Unlocked: the next open day can be marked on any date (for example an overdue day). Days are
-                always done in order.
-              </p>
-            </div>
+        {/* One line each: the name on the left, its button on the right. The full warning
+            is in each button's confirm box, which is read before anything is wiped. */}
+        <CardContent className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3" data-testid="physio-day-lock-card">
+            <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              Physio Treatment Days lock
+              {dayLock !== null && (
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${dayLock ? "bg-slate-200 text-slate-700" : "bg-amber-100 text-amber-700"}`}>
+                  {dayLock ? "LOCKED" : "UNLOCKED"}
+                </span>
+              )}
+            </p>
             <Button
               variant="outline"
-              className="self-start sm:self-center"
               onClick={toggleDayLock}
               disabled={dayLock === null || savingDayLock}
               data-testid="physio-day-lock-toggle"
@@ -476,23 +466,11 @@ export const PipelineStageManagement = ({ leading = null }) => {
                 : (<><Lock className="mr-1 h-4 w-4" /> Lock</>)}
             </Button>
           </div>
-          <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
             <p className="text-sm font-semibold text-red-800">Reset all leads to a fresh state</p>
-            <p className="mt-1 flex-1 text-xs text-red-700">
-              For testing only. Keeps every lead's name, phone and contact info, but resets stage,
-              branch, consultation, physio assignment, packages and fees back to New Leads, and
-              clears every VIP and Need Attention mark and every Diet, Diet Chart and Rehab
-              referral, coach, rehab physio and report —
-              and permanently deletes all sessions (treatment, diet and rehab days), weekly
-              assessments, every Review (Send to Review, Pending Review and Review Complete),
-              package recommendations, appointments, patient view links, activity history, and
-              every Zumba and Fitness registration and referral. Management's Consultant,
-              Physiotherapist, Zumba and Nutritionists calendars and Missed Classes start empty.
-              Cannot be undone.
-            </p>
             <Button
               variant="outline"
-              className="mt-3 self-start border-red-300 text-red-700 hover:bg-red-100"
+              className="border-red-300 text-red-700 hover:bg-red-100"
               onClick={handleResetAllLeads}
               disabled={resetting}
               data-testid="reset-all-leads-btn"
@@ -500,19 +478,11 @@ export const PipelineStageManagement = ({ leading = null }) => {
               <Trash2 className="mr-1 h-4 w-4" /> {resetting ? "Resetting..." : "Reset All Leads"}
             </Button>
           </div>
-          <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
             <p className="text-sm font-semibold text-red-800">Reset all payments to a fresh state</p>
-            <p className="mt-1 flex-1 text-xs text-red-700">
-              For clearing test money before go-live. Keeps every lead, registration, stage, package
-              and price, but clears every fee paid (Consultation, Treatment, Diet, Diet Chart, Rehab,
-              installments, Zumba, Fitness) so it reads as owed again. Deletes store sales and puts their
-              stock back, and permanently deletes expenses, petty cash, cash handovers, opening cash,
-              closing balances, closed books, payslips, payroll runs, and HR advance/expense claims.
-              Receipt numbers restart. Cannot be undone.
-            </p>
             <Button
               variant="outline"
-              className="mt-3 self-start border-red-300 text-red-700 hover:bg-red-100"
+              className="border-red-300 text-red-700 hover:bg-red-100"
               onClick={handleResetAllPayments}
               disabled={resettingPayments}
               data-testid="reset-all-payments-btn"
@@ -520,18 +490,11 @@ export const PipelineStageManagement = ({ leading = null }) => {
               <Trash2 className="mr-1 h-4 w-4" /> {resettingPayments ? "Resetting..." : "Reset All Payments"}
             </Button>
           </div>
-          <div className="flex flex-col rounded-lg border border-red-200 bg-red-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
             <p className="text-sm font-semibold text-red-800">Reset all users to a fresh state (Without Super Admin)</p>
-            <p className="mt-1 flex-1 text-xs text-red-700">
-              For clearing test staff before go-live. Deletes every login without Super Admin and signs
-              them out, with their HR employee records, attendance, leave requests, clock-ins, login
-              history and expert calendars (a calendar with bookings is switched off instead). Leads,
-              Zumba registrations (master) and branches that named them are unassigned, and every Client
-              Portal login is deleted. Super Admin accounts are never touched. Cannot be undone.
-            </p>
             <Button
               variant="outline"
-              className="mt-3 self-start border-red-300 text-red-700 hover:bg-red-100"
+              className="border-red-300 text-red-700 hover:bg-red-100"
               onClick={handleResetAllUsers}
               disabled={resettingUsers}
               data-testid="reset-all-users-btn"
