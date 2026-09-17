@@ -980,44 +980,10 @@ PORTAL_PASSWORD_MIN = 6
 
 @router.post("/patient-portal/change-password")
 async def patient_portal_change_password(payload: V3PatientPortalChangePassword, authorization: str = Header(...)):
-    """The signed-in patient replaces their own password.
-
-    One password per login, so it changes for every patient this session was opened with
-    whose account the current password still opens — the same rule sign-in applies. An
-    account left behind on an older password is not swept along by knowing the newer one.
-    """
-    session = await _portal_session(authorization)
-    new_password = payload.new_password or ""
-    if len(new_password) < PORTAL_PASSWORD_MIN:
-        raise HTTPException(status_code=400, detail=f"New password must be at least {PORTAL_PASSWORD_MIN} characters")
-    if new_password == payload.current_password:
-        raise HTTPException(status_code=400, detail="New password must be different from the current one")
-
-    lead_ids = session.get("lead_ids") or [session["lead_id"]]
-    accounts = await v3_col("patient_portal_accounts").find(
-        # A blocked account is left alone: its access is paused, not the patient's to manage.
-        {"lead_id": {"$in": lead_ids}, "blocked": {"$ne": True}},
-        {"_id": 0, "id": 1, "lead_id": 1, "password_hash": 1},
-    ).to_list(50)
-    matched = [a for a in accounts if verify_password(payload.current_password or "", a.get("password_hash", ""))]
-    if not matched:
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-
-    now = now_iso()
-    await v3_col("patient_portal_accounts").update_many(
-        {"id": {"$in": [a["id"] for a in matched]}},
-        {"$set": {"password_hash": hash_password(new_password), "updated_at": now, "updated_by": "Patient"}},
-    )
-    await v3_col("lead_activity").insert_many([{
-        "id": str(uuid.uuid4()),
-        "lead_id": a["lead_id"],
-        "action": "portal_password_changed",
-        "details": "Client Portal password changed by the patient",
-        "created_by": "Patient",
-        "created_by_role": "patient",
-        "created_at": now,
-    } for a in matched])
-    return {"message": "Password changed"}
+    """Refused. Portal passwords are set by the Super Admin or Branch Admin only; the portal
+    no longer offers this, and a hand-made request is turned away rather than honoured."""
+    await _portal_session(authorization)
+    raise HTTPException(status_code=403, detail="Your password is managed by the clinic. Please contact your branch.")
 
 
 # ------------------------------------------------------- Patient: forgot password (OTP)
@@ -1542,6 +1508,26 @@ class V3PatientFeedbackIn(BaseModel):
     audience: Optional[str] = None
 
 
+# How many messages a patient may send to Super Admin, across all their threads. Branch
+# Admin and Consultant have no limit.
+SUPER_ADMIN_MESSAGE_LIMIT = 2
+
+
+async def _super_admin_messages_sent(lead_id: str) -> int:
+    rows = await v3_col("patient_feedback").find(
+        {"lead_id": lead_id, "audience": AUDIENCE_SUPER}, {"_id": 0},
+    ).to_list(200)
+    return sum(1 for r in rows for m in _thread(r) if m.get("author") == AUTHOR_PATIENT)
+
+
+async def _check_super_admin_limit(lead_id: str) -> None:
+    if await _super_admin_messages_sent(lead_id) >= SUPER_ADMIN_MESSAGE_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You can send only {SUPER_ADMIN_MESSAGE_LIMIT} messages to Super Admin. Please write to your Branch Admin.",
+        )
+
+
 @router.post("/patient-portal/feedback")
 async def patient_portal_feedback(
     payload: V3PatientFeedbackIn,
@@ -1570,6 +1556,8 @@ async def patient_portal_feedback(
     # carries one keeps it.
     if not message:
         raise HTTPException(status_code=400, detail="Tell us how it went")
+    if audience == AUDIENCE_SUPER:
+        await _check_super_admin_limit(lead_id)
 
     lead = await _lead_or_404(lead_id)
     # Copied onto the row, like the patient and the branch beside it, and for the same
@@ -1695,6 +1683,8 @@ async def patient_portal_feedback_reply(
     body = (payload.body or "").strip()[:MAX_MESSAGE]
     if payload.resolved is None and not body:
         raise HTTPException(status_code=400, detail="Write something to send")
+    if body and _audience(row.get("audience")) == AUDIENCE_SUPER:
+        await _check_super_admin_limit(lead_id)
 
     now = now_iso()
     thread = _thread(row)

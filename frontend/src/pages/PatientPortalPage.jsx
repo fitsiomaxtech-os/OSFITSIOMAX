@@ -10,7 +10,7 @@ import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
-  patientPortalSwitch, patientPortalChangePassword,
+  patientPortalSwitch,
   patientPortalForgotPassword, patientPortalVerifyResetOtp, patientPortalResetPassword,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
@@ -1433,115 +1433,6 @@ function ForgotPasswordFlow({ initialLogin = "", onDone, onCancel }) {
   );
 }
 
-// Collapsed to one button until asked for: most visits to Overview are not to change a
-// password, and three empty fields would push the branch card off a phone screen.
-function ChangePasswordCard({ loginHint = "" }) {
-  const [open, setOpen] = useState(false);
-  const [forgot, setForgot] = useState(false);
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [show, setShow] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const reset = () => { setCurrent(""); setNext(""); setConfirm(""); setShow(false); };
-  const close = () => { reset(); setOpen(false); setForgot(false); };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (next.length < PORTAL_PASSWORD_MIN) { toast.error(`New password must be at least ${PORTAL_PASSWORD_MIN} characters`); return; }
-    if (next !== confirm) { toast.error("New passwords do not match"); return; }
-    if (next === current) { toast.error("New password must be different from the current one"); return; }
-    setSaving(true);
-    try {
-      await patientPortalChangePassword(current, next);
-      toast.success("Password changed");
-      close();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not change password");
-    }
-    setSaving(false);
-  };
-
-  const field = (label, value, setValue, autoComplete, testid) => (
-    <div>
-      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</label>
-      <Input
-        type={show ? "text" : "password"}
-        autoComplete={autoComplete}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        required
-        className="h-9 text-sm"
-        data-testid={testid}
-      />
-    </div>
-  );
-
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="patient-portal-change-password">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Password</p>
-        {!open && !forgot && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs"
-            onClick={() => setOpen(true)}
-            data-testid="patient-portal-change-password-open"
-          >
-            <Lock className="mr-1.5 h-3.5 w-3.5" /> Change Password
-          </Button>
-        )}
-      </div>
-      {forgot && (
-        <div className="mt-3">
-          <ForgotPasswordFlow
-            initialLogin={loginHint}
-            onCancel={close}
-            // The reset signs every session on this login out, this one included.
-            onDone={() => { clearPortalSession(); window.location.reload(); }}
-          />
-        </div>
-      )}
-      {open && !forgot && (
-        <form onSubmit={submit} className="mt-3 space-y-2.5">
-          {field("Current password", current, setCurrent, "current-password", "patient-portal-current-password")}
-          {field("New password", next, setNext, "new-password", "patient-portal-new-password")}
-          {field("Confirm new password", confirm, setConfirm, "new-password", "patient-portal-confirm-password")}
-          <button
-            type="button"
-            onClick={() => setShow((v) => !v)}
-            className="flex items-center gap-1 text-[11px] font-medium text-slate-500"
-          >
-            {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            {show ? "Hide passwords" : "Show passwords"}
-          </button>
-          <button
-            type="button"
-            onClick={() => { reset(); setOpen(false); setForgot(true); }}
-            className="block text-[11px] font-medium text-sky-600"
-            data-testid="patient-portal-change-password-forgot"
-          >
-            Forgot current password? Get a code by email
-          </button>
-          <p className="text-[10px] text-slate-400">
-            At least {PORTAL_PASSWORD_MIN} characters. If family members share this login, the new password applies to them too.
-          </p>
-          <div className="flex gap-2 pt-1">
-            <Button type="button" variant="outline" size="sm" className="flex-1 text-xs" onClick={close} disabled={saving}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" className="flex-1 bg-sky-600 text-xs text-white hover:bg-sky-700" disabled={saving} data-testid="patient-portal-change-password-submit">
-              {saving ? "Saving..." : "Update Password"}
-            </Button>
-          </div>
-        </form>
-      )}
-    </div>
-  );
-}
-
 function ProfileTab({ data }) {
   const Row = ({ label, value }) => (
     !value ? null : (
@@ -1581,8 +1472,6 @@ function ProfileTab({ data }) {
       )}
 
       <PatientDocuments />
-
-      <ChangePasswordCard loginHint={data.phone || data.email || ""} />
 
       {(data.branch_name || data.branch_phone) && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
@@ -1627,11 +1516,13 @@ const PORTAL_TABS = [
 /**
  * Talk to Management — the client's chat with the people who answer for their care.
  *
- * The client picks one or more of Super Admin, Branch Admin and their Consultant. Each of
- * those is still its own conversation underneath (the Branch Admin never sees what went to
- * Super Admin). Each chosen person gets their own chat and message box; one Send button
- * sends every written message to its own person.
+ * The client picks one of Super Admin, Branch Admin and their Consultant at a time. Each is
+ * its own conversation (the Branch Admin never sees what went to Super Admin), with its own
+ * chat and message box. Super Admin takes only SUPER_ADMIN_MESSAGE_LIMIT messages in all.
  */
+// Mirrors SUPER_ADMIN_MESSAGE_LIMIT in backend/routers/v3_patient_portal.py.
+const SUPER_ADMIN_MESSAGE_LIMIT = 2;
+
 const feedbackTo = (consultantName, hasConsultantThreads) => [
   {
     key: "super_admin",
@@ -1684,7 +1575,8 @@ const mergedMessages = (rows) => {
 };
 
 /** One chosen person's own conversation and message box inside Talk to Management. */
-function PersonChat({ audience, name, rows, draft, onDraft, sending, onAnswer }) {
+function PersonChat({ audience, name, rows, draft, onDraft, sending, onAnswer, remaining = null }) {
+  const limitReached = remaining !== null && remaining <= 0;
   const endRef = useRef(null);
   const chatRef = useRef(null);
   // How tall three messages happen to be, once they are on screen.
@@ -1723,6 +1615,16 @@ function PersonChat({ audience, name, rows, draft, onDraft, sending, onAnswer })
       <div>
         <p className="text-xs font-bold text-slate-700">{audience.label}</p>
         <p className="text-[11px] leading-snug text-slate-500">{audience.blurb}</p>
+        {remaining !== null && (
+          <p
+            className={`mt-1 text-[11px] font-semibold ${limitReached ? "text-rose-600" : "text-amber-700"}`}
+            data-testid="portal-feedback-super-limit"
+          >
+            {limitReached
+              ? `You have sent your ${SUPER_ADMIN_MESSAGE_LIMIT} messages to Super Admin. Please write to your Branch Admin.`
+              : `You can send ${SUPER_ADMIN_MESSAGE_LIMIT} messages to Super Admin in all — ${remaining} left.`}
+          </p>
+        )}
       </div>
 
       {messages.length > 0 && (
@@ -1784,8 +1686,9 @@ function PersonChat({ audience, name, rows, draft, onDraft, sending, onAnswer })
           value={draft}
           maxLength={2000}
           onChange={(e) => onDraft(e.target.value)}
-          placeholder={`Message to ${name}…`}
-          className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+          disabled={limitReached}
+          placeholder={limitReached ? "Message limit reached" : `Message to ${name}…`}
+          className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400 disabled:cursor-not-allowed disabled:bg-slate-50"
           data-testid={`portal-feedback-message-${audience.key}`}
         />
         <p className="mt-0.5 text-right text-[10px] text-slate-400">{draft.length}/2000</p>
@@ -1795,9 +1698,10 @@ function PersonChat({ audience, name, rows, draft, onDraft, sending, onAnswer })
 }
 
 function FeedbackTab({ data, onSeen }) {
-  // One draft per person, so each chosen person gets their own message.
+  // One draft per person, so switching between people keeps what was written to each.
   const [drafts, setDrafts] = useState({});
-  const [selected, setSelected] = useState(["branch_admin"]);
+  // One person at a time; null when none is chosen.
+  const [selected, setSelected] = useState("branch_admin");
   const [sending, setSending] = useState(false);
   const [mine, setMine] = useState([]);
 
@@ -1821,60 +1725,49 @@ function FeedbackTab({ data, onSeen }) {
 
   // Nothing points at a Consultant card that is no longer on screen.
   useEffect(() => {
-    if (!canWriteToConsultant && selected.includes("consultant")) {
-      setSelected(selected.filter((k) => k !== "consultant"));
-    }
+    if (!canWriteToConsultant && selected === "consultant") setSelected(null);
   }, [canWriteToConsultant, selected]);
 
-  // Any card can be unticked, down to none at all; nothing is sent until one is chosen.
-  const toggle = (key) => setSelected((cur) => (
-    cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]
-  ));
-  const allSelected = audiences.every((a) => selected.includes(a.key));
-  const toggleAll = () => setSelected(allSelected ? [] : audiences.map((a) => a.key));
+  // Tapping the chosen card again unticks it.
+  const toggle = (key) => setSelected((cur) => (cur === key ? null : key));
 
-  // Each change of who is chosen fetches the latest of those conversations.
-  const selectedKey = [...selected].sort().join(",");
+  // Each change of who is chosen fetches the latest of that conversation.
   const firstSelection = useRef(true);
   useEffect(() => {
     if (firstSelection.current) { firstSelection.current = false; return; }
     loadMine();
-  }, [selectedKey, loadMine]);
+  }, [selected, loadMine]);
 
   const setDraft = (key, value) => setDrafts((d) => ({ ...d, [key]: value }));
-  const chosen = audiences.filter((a) => selected.includes(a.key));
-  // Only the chosen people with something written are sent to.
-  const toSend = chosen.filter((a) => (drafts[a.key] || "").trim());
+  const chosen = audiences.find((a) => a.key === selected) || null;
+  const superSent = mine
+    .filter((f) => audienceOf(f) === "super_admin")
+    .reduce((n, f) => n + (f.messages || []).filter((m) => m.author === "patient").length, 0);
+  const superRemaining = Math.max(0, SUPER_ADMIN_MESSAGE_LIMIT - superSent);
+  const remainingFor = (key) => (key === "super_admin" ? superRemaining : null);
+  const body = chosen ? (drafts[chosen.key] || "").trim() : "";
+  const canSend = Boolean(chosen && body && !(chosen.key === "super_admin" && superRemaining <= 0));
 
   const waiting = (key) => mine.some(
     (f) => audienceOf(f) === key && (f.status || "new") === "awaiting_patient",
   );
 
-  // One Send for everyone: each person's own message goes into their open conversation, or starts one.
+  // The message goes to the one chosen person: into their open conversation, or starting one.
   const sendMessage = async () => {
-    if (!toSend.length) { toast.error("Write a message to send"); return; }
+    if (!canSend) return;
+    const key = chosen.key;
     setSending(true);
-    const failed = [];
-    const sent = [];
-    for (const a of toSend) {
-      const body = drafts[a.key].trim();
-      try {
-        const open = openThreadOf(mine.filter((f) => audienceOf(f) === a.key));
-        if (open) await patientPortalReplyFeedback(open.id, { body });
-        else await patientPortalSubmitFeedback({ message: body, audience: a.key });
-        sent.push(a.key);
-      } catch {
-        failed.push(nameOf(a.key));
-      }
+    try {
+      const open = openThreadOf(mine.filter((f) => audienceOf(f) === key));
+      if (open) await patientPortalReplyFeedback(open.id, { body });
+      else await patientPortalSubmitFeedback({ message: body, audience: key });
+      setDraft(key, "");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || `Could not send to ${nameOf(key)}. Please try again.`);
+    } finally {
+      setSending(false);
+      loadMine();
     }
-    setDrafts((d) => {
-      const next = { ...d };
-      sent.forEach((k) => { delete next[k]; });
-      return next;
-    });
-    if (failed.length) toast.error(`Could not send to ${failed.join(", ")}. Please try again.`);
-    setSending(false);
-    loadMine();
   };
 
   // "Has this sorted it?" is answered on the one conversation that asked, with that person's draft.
@@ -1899,24 +1792,14 @@ function FeedbackTab({ data, onSeen }) {
           <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
             <MessageSquareHeart className="h-4 w-4 text-sky-500" />Talk to Management
           </p>
-          <p className="mt-0.5 text-xs text-slate-500">Chat with the management. Pick one or more people to send to.</p>
+          <p className="mt-0.5 text-xs text-slate-500">Chat with the management. Pick one person to send to.</p>
         </div>
 
         <div>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to (choose one or more)</p>
-            <button
-              type="button"
-              onClick={toggleAll}
-              className="shrink-0 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
-              data-testid="portal-feedback-toggle-all"
-            >
-              {allSelected ? "Unselect all" : "Select all"}
-            </button>
-          </div>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to (choose one)</p>
           <div className={`grid gap-2 ${audiences.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`} data-testid="portal-feedback-audience">
             {audiences.map((a) => {
-              const on = selected.includes(a.key);
+              const on = selected === a.key;
               return (
                 <button
                   key={a.key}
@@ -1926,7 +1809,7 @@ function FeedbackTab({ data, onSeen }) {
                   className={`relative flex items-start gap-2 rounded-lg border p-3 text-left transition ${on ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500" : "border-slate-200 bg-white hover:border-sky-300"}`}
                   data-testid={`portal-feedback-to-${a.key}`}
                 >
-                  <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-sky-600 bg-sky-600 text-white" : "border-slate-300 bg-white"}`}>
+                  <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${on ? "border-sky-600 bg-sky-600 text-white" : "border-slate-300 bg-white"}`}>
                     {on && <Check className="h-3 w-3" />}
                   </span>
                   <span className="min-w-0">
@@ -1942,26 +1825,27 @@ function FeedbackTab({ data, onSeen }) {
           </div>
         </div>
 
-        {chosen.map((a) => (
+        {chosen && (
           <PersonChat
-            key={a.key}
-            audience={a}
-            name={nameOf(a.key)}
-            rows={mine.filter((f) => audienceOf(f) === a.key)}
-            draft={drafts[a.key] || ""}
-            onDraft={(value) => setDraft(a.key, value)}
+            key={chosen.key}
+            audience={chosen}
+            name={nameOf(chosen.key)}
+            rows={mine.filter((f) => audienceOf(f) === chosen.key)}
+            draft={drafts[chosen.key] || ""}
+            onDraft={(value) => setDraft(chosen.key, value)}
             sending={sending}
             onAnswer={answer}
+            remaining={remainingFor(chosen.key)}
           />
-        ))}
+        )}
 
         <Button
           className="w-full"
-          disabled={sending || !toSend.length}
+          disabled={sending || !canSend}
           onClick={sendMessage}
           data-testid="portal-feedback-submit"
         >
-          {sending ? "Sending…" : toSend.length ? `Send to ${toSend.map((a) => nameOf(a.key)).join(" & ")}` : "Send"}
+          {sending ? "Sending…" : chosen ? `Send to ${nameOf(chosen.key)}` : "Send"}
         </Button>
       </CardContent>
     </Card>

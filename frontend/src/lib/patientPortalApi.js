@@ -55,15 +55,6 @@ export const patientPortalGoogleLogin = async (credential) => {
   return data;
 };
 
-export const patientPortalChangePassword = async (currentPassword, newPassword) => {
-  const { data } = await portalApi.post(
-    "/patient-portal/change-password",
-    { current_password: currentPassword, new_password: newPassword },
-    { headers: authHeaders() },
-  );
-  return data;
-};
-
 /** Forgot password, step 1: email a 6-digit code for this phone number or email. */
 export const patientPortalForgotPassword = async (login) => {
   const { data } = await portalApi.post("/patient-portal/forgot-password", { login });
