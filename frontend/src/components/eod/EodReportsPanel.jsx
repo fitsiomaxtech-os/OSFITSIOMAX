@@ -2,13 +2,13 @@
  * HR Admin > EOD Report — Super Admin's read of every Physio's and Consultant's day.
  *
  * A period at a time — All, Today (the default), Yesterday, This Week, or a day or range
- * picked from the calendar icon. The four figures are also the way into their lists:
- * Reports lists every report filed, Not submitted lists each day somebody clocked in
- * without filing one, and Treatments / Consultations narrow the reports to Physios or
- * Consultants. The server only answers Super Admin. See backend/routers/v3_eod_reports.py.
+ * picked from the calendar icon — narrowed by branch and by a search. The four figures are
+ * also the way into their lists: All lists every report filed, Consultant Report and
+ * Physio Report narrow that to one desk, and Not Submitted lists each day somebody clocked
+ * in without filing one. The server only answers Super Admin. See backend/routers/v3_eod_reports.py.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertOctagon, Building2, Check, ChevronDown, ChevronUp, ClipboardList, HeartPulse, RefreshCw, Search, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,8 +30,7 @@ const PRESETS = [
   { key: "yesterday", label: "Yesterday" },
   { key: "week", label: "This Week" },
 ];
-const presetRange = (key) => {
-  const today = new Date();
+const presetRange = (key, today) => {
   if (key === "today") return { from: iso(today), to: iso(today) };
   if (key === "yesterday") { const y = addDays(today, -1); return { from: iso(y), to: iso(y) }; }
   if (key === "week") {
@@ -42,12 +41,14 @@ const presetRange = (key) => {
   return { from: "", to: "" };
 };
 
-// The four figures, and what clicking each one lists.
+// The four figures, in the order they sit, and what clicking each one lists. Each counts
+// reports (or missing ones), not the clients inside them -- the per-report count is on
+// the report's own row.
 const VIEWS = [
-  { key: "reports", label: "Reports", icon: ClipboardList, title: "All reports" },
-  { key: "pending", label: "Not submitted", icon: AlertOctagon, title: "Clocked in, no report" },
-  { key: "physio", label: "Treatments", icon: HeartPulse, title: "Physio reports" },
-  { key: "consultant", label: "Consultations", icon: Stethoscope, title: "Consultant reports" },
+  { key: "reports", label: "All", icon: ClipboardList, title: "All reports" },
+  { key: "consultant", label: "Consultant Report", icon: Stethoscope, title: "Consultant reports" },
+  { key: "physio", label: "Physio Report", icon: HeartPulse, title: "Physio reports" },
+  { key: "pending", label: "Not Submitted", icon: AlertOctagon, title: "Clocked in, no report" },
 ];
 
 const countLabel = (kind) => (kind === "consultant" ? "Consultations" : "Treatments");
@@ -124,29 +125,40 @@ export const EodReportsPanel = () => {
   // period's rows are already on screen, and the four figures follow the same filter.
   const [branchId, setBranchId] = useState("");
   const [branches, setBranches] = useState([]);
+  const [open, setOpen] = useState(null);
+  // The moment the presets are measured from, moved on by Refresh -- so a tab left open
+  // past midnight asks for the new Today rather than the day it was opened on.
+  const [now, setNow] = useState(() => new Date());
+  // Which request is the latest. A slower answer to an earlier click must not land on top
+  // of the answer to the later one and put the wrong period's figures on screen.
+  const latest = useRef(0);
 
   useEffect(() => {
     getBranches().then((rows) => setBranches((rows || []).filter((b) => b?.id && b?.name))).catch(() => {});
   }, []);
-  const [open, setOpen] = useState(null);
 
   const range = useMemo(
-    () => (custom ? { from: iso(custom.from), to: iso(custom.to || custom.from) } : presetRange(preset)),
-    [custom, preset],
+    () => (custom ? { from: iso(custom.from), to: iso(custom.to || custom.from) } : presetRange(preset, now)),
+    [custom, preset, now],
   );
   const singleDay = range.from && range.from === range.to;
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    const id = latest.current + 1;
+    latest.current = id;
     setLoading(true);
-    try { setData(await eodReports(range)); }
-    catch (e) { toast.error(e?.response?.data?.detail || e?.message || "Could not load EOD reports"); }
-    finally { setLoading(false); }
+    eodReports(range)
+      .then((next) => { if (latest.current === id) setData(next); })
+      .catch((e) => { if (latest.current === id) toast.error(e?.response?.data?.detail || e?.message || "Could not load EOD reports"); })
+      .finally(() => { if (latest.current === id) setLoading(false); });
   }, [range]);
 
-  useEffect(() => { load(); }, [load]);
+  const refresh = () => setNow(new Date());
 
   const matches = useCallback((r) => {
-    if (branchId && r.branch_id !== branchId) return false;
+    // Every branch the person covers, not only the one stamped on the row -- see
+    // list_eod_reports. The stamp is the fallback for a server that has not sent the list.
+    if (branchId && !(r.branch_ids || [r.branch_id]).includes(branchId)) return false;
     const needle = q.trim().toLowerCase();
     if (!needle) return true;
     return [r.user_name, r.branch_name, ...(r.entries || []).map((e) => e.client_name)]
@@ -157,9 +169,9 @@ export const EodReportsPanel = () => {
   const pending = useMemo(() => (data?.pending || []).filter(matches), [data, matches]);
   const totals = useMemo(() => ({
     reports: allReports.length,
+    consultant: allReports.filter((r) => r.kind === "consultant").length,
+    physio: allReports.filter((r) => r.kind === "physio").length,
     pending: pending.length,
-    physio: allReports.filter((r) => r.kind === "physio").reduce((n, r) => n + (r.count || 0), 0),
-    consultant: allReports.filter((r) => r.kind === "consultant").reduce((n, r) => n + (r.count || 0), 0),
   }), [allReports, pending]);
   const reports = useMemo(
     () => (view === "physio" || view === "consultant" ? allReports.filter((r) => r.kind === view) : allReports),
@@ -215,7 +227,7 @@ export const EodReportsPanel = () => {
           <DateFilterPopover value={custom} onChange={setCustom} testid="eod-date-filter" centered iconOnly />
           <Button
             type="button"
-            onClick={load}
+            onClick={refresh}
             disabled={loading}
             title="Refresh"
             aria-label="Refresh"
@@ -227,7 +239,7 @@ export const EodReportsPanel = () => {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${loading && data ? "opacity-60" : ""}`}>
         {VIEWS.map((v) => (
           <KPI
             key={v.key}
@@ -241,7 +253,7 @@ export const EodReportsPanel = () => {
         ))}
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className={`rounded-lg border border-slate-200 bg-white p-3 transition-opacity ${loading && data ? "opacity-60" : ""}`}>
         <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="eod-list-title">
           <ClipboardList className="h-4 w-4 text-sky-600" />
           {listTitle} <span className="text-slate-400">· {view === "pending" ? pending.length : reports.length}</span>

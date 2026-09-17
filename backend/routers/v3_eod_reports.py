@@ -258,16 +258,29 @@ async def list_eod_reports(
     ]
     pending.sort(key=lambda p: (-int(p["date"].replace("-", "") or 0), p["user_name"]))
 
-    branch_ids = {r.get("branch_id") for r in reports + pending if r.get("branch_id")}
+    # Every branch each person covers, read off their account as it stands now rather than
+    # only the one stamped on the report. A Consultant covers several and often has no
+    # primary branch at all, so filtering on the stamp alone hid them from every branch
+    # they actually work at.
+    people_ids = sorted({r["user_id"] for r in reports + pending if r.get("user_id")})
+    people = await v3_col("users").find(
+        {"id": {"$in": people_ids}}, {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1},
+    ).to_list(5000) if people_ids else []
+    covers = {u["id"]: [u.get("branch_id")] + list(u.get("branch_ids") or []) for u in people}
+    for row in reports + pending:
+        ids = [row.get("branch_id")] + covers.get(row.get("user_id"), [])
+        row["branch_ids"] = list(dict.fromkeys(b for b in ids if b))
+
+    branch_ids = {b for row in reports + pending for b in row["branch_ids"]}
     branches = await v3_col("branches").find(
         {"id": {"$in": list(branch_ids)}}, {"_id": 0, "id": 1, "name": 1},
     ).to_list(500) if branch_ids else []
     names = {b["id"]: b.get("name") or "" for b in branches}
     for row in reports + pending:
-        row["branch_name"] = names.get(row.get("branch_id"), "")
+        row["branch_name"] = ", ".join(n for n in (names.get(b) for b in row["branch_ids"]) if n)
 
     return {
         "date_from": date_from or "", "date_to": date_to or "",
-        "reports": [{**_public(r), "branch_name": r["branch_name"]} for r in reports],
+        "reports": [{**_public(r), "branch_ids": r["branch_ids"], "branch_name": r["branch_name"]} for r in reports],
         "pending": pending,
     }
