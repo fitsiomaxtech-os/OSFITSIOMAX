@@ -276,6 +276,8 @@ async def portal_my_review(lead_id: str = Depends(_current_patient_lead_id)):
         **team,
         "weeks": weeks,
         "weeks_pending": pending_weeks(weeks, week_rows, skipped),
+        # Skipped ones too: the Overview tab keeps offering them after the pop-up is skipped.
+        "weeks_unreviewed": pending_weeks(weeks, week_rows),
         "week_reviews": week_rows,
         "anytime_reviews": [r for r in rows if r.get("source") == SOURCE_ANYTIME],
     }

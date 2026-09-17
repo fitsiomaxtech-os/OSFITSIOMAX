@@ -1433,7 +1433,7 @@ function ForgotPasswordFlow({ initialLogin = "", onDone, onCancel }) {
   );
 }
 
-function ProfileTab({ data }) {
+function ProfileTab({ data, reviews = null, onReviewed }) {
   const Row = ({ label, value }) => (
     !value ? null : (
       <div>
@@ -1445,6 +1445,8 @@ function ProfileTab({ data }) {
 
   return (
     <div className="space-y-4" data-testid="patient-portal-profile-tab">
+      <OverviewWeeklyReview reviews={reviews} onReviewed={onReviewed} />
+
       <div className="rounded-lg border border-slate-200 bg-white p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Your Details</p>
         <div className="grid grid-cols-2 gap-3">
@@ -2085,9 +2087,49 @@ function WeekReviewButton({ track, number, reviews, onReviewed }) {
   );
 }
 
+function OverviewWeekRow({ week, reviews, onReviewed }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-slate-700">{weekTitle(week)}</p>
+        <p className="text-[10px] text-slate-400">
+          {[weekRange(week), week.physio_name || reviews?.physio?.name].filter(Boolean).join(" · ")}
+        </p>
+      </div>
+      <WeekReviewButton track={week.track} number={week.last_number} reviews={reviews} onReviewed={onReviewed} />
+    </div>
+  );
+}
+
+/** Overview's Weekly Review card: every completed week still waiting for a Physio review —
+    including ones whose pop-up was skipped — then the weeks already reviewed. */
+function OverviewWeeklyReview({ reviews, onReviewed }) {
+  const waiting = reviews?.weeks_unreviewed || reviews?.weeks_pending || [];
+  const reviewed = (reviews?.weeks || []).filter((w) => w.complete && savedForWeek(reviews, w));
+  if (!waiting.length && !reviewed.length) return null;
+  const row = (w) => <OverviewWeekRow key={`${w.track}-${w.week_number}`} week={w} reviews={reviews} onReviewed={onReviewed} />;
+  return (
+    <div className="rounded-lg border border-amber-200 bg-white" data-testid="patient-portal-overview-reviews">
+      <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-3 py-2">
+        <Star className="h-4 w-4 text-amber-500" />
+        <p className="flex-1 text-xs font-semibold uppercase tracking-wide text-amber-700">Weekly Review</p>
+        {waiting.length > 0 && (
+          <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold text-white">
+            {waiting.length} waiting
+          </span>
+        )}
+      </div>
+      <div className="divide-y divide-slate-100">
+        {waiting.map(row)}
+        {reviewed.map(row)}
+      </div>
+    </div>
+  );
+}
+
 /** The Review pop-up that opens by itself once a week of treatment is completed and not yet
     reviewed. Optional: Skip (or the close button) stops it asking for that week, which can
-    still be reviewed later from the Weekly Review card in Sessions. */
+    still be reviewed later from the Weekly Review card on Overview. */
 function WeekReviewGate({ reviews, onChanged }) {
   const [skipping, setSkipping] = useState(false);
   const pending = reviews?.weeks_pending || [];
@@ -2160,7 +2202,11 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
   const loadReviews = useCallback(() => {
     patientPortalMyReview().then(setReviews).catch(() => setReviews(null));
   }, []);
-  useEffect(() => { loadReviews(); }, [loadReviews]);
+  // Refetched each time Overview or Sessions opens, so a week finished or skipped since the
+  // app was opened shows up there without a reload.
+  useEffect(() => {
+    if (activeTab === "profile" || activeTab === "sessions") loadReviews();
+  }, [loadReviews, activeTab]);
 
   // Opening the Feedback tab reads its replies (the GET stamps them seen), so the
   // bottom-nav badge should clear the moment they land there rather than lag a reload.
@@ -2209,7 +2255,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
         {activeTab === "sessions" && <SessionsTab data={data} reviews={reviews} onReviewed={loadReviews} />}
         {activeTab === "treatment" && <TreatmentTab data={data} reviews={reviews} onReviewed={loadReviews} />}
         {activeTab === "payment" && <PaymentTab data={data} />}
-        {activeTab === "profile" && <ProfileTab data={data} />}
+        {activeTab === "profile" && <ProfileTab data={data} reviews={reviews} onReviewed={loadReviews} />}
         {activeTab === "feedback" && (
           <FeedbackTab data={data} onSeen={clearFeedbackBadge} />
         )}
@@ -2229,6 +2275,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
             // written back on since this patient last opened it. Clears on open — see
             // clearFeedbackBadge and patient_portal_my_feedback's seen stamp.
             const badge = t.key === "feedback" ? (data.feedback_unread || 0)
+              : t.key === "profile" ? (reviews?.weeks_unreviewed?.length || 0)
               : t.key === "sessions" ? (reviews?.weeks_pending?.length || 0) : 0;
             return (
               <button
