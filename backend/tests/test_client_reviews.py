@@ -1,4 +1,4 @@
-"""The rules behind Client Reviews: which physio days are owed stars, how old rows are read, and how the figures are worked out.
+"""The rules behind Client Reviews: which weeks are owed stars, how old rows are read, and how the figures are worked out.
 
 Unit tests like test_hr_ops_payroll.py -- they call the functions directly, with no
 database, server or login. See backend/routers/v3_client_reviews.py.
@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import HTTPException  # noqa: E402
 
 from routers.v3_client_reviews import (  # noqa: E402
-    pending_physio_days, required_rating, split_legacy, summarise,
+    course_weeks, pending_weeks, required_comment, required_rating, split_legacy, summarise, week_of,
 )
 
 
@@ -27,23 +27,57 @@ class TestRequiredRating:
         assert required_rating("4") == 4
 
 
-class TestPendingPhysioDays:
-    DAYS = [
-        {"id": "a", "status": "completed", "completed_at": "2026-09-20T10:00:00", "session_number": 2, "physio_name": "Priya"},
-        {"id": "b", "status": "completed", "completed_at": "2026-09-17T10:00:00", "session_number": 1, "physio_name": "Priya"},
-        {"id": "c", "status": "scheduled", "slot_time": "2026-09-21T10:00:00"},
-        {"id": "d", "status": "completed", "completed_at": "2026-09-01T10:00:00"},
-        {"id": "e", "status": "completed", "completed_at": "2026-09-18T10:00:00", "track": "rehab", "day_number": 1},
-    ]
+def _day(n, week, status="completed", when=None, track="treatment", physio="Priya"):
+    return {"id": f"{track}-{n}", "track": track, "session_number": n, "week_number": week, "status": status,
+            "completed_at": when or f"2026-09-{16 + n:02d}T10:00:00", "physio_name": physio}
 
-    def test_completed_since_start_not_yet_reviewed_oldest_first(self):
-        out = pending_physio_days(self.DAYS, {"e"}, since="2026-09-16")
-        assert [p["session_id"] for p in out] == ["b", "a"]
 
-    def test_rehab_day_number_is_its_number(self):
-        out = pending_physio_days(self.DAYS, set(), since="2026-09-16")
-        rehab = next(p for p in out if p["session_id"] == "e")
-        assert rehab["track"] == "rehab" and rehab["session_number"] == 1
+class TestCourseWeeks:
+    def test_week_complete_only_when_every_day_is(self):
+        days = [_day(n, 1) for n in range(1, 8)] + [_day(8, 2), _day(9, 2, status="upcoming")]
+        weeks = course_weeks(days)
+        assert [(w["week_number"], w["complete"]) for w in weeks] == [(1, True), (2, False)]
+        assert weeks[0]["first_number"] == 1 and weeks[0]["last_number"] == 7 and weeks[0]["finished_at"].startswith("2026-09-23")
+        assert weeks[1]["finished_at"] == ""
+
+    def test_rehab_weeks_are_every_seven_days(self):
+        days = [{"id": f"r{n}", "track": "rehab", "day_number": n, "status": "completed",
+                 "completed_at": "2026-09-20T10:00:00"} for n in range(1, 9)]
+        assert [(w["week_number"], w["days"]) for w in course_weeks(days)] == [(1, 7), (2, 1)]
+
+    def test_week_of_falls_back_to_number(self):
+        assert week_of({"session_number": 14}) == 2 and week_of({"session_number": 15}) == 3
+        assert week_of({"session_number": 3, "week_number": 5}) == 5
+
+
+class TestPendingWeeks:
+    WEEKS = course_weeks(
+        [_day(n, 1) for n in range(1, 8)]
+        + [_day(n, 2, when="2026-09-01T10:00:00") for n in range(8, 10)]
+        + [_day(n, 3, status="upcoming") for n in range(10, 12)]
+        + [_day(1, None, track="rehab")]
+    )
+
+    def test_complete_weeks_since_start_owe_both_halves(self):
+        out = pending_weeks(self.WEEKS, [], has_consultant=True, since="2026-09-16")
+        assert [(w["track"], w["week_number"]) for w in out] == [("rehab", 1), ("treatment", 1)]
+        treatment = out[1]
+        assert treatment["needs_physio"] and treatment["needs_consultant"]
+        assert out[0]["needs_physio"] and not out[0]["needs_consultant"]
+
+    def test_given_halves_drop_out(self):
+        rows = [{"source": "week", "kind": "physio", "track": "treatment", "week_number": 1},
+                {"source": "week", "kind": "physio", "track": "rehab", "week_number": 1}]
+        out = pending_weeks(self.WEEKS, rows, has_consultant=True, since="2026-09-16")
+        assert len(out) == 1 and not out[0]["needs_physio"] and out[0]["needs_consultant"]
+        assert pending_weeks(self.WEEKS, rows, has_consultant=False, since="2026-09-16") == []
+
+
+class TestRequiredComment:
+    def test_blank_is_refused(self):
+        with pytest.raises(HTTPException):
+            required_comment("   ", "physio")
+        assert required_comment(" good ", "physio") == "good"
 
 
 class TestSplitLegacy:

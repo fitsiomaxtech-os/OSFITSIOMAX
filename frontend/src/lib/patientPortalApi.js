@@ -102,21 +102,15 @@ export const patientPortalSubmitFeedback = async ({ rating, message, audience })
   return data;
 };
 
-/** Physio days waiting for stars, and past Physio, Consultant and anytime reviews. */
+/** The course's weeks, the ones waiting for a review, and past weekly and anytime reviews. */
 export const patientPortalMyReview = async () => {
   const { data } = await portalApi.get("/patient-portal/review", { headers: authHeaders() });
   return data;
 };
 
-/** Stars for one completed physio day — required for every one. */
-export const patientPortalReviewPhysio = async ({ session_id, rating, comment }) => {
-  const { data } = await portalApi.post("/patient-portal/review/physio", { session_id, rating, comment }, { headers: authHeaders() });
-  return data;
-};
-
-/** Stars for the Consultant on one completed 7-day Review. */
-export const patientPortalReviewConsultant = async ({ review_id, rating, comment }) => {
-  const { data } = await portalApi.post("/patient-portal/review/consultant", { review_id, rating, comment }, { headers: authHeaders() });
+/** Stars and feedback for the Physio and the Consultant on one completed week (every 7 days). */
+export const patientPortalReviewWeek = async (payload) => {
+  const { data } = await portalApi.post("/patient-portal/review/week", payload, { headers: authHeaders() });
   return data;
 };
 

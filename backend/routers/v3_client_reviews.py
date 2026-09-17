@@ -10,12 +10,14 @@ Kept apart from two things with a similar name:
 
 Every review is its own row, with a `kind` (who is rated) and a `source` (what prompted it):
 
-  * kind "physio",     source "session" -- one per completed physio day, treatment or rehab.
-    Required: the portal holds the client on a pop-up until every day completed since
-    PHYSIO_REVIEW_START is rated. Opened from the Review button on the day in Sessions.
-  * kind "consultant", source "review"  -- one per completed 7-day clinical Review, opened
-    from the Review button beside it on the Treatment tab. Optional.
-  * either kind,       source "anytime" -- from the Feedback tab, whenever the client wants.
+  * source "week"    -- every 7 days of treatment the client rates BOTH their Physio and their
+    Consultant the same way: 1-5 stars and written feedback, one row per kind per week. A
+    week is due once every day in it is completed; the portal holds the client on a pop-up
+    until each due week finished since PHYSIO_REVIEW_START is rated. Rehab weeks (every 7
+    rehab days) rate the Physio only -- rehab has no consultant of its own.
+  * source "anytime" -- either kind, from the Feedback tab, whenever the client wants.
+  * source "session" / "review" -- the earlier per-session Physio and per-clinical-Review
+    Consultant rows. No longer written, still read by management.
 
 Rows written by the first flow (one row per client with both ratings, no `kind`) are still
 read by management: list_client_reviews splits each into its consultant and physio halves.
@@ -38,7 +40,6 @@ from deps import v3_require_roles, is_branch_admin_role
 from physio_scope import consultant_of_lead
 from routers.v3_feedback import _rating
 from routers.v3_patient_portal import _current_patient_lead_id, _lead_or_404
-from routers.v3_reviews import review_numbers_for_lead
 from schemas.v3 import V3UserOut
 from utils import now_iso
 
@@ -49,26 +50,25 @@ MAX_TEXT = 2000
 
 KIND_PHYSIO = "physio"
 KIND_CONSULTANT = "consultant"
-SOURCE_SESSION = "session"
-SOURCE_REVIEW = "review"
+SOURCE_WEEK = "week"
 SOURCE_ANYTIME = "anytime"
 
-# Physio days completed on or after this are the ones a client must rate.
+TRACKS = ("treatment", "rehab")
+DAYS_PER_WEEK = 7
+
+# Weeks finished on or after this are the ones a client must rate.
 PHYSIO_REVIEW_START = "2026-09-16"
 
 BDE_ROLES = ("business_dev", "business_development_executive")
 
 
-class PhysioReviewIn(BaseModel):
-    session_id: str
-    rating: Optional[int] = None
-    comment: Optional[str] = ""
-
-
-class ConsultantReviewIn(BaseModel):
-    review_id: str
-    rating: Optional[int] = None
-    comment: Optional[str] = ""
+class WeekReviewIn(BaseModel):
+    track: str = "treatment"
+    week_number: int
+    physio_rating: Optional[int] = None
+    physio_comment: Optional[str] = ""
+    consultant_rating: Optional[int] = None
+    consultant_comment: Optional[str] = ""
 
 
 class AnytimeReviewIn(BaseModel):
@@ -88,37 +88,74 @@ def required_rating(value) -> int:
     return rating
 
 
-def pending_physio_days(days: List[dict], reviewed_ids: set, since: str = PHYSIO_REVIEW_START) -> List[dict]:
-    """Completed physio days, oldest first, that still need the client's stars.
+def required_comment(value, who: str) -> str:
+    text = _text(value)
+    if not text:
+        raise HTTPException(status_code=400, detail=f"Write a few words of feedback for your {who}")
+    return text
 
-    `days` are session rows from both tracks, each already carrying `track`. A day counts
-    from when it was completed; one with no completed_at (older rows) falls back to its slot.
-    """
-    out = []
+
+def week_of(day: dict) -> int:
+    """The week a day sits in. Treatment days carry `week_number` from booking; rehab days
+    and older rows do not, so every 7 days by number make a week."""
+    if day.get("track") != "rehab" and day.get("week_number"):
+        return int(day["week_number"])
+    number = day.get("session_number") or day.get("day_number") or 1
+    return (int(number) - 1) // DAYS_PER_WEEK + 1
+
+
+def course_weeks(days: List[dict]) -> List[dict]:
+    """Every week of both courses: its day range, whether every day is completed, when it
+    finished, and the physio of its last completed day. `days` each carry `track`."""
+    groups: Dict[tuple, List[dict]] = {}
     for d in days:
-        if d.get("status") != "completed" or d.get("id") in reviewed_ids:
-            continue
-        when = str(d.get("completed_at") or d.get("slot_time") or "")
-        if when[:10] < since:
-            continue
+        track = d.get("track") or "treatment"
+        groups.setdefault((track, week_of({**d, "track": track})), []).append(d)
+    out = []
+    for (track, week), rows in groups.items():
+        done = [r for r in rows if r.get("status") == "completed"]
+        complete = len(done) == len(rows)
+        last = max(done, key=lambda r: str(r.get("completed_at") or r.get("slot_time") or "")) if done else {}
+        numbers = [n for n in (r.get("session_number") or r.get("day_number") for r in rows) if n is not None]
         out.append({
-            "session_id": d.get("id"),
-            "track": d.get("track") or "treatment",
-            "session_number": d.get("session_number") or d.get("day_number"),
-            "slot_time": d.get("slot_time"),
-            "completed_at": d.get("completed_at"),
-            "physio_id": _text(d.get("physio_id")),
-            "physio_name": _text(d.get("physio_name") or d.get("completed_by")),
+            "track": track,
+            "week_number": week,
+            "first_number": min(numbers) if numbers else None,
+            "last_number": max(numbers) if numbers else None,
+            "days": len(rows),
+            "completed_days": len(done),
+            "complete": complete,
+            "finished_at": str(last.get("completed_at") or last.get("slot_time") or "") if complete else "",
+            "physio_id": _text(last.get("physio_id")),
+            "physio_name": _text(last.get("physio_name") or last.get("completed_by")),
         })
-    out.sort(key=lambda p: str(p.get("completed_at") or p.get("slot_time") or ""))
+    out.sort(key=lambda w: (TRACKS.index(w["track"]) if w["track"] in TRACKS else len(TRACKS), w["week_number"]))
     return out
 
 
-async def _physio_days(lead_id: str) -> List[dict]:
+def pending_weeks(weeks: List[dict], rows: List[dict], has_consultant: bool,
+                  since: str = PHYSIO_REVIEW_START) -> List[dict]:
+    """Completed weeks, finished since `since`, oldest first, still missing a Physio or
+    Consultant review. Rehab weeks owe the Physio half only."""
+    given = {(r.get("kind"), r.get("track"), r.get("week_number")) for r in rows if r.get("source") == SOURCE_WEEK}
+    out = []
+    for w in weeks:
+        if not w["complete"] or w["finished_at"][:10] < since:
+            continue
+        needs_physio = (KIND_PHYSIO, w["track"], w["week_number"]) not in given
+        needs_consultant = (w["track"] == "treatment" and has_consultant
+                            and (KIND_CONSULTANT, w["track"], w["week_number"]) not in given)
+        if needs_physio or needs_consultant:
+            out.append({**w, "needs_physio": needs_physio, "needs_consultant": needs_consultant})
+    out.sort(key=lambda w: w["finished_at"])
+    return out
+
+
+async def _course_days(lead_id: str) -> List[dict]:
     fields = {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "slot_time": 1, "session_number": 1,
-              "day_number": 1, "physio_id": 1, "physio_name": 1, "completed_by": 1}
-    treatment = await v3_col("sessions").find({"lead_id": lead_id, "status": "completed"}, fields).to_list(500)
-    rehab = await v3_col("rehab_sessions").find({"lead_id": lead_id, "status": "completed"}, fields).to_list(300)
+              "day_number": 1, "week_number": 1, "physio_id": 1, "physio_name": 1, "completed_by": 1}
+    treatment = await v3_col("sessions").find({"lead_id": lead_id}, fields).to_list(500)
+    rehab = await v3_col("rehab_sessions").find({"lead_id": lead_id}, fields).to_list(300)
     return [{**d, "track": "treatment"} for d in treatment] + [{**d, "track": "rehab"} for d in rehab]
 
 
@@ -157,7 +194,7 @@ def _base_row(lead: dict, kind: str, source: str) -> dict:
 
 
 async def _upsert(lead: dict, kind: str, source: str, match: dict, fields: dict) -> dict:
-    """One row per thing reviewed: saving the same session or clinical Review again changes it."""
+    """One row per thing reviewed: saving the same week again changes it."""
     existing = await v3_col(COLLECTION).find_one({"lead_id": lead["id"], "kind": kind, **match}, {"_id": 0})
     if existing:
         changes = {**fields, "updated_at": now_iso()}
@@ -221,70 +258,71 @@ def summarise(rows: List[dict]) -> dict:
 
 @router.get("/patient-portal/review")
 async def portal_my_review(lead_id: str = Depends(_current_patient_lead_id)):
-    """Everything the portal's Review buttons and pop-ups draw from."""
+    """Everything the portal's Weekly Review card, its pop-up and the Feedback tab draw from."""
     lead = await _lead_or_404(lead_id)
     rows = await v3_col(COLLECTION).find(
         {"lead_id": lead_id, "kind": {"$in": [KIND_PHYSIO, KIND_CONSULTANT]}, "skipped": {"$ne": True}}, {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
-    physio_rows = [r for r in rows if r["kind"] == KIND_PHYSIO]
-    reviewed = {r.get("session_id") for r in physio_rows if r.get("session_id")}
+    team = await care_team(lead)
+    weeks = course_weeks(await _course_days(lead_id))
+    week_rows = [r for r in rows if r.get("source") == SOURCE_WEEK]
     return {
-        **(await care_team(lead)),
-        "physio_pending": pending_physio_days(await _physio_days(lead_id), reviewed),
-        "physio_reviews": [r for r in physio_rows if r.get("session_id")],
-        "consultant_reviews": [r for r in rows if r["kind"] == KIND_CONSULTANT and r.get("clinical_review_id")],
+        **team,
+        "weeks": weeks,
+        "weeks_pending": pending_weeks(weeks, week_rows, bool(team["consultant"]["name"])),
+        "week_reviews": week_rows,
         "anytime_reviews": [r for r in rows if r.get("source") == SOURCE_ANYTIME],
     }
 
 
-@router.post("/patient-portal/review/physio")
-async def portal_review_physio_day(payload: PhysioReviewIn, lead_id: str = Depends(_current_patient_lead_id)):
-    """Stars for one completed physio day. Saving the same day again changes it."""
-    lead = await _lead_or_404(lead_id)
-    rating = required_rating(payload.rating)
-    day = None
-    for track, col in (("treatment", "sessions"), ("rehab", "rehab_sessions")):
-        day = await v3_col(col).find_one({"id": payload.session_id, "lead_id": lead_id}, {"_id": 0})
-        if day:
-            day["track"] = track
-            break
-    if not day:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if day.get("status") != "completed":
-        raise HTTPException(status_code=400, detail="You can review this session once it is completed")
-    row = await _upsert(lead, KIND_PHYSIO, SOURCE_SESSION, {"session_id": day["id"]}, {
-        "rating": rating,
-        "comment": _text(payload.comment),
-        "track": day["track"],
-        "session_number": day.get("session_number") or day.get("day_number"),
-        "session_date": day.get("slot_time"),
-        "person_id": _text(day.get("physio_id")),
-        "person_name": _text(day.get("physio_name") or day.get("completed_by")),
-    })
-    return {"message": "Thank you for reviewing your session.", "review": row}
+@router.post("/patient-portal/review/week")
+async def portal_review_week(payload: WeekReviewIn, lead_id: str = Depends(_current_patient_lead_id)):
+    """Stars and feedback for the Physio and the Consultant on one completed week.
 
-
-@router.post("/patient-portal/review/consultant")
-async def portal_review_consultant(payload: ConsultantReviewIn, lead_id: str = Depends(_current_patient_lead_id)):
-    """Stars for the Consultant on one completed 7-day Review. Saving again changes it."""
+    Both halves come together; a half already given may be left out, and sending a half
+    again changes it. Rehab weeks take the Physio half only.
+    """
+    if payload.track not in TRACKS:
+        raise HTTPException(status_code=400, detail="Unknown course")
     lead = await _lead_or_404(lead_id)
-    rating = required_rating(payload.rating)
-    clinical = await v3_col("reviews").find_one({"id": payload.review_id, "lead_id": lead_id}, {"_id": 0})
-    if not clinical:
-        raise HTTPException(status_code=404, detail="Review not found")
-    if clinical.get("status") != "completed":
-        raise HTTPException(status_code=400, detail="You can review your consultant once this review is completed")
-    all_reviews = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).sort("raised_at", 1).to_list(50)
-    consultant = await consultant_of_lead(lead)
-    row = await _upsert(lead, KIND_CONSULTANT, SOURCE_REVIEW, {"clinical_review_id": clinical["id"]}, {
-        "rating": rating,
-        "comment": _text(payload.comment),
-        "review_number": review_numbers_for_lead(all_reviews).get(clinical["id"], 1),
-        "review_date": clinical.get("review_date") or clinical.get("completed_at"),
-        "person_id": consultant["id"],
-        "person_name": _text(clinical.get("completed_by")) or consultant["name"],
-    })
-    return {"message": "Thank you for reviewing your consultant.", "review": row}
+    week = next((
+        w for w in course_weeks(await _course_days(lead_id))
+        if w["track"] == payload.track and w["week_number"] == payload.week_number
+    ), None)
+    if not week:
+        raise HTTPException(status_code=404, detail="Week not found")
+    if not week["complete"]:
+        raise HTTPException(status_code=400, detail="You can review this week once all its sessions are completed")
+
+    match = {"track": week["track"], "week_number": week["week_number"]}
+    given = {r["kind"] for r in await v3_col(COLLECTION).find(
+        {"lead_id": lead_id, "source": SOURCE_WEEK, **match}, {"_id": 0, "kind": 1}
+    ).to_list(10)}
+    team = await care_team(lead)
+
+    writes = []
+    if payload.physio_rating is not None or KIND_PHYSIO not in given:
+        writes.append((KIND_PHYSIO, {
+            "rating": required_rating(payload.physio_rating),
+            "comment": required_comment(payload.physio_comment, "physio"),
+            "person_id": week["physio_id"] or team["physio"]["id"],
+            "person_name": week["physio_name"] or team["physio"]["name"],
+        }))
+    wants_consultant = week["track"] == "treatment" and bool(team["consultant"]["name"])
+    if wants_consultant and (payload.consultant_rating is not None or KIND_CONSULTANT not in given):
+        writes.append((KIND_CONSULTANT, {
+            "rating": required_rating(payload.consultant_rating),
+            "comment": required_comment(payload.consultant_comment, "consultant"),
+            "person_id": team["consultant"]["id"],
+            "person_name": team["consultant"]["name"],
+        }))
+    if not writes:
+        raise HTTPException(status_code=400, detail="Tap the stars to give a rating")
+
+    common = {"week_first_number": week["first_number"], "week_last_number": week["last_number"],
+              "session_date": week["finished_at"]}
+    saved = [await _upsert(lead, kind, SOURCE_WEEK, match, {**common, **fields}) for kind, fields in writes]
+    return {"message": f"Thank you for reviewing week {week['week_number']}.", "reviews": saved}
 
 
 @router.post("/patient-portal/review/anytime")

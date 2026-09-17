@@ -14,8 +14,8 @@ import {
   patientPortalForgotPassword, patientPortalVerifyResetOtp, patientPortalResetPassword,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
-  patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewPhysio,
-  patientPortalReviewConsultant, patientPortalReviewAnytime,
+  patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewWeek,
+  patientPortalReviewAnytime,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -582,18 +582,13 @@ function TreatmentCourse({ data, reviews, onReviewed }) {
                     </div>
                   ) : null}
                 </>}
-                action={(
-                  <SessionReviewButton
-                    reviews={reviews}
-                    onReviewed={onReviewed}
-                    day={{ session_id: s.id, track: "treatment", session_number: s.session_number, slot_time: s.slot_time, status: s.status, physio_name: data.physio_name }}
-                  />
-                )}
               />
             ))
           )}
         </div>
       </div>
+
+      <WeeklyReviewCard track="treatment" reviews={reviews} onReviewed={onReviewed} />
 
       {data.weekly_assessments && data.weekly_assessments.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -682,18 +677,13 @@ function RehabCourse({ rehab, reviews, onReviewed }) {
                     </div>
                   ) : null}
                 </>}
-                action={(
-                  <SessionReviewButton
-                    reviews={reviews}
-                    onReviewed={onReviewed}
-                    day={{ session_id: r.id, track: "rehab", session_number: r.day_number, slot_time: r.slot_time, status: r.status, physio_name: rehab?.physio_name }}
-                  />
-                )}
               />
             ))
           )}
         </div>
       </div>
+
+      <WeeklyReviewCard track="rehab" reviews={reviews} onReviewed={onReviewed} />
     </>
   );
 }
@@ -1083,7 +1073,6 @@ export function TreatmentTab({ data, reviews = null, onReviewed }) {
               <div key={i} className="px-4 py-3" data-testid={`patient-portal-review-${r.review_number}`}>
                 <div className="flex items-center justify-between gap-2">
                   <p className="flex-1 text-xs font-semibold text-slate-700">{ordinal(r.review_number)} Review</p>
-                  <ConsultantReviewButton review={r} reviews={reviews} onReviewed={onReviewed} />
                   <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
                     r.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
                   }`}>
@@ -1672,12 +1661,6 @@ const feedbackSentOn = (iso) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 };
 
-const dayOn = (iso) => {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-};
-
 /** The thread a new message to one side belongs to, or nothing if it starts one. Rows
     arrive newest first, so this is the most recent one still open. */
 const openThreadOf = (rows) => rows.find((f) => (f.status || "new") !== "resolved") || null;
@@ -1974,8 +1957,6 @@ const STAR_WORDS = { 1: "Poor", 2: "Not great", 3: "Okay", 4: "Good", 5: "Excell
 
 const inputBox = "w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400";
 
-const dayTitle = (d) => `${d.track === "rehab" ? "Rehab Day" : "Session"} ${d.session_number ?? ""}`.trim();
-
 /** Stars and words, and a button to save them. `onSubmit(rating, comment)` returns the
     server's answer; the form clears itself only on success. */
 function ReviewForm({ initial = null, placeholder, submitLabel = "Submit review", onSubmit, onDone, testid }) {
@@ -2074,71 +2055,166 @@ function ReviewChip({ state, rating, required, onClick, testid }) {
   );
 }
 
-/** Physio Review for one session day — the Review button in the Sessions list. Nothing
-    without `reviews`: the staff preview of this tab draws the days alone. */
-function SessionReviewButton({ day, reviews, onReviewed }) {
-  const [open, setOpen] = useState(false);
-  if (!reviews || !day.session_id) return null;
-  const saved = (reviews.physio_reviews || []).find((r) => r.session_id === day.session_id);
-  const state = day.status !== "completed" ? "locked" : saved ? "done" : "due";
-  const testid = `portal-session-review-${day.track}-${day.session_number}`;
+const weekTitle = (w) => `${w.track === "rehab" ? "Rehab " : ""}Week ${w.week_number}`;
+
+const weekRange = (w) => {
+  if (w.first_number == null) return "";
+  const noun = w.track === "rehab" ? "Rehab Days" : "Sessions";
+  return w.first_number === w.last_number ? `${noun.replace(/s$/, "")} ${w.first_number}` : `${noun} ${w.first_number}–${w.last_number}`;
+};
+
+/** The client's saved Physio and Consultant rows for one week. */
+const savedForWeek = (reviews, w) => {
+  const rows = (reviews?.week_reviews || []).filter((r) => r.track === w.track && r.week_number === w.week_number);
+  return { physio: rows.find((r) => r.kind === "physio"), consultant: rows.find((r) => r.kind === "consultant") };
+};
+
+/** Who a week's review rates: its physio always, the consultant on treatment weeks only. */
+const weekPeople = (reviews, w) => [
+  { key: "physio", label: "Physio", name: w.physio_name || reviews?.physio?.name || "" },
+  w.track === "treatment" && reviews?.consultant?.name && { key: "consultant", label: "Consultant", name: reviews.consultant.name },
+].filter(Boolean);
+
+/** Every 7 days of treatment: 1–5 stars and written feedback for the Physio and the
+    Consultant, the same for both, saved together. */
+function WeekReviewForm({ week, reviews, onDone, testid }) {
+  const people = weekPeople(reviews, week);
+  const saved = savedForWeek(reviews, week);
+  const [values, setValues] = useState(() => Object.fromEntries(people.map((p) => [
+    p.key, { rating: saved[p.key]?.rating || null, comment: saved[p.key]?.comment || "" },
+  ])));
+  const [saving, setSaving] = useState(false);
+  const set = (key, patch) => setValues((v) => ({ ...v, [key]: { ...v[key], ...patch } }));
+  const missing = people.find((p) => !values[p.key]?.rating || !values[p.key]?.comment.trim());
+  const everSaved = people.every((p) => saved[p.key]);
+
+  const save = async () => {
+    if (missing) {
+      toast.error(!values[missing.key]?.rating
+        ? `Tap the stars for your ${missing.label.toLowerCase()}`
+        : `Write a few words of feedback for your ${missing.label.toLowerCase()}`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = { track: week.track, week_number: week.week_number };
+      people.forEach((p) => {
+        payload[`${p.key}_rating`] = values[p.key].rating;
+        payload[`${p.key}_comment`] = values[p.key].comment;
+      });
+      const res = await patientPortalReviewWeek(payload);
+      toast.success(res?.message || "Thank you for your review.");
+      onDone?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save your review. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <>
-      <ReviewChip
-        state={state}
-        rating={saved?.rating}
-        required
-        testid={testid}
-        onClick={() => (state === "locked" ? toast.info(`You can review ${dayTitle(day)} once it is completed`) : setOpen(true))}
-      />
-      {open && (
-        <ReviewDialog
-          title={`Review ${dayTitle(day)}`}
-          subtitle={[day.physio_name, dayOn(day.slot_time)].filter(Boolean).join(" · ") || "How was this session?"}
-          onClose={() => setOpen(false)}
-          testid={`${testid}-dialog`}
-        >
-          <ReviewForm
-            initial={saved}
-            placeholder="How was this session? (optional)"
-            testid={`${testid}-form`}
-            onSubmit={(rating, comment) => patientPortalReviewPhysio({ session_id: day.session_id, rating, comment })}
-            onDone={() => { setOpen(false); onReviewed?.(); }}
-          />
-        </ReviewDialog>
-      )}
-    </>
+    <div className="space-y-4" data-testid={testid}>
+      {people.map((p) => {
+        const v = values[p.key] || {};
+        return (
+          <div key={p.key} className="space-y-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3" data-testid={`${testid}-${p.key}`}>
+            <p className="text-xs text-slate-500">
+              <span className="font-semibold text-slate-800">{p.label}</span>
+              {p.name ? <> · {p.name}</> : null}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <StarPicker value={v.rating} onChange={(rating) => set(p.key, { rating })} testid={`${testid}-${p.key}-stars`} />
+              {v.rating && <span className="text-xs font-semibold text-amber-600">{STAR_WORDS[v.rating]}</span>}
+            </div>
+            <textarea
+              rows={3}
+              maxLength={2000}
+              value={v.comment}
+              onChange={(e) => set(p.key, { comment: e.target.value })}
+              placeholder={`Your feedback on your ${p.label.toLowerCase()} this week`}
+              className={`${inputBox} bg-white`}
+              data-testid={`${testid}-${p.key}-comment`}
+            />
+          </div>
+        );
+      })}
+      <Button className="w-full" disabled={saving || !!missing} onClick={save} data-testid={`${testid}-submit`}>
+        {saving ? "Saving…" : everSaved ? "Update review" : "Submit review"}
+      </Button>
+    </div>
   );
 }
 
-/** Consultant Review for one 7-day Review — its Review button appears once that Review is
-    completed. Optional. */
-function ConsultantReviewButton({ review, reviews, onReviewed }) {
-  const [open, setOpen] = useState(false);
-  if (!reviews || !review.id || review.status !== "completed") return null;
-  const saved = (reviews.consultant_reviews || []).find((r) => r.clinical_review_id === review.id);
-  const label = `${ordinal(review.review_number)} Review`;
-  const testid = `portal-consultant-review-${review.review_number}`;
+/** One row per week of the course, with its Review button: grey until every day in the
+    week is completed, amber while due, then the stars given. Nothing without `reviews`:
+    the staff preview of this tab draws the days alone. */
+function WeeklyReviewCard({ track, reviews, onReviewed }) {
+  const [openKey, setOpenKey] = useState(null);
+  if (!reviews) return null;
+  const weeks = (reviews.weeks || []).filter((w) => w.track === track);
+  if (!weeks.length) return null;
+  const opened = weeks.find((w) => w.week_number === openKey);
+  const rehab = track === "rehab";
+
   return (
-    <>
-      <ReviewChip state={saved ? "done" : "due"} rating={saved?.rating} testid={testid} onClick={() => setOpen(true)} />
-      {open && (
+    <div className={`overflow-hidden rounded-xl border bg-white ${rehab ? "border-violet-200" : "border-slate-200"}`} data-testid={`portal-weekly-reviews-${track}`}>
+      <div className={`border-b px-4 py-3 ${rehab ? "border-violet-100 bg-violet-50/60" : "border-slate-100 bg-slate-50/60"}`}>
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+          <Star className="h-4 w-4 fill-amber-400 text-amber-400" /> Weekly Review
+        </h2>
+        <p className="mt-0.5 text-[10px] text-slate-500">
+          Every 7 days, rate your {rehab ? "physio" : "physio and consultant"} from 1 to 5 stars and tell us how it went.
+        </p>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {weeks.map((w) => {
+          const saved = savedForWeek(reviews, w);
+          const people = weekPeople(reviews, w);
+          const allGiven = people.every((p) => saved[p.key]);
+          const state = !w.complete ? "locked" : allGiven ? "done" : "due";
+          const testid = `portal-week-review-${track}-${w.week_number}`;
+          return (
+            <div key={w.week_number} className="flex items-center gap-3 px-4 py-3" data-testid={testid}>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-800">{weekTitle(w)}</p>
+                <p className="text-[10px] text-slate-400">
+                  {[weekRange(w), `${w.completed_days}/${w.days} completed`].filter(Boolean).join(" · ")}
+                </p>
+                {people.some((p) => saved[p.key]) && (
+                  <p className="mt-0.5 text-[10px] text-amber-600">
+                    {people.filter((p) => saved[p.key]).map((p) => `${p.label} ${saved[p.key].rating}/5`).join(" · ")}
+                  </p>
+                )}
+              </div>
+              <ReviewChip
+                state={state}
+                rating={saved.physio?.rating}
+                required
+                testid={`${testid}-button`}
+                onClick={() => (state === "locked"
+                  ? toast.info(`You can review ${weekTitle(w)} once all its sessions are completed`)
+                  : setOpenKey(w.week_number))}
+              />
+            </div>
+          );
+        })}
+      </div>
+      {opened && (
         <ReviewDialog
-          title="Review your consultant"
-          subtitle={`${label}${reviews.consultant?.name ? ` · ${reviews.consultant.name}` : ""}`}
-          onClose={() => setOpen(false)}
-          testid={`${testid}-dialog`}
+          title={`Review ${weekTitle(opened)}`}
+          subtitle={weekRange(opened)}
+          onClose={() => setOpenKey(null)}
+          testid={`portal-week-review-${track}-${opened.week_number}-dialog`}
         >
-          <ReviewForm
-            initial={saved}
-            placeholder="How was your consultant's review? (optional)"
-            testid={`${testid}-form`}
-            onSubmit={(rating, comment) => patientPortalReviewConsultant({ review_id: review.id, rating, comment })}
-            onDone={() => { setOpen(false); onReviewed?.(); }}
+          <WeekReviewForm
+            week={opened}
+            reviews={reviews}
+            testid={`portal-week-review-${track}-${opened.week_number}-form`}
+            onDone={() => { setOpenKey(null); onReviewed?.(); }}
           />
         </ReviewDialog>
       )}
-    </>
+    </div>
   );
 }
 
@@ -2227,29 +2303,29 @@ function AnytimeReviewCard({ reviews, onChanged }) {
   );
 }
 
-/** The Review pop-up that opens by itself when a physio session is completed and not yet
-    reviewed. Physio Review is required, so it has no close — logging out is the only other
-    way off it. */
-function PhysioReviewGate({ reviews, onChanged, onLogout }) {
-  const pending = reviews?.physio_pending || [];
+/** The Review pop-up that opens by itself once a week of treatment is completed and not yet
+    reviewed. The weekly review is required, so it has no close — logging out is the only
+    other way off it. */
+function WeekReviewGate({ reviews, onChanged, onLogout }) {
+  const pending = reviews?.weeks_pending || [];
   if (!pending.length) return null;
-  const day = pending[0];
+  const week = pending[0];
   return (
     <ReviewDialog
-      title={`Review ${dayTitle(day)}`}
-      subtitle={`Your session is completed${day.physio_name ? ` with ${day.physio_name}` : ""}. Please review it to continue${pending.length > 1 ? ` — ${pending.length} sessions are waiting` : ""}.`}
-      testid="portal-physio-review-gate"
+      title={`Review ${weekTitle(week)}`}
+      subtitle={`${weekRange(week) ? `${weekRange(week)} completed. ` : ""}Please rate your week to continue${pending.length > 1 ? ` — ${pending.length} weeks are waiting` : ""}.`}
+      testid="portal-week-review-gate"
       footer={(
         <button type="button" onClick={onLogout} className="mt-3 w-full text-center text-[11px] text-slate-400 hover:text-slate-600">
           Log out
         </button>
       )}
     >
-      <ReviewForm
-        key={day.session_id}
-        placeholder="How was this session? (optional)"
-        testid="portal-physio-review-gate-form"
-        onSubmit={(rating, comment) => patientPortalReviewPhysio({ session_id: day.session_id, rating, comment })}
+      <WeekReviewForm
+        key={`${week.track}-${week.week_number}`}
+        week={week}
+        reviews={reviews}
+        testid="portal-week-review-gate-form"
         onDone={onChanged}
       />
     </ReviewDialog>
@@ -2339,7 +2415,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
         )}
       </div>
 
-      <PhysioReviewGate reviews={reviews} onChanged={loadReviews} onLogout={onLogout} />
+      <WeekReviewGate reviews={reviews} onChanged={loadReviews} onLogout={onLogout} />
 
       {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal
           shows it at all widths — so the slate is reverted from md up rather than applied
@@ -2353,7 +2429,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
             // written back on since this patient last opened it. Clears on open — see
             // clearFeedbackBadge and patient_portal_my_feedback's seen stamp.
             const badge = t.key === "feedback" ? (data.feedback_unread || 0)
-              : t.key === "sessions" ? (reviews?.physio_pending?.length || 0) : 0;
+              : t.key === "sessions" ? (reviews?.weeks_pending?.length || 0) : 0;
             return (
               <button
                 key={t.key}

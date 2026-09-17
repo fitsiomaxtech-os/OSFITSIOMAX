@@ -64,15 +64,22 @@ const KINDS = [
 ];
 
 const ORDINAL = ["", "1st", "2nd", "3rd"];
-// What prompted the review: a session day, a completed 7-day Review, or the Feedback tab.
+// What prompted the review: a week of treatment, the Feedback tab, or (older rows) a
+// session day or a completed 7-day clinical Review.
 const sessionLabel = (r) => {
   if (r.source === "anytime") return "Anytime";
+  if (r.source === "week") {
+    const noun = r.track === "rehab" ? "Rehab Day" : "Session";
+    const range = r.week_first_number == null ? ""
+      : r.week_first_number === r.week_last_number ? ` · ${noun} ${r.week_first_number}` : ` · ${noun}s ${r.week_first_number}–${r.week_last_number}`;
+    return `${r.track === "rehab" ? "Rehab " : ""}Week ${r.week_number}${range}`;
+  }
   if (r.review_number != null) return `${ORDINAL[r.review_number] || `${r.review_number}th`} Review`;
   if (r.session_number != null) return `${r.track === "rehab" ? "Rehab Day" : "Session"} ${r.session_number}`;
   return "";
 };
 
-const SOURCE_LABEL = { session: "After a session day", review: "After a 7-day Review", anytime: "Anytime (Feedback tab)" };
+const SOURCE_LABEL = { week: "After 7 days of treatment", session: "After a session day", review: "After a 7-day Review", anytime: "Anytime (Feedback tab)" };
 
 const matchesSearch = (r, q) => !q || [
   r.patient_name, r.patient_number, r.person_name, r.branch_name, r.comment,
@@ -327,12 +334,13 @@ const PersonFilter = ({ people, value, onChange, meta }) => {
 
 // What a review was given for, as the pill in the Type column.
 const TYPE_PILL = {
+  week: { label: "Weekly", color: "#059669" },
   review: { label: "7-day Review", color: "#059669" },
   session: { label: "Session", color: "#0284c7" },
   rehab: { label: "Rehab", color: "#7c3aed" },
   anytime: { label: "Anytime", color: "#64748b" },
 };
-const typeOf = (r) => (r.source === "session" && r.track === "rehab" ? "rehab" : r.source);
+const typeOf = (r) => ((r.source === "session" || r.source === "week") && r.track === "rehab" ? "rehab" : r.source);
 
 const TypePill = ({ review }) => {
   const t = TYPE_PILL[typeOf(review)];
@@ -356,18 +364,21 @@ const TILES = {
   consultant: [
     { key: "", label: "All", figure: "total", sub: () => "Every consultant review", icon: MessageSquareQuote, color: "#4f46e5" },
     { key: "rated", label: "Consultation Review", figure: "average", sub: (f) => `${f.rated} ratings · 7-day + anytime`, icon: Star, color: "#f59e0b" },
-    { key: "review", label: "7 Days Review", figure: "review", sub: (f) => `Avg ${f.reviewAvg ?? "—"} ★ · from a 7-day Review`, icon: CalendarCheck, color: "#059669" },
+    { key: "weekly", label: "7 Days Review", figure: "weekly", sub: (f) => `Avg ${f.weeklyAvg ?? "—"} ★ · every 7 days of treatment`, icon: CalendarCheck, color: "#059669" },
     { key: "anytime", label: "Anytime", figure: "anytime", sub: () => "From the Feedback tab", icon: Clock, color: "#0284c7" },
   ],
   physio: [
     { key: "", label: "All", figure: "total", sub: () => "Every physio review", icon: MessageSquareQuote, color: "#4f46e5" },
-    { key: "session", label: "Session Review", figure: "session", sub: () => "Every treatment and rehab day", icon: Activity, color: "#059669" },
+    { key: "weekly", label: "7 Days Review", figure: "weekly", sub: (f) => `Avg ${f.weeklyAvg ?? "—"} ★ · every 7 days of treatment`, icon: Activity, color: "#059669" },
     { key: "rated", label: "Average Rating", figure: "average", sub: (f) => `${f.rated} ratings`, icon: Star, color: "#f59e0b" },
     { key: "anytime", label: "Anytime", figure: "anytime", sub: () => "From the Feedback tab", icon: Clock, color: "#0284c7" },
   ],
 };
 
-const inSource = (r, key) => !key || (key === "rated" ? !!r.rating : r.source === key);
+// "weekly" takes in the older per-session and per-clinical-Review rows it replaced.
+const WEEKLY_SOURCES = ["week", "session", "review"];
+const inSource = (r, key) => !key
+  || (key === "rated" ? !!r.rating : key === "weekly" ? WEEKLY_SOURCES.includes(r.source) : r.source === key);
 
 const inDates = (r, range) => {
   if (!range?.from || !range?.to) return true;
@@ -518,9 +529,8 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
       total: inPerson.length,
       average: average(inPerson),
       rated: from("rated").length,
-      review: from("review").length,
-      reviewAvg: average(from("review")),
-      session: from("session").length,
+      weekly: from("weekly").length,
+      weeklyAvg: average(from("weekly")),
       anytime: from("anytime").length,
     };
   }, [inPerson]);
