@@ -114,6 +114,12 @@ export const patientPortalReviewWeek = async (payload) => {
   return data;
 };
 
+/** Skip a week's review pop-up; it stops asking, and the week can still be reviewed later. */
+export const patientPortalSkipWeekReview = async ({ track, week_number }) => {
+  const { data } = await portalApi.post("/patient-portal/review/week/skip", { track, week_number }, { headers: authHeaders() });
+  return data;
+};
+
 /** A review of the Consultant or Physio from the Feedback tab, any time. */
 export const patientPortalReviewAnytime = async ({ target, rating, comment }) => {
   const { data } = await portalApi.post("/patient-portal/review/anytime", { target, rating, comment }, { headers: authHeaders() });

@@ -12,8 +12,8 @@ Every review is its own row, with a `kind` (who is rated) and a `source` (what p
 
   * source "week"    -- every 7 days of treatment the client rates BOTH their Physio and their
     Consultant the same way: 1-5 stars and written feedback, one row per kind per week. A
-    week is due once every day in it is completed; the portal holds the client on a pop-up
-    until each due week finished since PHYSIO_REVIEW_START is rated. Rehab weeks (every 7
+    week is due once every day in it is completed; the portal then asks in a pop-up for
+    each due week finished since PHYSIO_REVIEW_START. Optional: Skip stops the asking. Rehab weeks (every 7
     rehab days) rate the Physio only -- rehab has no consultant of its own.
   * source "anytime" -- either kind, from the Feedback tab, whenever the client wants.
   * source "session" / "review" -- the earlier per-session Physio and per-clinical-Review
@@ -46,6 +46,8 @@ from utils import now_iso
 router = APIRouter(prefix="/api/v3")
 
 COLLECTION = "client_reviews"
+# Weeks whose review pop-up the client skipped: {lead_id, track, week_number, skipped_at}.
+SKIPS_COLLECTION = "client_review_skips"
 MAX_TEXT = 2000
 
 KIND_PHYSIO = "physio"
@@ -137,13 +139,14 @@ def course_weeks(days: List[dict]) -> List[dict]:
 
 
 def pending_weeks(weeks: List[dict], rows: List[dict], has_consultant: bool,
-                  since: str = PHYSIO_REVIEW_START) -> List[dict]:
+                  skipped: Optional[set] = None, since: str = PHYSIO_REVIEW_START) -> List[dict]:
     """Completed weeks, finished since `since`, oldest first, still missing a Physio or
-    Consultant review. Rehab weeks owe the Physio half only."""
+    Consultant review and not skipped. Rehab weeks owe the Physio half only."""
     given = {(r.get("kind"), r.get("track"), r.get("week_number")) for r in rows if r.get("source") == SOURCE_WEEK}
+    skipped = skipped or set()
     out = []
     for w in weeks:
-        if not w["complete"] or w["finished_at"][:10] < since:
+        if not w["complete"] or w["finished_at"][:10] < since or (w["track"], w["week_number"]) in skipped:
             continue
         needs_physio = (KIND_PHYSIO, w["track"], w["week_number"]) not in given
         needs_consultant = (w["track"] == "treatment" and has_consultant
@@ -269,13 +272,34 @@ async def portal_my_review(lead_id: str = Depends(_current_patient_lead_id)):
     team = await care_team(lead)
     weeks = course_weeks(await _course_days(lead_id))
     week_rows = [r for r in rows if r.get("source") == SOURCE_WEEK]
+    skipped = {
+        (s.get("track"), s.get("week_number"))
+        for s in await v3_col(SKIPS_COLLECTION).find({"lead_id": lead_id}, {"_id": 0}).to_list(500)
+    }
     return {
         **team,
         "weeks": weeks,
-        "weeks_pending": pending_weeks(weeks, week_rows, bool(team["consultant"]["name"])),
+        "weeks_pending": pending_weeks(weeks, week_rows, bool(team["consultant"]["name"]), skipped),
         "week_reviews": week_rows,
         "anytime_reviews": [r for r in rows if r.get("source") == SOURCE_ANYTIME],
     }
+
+
+class WeekSkipIn(BaseModel):
+    track: str = "treatment"
+    week_number: int
+
+
+@router.post("/patient-portal/review/week/skip")
+async def portal_skip_week(payload: WeekSkipIn, lead_id: str = Depends(_current_patient_lead_id)):
+    """The client closed a week's review pop-up with Skip. It stops asking for that week;
+    the week's Review button still opens it whenever they choose."""
+    if payload.track not in TRACKS:
+        raise HTTPException(status_code=400, detail="Unknown course")
+    await _lead_or_404(lead_id)
+    match = {"lead_id": lead_id, "track": payload.track, "week_number": payload.week_number}
+    await v3_col(SKIPS_COLLECTION).update_one(match, {"$set": {**match, "skipped_at": now_iso()}}, upsert=True)
+    return {"message": "Skipped. You can review this week any time from Sessions."}
 
 
 @router.post("/patient-portal/review/week")

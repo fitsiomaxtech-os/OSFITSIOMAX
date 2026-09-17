@@ -76,6 +76,10 @@ class TestPendingWeeks:
         assert len(out) == 1 and not out[0]["needs_physio"] and out[0]["needs_consultant"]
         assert pending_weeks(self.WEEKS, rows, has_consultant=False, since="2026-09-16") == []
 
+    def test_skipped_weeks_are_not_asked_again(self):
+        out = pending_weeks(self.WEEKS, [], has_consultant=True, skipped={("treatment", 1)}, since="2026-09-16")
+        assert [(w["track"], w["week_number"]) for w in out] == [("rehab", 1)]
+
 
 class TestRequiredComment:
     def test_blank_is_refused(self):

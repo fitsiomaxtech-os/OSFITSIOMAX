@@ -15,7 +15,7 @@ import {
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewWeek,
-  patientPortalReviewAnytime,
+  patientPortalSkipWeekReview, patientPortalReviewAnytime,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -2198,7 +2198,6 @@ function WeeklyReviewCard({ track, reviews, onReviewed }) {
               <ReviewChip
                 state={state}
                 rating={saved.physio?.rating}
-                required
                 testid={`${testid}-button`}
                 onClick={() => setOpenKey(w.week_number)}
               />
@@ -2311,21 +2310,42 @@ function AnytimeReviewCard({ reviews, onChanged }) {
 }
 
 /** The Review pop-up that opens by itself once a week of treatment is completed and not yet
-    reviewed. The weekly review is required, so it has no close — logging out is the only
-    other way off it. */
-function WeekReviewGate({ reviews, onChanged, onLogout }) {
+    reviewed. Optional: Skip (or the close button) stops it asking for that week, which can
+    still be reviewed later from the Weekly Review card in Sessions. */
+function WeekReviewGate({ reviews, onChanged }) {
+  const [skipping, setSkipping] = useState(false);
   const pending = reviews?.weeks_pending || [];
   if (!pending.length) return null;
   const week = pending[0];
+
+  const skip = async () => {
+    setSkipping(true);
+    try {
+      await patientPortalSkipWeekReview({ track: week.track, week_number: week.week_number });
+      onChanged?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not skip. Please try again.");
+    } finally {
+      setSkipping(false);
+    }
+  };
+
   return (
     <ReviewDialog
       title={`Review ${weekTitle(week)}`}
-      subtitle={`${weekRange(week) ? `${weekRange(week)} completed. ` : ""}Please rate your week to continue${pending.length > 1 ? ` — ${pending.length} weeks are waiting` : ""}.`}
+      subtitle={`${weekRange(week) ? `${weekRange(week)} completed. ` : ""}How was your week? Rate your care${pending.length > 1 ? ` — ${pending.length} weeks are waiting` : ""}.`}
+      onClose={skipping ? undefined : skip}
       testid="portal-week-review-gate"
       footer={(
-        <button type="button" onClick={onLogout} className="mt-3 w-full text-center text-[11px] text-slate-400 hover:text-slate-600">
-          Log out
-        </button>
+        <Button
+          variant="outline"
+          className="mt-2 w-full"
+          disabled={skipping}
+          onClick={skip}
+          data-testid="portal-week-review-gate-skip"
+        >
+          {skipping ? "Skipping…" : "Skip"}
+        </Button>
       )}
     >
       <WeekReviewForm
@@ -2422,7 +2442,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
         )}
       </div>
 
-      <WeekReviewGate reviews={reviews} onChanged={loadReviews} onLogout={onLogout} />
+      <WeekReviewGate reviews={reviews} onChanged={loadReviews} />
 
       {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal
           shows it at all widths — so the slate is reverted from md up rather than applied
