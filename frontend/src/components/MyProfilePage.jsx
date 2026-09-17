@@ -29,6 +29,7 @@ import {
   Banknote,
   BriefcaseBusiness,
   CalendarClock,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -38,7 +39,9 @@ import {
   ShieldCheck,
   UserRound,
 } from "lucide-react";
-import { myAttendance, myProfile } from "@/lib/api";
+import { getBranches, myAttendance, myProfile } from "@/lib/api";
+// The branch's working / leave days — the same calendar Management → Calendar sets.
+import { BranchMonthlyCalendar } from "@/components/branch/BranchMonthlyCalendar";
 import { CLOCK_CHANGED_EVENT } from "@/components/ClockWidget";
 // The third tab, in its own file. Same reason HROpsTabs.jsx lives beside HRBoard.jsx: this
 // page is already six hundred lines of two tabs, and the one that writes is the one most
@@ -57,6 +60,8 @@ import { duration, hours, prettyTime } from "@/lib/clock";
 // "Attendance" and "My Profile" need, so both would arrive as an ellipsis. `short` is the
 // phone label; the full one returns from sm up. See SegmentedTabs.
 const TABS = [
+  // First: the month the branch is open, which is the frame the other tabs are read in.
+  { key: "calendar", label: "Monthly Calendar", short: "Calendar", icon: CalendarDays },
   { key: "attendance", label: "Attendance", short: "Hours", icon: Clock },
   // Between the two, because that is the order the questions come in: what did I work,
   // what am I asking for, and who am I on the books. What Time Off writes also lands on
@@ -625,6 +630,53 @@ const ProfileTab = ({ roleLabel }) => {
   );
 };
 
+// ---------- monthly calendar ----------
+
+const ORG_WIDE = ["super_admin", "business_dev"];
+
+/** My branch's Working / Leave days. Super Admin and BDE run every branch, so they pick one. */
+const MonthlyCalendarTab = ({ user }) => {
+  const orgWide = ORG_WIDE.includes(String(user?.role || "").trim().toLowerCase());
+  const own = [...new Set([user?.branch_id, ...(user?.branch_ids || [])].filter(Boolean))];
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState(own[0] || "");
+
+  useEffect(() => {
+    if (!orgWide && own.length < 2) return;
+    getBranches()
+      .then((rows) => {
+        const list = (rows || []).filter((b) => orgWide || own.includes(b.id));
+        setBranches(list);
+        setBranchId((cur) => cur || list[0]?.id || "");
+      })
+      .catch(() => setBranches([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgWide]);
+
+  if (!branchId) {
+    return (
+      <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400" data-testid="my-calendar-no-branch">
+        You are not posted to a branch yet, so there is no branch calendar to show.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 sm:p-4" data-testid="my-calendar-tab">
+      {branches.length > 1 && (
+        <select
+          value={branchId}
+          onChange={(e) => setBranchId(e.target.value)}
+          className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 sm:w-72"
+          data-testid="my-calendar-branch"
+        >
+          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name || b.name || b.id}</option>)}
+        </select>
+      )}
+      <BranchMonthlyCalendar branchId={branchId} />
+    </div>
+  );
+};
+
 // ---------- the page ----------
 
 export const MyProfilePage = ({ user, roleLabel, onBack }) => {
@@ -654,7 +706,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
             four characters is not a tab. shrink-0 keeps the greeting beside it from
             squeezing it back into an ellipsis; the row wraps instead. */}
         <div className="w-full sm:w-auto sm:shrink-0" data-testid="my-profile-tabs-wrap">
-          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={4} fit />
+          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={3} fit />
         </div>
       </div>
 
@@ -662,7 +714,8 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
           somebody opened to read one thing, so each is mounted only while it is the tab.
           Switching back re-reads, which is right for a page whose whole subject is what
           happened today. */}
-      {tab === "attendance" ? <AttendanceTab />
+      {tab === "calendar" ? <MonthlyCalendarTab user={user} />
+        : tab === "attendance" ? <AttendanceTab />
         : tab === "timeoff" ? <TimeOffTab />
           : tab === "security" ? <SecurityTab />
             : <ProfileTab roleLabel={roleLabel} />}

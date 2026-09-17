@@ -1,6 +1,6 @@
 """MANAGEMENT → CALENDAR → MONTHLY CALENDAR — which days a branch works and which it is on leave.
 
-Read by anyone who works off the branch's calendars; changed only by the branch's own
+Read by everyone posted to the branch (and Super Admin / BDE); changed only by the branch's own
 Branch Admin, Super Admin and BDE.
 
 Marking a day Leave does two things, because the day has to be closed everywhere a patient
@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from branch_calendar import LEAVE, WORKING, day_key, day_status
 from database import v3_col
-from deps import is_branch_admin_role, v3_require_roles, works_org_wide
+from deps import is_branch_admin_role, v3_current_user, v3_require_roles, works_org_wide
 from routers.v3_config import team_roster_experts
 from schemas.v3 import V3UserOut
 from utils import now_iso
@@ -34,7 +34,6 @@ from utils import now_iso
 router = APIRouter(prefix="/api/v3")
 
 EDIT_ROLES = ("branch_admin", "super_admin", "business_dev")
-READ_ROLES = (*EDIT_ROLES, "head_physio", "physio")
 
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONTH = re.compile(r"^\d{4}-\d{2}$")
@@ -63,12 +62,16 @@ async def _branch(branch_id: str) -> dict:
 async def get_month_calendar(
     branch_id: str,
     month: str = Query(..., description="YYYY-MM"),
-    user: V3UserOut = Depends(v3_require_roles(*READ_ROLES)),
+    user: V3UserOut = Depends(v3_current_user),
 ):
     if not _MONTH.match(month or ""):
         raise HTTPException(status_code=400, detail="month must be YYYY-MM")
-    if is_branch_admin_role(user.role) and user.branch_id and user.branch_id != branch_id:
-        raise HTTPException(status_code=403, detail="You can only open your own branch's calendar")
+    # Read by everyone who works at the branch (the profile page's Monthly Calendar tab),
+    # and by the org-wide desks for any branch. Nobody reads another branch's.
+    if not works_org_wide(user.role):
+        posted = {b for b in (user.branch_ids or []) if b} | ({user.branch_id} if user.branch_id else set())
+        if branch_id not in posted:
+            raise HTTPException(status_code=403, detail="You can only open your own branch's calendar")
     branch = await _branch(branch_id)
     y, m = (int(x) for x in month.split("-"))
     days = []
