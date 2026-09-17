@@ -120,12 +120,6 @@ export const patientPortalSkipWeekReview = async ({ track, week_number }) => {
   return data;
 };
 
-/** A review of the Consultant or Physio from the Feedback tab, any time. */
-export const patientPortalReviewAnytime = async ({ target, rating, comment }) => {
-  const { data } = await portalApi.post("/patient-portal/review/anytime", { target, rating, comment }, { headers: authHeaders() });
-  return data;
-};
-
 /** What this patient has sent, and where each piece has got to. */
 export const patientPortalMyFeedback = async () => {
   const { data } = await portalApi.get("/patient-portal/feedback", { headers: authHeaders() });

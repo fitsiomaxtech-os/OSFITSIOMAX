@@ -15,7 +15,7 @@ import {
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewWeek,
-  patientPortalSkipWeekReview, patientPortalReviewAnytime,
+  patientPortalSkipWeekReview,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -1716,15 +1716,24 @@ function FeedbackTab({ data, onSeen }) {
   // Nothing points at a Consultant card that is no longer on screen.
   useEffect(() => {
     if (!canWriteToConsultant && selected.includes("consultant")) {
-      const rest = selected.filter((k) => k !== "consultant");
-      setSelected(rest.length ? rest : ["branch_admin"]);
+      setSelected(selected.filter((k) => k !== "consultant"));
     }
   }, [canWriteToConsultant, selected]);
 
-  const toggle = (key) => setSelected((cur) => {
-    if (cur.includes(key)) return cur.length > 1 ? cur.filter((k) => k !== key) : cur;
-    return [...cur, key];
-  });
+  // Any card can be unticked, down to none at all; nothing is sent until one is chosen.
+  const toggle = (key) => setSelected((cur) => (
+    cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]
+  ));
+  const allSelected = audiences.every((a) => selected.includes(a.key));
+  const toggleAll = () => setSelected(allSelected ? [] : audiences.map((a) => a.key));
+
+  // Each change of who is chosen fetches the latest of those conversations.
+  const selectedKey = [...selected].sort().join(",");
+  const firstSelection = useRef(true);
+  useEffect(() => {
+    if (firstSelection.current) { firstSelection.current = false; return; }
+    loadMine();
+  }, [selectedKey, loadMine]);
 
   const channelRows = mine.filter((f) => selected.includes(audienceOf(f)));
   const messages = mergedMessages(channelRows);
@@ -1764,6 +1773,7 @@ function FeedbackTab({ data, onSeen }) {
   const sendMessage = async () => {
     const body = draft.trim();
     if (!body) { toast.error("Write something to send"); return; }
+    if (!selected.length) { toast.error("Choose who to send to"); return; }
     setSending(true);
     const failed = [];
     for (const key of selected) {
@@ -1808,7 +1818,17 @@ function FeedbackTab({ data, onSeen }) {
         </div>
 
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to (choose one or more)</p>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to (choose one or more)</p>
+            <button
+              type="button"
+              onClick={toggleAll}
+              className="shrink-0 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
+              data-testid="portal-feedback-toggle-all"
+            >
+              {allSelected ? "Unselect all" : "Select all"}
+            </button>
+          </div>
           <div className={`grid gap-2 ${audiences.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`} data-testid="portal-feedback-audience">
             {audiences.map((a) => {
               const on = selected.includes(a.key);
@@ -1852,7 +1872,11 @@ function FeedbackTab({ data, onSeen }) {
             style={chatMax ? { maxHeight: chatMax } : undefined}
             data-testid="portal-feedback-chat"
           >
-            {messages.length === 0 ? (
+            {selected.length === 0 ? (
+              <p className="py-6 text-center text-xs text-slate-400" data-testid="portal-feedback-none-chosen">
+                No one chosen. Tick one or more people above to see the chat and send.
+              </p>
+            ) : messages.length === 0 ? (
               <p className="py-6 text-center text-xs text-slate-400">
                 Nothing sent to {chosenNames.join(", ")} yet. Whatever you write below starts the chat.
               </p>
@@ -1910,7 +1934,7 @@ function FeedbackTab({ data, onSeen }) {
             value={draft}
             maxLength={2000}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Message to ${chosenNames.join(", ")}…`}
+            placeholder={chosenNames.length ? `Message to ${chosenNames.join(", ")}…` : "Choose who to send to first…"}
             className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
             data-testid="portal-feedback-message"
           />
@@ -1919,11 +1943,11 @@ function FeedbackTab({ data, onSeen }) {
 
         <Button
           className="w-full"
-          disabled={sending || !draft.trim()}
+          disabled={sending || !draft.trim() || !selected.length}
           onClick={sendMessage}
           data-testid="portal-feedback-submit"
         >
-          {sending ? "Sending…" : `Send to ${chosenNames.join(" & ")}`}
+          {sending ? "Sending…" : chosenNames.length ? `Send to ${chosenNames.join(" & ")}` : "Choose who to send to"}
         </Button>
       </CardContent>
     </Card>
@@ -2224,91 +2248,6 @@ function WeeklyReviewCard({ track, reviews, onReviewed }) {
   );
 }
 
-/** A review already given, read-only. */
-function PastReview({ title, subtitle, rating, comment, when }) {
-  return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-1">
-        <p className="text-xs text-slate-500">
-          <span className="font-semibold text-slate-700">{title}</span>
-          {subtitle ? <> · {subtitle}</> : null}
-        </p>
-        <StarPicker value={rating} testid="portal-past-review" size="h-3.5 w-3.5" />
-      </div>
-      {comment && <p className="mt-1 whitespace-pre-wrap break-words text-xs text-slate-700">{comment}</p>}
-      {when && <p className="mt-0.5 text-[10px] text-slate-400">{feedbackSentOn(when)}</p>}
-    </div>
-  );
-}
-
-/** Review anytime — the Feedback tab's own review, of the Consultant or the Physio,
-    whenever the client wants to give one. */
-function AnytimeReviewCard({ reviews, onChanged }) {
-  const people = [
-    reviews?.consultant?.name && { key: "consultant", label: "Consultant", name: reviews.consultant.name },
-    reviews?.physio?.name && { key: "physio", label: "Physio", name: reviews.physio.name },
-  ].filter(Boolean);
-  const [target, setTarget] = useState(null);
-  if (!reviews || people.length === 0) return null;
-  const chosen = people.find((p) => p.key === target) || people[0];
-  const past = reviews.anytime_reviews || [];
-
-  return (
-    <Card data-testid="portal-anytime-review">
-      <CardContent className="space-y-3 p-5">
-        <div>
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />Review anytime
-          </p>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Rate your consultant or physio whenever you like. Your review goes to the clinic management.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2" data-testid="portal-anytime-review-target">
-          {people.map((p) => {
-            const on = chosen.key === p.key;
-            return (
-              <button
-                key={p.key}
-                type="button"
-                onClick={() => setTarget(p.key)}
-                aria-pressed={on}
-                className={`rounded-lg border p-2.5 text-left transition ${on ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500" : "border-slate-200 bg-white hover:border-sky-300"}`}
-                data-testid={`portal-anytime-review-target-${p.key}`}
-              >
-                <span className={`block text-xs font-bold ${on ? "text-sky-700" : "text-slate-700"}`}>{p.label}</span>
-                <span className="block truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">{p.name}</span>
-              </button>
-            );
-          })}
-        </div>
-        <ReviewForm
-          key={chosen.key}
-          placeholder={`How is it going with ${chosen.name}? (optional)`}
-          testid="portal-anytime-review-form"
-          onSubmit={(rating, comment) => patientPortalReviewAnytime({ target: chosen.key, rating, comment })}
-          onDone={onChanged}
-        />
-        {past.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Your reviews</p>
-            {past.map((r) => (
-              <PastReview
-                key={r.id}
-                title={r.kind === "consultant" ? "Consultant" : "Physio"}
-                subtitle={r.person_name}
-                rating={r.rating}
-                comment={r.comment}
-                when={r.created_at}
-              />
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 /** The Review pop-up that opens by itself once a week of treatment is completed and not yet
     reviewed. Optional: Skip (or the close button) stops it asking for that week, which can
     still be reviewed later from the Weekly Review card in Sessions. */
@@ -2435,10 +2374,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
         {activeTab === "payment" && <PaymentTab data={data} />}
         {activeTab === "profile" && <ProfileTab data={data} />}
         {activeTab === "feedback" && (
-          <div className="space-y-4">
-            <AnytimeReviewCard reviews={reviews} onChanged={loadReviews} />
-            <FeedbackTab data={data} onSeen={clearFeedbackBadge} />
-          </div>
+          <FeedbackTab data={data} onSeen={clearFeedbackBadge} />
         )}
       </div>
 
