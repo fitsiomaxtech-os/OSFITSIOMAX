@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee, uploadEmployeePhoto,
+  hrDashboard, hrAttendanceDay, hrApprovals, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee, uploadEmployeePhoto,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrEmailStatus, hrEmailTest, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrMeta, hrAddCustomRole,
   hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrDeleteDesignation, hrReorderDesignations,
   getBranches, getVerticals,
@@ -241,10 +241,6 @@ export const HRBoard = ({ isSuperAdmin = false }) => {
   const [tab, setTab] = useState("dashboard");
   const [staffSub, setStaffSub] = useState("attendance");
   const tabs =useMemo(() => TABS.filter((t) => !t.superAdminOnly || isSuperAdmin), [isSuperAdmin]);
-  // Set by a Dashboard card or a department bar, consumed once by the Employees tab. Held
-  // here rather than inside EmployeesTab because the thing that decides the filter and the
-  // thing that applies it are on opposite sides of the tab switch.
-  const [empFilter, setEmpFilter] = useState(null);
   const [meta, setMeta] = useState({ departments: [], department_designations: {}, roles: [], custom_roles: [] });
   const reloadMeta = useCallback(() => hrMeta().then((m) => {
     // Before setMeta, so the first render after a reload already has the colours rather
@@ -260,18 +256,10 @@ export const HRBoard = ({ isSuperAdmin = false }) => {
     <div className="flex flex-col gap-5" data-testid="hr-board">
       {/* No heading. The nav tab above already reads HR Admin. */}
       <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={4} />
-      {tab === "dashboard" && (
-        <DashboardTab
-          onNavigate={(t, f) => {
-            setEmpFilter(f || null);
-            // Attendance and Approvals live inside Staff now; the Dashboard cards still name them.
-            if (STAFF_TABS.some((s) => s.key === t)) { setStaffSub(t); setTab("staff"); }
-            else setTab(t);
-          }}
-        />
-      )}
+      {/* The Dashboard's cards filter a list of their own now rather than switching tabs. */}
+      {tab === "dashboard" && <DashboardTab />}
       {tab === "staff" && <StaffTab isSuperAdmin={isSuperAdmin} sub={staffSub} onSubChange={setStaffSub} />}
-      {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
+      {tab === "employees" && <EmployeesTab meta={meta} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
       {tab === "structure" && <StructureTab meta={meta} reloadMeta={reloadMeta} />}
     </div>
@@ -280,58 +268,212 @@ export const HRBoard = ({ isSuperAdmin = false }) => {
 
 // ---------- Dashboard ----------
 
-const DashboardTab = ({ onNavigate }) => {
+const DashboardTab = () => {
   const [data, setData] = useState(null);
-  useEffect(() => { hrDashboard().then(setData).catch(() => toast.error("Failed to load")); }, []);
+  // The rows behind the cards, fetched with the figures so a click filters in place rather
+  // than waiting on a request. Each is its own slot: a desk that may read the dashboard but
+  // not the register (marketing_head) still gets every list it is allowed.
+  const [employees, setEmployees] = useState(null);
+  const [users, setUsers] = useState(null);
+  const [register, setRegister] = useState(null);
+  const [approvals, setApprovals] = useState(null);
+  const [selected, setSelected] = useState("active");
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    hrDashboard().then(setData).catch(() => toast.error("Failed to load"));
+    hrEmployees().then(setEmployees).catch(() => setEmployees([]));
+    hrUsers().then(setUsers).catch(() => setUsers([]));
+    hrAttendanceDay().then(setRegister).catch(() => setRegister({ rows: [], failed: true }));
+    hrApprovals({ status: "pending" }).then((r) => setApprovals(r.approvals || [])).catch(() => setApprovals([]));
+  }, []);
+
   if (!data) return <p className="text-sm text-slate-500">Loading...</p>;
   const k = data.kpis;
 
   // Sorted, so the biggest department is the one the eye lands on.
   const depts = [...(data.department_strength || [])].sort((a, b) => b.count - a.count);
 
-  // One row of summary cards in the HR Admin Master View's shape (StageCard in
-  // HumanResourceBoard.jsx): label over count, left aligned, white and bordered -- but in
-  // slate throughout, no per-card colour. The departments follow the five headline figures
-  // in the same row rather than in a Department Strength panel of their own, biggest first.
-  // Every card still opens the rows behind it.
+  // Present and Absent are read off the day's register -- the same rows the list draws --
+  // rather than off stored marks alone, which miss every day read from the clock and so
+  // left both cards at 0 while the register had people in. Present keeps the late arrivals.
+  const regOk = register && !register.failed;
+  const regRows = register?.rows || [];
+  const presentRows = regRows.filter((r) => r.status === "present" || r.status === "late");
+  const absentRows = regRows.filter((r) => r.status === "absent");
+
+  const activeEmployees = (employees || []).filter((e) => e.status === "active");
+  const activeUsers = (users || []).filter((u) => u.is_active !== false);
+
   const cards = [
-    { key: "active", label: "Active Employees", value: k.active_employees, go: () => onNavigate("employees", { status: "active" }) },
-    { key: "users", label: "Total Users", value: k.total_users, go: () => onNavigate("roles") },
-    { key: "present", label: "Today Present", value: k.present_today, go: () => onNavigate("attendance") },
-    { key: "absent", label: "Today Absent", value: k.absent_today ?? 0, go: () => onNavigate("attendance") },
-    { key: "leaves", label: "Pending Approvals", value: k.pending_leaves, go: () => onNavigate("approvals") },
-    ...depts.map((d) => ({ key: `dept-${d.name}`, label: d.name, value: d.count, go: () => onNavigate("employees", { department: d.name }) })),
+    { key: "active", label: "Active Employees", value: employees ? activeEmployees.length : k.active_employees, kind: "employees", ready: employees, rows: activeEmployees },
+    { key: "users", label: "Total Users", value: users ? activeUsers.length : k.total_users, kind: "users", ready: users, rows: activeUsers },
+    { key: "present", label: "Today Present", value: regOk ? presentRows.length : k.present_today, kind: "register", ready: register, rows: presentRows },
+    { key: "absent", label: "Today Absent", value: regOk ? absentRows.length : (k.absent_today ?? 0), kind: "register", ready: register, rows: absentRows },
+    { key: "leaves", label: "Pending Approvals", value: approvals ? approvals.length : k.pending_leaves, kind: "approvals", ready: approvals, rows: approvals || [] },
+    ...depts.map((d) => ({
+      key: `dept-${d.name}`,
+      label: d.name,
+      value: d.count,
+      kind: "employees",
+      ready: employees,
+      rows: (employees || []).filter((e) => (e.department || "Unassigned") === d.name),
+    })),
   ];
+  const current = cards.find((c) => c.key === selected) || cards[0];
+
+  const q = search.trim().toLowerCase();
+  const rows = !q ? current.rows : current.rows.filter((r) =>
+    [r.full_name, r.employee_name, r.employee_code, r.email, r.phone, r.designation, r.department, r.branch_name, r.role, r.kind, r.reason]
+      .some((v) => String(v || "").toLowerCase().includes(q)));
 
   return (
-    <div data-testid="hr-dashboard-tab">
-      {/* Five to a row on a phone, as the Master View does, so nine cards land as 5 + 4. */}
-      <div
-        className="flex flex-wrap justify-center gap-1.5 sm:grid sm:grid-cols-3 sm:gap-3 lg:grid-cols-5 xl:grid-cols-9"
-        style={{ fontFamily: "Lexend, sans-serif" }}
-        data-testid="hr-dashboard-cards"
-      >
-        {cards.map((c) => (
-          <button
-            key={c.key}
-            type="button"
-            onClick={c.go}
-            className="w-[calc(20%-0.3rem)] min-w-0 rounded-lg border-2 border-slate-200 bg-white px-1 py-1.5 text-center transition hover:border-slate-300 hover:shadow-sm sm:w-full sm:rounded-xl sm:px-4 sm:py-4 sm:text-left"
-            data-testid={`hr-kpi-${c.key}`}
-          >
-            <span
-              className="block break-words text-[9px] font-bold uppercase leading-[1.15] text-slate-600 [hyphens:auto] sm:truncate sm:text-xs sm:tracking-wider"
-              title={c.label}
+    <div className="space-y-4" data-testid="hr-dashboard-tab">
+      {/* The HR Admin Master View's summary cards -- label over count, left aligned, white
+          and bordered -- in plain slate, without the per-stage colour. Selecting one filters
+          the list under it, the way a stage does there. Five to a row on a phone. */}
+      <div className="flex flex-wrap justify-center gap-1.5 sm:grid sm:grid-cols-3 sm:gap-3 lg:grid-cols-5 xl:grid-cols-9" data-testid="hr-dashboard-cards">
+        {cards.map((c) => {
+          const active = c.key === current.key;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => { setSelected(c.key); setSearch(""); }}
+              className={`w-[calc(20%-0.3rem)] min-w-0 rounded-lg border-2 px-1 py-1.5 text-center transition hover:shadow-sm sm:w-full sm:rounded-xl sm:px-4 sm:py-3.5 sm:text-left ${
+                active ? "border-slate-400 bg-slate-50 shadow-sm" : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+              aria-pressed={active}
+              data-testid={`hr-kpi-${c.key}`}
             >
-              {c.label}
-            </span>
-            <span className="mt-0.5 block text-lg font-extrabold leading-tight text-slate-800 sm:mt-1 sm:text-3xl">
-              {c.value ?? 0}
-            </span>
+              <span className="block break-words text-[9px] font-medium leading-[1.15] text-slate-500 [hyphens:auto] sm:truncate sm:text-xs" title={c.label}>
+                {c.label}
+              </span>
+              <span className="mt-0.5 block text-lg font-semibold leading-tight text-slate-600 sm:mt-1 sm:text-2xl">
+                {c.value ?? 0}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+        <Search className="h-4 w-4 shrink-0 text-slate-400" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name, code, phone or email..."
+          className="min-w-0 flex-1 border-0 p-0 text-sm outline-none placeholder:text-slate-400"
+          data-testid="hr-dashboard-search"
+        />
+        {search && (
+          <button type="button" onClick={() => setSearch("")} className="shrink-0 text-slate-400 hover:text-slate-600" aria-label="Clear search">
+            <X className="h-4 w-4" />
           </button>
+        )}
+      </div>
+
+      {current.ready === null ? <p className="text-sm text-slate-500">Loading...</p> : <DashboardList kind={current.kind} rows={rows} />}
+    </div>
+  );
+};
+
+const dashDate = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(String(iso).length === 10 ? `${iso}T00:00:00` : iso);
+  return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+const slugLabel = (s) => String(s || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+const DashPill = ({ children }) => (
+  <span className="inline-flex shrink-0 whitespace-nowrap rounded-[5px] border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{children}</span>
+);
+// Name over a quiet second line, as the Master View's Candidate and Position cells are.
+const TwoLine = ({ top, sub }) => (
+  <>
+    <p className="font-medium text-slate-800">{top || "—"}</p>
+    {sub ? <p className="truncate text-[11px] text-slate-400">{sub}</p> : null}
+  </>
+);
+
+// One set of columns per kind of card. `text` is the same cell as a plain string, for the
+// phone layout's one-line summary.
+const DASH_COLUMNS = {
+  employees: [
+    { h: "Employee", cell: (e) => <TwoLine top={e.full_name} sub={e.employee_code} /> },
+    { h: "Designation", cell: (e) => <TwoLine top={e.designation} sub={e.department} />, text: (e) => e.designation },
+    { h: "Contact", cell: (e) => <TwoLine top={e.phone} sub={e.email} />, text: (e) => e.phone },
+    { h: "Branch", cell: (e) => e.branch_name || "—", text: (e) => e.branch_name },
+    { h: "Joined", cell: (e) => dashDate(e.joining_date) },
+    { h: "Status", cell: (e) => <DashPill>{slugLabel(e.status) || "—"}</DashPill> },
+  ],
+  users: [
+    { h: "User", cell: (u) => <TwoLine top={u.full_name} sub={u.linked_employee?.employee_code} /> },
+    { h: "Role", cell: (u) => <TwoLine top={roleLabel(u.role)} sub={u.linked_employee?.designation} />, text: (u) => roleLabel(u.role) },
+    { h: "Contact", cell: (u) => <TwoLine top={u.email} sub={u.phone} />, text: (u) => u.email },
+    { h: "Department", cell: (u) => u.linked_employee?.department || "—", text: (u) => u.linked_employee?.department },
+    { h: "Status", cell: (u) => <DashPill>{u.is_active === false ? "Inactive" : "Active"}</DashPill> },
+  ],
+  register: [
+    { h: "Employee", cell: (r) => <TwoLine top={r.full_name} sub={r.employee_code} /> },
+    { h: "Designation", cell: (r) => <TwoLine top={r.designation} sub={r.department} />, text: (r) => r.designation },
+    { h: "Branch", cell: (r) => r.branch_name || "—", text: (r) => r.branch_name },
+    { h: "Check In", cell: (r) => r.check_in || "—", text: (r) => r.check_in && `In ${r.check_in}` },
+    { h: "Check Out", cell: (r) => r.check_out || "—", text: (r) => r.check_out && `Out ${r.check_out}` },
+    { h: "Status", cell: (r) => <DashPill>{slugLabel(r.status)}</DashPill> },
+  ],
+  approvals: [
+    { h: "Employee", cell: (a) => <TwoLine top={a.employee_name} sub={a.employee_code} /> },
+    { h: "Request", cell: (a) => <TwoLine top={slugLabel(a.kind)} sub={a.reason} />, text: (a) => slugLabel(a.kind) },
+    {
+      h: "When",
+      cell: (a) => (a.from_date ? `${dashDate(a.from_date)}${a.to_date && a.to_date !== a.from_date ? ` – ${dashDate(a.to_date)}` : ""}` : a.amount ? `Rs.${a.amount}` : "—"),
+      text: (a) => (a.from_date ? dashDate(a.from_date) : a.amount ? `Rs.${a.amount}` : ""),
+    },
+    { h: "Requested By", cell: (a) => a.requested_by || "—", text: (a) => a.requested_by },
+    { h: "Raised", cell: (a) => dashDate(a.requested_at) },
+    { h: "Status", cell: (a) => <DashPill>{slugLabel(a.status)}</DashPill> },
+  ],
+};
+
+const DashboardList = ({ kind, rows }) => {
+  const cols = DASH_COLUMNS[kind];
+  if (rows.length === 0) {
+    return <p className="rounded-xl border border-dashed border-slate-200 bg-white py-8 text-center text-sm text-slate-400">Nothing to show.</p>;
+  }
+  const rowKey = (r, i) => r.id || r.employee_id || i;
+  return (
+    <>
+      <div className="space-y-2 sm:hidden" data-testid="hr-dashboard-list-mobile">
+        {rows.map((r, i) => (
+          <div key={rowKey(r, i)} className="rounded-xl border border-slate-200 bg-white p-3 text-sm">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">{cols[0].cell(r)}</div>
+              {cols[cols.length - 1].cell(r)}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              {cols.map((c) => c.text?.(r)).filter(Boolean).join(" · ") || "—"}
+            </p>
+          </div>
         ))}
       </div>
-    </div>
+
+      <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="hr-dashboard-list">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+              <tr>{cols.map((c) => <th key={c.h} className="px-4 py-2.5 font-semibold">{c.h}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r, i) => (
+                <tr key={rowKey(r, i)} className="hover:bg-slate-50">
+                  {cols.map((c, j) => <td key={c.h} className={`px-4 py-3 ${j === 0 ? "" : "text-slate-600"}`}>{c.cell(r)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
   );
 };
 
