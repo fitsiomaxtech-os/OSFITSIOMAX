@@ -3,7 +3,7 @@ import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, RefreshCw,
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/components/ui/sonner";
-import { hrPerformance } from "@/lib/api";
+import { getBranches, hrPerformance } from "@/lib/api";
 
 /**
  * HR Admin > Staff > Performance. Super Admin only.
@@ -94,40 +94,43 @@ const MonthPicker = ({ value, label, active, onChange }) => {
   );
 };
 
-/** Physio / Consultant / Branch Admin, as the same popover the rest of HR filters with. */
-const RoleFilter = ({ value, onChange }) => {
+/** A one-answer filter -- Branch, Role -- as the same popover the rest of HR filters with.
+ *  The first option is the "All" one, keyed "". */
+const FilterSelect = ({ value, onChange, options, title, testid }) => {
   const [open, setOpen] = useState(false);
-  const current = ROLE_FILTERS.find((r) => r.key === value) || ROLE_FILTERS[0];
+  const current = options.find((o) => o.key === value) || options[0];
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          title="Filter by role"
+          title={title}
           className={`flex h-10 w-40 items-center justify-between gap-2 rounded-md border px-3 text-xs font-semibold transition ${
             value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
           }`}
-          data-testid="hr-perf-role"
+          data-testid={testid}
         >
           <span className="truncate">{current.label}</span>
           <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-44 p-1" data-testid="hr-perf-role-panel">
-        {ROLE_FILTERS.map((r) => (
-          <button
-            key={r.key || "all"}
-            type="button"
-            onClick={() => { onChange(r.key); setOpen(false); }}
-            className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm transition ${
-              r.key === value ? "bg-sky-600 font-semibold text-white" : "text-slate-700 hover:bg-sky-50 hover:text-sky-800"
-            }`}
-            data-testid={`hr-perf-role-${r.key || "all"}`}
-          >
-            {r.label}
-            {r.key === value && <Check className="h-3.5 w-3.5 shrink-0" />}
-          </button>
-        ))}
+      <PopoverContent align="start" className="w-52 p-1" data-testid={`${testid}-panel`}>
+        <div className="max-h-72 overflow-y-auto">
+          {options.map((o) => (
+            <button
+              key={o.key || "all"}
+              type="button"
+              onClick={() => { onChange(o.key); setOpen(false); }}
+              className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm transition ${
+                o.key === value ? "bg-sky-600 font-semibold text-white" : "text-slate-700 hover:bg-sky-50 hover:text-sky-800"
+              }`}
+              data-testid={`${testid}-${o.key || "all"}`}
+            >
+              <span className="truncate">{o.label}</span>
+              {o.key === value && <Check className="h-3.5 w-3.5 shrink-0" />}
+            </button>
+          ))}
+        </div>
       </PopoverContent>
     </Popover>
   );
@@ -181,6 +184,17 @@ export const PerformancePanel = () => {
   const [period, setPeriod] = useState("month");
   const [month, setMonth] = useState(thisMonth);
   const [role, setRole] = useState("");
+  const [branch, setBranch] = useState("");
+  const [branches, setBranches] = useState([]);
+  useEffect(() => {
+    getBranches()
+      .then((list) => setBranches([...(list || [])].sort((a, b) => String(a.branch_name || "").localeCompare(String(b.branch_name || "")))))
+      .catch((e) => console.warn("[load failed]", e?.message || e));
+  }, []);
+  const branchOptions = useMemo(
+    () => [{ key: "", label: "All Branches" }, ...branches.filter((b) => b.id && b.branch_name).map((b) => ({ key: b.id, label: b.branch_name }))],
+    [branches],
+  );
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -207,11 +221,13 @@ export const PerformancePanel = () => {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const all = (data?.rows || []).filter((r) => !role || r.group === role);
+    const all = (data?.rows || [])
+      .filter((r) => !branch || r.all_branches || (r.branch_ids || []).includes(branch))
+      .filter((r) => !role || r.group === role);
     if (!q) return all;
     return all.filter((r) => [r.full_name, r.employee_code, r.role_label, r.designation, r.branch_name]
       .some((v) => String(v || "").toLowerCase().includes(q)));
-  }, [data, search, role]);
+  }, [data, search, role, branch]);
 
   return (
     <div className="flex flex-col gap-4" data-testid="hr-performance-tab">
@@ -233,7 +249,8 @@ export const PerformancePanel = () => {
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-          <RoleFilter value={role} onChange={setRole} />
+          <FilterSelect value={branch} onChange={setBranch} options={branchOptions} title="Filter by branch" testid="hr-perf-branch" />
+          <FilterSelect value={role} onChange={setRole} options={ROLE_FILTERS} title="Filter by role" testid="hr-perf-role" />
 
           <div className="flex h-10 overflow-hidden rounded-md border border-slate-200 bg-white" role="group" aria-label="Period">
             {PERIOD_PILLS.map((p) => (

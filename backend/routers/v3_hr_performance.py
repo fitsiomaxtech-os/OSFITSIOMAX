@@ -34,6 +34,7 @@ from deps import (
 from physio_scope import resolve_physio_doctor, resolve_consultant_doctor
 from routers.v3_client_reviews import COLLECTION as REVIEWS, split_legacy
 from routers.v3_dashboard import _is_converted
+from routers.v3_hr import ALL_BRANCHES
 from routers.v3_hr_ops import (
     ABSENT, HALF_DAY, LATE, LEAVE, PRESENT, _dates_between, _roster, _span_context,
 )
@@ -235,6 +236,13 @@ async def staff_performance(
             "department": e.get("department") or "",
             "photo_url": e.get("photo_url") or "",
             "branch_name": e.get("branch_name") or "",
+            # Every branch this person covers, for the Branch filter. The employee record and
+            # the account can each hold some; a desk posted to all branches matches any of them.
+            "branch_ids": list(dict.fromkeys(b for b in [
+                e.get("branch_id"), *(e.get("branch_ids") or []),
+                account.get("branch_id"), *(account.get("branch_ids") or []),
+            ] if b and b != ALL_BRANCHES)),
+            "all_branches": ALL_BRANCHES in (e.get("branch_id"), *(e.get("branch_ids") or [])),
             "group": group,
             "role_label": GROUP_LABELS[group] or e.get("designation") or "Staff",
             "attendance": attendance_percent(counts),
