@@ -484,8 +484,8 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
   const [branches, setBranches] = useState([]);
   // Only offered where no branch was handed in — the HR Admin view across branches.
   const [branch, setBranch] = useState("");
-  // Consultant Review is the tab a review of a consultant lands in, and the one that opens.
-  const [kind, setKind] = useState("consultant");
+  // Physio Review opens first: the weekly review every 7 days of treatment rates the Physio.
+  const [kind, setKind] = useState("physio");
   // Set only by the tiles: where the review came from (see TILES).
   const [source, setSource] = useState("");
   const [person, setPerson] = useState("");

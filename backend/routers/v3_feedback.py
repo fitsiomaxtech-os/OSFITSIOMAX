@@ -76,7 +76,16 @@ AUDIENCE_CONSULTANT = "consultant"
 # deliberately sent past. Nothing offers it now -- see feedbackTo in the portal.
 AUDIENCE_PHYSIO = "physio"
 
-AUDIENCES = (AUDIENCE_BRANCH, AUDIENCE_SUPER, AUDIENCE_CONSULTANT, AUDIENCE_PHYSIO)
+# Not chosen by the patient: the written feedback from their weekly Physio review
+# (routers/v3_client_reviews.py), filed here so it can be answered. Read by all three desks
+# -- Super Admin, the patient's Branch Admin, and the patient's Consultant -- which is why
+# it is not in BRANCH_HIDDEN_AUDIENCES and is in CONSULTANT_AUDIENCES.
+AUDIENCE_WEEKLY_REVIEW = "weekly_review"
+
+AUDIENCES = (AUDIENCE_BRANCH, AUDIENCE_SUPER, AUDIENCE_CONSULTANT, AUDIENCE_PHYSIO, AUDIENCE_WEEKLY_REVIEW)
+
+# What a consultant reads: what was addressed to them, and their patients' weekly reviews.
+CONSULTANT_AUDIENCES = (AUDIENCE_CONSULTANT, AUDIENCE_WEEKLY_REVIEW)
 
 # What a Branch Admin's board must not show, for two different reasons that come to the
 # same query. Super Admin's post is kept from them because half of it is about them. The
@@ -173,7 +182,7 @@ async def _consultant_scope(user: V3UserOut) -> Optional[dict]:
         return None
     doctor = await resolve_consultant_doctor(user.id, user.role)
     ids = (doctor or {}).get("consultant_ids") or []
-    return {"audience": AUDIENCE_CONSULTANT, "consultant_id": {"$in": ids}}
+    return {"audience": {"$in": list(CONSULTANT_AUDIENCES)}, "consultant_id": {"$in": ids}}
 
 
 @router.get("/branch/feedback")
@@ -283,7 +292,7 @@ async def move_feedback(
         raise HTTPException(status_code=404, detail="No such feedback")
     consultant = await _consultant_scope(user)
     if consultant is not None:
-        if (_audience(existing.get("audience")) != AUDIENCE_CONSULTANT
+        if (_audience(existing.get("audience")) not in CONSULTANT_AUDIENCES
                 or existing.get("consultant_id") not in consultant["consultant_id"]["$in"]):
             raise HTTPException(status_code=403, detail="Not addressed to you")
     elif is_branch_admin_role(user.role):
@@ -362,7 +371,7 @@ async def reply_to_feedback(
         # The other half of the same wall. A consultant answers on the threads addressed to
         # them, and on nothing else -- the id is guessable and the board is not the only
         # way in.
-        if (_audience(existing.get("audience")) != AUDIENCE_CONSULTANT
+        if (_audience(existing.get("audience")) not in CONSULTANT_AUDIENCES
                 or existing.get("consultant_id") not in consultant["consultant_id"]["$in"]):
             raise HTTPException(status_code=403, detail="Not addressed to you")
     elif is_branch_admin_role(user.role):

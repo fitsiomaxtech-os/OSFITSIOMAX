@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Star,
   Stethoscope,
   User,
   Users,
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { ConsultationsBoard, leadPlanParts, PlanLine } from "@/components/ConsultationsBoard";
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
+import { ClientReviewsPanel } from "@/components/reviews/ClientReviewsPanel";
 import { todayIso } from "@/components/WeekStrip";
 import { RescheduledTag } from "@/components/ui/lead-marks";
 import { DayStripFilter, todayFilter, isDayKey } from "@/components/DayStripFilter";
@@ -73,6 +75,9 @@ const WORK_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar, color: "#0284c7" },
   { key: "review", label: "Review", icon: ClipboardCheck, color: "#7c3aed" },
   { key: "all", label: "All", icon: LayoutList, color: "#0d9488" },
+  // What the consultant's patients said: the star rating and written feedback from each
+  // weekly review, read-only. Not a queue, so it carries no count.
+  { key: "client_reviews", label: "Client Reviews", icon: Star, color: "#f59e0b" },
 ];
 
 // The two queues All merges, and the labels its own filter offers. Kept beside WORK_TABS
@@ -418,7 +423,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               to the tallest rather than each card to itself. */}
           <div className={`-mx-1 flex items-stretch gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid ${TAB_GRID_COLS[WORK_TABS.length] || "sm:grid-cols-4"} sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0`} data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
-              const n = t.key === "consultations" ? (consultStages[firstStage] || 0)
+              const n = t.key === "client_reviews" ? "★"
+                : t.key === "consultations" ? (consultStages[firstStage] || 0)
                 : t.key === "review" ? reviewCount
                 // All is the two of them together, every stage, nothing narrowed.
                 : consultCount + reviewCount;
@@ -431,7 +437,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
                 : !isDayKey(dateRange.key) ? "in this range"
                 : /^(Today|Yesterday|Tomorrow)$/.test(dateRange.label) ? dateRange.label.toLowerCase()
                 : `on ${dateRange.label}`;
-              const sub = t.key === "consultations" ? (firstStage ? `in ${firstStage}` : when)
+              const sub = t.key === "client_reviews" ? "stars & feedback"
+                : t.key === "consultations" ? (firstStage ? `in ${firstStage}` : when)
                 : t.key === "review" ? when
                 : `everything ${when}`;
               // The wrapper keeps the phone's side-scrolling row of fixed-width cards; the
@@ -528,6 +535,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               every patient, matching how Consultations narrows and All doesn't. The
               weekly assessments sit under it — same patients, the per-week record rather
               than the dispatched reviews. */}
+          {workTab === "client_reviews" && (
+            <div data-testid="hp-work-client-reviews">
+              <ClientReviewsPanel />
+            </div>
+          )}
+
           {workTab === "all" && (
             <div data-testid="hp-work-all">
               {/* Six columns can't reflow onto a phone, so the same rows render as cards

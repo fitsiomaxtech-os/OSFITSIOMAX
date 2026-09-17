@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import HTTPException  # noqa: E402
 
 from routers.v3_client_reviews import (  # noqa: E402
-    course_weeks, pending_weeks, required_comment, required_rating, split_legacy, summarise, week_of,
+    course_weeks, pending_weeks, required_comment, required_rating, split_legacy, summarise, week_feedback_text, week_of,
 )
 
 
@@ -114,3 +114,12 @@ class TestSummarise:
         s = summarise(rows)
         assert s["total"] == 4 and s["average"] == 3.5 and s["low"] == 1 and s["anytime"] == 1
         assert s["people"][0] == {"name": "Dr Abdul", "count": 2, "average": 3.5}
+
+
+class TestWeekFeedbackText:
+    def test_names_week_physio_stars_and_words(self):
+        week = {"track": "treatment", "week_number": 1, "first_number": 1, "last_number": 7}
+        row = {"rating": 4, "comment": "Much better", "person_name": "Priya"}
+        text = week_feedback_text(row, week)
+        assert text.startswith("Week 1 review (Sessions 1-7) - Physio Priya\n")
+        assert "★★★★☆ 4/5" in text and text.endswith("\n\nMuch better")

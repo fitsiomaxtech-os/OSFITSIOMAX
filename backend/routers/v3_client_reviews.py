@@ -36,9 +36,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from database import v3_col
-from deps import v3_require_roles, is_branch_admin_role
-from physio_scope import consultant_of_lead
-from routers.v3_feedback import _rating
+from deps import v3_require_roles, is_branch_admin_role, is_head_physio_role
+from physio_scope import consultant_of_lead, resolve_consultant_doctor
+from routers.v3_feedback import AUDIENCE_WEEKLY_REVIEW, AUTHOR_PATIENT, STATUS_NEW, _rating
 from routers.v3_patient_portal import _current_patient_lead_id, _lead_or_404
 from schemas.v3 import V3UserOut
 from utils import now_iso
@@ -326,8 +326,66 @@ async def portal_review_week(payload: WeekReviewIn, lead_id: str = Depends(_curr
         "session_date": week["finished_at"],
         "person_id": week["physio_id"] or team["physio"]["id"],
         "person_name": week["physio_name"] or team["physio"]["name"],
+        # The patient's consultant, so their Review tab can find it.
+        "consultant_id": team["consultant"]["id"],
+        "consultant_name": team["consultant"]["name"],
     })
+    await file_week_feedback(lead, row, week)
     return {"message": f"Thank you for reviewing week {week['week_number']}.", "review": row}
+
+
+def week_feedback_text(row: dict, week: dict) -> str:
+    """The Patient Feedback message for a weekly review: what week, which physio, the
+    stars, and the client's words."""
+    noun = "Rehab Day" if week["track"] == "rehab" else "Session"
+    first, last = week.get("first_number"), week.get("last_number")
+    span = "" if first is None else (f" ({noun} {first})" if first == last else f" ({noun}s {first}-{last})")
+    title = f"{'Rehab ' if week['track'] == 'rehab' else ''}Week {week['week_number']} review{span}"
+    physio = f" - Physio {row['person_name']}" if row.get("person_name") else ""
+    stars = "\u2605" * row["rating"] + "\u2606" * (5 - row["rating"])
+    return f"{title}{physio}\n{stars} {row['rating']}/5\n\n{row['comment']}"
+
+
+async def file_week_feedback(lead: dict, row: dict, week: dict) -> None:
+    """The review's written feedback, as a Patient Feedback thread Super Admin, the Branch
+    Admin and the Consultant all read (see AUDIENCE_WEEKLY_REVIEW). One thread per weekly
+    review: changing the review rewrites its opening message rather than adding another."""
+    col = v3_col("patient_feedback")
+    body = week_feedback_text(row, week)
+    now = now_iso()
+    existing = await col.find_one({"client_review_id": row["id"]}, {"_id": 0})
+    if existing:
+        messages = list(existing.get("messages") or [])
+        if messages:
+            messages[0] = {**messages[0], "body": body}
+        await col.update_one({"id": existing["id"]}, {"$set": {
+            "message": body, "messages": messages, "rating": row["rating"], "updated_at": now,
+        }})
+        return
+    thread = {
+        "id": str(uuid.uuid4()),
+        "lead_id": lead.get("id"),
+        "branch_id": lead.get("branch_id"),
+        "consultant_id": row.get("consultant_id") or "",
+        "consultant_name": row.get("consultant_name") or "",
+        "patient_name": _text(lead.get("name")),
+        "patient_phone": _text(lead.get("phone")),
+        "rating": row["rating"],
+        "message": body,
+        "audience": AUDIENCE_WEEKLY_REVIEW,
+        "client_review_id": row["id"],
+        "status": STATUS_NEW,
+        "note": "",
+        "created_at": now,
+    }
+    thread["messages"] = [{
+        "id": str(uuid.uuid4()),
+        "author": AUTHOR_PATIENT,
+        "author_name": thread["patient_name"],
+        "body": body,
+        "created_at": now,
+    }]
+    await col.insert_one(dict(thread))
 
 
 @router.post("/patient-portal/review/anytime")
@@ -353,26 +411,57 @@ async def portal_review_anytime(payload: AnytimeReviewIn, lead_id: str = Depends
 
 # ------------------------------------------------------------------ Management side
 
+async def _for_consultant(rows: List[dict], consultant_ids: set) -> List[dict]:
+    """The rows about a consultant's own patients. Weekly reviews carry the consultant they
+    were given under; older rows do not, so theirs is worked out from the lead, once per lead."""
+    by_lead: Dict[str, str] = {}
+    out = []
+    for r in rows:
+        cid = r.get("consultant_id")
+        if not cid and r.get("kind") == KIND_CONSULTANT:
+            cid = r.get("person_id")
+        if not cid and r.get("lead_id"):
+            if r["lead_id"] not in by_lead:
+                lead = await v3_col("leads").find_one({"id": r["lead_id"]}, {"_id": 0})
+                by_lead[r["lead_id"]] = (await consultant_of_lead(lead))["id"] if lead else ""
+            cid = by_lead[r["lead_id"]]
+        if cid in consultant_ids:
+            out.append(r)
+    return out
+
+
 @router.get("/client-reviews")
 async def list_client_reviews(
     branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles("super_admin", *BDE_ROLES, "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", *BDE_ROLES, "branch_admin", "head_physio")),
 ):
     """Every review management may read, split into Consultant Review and Physio Review.
 
     A Branch Admin is always held to their own branch, whatever they pass. Super Admin and
-    BDE read every branch and may narrow to one.
+    BDE read every branch and may narrow to one. A Consultant reads their own patients'
+    reviews, across branches.
     """
+    empty = summarise([])
+    nothing = {"consultant": [], "physio": [], "summary": {"consultant": empty, "physio": empty}}
     query: dict = {"skipped": {"$ne": True}}
-    if is_branch_admin_role(user.role):
+    consultant_ids = None
+    if is_head_physio_role(user.role):
+        doctor = await resolve_consultant_doctor(user.id, user.role)
+        consultant_ids = set((doctor or {}).get("consultant_ids") or [])
+        if not consultant_ids:
+            return nothing
+        if branch_id:
+            query["branch_id"] = branch_id
+    elif is_branch_admin_role(user.role):
         if not user.branch_id:
-            empty = summarise([])
-            return {"consultant": [], "physio": [], "summary": {"consultant": empty, "physio": empty}}
+            return nothing
         query["branch_id"] = user.branch_id
     elif branch_id:
         query["branch_id"] = branch_id
 
     raw = await v3_col(COLLECTION).find(query, {"_id": 0}).to_list(10000)
+    if consultant_ids is not None:
+        raw = await _for_consultant(raw, consultant_ids)
     rows = [r for row in raw for r in split_legacy(row)]
     rows.sort(key=lambda r: r.get("updated_at") or r.get("created_at") or "", reverse=True)
 

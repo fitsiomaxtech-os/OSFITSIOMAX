@@ -40,7 +40,7 @@ from email_utils import SmtpNotConfigured, send_email
 from deps import v3_require_roles, is_branch_admin_role, works_org_wide
 from routers.v3_lead_documents import DIET_CHART, DOC_DIR, is_shared_with_patient
 from routers.v3_feedback import (
-    AUDIENCE_CONSULTANT, AUDIENCE_SUPER, AUTHOR_PATIENT, AUTHOR_STAFF, MAX_MESSAGE,
+    AUDIENCE_BRANCH, AUDIENCE_CONSULTANT, AUDIENCE_SUPER, AUDIENCE_WEEKLY_REVIEW, AUTHOR_PATIENT, AUTHOR_STAFF, MAX_MESSAGE,
     STATUS_AWAITING, STATUS_IN_PROGRESS, STATUS_NEW, STATUS_RESOLVED,
     _audience, _rating, _thread,
 )
@@ -1550,6 +1550,9 @@ async def patient_portal_feedback(
     message = (payload.message or "").strip()[:MAX_MESSAGE]
     rating = _rating(payload.rating)
     audience = _audience(payload.audience)
+    # Weekly review threads are filed by the review itself, never chosen from this form.
+    if audience == AUDIENCE_WEEKLY_REVIEW:
+        audience = AUDIENCE_BRANCH
     # The words are the whole of it now: the portal stopped asking for a rating, because a
     # star out of five says something happened without saying what and a branch cannot act on
     # four stars. The field is still read for anything sent by an older app, and a row that
