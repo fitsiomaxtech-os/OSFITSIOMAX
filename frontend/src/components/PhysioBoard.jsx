@@ -62,7 +62,7 @@ import { to12h, slotTo12h } from "@/lib/time";
 // top-right page button instead, alongside Profile on the top-left.
 const VIEW_TABS = [
   { key: "treatment", label: "Treatment", icon: ClipboardList },
-  { key: "review", label: "Review", icon: ClipboardCheck },
+  { key: "review", label: "Send to Review", icon: ClipboardCheck },
   { key: "patients", label: "Patients", icon: Users },
 ];
 
