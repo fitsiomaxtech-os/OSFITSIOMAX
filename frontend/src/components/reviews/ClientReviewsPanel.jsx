@@ -12,9 +12,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Building2, CalendarCheck, Check, ChevronDown, ChevronRight, Clock, MessageSquareQuote, RefreshCw, Search, Star, X } from "lucide-react";
+import { Activity, Building2, UserRound, CalendarCheck, Check, ChevronDown, ChevronRight, Clock, MessageSquareQuote, RefreshCw, Search, Star, X } from "lucide-react";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -233,6 +233,98 @@ const BranchFilter = ({ branches, value, onChange }) => {
   );
 };
 
+/**
+ * The consultant or physio picker: the Branch picker's look, listing every person reviewed
+ * under the bar's other filters with their average and review count, best rated first.
+ * Picking one narrows the tiles and the list to that person.
+ */
+const PersonFilter = ({ people, value, onChange, meta }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const listed = q ? people.filter((p) => p.name.toLowerCase().includes(q)) : people;
+  const active = Boolean(value);
+  const plural = meta.key === "consultant" ? "Consultants" : "Physios";
+  const pick = (name) => { onChange(name); setOpen(false); setQuery(""); };
+
+  const row = (selected) => `flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+    selected ? "bg-sky-100 font-semibold text-sky-700" : "text-slate-700 hover:bg-slate-100"
+  }`;
+
+  return (
+    <div className="inline-flex items-center">
+      <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(""); }}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            className={`h-9 max-w-[240px] justify-between gap-2 ${active ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : "text-slate-600"}`}
+            data-testid="client-reviews-person"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <UserRound className="h-4 w-4 shrink-0" />
+              <span className="truncate">{value || `All ${plural}`}</span>
+            </span>
+            <ChevronDown className={`h-4 w-4 shrink-0 opacity-60 transition-transform ${open ? "rotate-180" : ""}`} />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-80 p-0" data-testid="client-reviews-person-panel">
+          <div className="border-b border-slate-200 bg-slate-50/40 p-2">
+            <p className="px-1 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Filter by {meta.person}</p>
+            {people.length > 6 && (
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <Input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={`Search ${meta.person.toLowerCase()}...`}
+                  className="h-8 pl-8 text-sm"
+                  data-testid="client-reviews-person-search"
+                />
+              </div>
+            )}
+          </div>
+          <div className="max-h-72 space-y-0.5 overflow-y-auto p-1.5">
+            {!q && (
+              <button type="button" onClick={() => pick("")} className={row(!active)} data-testid="client-reviews-person-all">
+                <span className="truncate">All {plural}</span>
+                {!active && <Check className="h-4 w-4 shrink-0" />}
+              </button>
+            )}
+            {listed.map((p) => (
+              <button key={p.name} type="button" onClick={() => pick(p.name)} className={row(p.name === value)} data-testid={`client-reviews-person-${p.name}`}>
+                <span className="truncate">{p.name}</span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                  <span className="text-xs font-bold">{p.average ?? "—"}</span>
+                  <span className="text-[10px] font-normal text-slate-400">({p.count})</span>
+                  {p.name === value && <Check className="h-4 w-4" />}
+                </span>
+              </button>
+            ))}
+            {listed.length === 0 && (
+              <p className="px-3 py-4 text-center text-xs text-slate-400">
+                {people.length ? `No ${meta.person.toLowerCase()} matches.` : "No ratings yet."}
+              </p>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {active && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          title={`Clear ${meta.person.toLowerCase()} filter`}
+          className="flex h-9 items-center rounded-r-md border border-l-0 border-sky-300 bg-sky-50 px-2 text-sky-700 hover:bg-sky-100"
+          data-testid="client-reviews-person-clear"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+};
+
 // What a review was given for, as the pill in the Type column.
 const TYPE_PILL = {
   review: { label: "7-day Review", color: "#059669" },
@@ -410,7 +502,7 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
   const reviews = useMemo(() => data[kind] || [], [data, kind]);
   const q = search.trim().toLowerCase();
 
-  // The tiles and the people card count what the bar leaves (branch, search, date),
+  // The tiles and the person picker count what the bar leaves (branch, search, date),
   // but not the tile filter itself: a tile that zeroes the other three when pressed leaves
   // nothing to press next.
   const base = useMemo(
@@ -472,6 +564,7 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
           {!branchId && (
             <BranchFilter branches={branches} value={branch} onChange={setBranch} />
           )}
+          <PersonFilter people={people} value={person} onChange={setPerson} meta={meta} />
           <div className="relative min-w-[180px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search client, ${meta.person.toLowerCase()}...`} className="h-9 pl-9" data-testid="client-reviews-search" />
@@ -530,35 +623,6 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
           />
         ))}
       </div>
-
-      <Card data-testid={`client-reviews-${kind}-people`}>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm">{kind === "consultant" ? "Consultants" : "Physiotherapists"}</CardTitle>
-          {person && (
-            <button type="button" onClick={() => setPerson("")} className="text-xs font-semibold text-indigo-600 hover:underline">Show all</button>
-          )}
-        </CardHeader>
-        <CardContent className="grid gap-1.5 sm:grid-cols-2">
-          {people.length === 0 ? (
-            <p className="text-xs text-slate-400">No ratings yet.</p>
-          ) : people.map((p) => (
-            <button
-              key={p.name}
-              type="button"
-              onClick={() => setPerson((cur) => (cur === p.name ? "" : p.name))}
-              className={`flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left transition ${person === p.name ? "border-indigo-300 bg-indigo-50" : "border-transparent bg-slate-50 hover:bg-slate-100"}`}
-              data-testid={`client-reviews-person-${p.name}`}
-            >
-              <span className={`truncate text-sm font-medium ${person === p.name ? "text-indigo-700" : "text-slate-700"}`}>{p.name}</span>
-              <span className="flex shrink-0 items-center gap-2">
-                <StarRow value={Math.round(p.average || 0)} size="h-3.5 w-3.5" />
-                <span className="text-xs font-bold text-slate-700">{p.average ?? "—"}</span>
-                <span className="text-[10px] text-slate-400">({p.count})</span>
-              </span>
-            </button>
-          ))}
-        </CardContent>
-      </Card>
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
