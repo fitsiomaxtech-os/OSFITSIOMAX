@@ -21,7 +21,10 @@ Rows written by the first flow (one row per client with both ratings, no `kind`)
 read by management: list_client_reviews splits each into its consultant and physio halves.
 
 Read by management only: Super Admin and BDE across every branch, a Branch Admin for their
-own branch.
+own branch. BDE is admitted by BDE_ROLES rather than the one slug: the Business Development
+Executive is `business_dev`, but a login created before migrate_designation_roles ran still
+holds the typed `business_development_executive` (see DEFAULT_ROLES in routers/v3_hr.py),
+and that desk reads these figures for the company.
 """
 
 import uuid
@@ -52,6 +55,8 @@ SOURCE_ANYTIME = "anytime"
 
 # Physio days completed on or after this are the ones a client must rate.
 PHYSIO_REVIEW_START = "2026-09-16"
+
+BDE_ROLES = ("business_dev", "business_development_executive")
 
 
 class PhysioReviewIn(BaseModel):
@@ -308,7 +313,7 @@ async def portal_review_anytime(payload: AnytimeReviewIn, lead_id: str = Depends
 @router.get("/client-reviews")
 async def list_client_reviews(
     branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", *BDE_ROLES, "branch_admin")),
 ):
     """Every review management may read, split into Consultant Review and Physio Review.
 
