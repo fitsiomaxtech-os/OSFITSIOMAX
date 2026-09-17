@@ -9,15 +9,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertOctagon, ChevronDown, ChevronUp, ClipboardList, HeartPulse, RefreshCw, Search, Stethoscope } from "lucide-react";
+import { AlertOctagon, Building2, Check, ChevronDown, ChevronUp, ClipboardList, HeartPulse, RefreshCw, Search, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 // The same figure tile HR's own Dashboard counts with.
 import { KPI } from "@/components/ui/kpi-card";
 import { roleLabel } from "@/lib/roles";
-import { eodReports } from "@/lib/api";
+import { eodReports, getBranches } from "@/lib/api";
 
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -57,6 +58,59 @@ const prettyTime = (stamp) => {
 };
 const prettyDay = (day) => (day ? new Date(`${day}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "");
 
+/**
+ * The branch popover, drawn class for class like the branch button on the Business Leads
+ * Dashboard's toolbar (ModeBranchScope in DashboardBoard.jsx) without its Online/Offline
+ * half, which this list has no use for. Kept here rather than importing that one so this
+ * tab does not pull the whole Dashboard board in with it.
+ */
+const BranchScope = ({ branches, value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const current = branches.find((b) => b.id === value);
+  const pick = (id) => { onChange(id); setOpen(false); };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Filter by branch"
+          className={`flex h-10 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition ${
+            value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+          data-testid="eod-branch-button"
+        >
+          <Building2 className="h-3.5 w-3.5 shrink-0" />
+          <span className="max-w-[130px] truncate">{current?.name || "All Branches"}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="max-h-80 w-64 overflow-y-auto p-1" data-testid="eod-branch-menu">
+        <button
+          type="button"
+          onClick={() => pick("")}
+          className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm transition hover:bg-slate-50 ${!value ? "font-semibold text-sky-700" : "text-slate-700"}`}
+          data-testid="eod-branch-all"
+        >
+          <Check className={`h-3.5 w-3.5 shrink-0 ${value ? "opacity-0" : ""}`} />
+          <span className="truncate">All Branches</span>
+        </button>
+        {branches.map((b) => (
+          <button
+            key={b.id}
+            type="button"
+            onClick={() => pick(value === b.id ? "" : b.id)}
+            className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm transition hover:bg-slate-50 ${value === b.id ? "font-semibold text-sky-700" : "text-slate-700"}`}
+            data-testid={`eod-branch-${b.id}`}
+          >
+            <Check className={`h-3.5 w-3.5 shrink-0 ${value === b.id ? "" : "opacity-0"}`} />
+            <span className="truncate">{b.name}</span>
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+};
+
 export const EodReportsPanel = () => {
   // Today, every time the tab is opened -- nothing remembers the last range picked.
   const [preset, setPreset] = useState("today");
@@ -66,6 +120,14 @@ export const EodReportsPanel = () => {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("reports");
   const [q, setQ] = useState("");
+  // A branch id, or "" for every branch. Narrowed here rather than on the server: the
+  // period's rows are already on screen, and the four figures follow the same filter.
+  const [branchId, setBranchId] = useState("");
+  const [branches, setBranches] = useState([]);
+
+  useEffect(() => {
+    getBranches().then((rows) => setBranches((rows || []).filter((b) => b?.id && b?.name))).catch(() => {});
+  }, []);
   const [open, setOpen] = useState(null);
 
   const range = useMemo(
@@ -84,11 +146,12 @@ export const EodReportsPanel = () => {
   useEffect(() => { load(); }, [load]);
 
   const matches = useCallback((r) => {
+    if (branchId && r.branch_id !== branchId) return false;
     const needle = q.trim().toLowerCase();
     if (!needle) return true;
     return [r.user_name, r.branch_name, ...(r.entries || []).map((e) => e.client_name)]
       .some((v) => String(v || "").toLowerCase().includes(needle));
-  }, [q]);
+  }, [q, branchId]);
 
   const allReports = useMemo(() => (data?.reports || []).filter(matches), [data, matches]);
   const pending = useMemo(() => (data?.pending || []).filter(matches), [data, matches]);
@@ -144,6 +207,8 @@ export const EodReportsPanel = () => {
             );
           })}
         </div>
+
+        <BranchScope branches={branches} value={branchId} onChange={setBranchId} />
 
         <div className="ml-auto flex items-center gap-1.5">
           {/* Lit with the picked day or range while one is set, with its own clear. */}
