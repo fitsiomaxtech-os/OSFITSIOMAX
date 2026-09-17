@@ -582,13 +582,12 @@ function TreatmentCourse({ data, reviews, onReviewed }) {
                     </div>
                   ) : null}
                 </>}
+                action={<WeekReviewButton track="treatment" number={s.session_number} reviews={reviews} onReviewed={onReviewed} />}
               />
             ))
           )}
         </div>
       </div>
-
-      <WeeklyReviewCard track="treatment" reviews={reviews} onReviewed={onReviewed} />
 
       {data.weekly_assessments && data.weekly_assessments.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -677,13 +676,12 @@ function RehabCourse({ rehab, reviews, onReviewed }) {
                     </div>
                   ) : null}
                 </>}
+                action={<WeekReviewButton track="rehab" number={r.day_number} reviews={reviews} onReviewed={onReviewed} />}
               />
             ))
           )}
         </div>
       </div>
-
-      <WeeklyReviewCard track="rehab" reviews={reviews} onReviewed={onReviewed} />
     </>
   );
 }
@@ -2073,7 +2071,7 @@ function ReviewDialog({ title, subtitle, onClose, children, footer, testid }) {
 
 /** The Review button on a row: grey until there is something to review, amber while a
     review is due, and the client's stars once given (tap to change them). */
-function ReviewChip({ state, rating, required, onClick, testid }) {
+function ReviewChip({ state, rating, label, required, onClick, testid }) {
   const base = "relative inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition";
   const look = state === "done" ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
     : state === "due" ? "border-amber-400 bg-amber-400 text-white hover:bg-amber-500"
@@ -2087,7 +2085,7 @@ function ReviewChip({ state, rating, required, onClick, testid }) {
       data-testid={testid}
     >
       <Star className={`h-3 w-3 ${state === "done" ? "fill-amber-400 text-amber-400" : ""}`} />
-      {state === "done" ? `${rating}/5` : "Review"}
+      {label || (state === "done" ? `${rating}/5` : "Review")}
       {state === "due" && required && (
         <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-rose-500" />
       )}
@@ -2185,82 +2183,42 @@ function WeekReviewForm({ week, reviews, onDone, testid }) {
   );
 }
 
-/** The week reviews the client can see: only weeks whose every day is completed, amber
-    while due and the stars once given. Weeks still running are not listed; the next one
-    is named with the date its review opens. Nothing without `reviews`: the staff preview
-    of this tab draws the days alone. */
-function WeeklyReviewCard({ track, reviews, onReviewed }) {
-  const [openKey, setOpenKey] = useState(null);
-  if (!reviews) return null;
-  const all = (reviews.weeks || []).filter((w) => w.track === track);
-  if (!all.length) return null;
-  const weeks = all.filter((w) => w.complete);
-  const next = all.find((w) => !w.complete);
-  const opened = weeks.find((w) => w.week_number === openKey);
-  const rehab = track === "rehab";
-
+/** The Review button on the Session History row of a week's last day (e.g. Session 7).
+    Appears only once every day in that week is completed: amber while not yet reviewed,
+    then "Reviewed" (tap to change it). Opens the Physio and Consultant review pop-up.
+    Nothing without `reviews`: the staff preview of this tab draws the days alone. */
+function WeekReviewButton({ track, number, reviews, onReviewed }) {
+  const [open, setOpen] = useState(false);
+  if (!reviews || number == null) return null;
+  const week = (reviews.weeks || []).find((w) => w.track === track && w.complete && w.last_number === number);
+  if (!week) return null;
+  const saved = savedForWeek(reviews, week);
+  const done = weekPeople(reviews, week).every((p) => saved[p.key]);
+  const testid = `portal-week-review-${track}-${week.week_number}`;
   return (
-    <div className={`overflow-hidden rounded-xl border bg-white ${rehab ? "border-violet-200" : "border-slate-200"}`} data-testid={`portal-weekly-reviews-${track}`}>
-      <div className={`border-b px-4 py-3 ${rehab ? "border-violet-100 bg-violet-50/60" : "border-slate-100 bg-slate-50/60"}`}>
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-          <Star className="h-4 w-4 fill-amber-400 text-amber-400" /> Weekly Review
-        </h2>
-        <p className="mt-0.5 text-[10px] text-slate-500">
-          Every 7 days, rate your {rehab ? "physio" : "physio and consultant"} from 1 to 5 stars and tell us how it went.
-        </p>
-      </div>
-      {next && (
-        <p className="border-b border-slate-100 px-4 py-2 text-[11px] text-slate-500" data-testid={`portal-weekly-reviews-${track}-next`}>
-          Your <span className="font-semibold text-slate-700">{weekTitle(next)}</span> review opens
-          {next.opens_on ? <> on <span className="font-semibold text-slate-700">{next.opens_on}</span></> : null}
-          {next.last_number != null ? <>, once {rehab ? "Rehab Day" : "Session"} {next.last_number} is completed</> : null}.
-        </p>
-      )}
-      <div className="divide-y divide-slate-50">
-        {weeks.map((w) => {
-          const saved = savedForWeek(reviews, w);
-          const people = weekPeople(reviews, w);
-          const state = people.every((p) => saved[p.key]) ? "done" : "due";
-          const testid = `portal-week-review-${track}-${w.week_number}`;
-          return (
-            <div key={w.week_number} className="flex items-center gap-3 px-4 py-3" data-testid={testid}>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-slate-800">{weekTitle(w)}</p>
-                <p className="text-[10px] text-slate-400">
-                  {[weekRange(w), w.opens_on].filter(Boolean).join(" · ")}
-                </p>
-                {people.some((p) => saved[p.key]) && (
-                  <p className="mt-0.5 text-[10px] text-amber-600">
-                    {people.filter((p) => saved[p.key]).map((p) => `${p.label} ${saved[p.key].rating}/5`).join(" · ")}
-                  </p>
-                )}
-              </div>
-              <ReviewChip
-                state={state}
-                rating={saved.physio?.rating}
-                testid={`${testid}-button`}
-                onClick={() => setOpenKey(w.week_number)}
-              />
-            </div>
-          );
-        })}
-      </div>
-      {opened && (
+    <>
+      <ReviewChip
+        state={done ? "done" : "due"}
+        label={done ? "Reviewed" : `Review ${weekTitle(week)}`}
+        testid={`${testid}-button`}
+        onClick={() => setOpen(true)}
+      />
+      {open && (
         <ReviewDialog
-          title={`Review ${weekTitle(opened)}`}
-          subtitle={weekRange(opened)}
-          onClose={() => setOpenKey(null)}
-          testid={`portal-week-review-${track}-${opened.week_number}-dialog`}
+          title={`Review ${weekTitle(week)}`}
+          subtitle={`${weekRange(week)} · rate your ${track === "rehab" ? "physio" : "physio and consultant"}`}
+          onClose={() => setOpen(false)}
+          testid={`${testid}-dialog`}
         >
           <WeekReviewForm
-            week={opened}
+            week={week}
             reviews={reviews}
-            testid={`portal-week-review-${track}-${opened.week_number}-form`}
-            onDone={() => { setOpenKey(null); onReviewed?.(); }}
+            testid={`${testid}-form`}
+            onDone={() => { setOpen(false); onReviewed?.(); }}
           />
         </ReviewDialog>
       )}
-    </div>
+    </>
   );
 }
 
