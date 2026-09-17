@@ -4,6 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/sonner";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { QuickDateFilterBar, intersectDateFilters } from "@/components/QuickDateFilterBar";
 import { getBranchTransferRecords } from "@/lib/api";
 import { downloadCsv } from "@/lib/printable";
 import { dateStampFull, callTimeStamp } from "@/lib/time";
@@ -53,6 +55,15 @@ const BranchTransferRecords = ({ branchId }) => {
   const [search, setSearch] = useState("");
   const [direction, setDirection] = useState("all");
   const [open, setOpen] = useState(null);
+  // The same pair Branch Leads carries: a preset row and a calendar, combined by overlap.
+  // Opens on All — a record is looked up, and the transfer being looked for is rarely today's.
+  const [quickDate, setQuickDate] = useState(null);
+  const [dateFilter, setDateFilter] = useState(null);
+  const applyDateFilter = (next) => {
+    setDateFilter(next);
+    if (next) setQuickDate(null);
+  };
+  const effectiveDateFilter = useMemo(() => intersectDateFilters(dateFilter, quickDate), [dateFilter, quickDate]);
 
   const load = useCallback(async () => {
     if (!branchId) return;
@@ -68,21 +79,32 @@ const BranchTransferRecords = ({ branchId }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const rows = useMemo(() => {
+  // Date and search first, direction last, so the three cards count what the date and
+  // search leave and pressing one of them never changes the numbers on the other two.
+  const dated = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const from = effectiveDateFilter?.from?.getTime();
+    const to = effectiveDateFilter?.to?.getTime();
     return records.filter((r) => {
-      if (direction !== "all" && r.direction !== direction) return false;
+      const ts = new Date(r.at || 0).getTime();
+      if (from && ts < from) return false;
+      if (to && ts > to) return false;
       if (!q) return true;
       return [r.lead.name, r.lead.phone, r.lead.patient_number, r.from_branch_name, r.to_branch_name, r.transferred_by]
         .some((v) => (v || "").toLowerCase().includes(q));
     });
-  }, [records, search, direction]);
+  }, [records, search, effectiveDateFilter]);
+
+  const rows = useMemo(
+    () => (direction === "all" ? dated : dated.filter((r) => r.direction === direction)),
+    [dated, direction],
+  );
 
   const counts = useMemo(() => ({
-    all: records.length,
-    outgoing: records.filter((r) => r.direction === "outgoing").length,
-    incoming: records.filter((r) => r.direction === "incoming").length,
-  }), [records]);
+    all: dated.length,
+    outgoing: dated.filter((r) => r.direction === "outgoing").length,
+    incoming: dated.filter((r) => r.direction === "incoming").length,
+  }), [dated]);
 
   // CSV with a BOM, which Excel opens straight into columns. Exports what the filters
   // leave, so a search narrows the sheet the same way it narrows the list.
@@ -141,6 +163,8 @@ const BranchTransferRecords = ({ branchId }) => {
             data-testid="transfer-records-search"
           />
         </div>
+        <QuickDateFilterBar value={quickDate} onChange={setQuickDate} testid="transfer-records-quick-date" showCustom={false} />
+        <DateFilterPopover value={dateFilter} onChange={applyDateFilter} testid="transfer-records-date-filter" centered iconOnly />
         <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={load} disabled={loading} title="Refresh" data-testid="transfer-records-refresh">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
