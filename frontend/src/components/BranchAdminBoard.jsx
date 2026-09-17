@@ -1545,6 +1545,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // branch, and calling the same shelves two different things left nobody able to say
     // whether the branch was looking at the same list.
     { key: "store", label: "Services and Products", short: "Services", icon: ShoppingCart },
+    // Navigation going in ahead of the panel, as Consultation did: the position is settled
+    // while what the branch keeps under Records is still being built.
+    { key: "records", label: "Records", short: "Records", icon: FileText },
     // Taken off an online arm's own board, where the studio and the gym floor those two
     // desks run do not exist — see runsWithoutARoom.
     //
@@ -1685,6 +1688,15 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         <ClientReviewsPanel branchId={branchId} />
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel branchId={branchId} />
+      ) : activeView === "records" ? (
+        <div
+          className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 bg-white py-16 text-center"
+          data-testid="branch-records-panel"
+        >
+          <FileText className="h-8 w-8 text-slate-300" />
+          <p className="text-sm font-medium text-slate-600">Records</p>
+          <p className="text-xs text-slate-400">Coming soon.</p>
+        </div>
       ) : activeView === "accountant_mgmt" ? (
         <AccountantManageTab branchId={branchId} />
       ) : (
