@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  FileSpreadsheet, Layers, Users, ChevronDown,
-  Plus, RefreshCw, Trash2, Archive, ArchiveRestore, Link as LinkIcon, ArrowRightLeft, X, Pencil,
+  FileSpreadsheet, Users,
+  Plus, RefreshCw, Archive, ArchiveRestore, Link as LinkIcon, ArrowRightLeft, X, Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkUnassignedCount, mkDistributeUnassigned,
-  mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
+  mkGetTeam, mkCreateTeamMember,
   mkGetSources, mkLeadFieldCatalogue, gsSheetHeaders, leadFieldsCreate, mkCreateSource, mkUpdateSource, mkSyncSource,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull, gsListTabs,
   getBranches,
@@ -63,7 +63,6 @@ const sourceModes = (source, branches) => {
 };
 
 const SUB_TABS = [
-  { key: "all_leads", label: "All Leads", icon: Layers },
   { key: "team", label: "Team & Distribution", icon: Users },
   { key: "lead_sources", label: "Lead Sources", icon: FileSpreadsheet },
 ];
@@ -347,7 +346,7 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
 
       {showSync && (
         <DialogShell title={`Sync: ${showSync.name}`} onClose={() => { setShowSync(null); setSyncResult(null); }} testid="mk-sync-dialog">
-          <p className="text-xs text-slate-500">Paste JSON rows from your Google Sheet (each row = one object). Phones are deduped by last 10 digits. New leads land in <span className="font-semibold">Pre Sales</span> + Marketing Source → All Leads with auto round-robin if enabled.</p>
+          <p className="text-xs text-slate-500">Paste JSON rows from your Google Sheet (each row = one object). Phones are deduped by last 10 digits. New leads land in <span className="font-semibold">Pre Sales</span> with auto round-robin if enabled.</p>
           <textarea
             value={syncRows}
             onChange={(e) => setSyncRows(e.target.value)}
@@ -1029,245 +1028,6 @@ const SheetMappingDialog = ({ title, spreadsheetId, tabs, fallbackHeaders = [], 
   );
 };
 
-// ============ All Leads ============
-
-const STAGE_TYPE_META = {
-  all: { label: "All Stages", classes: "border-slate-200 bg-white text-slate-700" },
-  pre_sales: { label: "Pre-Sales", classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
-  sales: { label: "Sales", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
-};
-
-// A fixed color per assignee would need a stable id->color map that survives
-// the list changing; cycling a palette by list position is simpler and still
-// gives each assignee its own distinct color in the open dropdown.
-const ASSIGNEE_COLOR_PALETTE = [
-  "border-purple-300 bg-purple-50 text-purple-700",
-  "border-indigo-300 bg-indigo-50 text-indigo-700",
-  "border-emerald-300 bg-emerald-50 text-emerald-700",
-  "border-amber-300 bg-amber-50 text-amber-700",
-  "border-cyan-300 bg-cyan-50 text-cyan-700",
-  "border-pink-300 bg-pink-50 text-pink-700",
-  "border-orange-300 bg-orange-50 text-orange-700",
-  "border-sky-300 bg-sky-50 text-sky-700",
-];
-
-// Native <select> can't reliably color individual dropdown-list items across
-// browsers — only the closed box. This renders each option as its own colored,
-// rounded row in a custom open list instead (same pattern as HRBoard's role filter).
-const ColorFilterDropdown = ({ value, options, onChange, testId, compact = false }) => {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  const current = options.find((o) => o.value === value) || options[0];
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex w-full items-center justify-between gap-2 rounded-md border font-semibold ${
-          compact ? "h-7 px-2 text-[11px]" : "h-9 px-3 text-sm"
-        } ${current?.classes || "border-slate-200 bg-white text-slate-700"}`}
-        data-testid={testId}
-      >
-        <span className="truncate">{current?.label}</span>
-        <ChevronDown className={`shrink-0 opacity-60 ${compact ? "h-3 w-3" : "h-3.5 w-3.5"}`} />
-      </button>
-      {open && (
-        <div className={`absolute left-0 z-20 mt-1 max-h-64 w-full overflow-y-auto space-y-1 rounded-md border border-slate-200 bg-white p-1.5 shadow-lg ${compact ? "min-w-[150px]" : "min-w-[170px]"}`} data-testid={`${testId}-list`}>
-          {options.map((o) => (
-            <button
-              key={o.value || "empty"}
-              type="button"
-              onClick={() => { onChange(o.value); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${o.classes}`}
-              data-testid={`${testId}-option-${o.value || "empty"}`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const AllLeadsTab = ({ team }) => {
-  const [filter, setFilter] = useState({ stage_type: "all", source: "", assigned_to: "", search: "" });
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState({ rows: [], total: 0, page: 1, page_size: 50 });
-  const [selected, setSelected] = useState({});
-
-  const load = useCallback(async () => {
-    const res = await mkAllLeads({ ...filter, page, page_size: 50 });
-    setData(res);
-    setSelected({});
-  }, [filter, page]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const selectedIds = useMemo(() => Object.entries(selected).filter(([, v]) => v).map(([k]) => k), [selected]);
-
-  const reassign = async (leadId, userId) => {
-    if (!userId) return;
-    try { await mkAssignLead(leadId, userId); toast.success("Reassigned"); load(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Reassign failed"); }
-  };
-
-  const remove = async (leadId) => {
-    if (!window.confirm("Delete this lead?")) return;
-    try { await mkDeleteLead(leadId); toast.success("Lead deleted"); load(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
-  };
-
-  const bulkRemove = async () => {
-    if (selectedIds.length === 0) return;
-    if (!window.confirm(`Delete ${selectedIds.length} leads?`)) return;
-    await mkBulkDelete(selectedIds);
-    toast.success(`Deleted ${selectedIds.length}`);
-    load();
-  };
-
-  const everyone = [...(team.pre_sales || []), ...(team.sales || [])];
-
-  const stageOptions = [STAGE_TYPE_META.all, STAGE_TYPE_META.pre_sales, STAGE_TYPE_META.sales].map((meta, idx) => ({
-    value: ["all", "pre_sales", "sales"][idx], label: meta.label, classes: meta.classes,
-  }));
-  const assigneeOptions = [
-    { value: "", label: "All Assignees", classes: "border-slate-200 bg-white text-slate-700" },
-    ...everyone.map((u, i) => ({ value: u.id, label: u.full_name, classes: ASSIGNEE_COLOR_PALETTE[i % ASSIGNEE_COLOR_PALETTE.length] })),
-  ];
-
-  return (
-    <div className="space-y-3" data-testid="mk-all-leads-tab">
-      <div className="grid gap-2 sm:grid-cols-5">
-        <ColorFilterDropdown
-          value={filter.stage_type}
-          options={stageOptions}
-          onChange={(v) => { setPage(1); setFilter({ ...filter, stage_type: v }); }}
-          testId="mk-filter-stage"
-        />
-        <Input placeholder="Source name" value={filter.source} onChange={(e) => { setPage(1); setFilter({ ...filter, source: e.target.value }); }} data-testid="mk-filter-source" />
-        <ColorFilterDropdown
-          value={filter.assigned_to}
-          options={assigneeOptions}
-          onChange={(v) => { setPage(1); setFilter({ ...filter, assigned_to: v }); }}
-          testId="mk-filter-assigned"
-        />
-        <Input placeholder="Search name/phone/email" value={filter.search} onChange={(e) => { setPage(1); setFilter({ ...filter, search: e.target.value }); }} data-testid="mk-filter-search" />
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={load} data-testid="mk-leads-refresh"><RefreshCw className="h-4 w-4" /></Button>
-          {selectedIds.length > 0 && <Button variant="outline" className="border-red-200 text-red-600" onClick={bulkRemove} data-testid="mk-leads-bulk-delete"><Trash2 className="mr-1 h-4 w-4" />Delete ({selectedIds.length})</Button>}
-        </div>
-      </div>
-
-      {/* Mobile: full-width cards, all the row's details folded into one card instead
-          of spread across columns you'd otherwise have to scroll sideways to read. */}
-      <div className="space-y-2 md:hidden" data-testid="mk-leads-mobile-cards">
-        {data.rows.map((l) => (
-          <div key={l.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm" data-testid={`mk-lead-card-${l.id}`}>
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={!!selected[l.id]}
-                  onChange={(e) => setSelected({ ...selected, [l.id]: e.target.checked })}
-                  data-testid={`mk-lead-select-mobile-${l.id}`}
-                />
-                <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
-              </div>
-              <button onClick={() => remove(l.id)} className="shrink-0 text-red-500 hover:text-red-700" data-testid={`mk-lead-delete-mobile-${l.id}`}>
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="mt-2">
-              <MaskedContact phone={l.phone} email={l.email} locked={l.stage === "Lost"} />
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <SourcePill source={l.source_tab || l.source_type} />
-              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{l.stage}</span>
-              <span className="text-xs text-slate-400">{(l.created_at || "").slice(0, 10)}</span>
-            </div>
-            <div className="mt-2">
-              <ColorFilterDropdown
-                compact
-                value={l.assigned_user_id || ""}
-                options={[
-                  { value: "", label: "— Unassigned —", classes: "border-slate-200 bg-white text-slate-700" },
-                  ...everyone.map((u, i) => ({ value: u.id, label: u.full_name, classes: ASSIGNEE_COLOR_PALETTE[i % ASSIGNEE_COLOR_PALETTE.length] })),
-                ]}
-                onChange={(v) => reassign(l.id, v)}
-                testId={`mk-lead-reassign-mobile-${l.id}`}
-              />
-            </div>
-          </div>
-        ))}
-        {data.rows.length === 0 && (
-          <p className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No leads match these filters.</p>
-        )}
-      </div>
-
-      <div className="hidden overflow-auto rounded-lg border border-slate-200 md:block">
-        <table className="min-w-full text-xs">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-2 py-2 w-8"><input type="checkbox" onChange={(e) => { const v = e.target.checked; const next = {}; data.rows.forEach((r) => { next[r.id] = v; }); setSelected(next); }} data-testid="mk-leads-select-all" /></th>
-              <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2">Contact</th>
-              <th className="px-3 py-2">Source</th>
-              <th className="px-3 py-2">Stage</th>
-              <th className="px-3 py-2">Assigned</th>
-              <th className="px-3 py-2">Created</th>
-              <th className="px-3 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.rows.map((l) => (
-              <tr key={l.id} className="border-t border-slate-100" data-testid={`mk-lead-row-${l.id}`}>
-                <td className="px-2 py-2"><input type="checkbox" checked={!!selected[l.id]} onChange={(e) => setSelected({ ...selected, [l.id]: e.target.checked })} data-testid={`mk-lead-select-${l.id}`} /></td>
-                <td className="px-3 py-2 font-medium text-slate-800">{l.name}</td>
-                <td className="px-3 py-2"><MaskedContact phone={l.phone} email={l.email} locked={l.stage === "Lost"} /></td>
-                <td className="px-3 py-2"><SourcePill source={l.source_tab || l.source_type} /></td>
-                <td className="px-3 py-2 text-slate-600">{l.stage}</td>
-                <td className="px-3 py-2">
-                  <ColorFilterDropdown
-                    compact
-                    value={l.assigned_user_id || ""}
-                    options={[
-                      { value: "", label: "— Unassigned —", classes: "border-slate-200 bg-white text-slate-700" },
-                      ...everyone.map((u, i) => ({ value: u.id, label: u.full_name, classes: ASSIGNEE_COLOR_PALETTE[i % ASSIGNEE_COLOR_PALETTE.length] })),
-                    ]}
-                    onChange={(v) => reassign(l.id, v)}
-                    testId={`mk-lead-reassign-${l.id}`}
-                  />
-                </td>
-                <td className="px-3 py-2 text-slate-400">{(l.created_at || "").slice(0, 10)}</td>
-                <td className="px-3 py-2"><button onClick={() => remove(l.id)} className="text-red-500 hover:text-red-700" data-testid={`mk-lead-delete-${l.id}`}><Trash2 className="h-4 w-4" /></button></td>
-              </tr>
-            ))}
-            {data.rows.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">No leads match these filters.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="flex items-center justify-between text-xs text-slate-500">
-        <span>Showing {data.rows.length} of {data.total}</span>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} data-testid="mk-leads-prev">Prev</Button>
-          <span className="px-2 py-1">Page {data.page}</span>
-          <Button size="sm" variant="outline" disabled={data.rows.length < data.page_size} onClick={() => setPage((p) => p + 1)} data-testid="mk-leads-next">Next</Button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // ============ Team & Distribution ============
 
 const TeamTab = ({ team, reloadTeam, branches }) => {
@@ -1430,7 +1190,7 @@ const DialogShell = ({ title, onClose, children, testid, maxWidth = "max-w-md" }
 // ============ Root ============
 
 export const MarketingBoard = ({ branches = [], leading = null }) => {
-  const [tab, setTab] = useState("all_leads");
+  const [tab, setTab] = useState("team");
   const [team, setTeam] = useState({ pre_sales: [], sales: [] });
   const reloadTeam = useCallback(() => mkGetTeam().then(setTeam).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   useEffect(() => { reloadTeam(); }, [reloadTeam]);
@@ -1450,7 +1210,6 @@ export const MarketingBoard = ({ branches = [], leading = null }) => {
         </div>
       </div>
       {tab === "lead_sources" && <SourcesTab branches={branches} />}
-      {tab === "all_leads" && <AllLeadsTab team={team} />}
       {tab === "team" && <TeamTab team={team} reloadTeam={reloadTeam} branches={branches} />}
     </div>
   );
