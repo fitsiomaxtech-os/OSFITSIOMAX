@@ -9,13 +9,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, ClipboardList, Download, RefreshCw, Search, X } from "lucide-react";
+import { AlertOctagon, ChevronDown, ChevronUp, ClipboardList, HeartPulse, RefreshCw, Search, Stethoscope, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
-import { downloadCsv } from "@/lib/printable";
+// The same figure tile HR's own Dashboard counts with.
+import { KPI } from "@/components/ui/kpi-card";
 import { roleLabel } from "@/lib/roles";
 import { eodReports } from "@/lib/api";
 
@@ -42,12 +43,12 @@ const presetRange = (key) => {
 };
 
 // The four figures, and what clicking each one lists.
-const VIEWS = {
-  reports: { label: "Reports", tone: "text-slate-800", ring: "border-slate-400 ring-slate-200" },
-  pending: { label: "Not submitted", tone: "text-rose-600", ring: "border-rose-400 ring-rose-100" },
-  physio: { label: "Treatments", tone: "text-emerald-600", ring: "border-emerald-400 ring-emerald-100" },
-  consultant: { label: "Consultations", tone: "text-sky-600", ring: "border-sky-400 ring-sky-100" },
-};
+const VIEWS = [
+  { key: "reports", label: "Reports", icon: ClipboardList, hint: "Filed for this period", title: "All reports" },
+  { key: "pending", label: "Not submitted", icon: AlertOctagon, hint: "Clocked in, no report", title: "Clocked in, no report" },
+  { key: "physio", label: "Treatments", icon: HeartPulse, hint: "Clients treated by Physios", title: "Physio reports" },
+  { key: "consultant", label: "Consultations", icon: Stethoscope, hint: "Clients seen by Consultants", title: "Consultant reports" },
+];
 
 const countLabel = (kind) => (kind === "consultant" ? "Consultations" : "Treatments");
 const prettyTime = (stamp) => {
@@ -56,18 +57,6 @@ const prettyTime = (stamp) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 };
 const prettyDay = (day) => (day ? new Date(`${day}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "");
-
-const Figure = ({ view, value, active, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`rounded-lg border bg-white px-3 py-2 text-left transition hover:border-slate-300 hover:shadow-sm ${active ? `${VIEWS[view].ring} ring-2` : "border-slate-200"}`}
-    data-testid={`eod-card-${view}`}
-  >
-    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">{VIEWS[view].label}</span>
-    <span className={`mt-0.5 block text-xl font-extrabold ${VIEWS[view].tone}`}>{value}</span>
-  </button>
-);
 
 export const EodReportsPanel = () => {
   const [preset, setPreset] = useState("today");
@@ -117,24 +106,7 @@ export const EodReportsPanel = () => {
   const pickPreset = (key) => { setCustom(null); setPreset(key); };
   const pickCard = (key) => setView((v) => (v === key && key !== "reports" ? "reports" : key));
 
-  const exportCsv = () => {
-    if (view === "pending") {
-      downloadCsv([["Date", "Name", "Role", "Branch"], ...pending.map((p) => [p.date, p.user_name, roleLabel(p.role), p.branch_name])],
-        `eod-not-submitted-${range.from || "all"}.csv`);
-      return;
-    }
-    const rows = [["Date", "Name", "Role", "Branch", "Type", "Count", "Client", "Client note", "About the day", "Submitted"]];
-    for (const r of reports) {
-      const entries = r.entries?.length ? r.entries : [{ client_name: "", notes: "" }];
-      for (const e of entries) {
-        rows.push([r.date, r.user_name, roleLabel(r.role), r.branch_name, countLabel(r.kind), r.count, e.client_name, e.notes, r.summary, prettyTime(r.updated_at)]);
-      }
-    }
-    downloadCsv(rows, `eod-reports-${range.from || "all"}.csv`);
-  };
-
-  const listTitle = view === "pending" ? "Clocked in, no report"
-    : view === "physio" ? "Physio reports" : view === "consultant" ? "Consultant reports" : "All reports";
+  const listTitle = VIEWS.find((v) => v.key === view)?.title || "All reports";
 
   return (
     <Card data-testid="eod-reports-panel">
@@ -143,6 +115,12 @@ export const EodReportsPanel = () => {
           <ClipboardList className="h-5 w-5 text-sky-600" />EOD Report
         </CardTitle>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Search sits with the period controls: both narrow the same list, so they read
+              as one toolbar rather than a filter above the figures and another below. */}
+          <div className="relative w-full min-w-0 sm:w-56">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search staff, branch or client" className="pl-8" data-testid="eod-search" />
+          </div>
           <div className="flex rounded-lg bg-slate-100 p-0.5" data-testid="eod-presets">
             {PRESETS.map((p) => (
               <button
@@ -166,25 +144,27 @@ export const EodReportsPanel = () => {
             </span>
           )}
           <Button variant="outline" size="sm" onClick={load} disabled={loading} aria-label="Refresh" data-testid="eod-refresh"><RefreshCw className="h-4 w-4" /></Button>
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={view === "pending" ? !pending.length : !reports.length} data-testid="eod-export"><Download className="h-4 w-4" />CSV</Button>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {Object.keys(VIEWS).map((key) => (
-            <Figure key={key} view={key} value={totals[key]} active={view === key} onClick={() => pickCard(key)} />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {VIEWS.map((v) => (
+            <KPI
+              key={v.key}
+              icon={v.icon}
+              label={v.label}
+              value={totals[v.key]}
+              hint={v.hint}
+              active={view === v.key}
+              onClick={() => pickCard(v.key)}
+              testid={`eod-card-${v.key}`}
+            />
           ))}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="eod-list-title">
-            {listTitle} <span className="text-slate-400">· {view === "pending" ? pending.length : reports.length}</span>
-          </p>
-          <div className="relative w-full min-w-0 sm:w-72">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search staff, branch or client" className="pl-8" data-testid="eod-search" />
-          </div>
-        </div>
+        <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="eod-list-title">
+          {listTitle} <span className="text-slate-400">· {view === "pending" ? pending.length : reports.length}</span>
+        </p>
 
         {loading && !data ? (
           <p className="py-10 text-center text-sm text-slate-400">Loading…</p>

@@ -20,6 +20,8 @@ import { ROLE_META, roleLabel, roleClasses, setCustomRoleClasses } from "@/lib/r
 import { AttendanceTab, PayrollTab, ApprovalsTab, QuotesTab } from "@/components/hr/HROpsTabs";
 import { ClientReviewsPanel } from "@/components/reviews/ClientReviewsPanel";
 import { EodReportsPanel } from "@/components/eod/EodReportsPanel";
+// The HR figure tile, shared with the EOD Report tab — see components/ui/kpi-card.jsx.
+import { KPI } from "@/components/ui/kpi-card";
 
 // Matches ALL_BRANCHES in backend/routers/v3_hr.py, which resolves it to a name on the way
 // out. Held in branch_id where a real branch id would go, so everything that already reads
@@ -255,31 +257,6 @@ export const HRBoard = ({ isSuperAdmin = false }) => {
 };
 
 // ---------- Dashboard ----------
-
-/**
- * A figure, and — where there is somewhere to go — the control that takes you to the rows
- * behind it. A tile with no `onClick` renders as plain text rather than a button, so a
- * card that leads nowhere never invites a click that does nothing.
- */
-const KPI = ({ label, value, icon: Icon, onClick, hint, testid }) => {
-  const Tag = onClick ? "button" : "div";
-  return (
-    <Tag
-      {...(onClick ? { type: "button", onClick } : {})}
-      className={`w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-left transition ${
-        onClick ? "cursor-pointer hover:border-sky-300 hover:shadow-sm" : ""
-      }`}
-      data-testid={testid}
-    >
-      <span className="flex items-center gap-1.5 text-slate-500">
-        {Icon && <Icon className="h-4 w-4 shrink-0" />}
-        <span className="truncate text-[11px] font-bold uppercase tracking-wider">{label}</span>
-      </span>
-      <span className="mt-1 block text-3xl font-extrabold text-slate-800">{value}</span>
-      {hint && <span className="mt-0.5 block text-[10px] text-slate-400">{hint}</span>}
-    </Tag>
-  );
-};
 
 const DashboardTab = ({ onNavigate }) => {
   const [data, setData] = useState(null);
