@@ -294,7 +294,8 @@ export const branchSendReview = async (reviewId, payload) => (await api.post(`/b
 // asks for that branch's whole Consultant queue. A Consultant's own board sends none
 // and gets the reviews dispatched to them.
 export const hpReviews = async (branchId) => (await api.get("/head-physio/reviews", { params: branchId ? { branch_id: branchId } : {} })).data;
-export const hpCompleteReview = async (reviewId, payload) => (await api.post(`/head-physio/reviews/${reviewId}/complete`, payload)).data;
+export const hpLeadWeekReviews = async (leadId) => (await api.get(`/head-physio/reviews/lead/${leadId}/weeks`)).data;
+export const hpCompleteReview =async (reviewId, payload) => (await api.post(`/head-physio/reviews/${reviewId}/complete`, payload)).data;
 export const getCalendarAvailability = async (branchId, month) => (await api.get(`/branch-admin/calendar-availability/${branchId}`, { params: { month } })).data;
 export const getDaySlots = async (branchId, date) => (await api.get(`/branch-admin/day-slots/${branchId}`, { params: { date } })).data;
 export const getExpertCalendar = async (expertId, month) => (await api.get(`/branch-admin/expert-calendar/${expertId}`, { params: { month } })).data;

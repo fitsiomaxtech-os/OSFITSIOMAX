@@ -749,6 +749,31 @@ async def hp_reviews(
     return out
 
 
+@router.get("/head-physio/reviews/lead/{lead_id}/weeks")
+async def hp_lead_week_reviews(
+    lead_id: str,
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev")),
+):
+    """Every week's review on one patient, for the Consultant's review popup: the
+    clinical review for each week (whoever wrote it) and the client's weekly review form
+    (stars and Treatment Feedback). The popup only carried the review it was opened on, so
+    the weeks before it -- and what the client had said about each -- were on no screen
+    the person writing the next one could reach."""
+    revs = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).to_list(500)
+    numbers = review_numbers_for_lead(revs)
+    reviews = sorted(
+        [{**_shape(r), "review_number": numbers.get(r.get("id"))} for r in revs],
+        key=lambda r: r.get("review_number") or 0,
+    )
+    client = await v3_col("client_reviews").find(
+        {"lead_id": lead_id, "kind": "physio", "source": "week", "skipped": {"$ne": True}},
+        {"_id": 0, "id": 1, "track": 1, "week_number": 1, "rating": 1, "comment": 1,
+         "person_name": 1, "created_at": 1, "updated_at": 1},
+    ).to_list(500)
+    client.sort(key=lambda c: (c.get("week_number") or 0, c.get("track") or ""))
+    return {"reviews": reviews, "client_weeks": client}
+
+
 @router.post("/head-physio/reviews/{review_id}/complete")
 async def hp_complete_review(
     review_id: str,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, AlertTriangle, ChevronDown, ChevronRight, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import { hpReviews, hpCompleteReview, physioSessions } from "@/lib/api";
+import { hpReviews, hpCompleteReview, hpLeadWeekReviews, physioSessions } from "@/lib/api";
 import { to12h } from "@/lib/time";
 import { LeadDocuments } from "@/components/LeadDocuments";
 import { PhysioTreatmentChips } from "@/components/ui/physio-treatment-chips";
@@ -50,6 +50,86 @@ const StarRating = ({ value, testid }) => (
   ) : <span className="text-slate-300">—</span>
 );
 
+/**
+ * One week's reviews, read back: the client's weekly review form (stars and Treatment
+ * Feedback) and the Consultant's review of that week. Shared by the Write Review tab and
+ * each week on Treatment Days, so a week reads the same wherever it is opened.
+ */
+const WeekReviewCard = ({ week, clinical, client, current }) => {
+  const done = clinical?.status === "completed";
+  return (
+    <div className={`rounded-lg border p-3 ${current ? "border-sky-200 bg-sky-50/40" : "border-slate-200 bg-white"}`} data-testid={`hp-review-weekcard-${week}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-bold text-slate-700">
+          Week {week} Review
+          {current && (
+            <span className="ml-1.5 rounded-[4px] border border-sky-200 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-700">
+              This review
+            </span>
+          )}
+        </p>
+        {clinical && (
+          <span className={`rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${done ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+            {done ? "Completed" : "Pending"}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client's Weekly Review</p>
+        {client.length === 0 ? (
+          <p className="mt-0.5 text-xs italic text-slate-400">The client hasn't filled this week's review yet.</p>
+        ) : client.map((c) => (
+          <div key={c.id} className="mt-1">
+            <div className="flex items-center gap-1.5">
+              {c.track === "rehab" && <span className="text-[10px] font-semibold text-violet-600">Rehab</span>}
+              <span className="inline-flex items-center gap-0.5" aria-label={`${c.rating} of 5 stars`}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <Star key={n} className={`h-3.5 w-3.5 ${n <= (c.rating || 0) ? "fill-amber-400 text-amber-400" : "text-slate-200"}`} />
+                ))}
+              </span>
+              <span className="text-[11px] font-semibold text-amber-700">{c.rating || "—"}/5</span>
+              <span className="text-[10px] text-slate-400">· {dmy(c.updated_at || c.created_at)}</span>
+            </div>
+            {c.comment ? (
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700">{c.comment}</p>
+            ) : (
+              <p className="mt-0.5 text-xs italic text-slate-400">No feedback written.</p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* The open review's own notes are already on the page around this card. */}
+      {clinical && !current && (
+        <>
+          {clinical.physio_notes && (
+            <div className="mt-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Physio's Notes{clinical.physio_name ? ` · ${clinical.physio_name}` : ""}
+              </p>
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700">{clinical.physio_notes}</p>
+            </div>
+          )}
+          <div className="mt-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Consultant's Review{done && clinical.head_physio_name ? ` · ${clinical.head_physio_name}` : ""}
+            </p>
+            {done && clinical.head_physio_notes ? (
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700">{clinical.head_physio_notes}</p>
+            ) : (
+              <p className="mt-0.5 text-xs italic text-slate-400">{done ? "Completed without notes." : "Not written yet."}</p>
+            )}
+            {clinical.head_physio_suggestions && (
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-emerald-700">{clinical.head_physio_suggestions}</p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 const StageBadge = ({ stage }) => (
   <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${stage.badge}`}>
     {stage.warn && <AlertTriangle className="h-3 w-3" />}
@@ -81,6 +161,9 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
   // Which week bars the reader has opened or shut by hand; null means "whatever this
   // review covers", which is what a freshly opened popup should be showing.
   const [weekOverride, setWeekOverride] = useState(null);
+  // Every week's reviews on the open patient — the clinical ones and the client's weekly
+  // review form — fetched with the popup, not with the list.
+  const [weekReviews, setWeekReviews] = useState({ reviews: [], client_weeks: [] });
 
   // branchId is set only by a supervisor board, and it is what makes this list answer to
   // the branch on screen rather than to whoever is signed in. Without it a Super Admin in
@@ -175,6 +258,10 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
     setDraftTab("write");
     setWeekOverride(null);
     setSessionState({ loading: true, failed: false, sessions: [] });
+    setWeekReviews({ reviews: [], client_weeks: [] });
+    hpLeadWeekReviews(leadId)
+      .then((data) => { if (!cancelled) setWeekReviews({ reviews: data.reviews || [], client_weeks: data.client_weeks || [] }); })
+      .catch(() => {});
     physioSessions(leadId)
       .then((data) => { if (!cancelled) setSessionState({ loading: false, failed: false, sessions: data.sessions || [] }); })
       // The write-up is the job; losing the day list should not stop it being done.
@@ -257,6 +344,33 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
     else next.add(week);
     setWeekOverride(next);
   };
+
+  // Week number -> that week's clinical review and client forms. The open review's own
+  // week comes from the server's numbering, so it is the same week the table calls it.
+  const weekInfo = useMemo(() => {
+    const clinical = new Map();
+    for (const r of weekReviews.reviews) if (r.review_number) clinical.set(r.review_number, r);
+    const client = new Map();
+    for (const c of weekReviews.client_weeks) {
+      if (!c.week_number) continue;
+      if (!client.has(c.week_number)) client.set(c.week_number, []);
+      client.get(c.week_number).push(c);
+    }
+    const currentWeek = weekReviews.reviews.find((r) => r.id === draft?.review?.id)?.review_number
+      || Math.max(1, Math.floor((Number(draft?.review?.treatment_days) || 0) / REVIEW_EVERY));
+    const weeks = [...new Set([...clinical.keys(), ...client.keys(), currentWeek])].sort((a, b) => a - b);
+    return { clinical, client, currentWeek, weeks };
+  }, [weekReviews, draft?.review?.id, draft?.review?.treatment_days]);
+
+  const weekCard = (week) => (
+    <WeekReviewCard
+      key={week}
+      week={week}
+      clinical={weekInfo.clinical.get(week)}
+      client={weekInfo.client.get(week) || []}
+      current={week === weekInfo.currentWeek}
+    />
+  );
 
   const submit = async () => {
     if (!draft.head_physio_notes.trim()) { toast.error("Write the review notes"); return; }
@@ -409,10 +523,10 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
       {draft && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid="hp-review-modal">
           <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between bg-slate-500 px-6 py-4 text-white">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
               <div>
-                <p className="text-lg font-bold">{draft.review.lead_name}</p>
-                <p className="text-xs text-white/80">
+                <p className="text-lg font-bold text-slate-800">{draft.review.lead_name}</p>
+                <p className="text-xs text-slate-500">
                   {draft.review.treatment_days} treatment days · review {dmy(draft.review.review_date)}
                 </p>
               </div>
@@ -465,6 +579,12 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
                 ) : (
                   <p className="mt-1 text-sm italic text-slate-400">The physio raised this review without notes.</p>
                 )}
+              </div>
+              {/* Each week's review — the client's weekly form, and for earlier weeks what
+                  the Consultant wrote — read before this one is written. */}
+              <div className="space-y-2" data-testid="hp-review-week-reviews">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Weekly Reviews</p>
+                {weekInfo.weeks.map(weekCard)}
               </div>
               {reviewDone ? (
                 <>
@@ -562,6 +682,7 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
 
                           {open && (
                             <div className="space-y-2 border-t border-slate-200 bg-white p-2.5" data-testid={`hp-review-week-days-${w.week}`}>
+                              {weekCard(w.week)}
                               {w.rows.map((s) => {
                                 const isRehab = s.track === "rehab";
                                 const inWindow = s.day_index >= dayBook.reviewFrom && s.day_index <= dayBook.reviewTo;
