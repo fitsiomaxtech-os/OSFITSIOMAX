@@ -96,10 +96,10 @@ def required_comment(value, who: str) -> str:
 
 
 def week_of(day: dict) -> int:
-    """The week a day sits in. Treatment days carry `week_number` from booking; rehab days
-    and older rows do not, so every 7 days by number make a week."""
-    if day.get("track") != "rehab" and day.get("week_number"):
-        return int(day["week_number"])
+    """The review week a day sits in: every 7 days by number -- Days 1-7 are Week 1, 8-14
+    Week 2 -- the same interval as the Consultant review (REVIEW_AFTER_DAYS). Not the
+    booked `week_number`, which follows the calendar: a course starting mid-week split 14
+    days into three weeks (1-6, 7-13, 14) and asked for a third review."""
     number = day.get("session_number") or day.get("day_number") or 1
     return (int(number) - 1) // DAYS_PER_WEEK + 1
 
@@ -166,25 +166,27 @@ def star_key(track: str, week_number) -> str:
 
 
 async def physio_star_ratings(lead_ids: List[str], physio_ids: List[str]) -> Dict[str, dict]:
-    """What a Physio may see of their clients' weekly reviews: the stars, per week and on
-    average, for each lead. Never the Treatment Feedback -- that is read by management and
-    the Consultant (Client Reviews), and is left out of the projection so it cannot leak.
+    """What a Physio may see of their clients' reviews: the stars, per week and on average,
+    for each lead. Never the words -- those are read by management and the Consultant
+    (Client Reviews), and are left out of the projection so they cannot leak.
 
-    Only the weeks rated for this Physio; a row with no physio on it (a week whose days
-    carried none) is counted for whoever is treating the client now."""
+    `weeks` is the weekly reviews. `average` counts those and the star reviews of the
+    Physio from the portal's Feedback tab (source "anytime") alike. Only reviews of this
+    Physio; a row with no physio on it is counted for whoever is treating the client now."""
     if not lead_ids:
         return {}
     rows = await v3_col(COLLECTION).find(
-        {"lead_id": {"$in": lead_ids}, "kind": KIND_PHYSIO, "source": SOURCE_WEEK,
+        {"lead_id": {"$in": lead_ids}, "kind": KIND_PHYSIO, "source": {"$in": [SOURCE_WEEK, SOURCE_ANYTIME]},
          "skipped": {"$ne": True}, "person_id": {"$in": list(physio_ids) + ["", None]}},
-        {"_id": 0, "lead_id": 1, "track": 1, "week_number": 1, "rating": 1},
+        {"_id": 0, "lead_id": 1, "source": 1, "track": 1, "week_number": 1, "rating": 1},
     ).to_list(10000)
     out: Dict[str, dict] = {}
     for r in rows:
         if not r.get("rating"):
             continue
         entry = out.setdefault(r["lead_id"], {"weeks": {}, "values": []})
-        entry["weeks"][star_key(r.get("track"), r.get("week_number"))] = r["rating"]
+        if r.get("source") == SOURCE_WEEK:
+            entry["weeks"][star_key(r.get("track"), r.get("week_number"))] = r["rating"]
         entry["values"].append(r["rating"])
     return {
         lid: {"weeks": e["weeks"], "average": _average(e["values"]), "count": len(e["values"])}

@@ -449,11 +449,10 @@ const StarBadge = ({ value, count, testid }) => (
   ) : null
 );
 
-// Which week a Treatment row's stars belong to. Treatment days carry their booked week;
-// rehab days do not, so every 7 days make one — the same rule as week_of on the server.
-const starWeekOf = (r) => (r.track === "rehab" || !r.week)
-  ? Math.floor(((r.sessionNumber || 1) - 1) / 7) + 1
-  : r.week;
+// Which review week a Treatment row's stars belong to: every 7 days by number (Days 1-7
+// are Week 1, 8-14 Week 2), not the booked calendar week — the same rule as week_of on
+// the server.
+const starWeekOf = (r) => Math.floor(((r.sessionNumber || 1) - 1) / 7) + 1;
 
 const rowStars = (r) => r.lead?.star_weeks?.[`${r.track || "treatment"}:${starWeekOf(r)}`] || null;
 

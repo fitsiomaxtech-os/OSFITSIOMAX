@@ -51,7 +51,10 @@ class TestCourseWeeks:
 
     def test_week_of_falls_back_to_number(self):
         assert week_of({"session_number": 14}) == 2 and week_of({"session_number": 15}) == 3
-        assert week_of({"session_number": 3, "week_number": 5}) == 5
+        # The booked calendar week is not used: 14 days are two review weeks, not three.
+        assert week_of({"session_number": 6, "week_number": 1}) == 1
+        assert week_of({"session_number": 7, "week_number": 2}) == 1
+        assert week_of({"session_number": 14, "week_number": 3}) == 2
 
 
 class TestPendingWeeks:
