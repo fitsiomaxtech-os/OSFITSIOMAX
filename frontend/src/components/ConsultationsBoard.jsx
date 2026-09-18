@@ -11935,9 +11935,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
 
                             {treatmentPlan.length > 0 && (
                               <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="cons-treatment-plan">
-                                <div className="mb-2 flex items-center">
-                                  <p className="text-[12px] font-bold uppercase tracking-wider text-violet-700">{isRehabAssign ? "Rehab plan" : "Treatment plan"}</p>
-                                </div>
                                 {/* Grouped the way the package is sold — "03 Week · 9 sessions" reads back
                                     as 3 weeks of treatment days, each day one session. Each day carries
                                     whether the Treatment Fee actually covers it. */}
