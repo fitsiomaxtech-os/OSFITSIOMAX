@@ -19,6 +19,7 @@ import {
   Send,
   Star,
   UserCheck,
+  UserCircle,
   Users,
   UserX,
   X,
@@ -32,6 +33,7 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StatTile } from "@/components/ui/stat-tile";
 import { PhysioTreatmentChips } from "@/components/ui/physio-treatment-chips";
 import { DocumentPreview, useDocumentPreview } from "@/components/ui/document-preview";
+import { MyProfilePage } from "@/components/MyProfilePage";
 import {
   physioConsultations,
   physioCompleteConsultation,
@@ -66,7 +68,23 @@ const VIEW_TABS = [
   { key: "patients", label: "Patients", icon: Users },
 ];
 
-export const PhysioBoard = ({ physioId } = {}) => {
+/**
+ * A fourth stop on the phone's bar only: My Profile, after Patients.
+ *
+ * It is not a board view, which is why it is kept out of VIEW_TABS — on a desk the same
+ * page is one tap away in the header, beside Calendar and Logout, and a desk has the room
+ * for it there. A phone header does not, so the bar carries it.
+ *
+ * The bar is glyphs from here on, all four of them. "Send to Review" wrapped to two lines
+ * at three tabs across a 325px screen; a fourth column makes every label either wrap or
+ * clip, and a label clipped to four characters says less than the icon over it does. Each
+ * button keeps its words in title/aria-label, so the name is still there for a long press
+ * and still read out by a screen reader.
+ */
+const PROFILE_TAB = { key: "profile", label: "My Profile", icon: UserCircle };
+const BOTTOM_TABS = [...VIEW_TABS, PROFILE_TAB];
+
+export const PhysioBoard = ({ physioId, user, roleLabel } = {}) => {
   const [activeTab, setActiveTab] = useState("treatment");
   // Counts shown on both switchers — every one of them is what's still
   // outstanding, so it counts down as the physio works through it rather than
@@ -100,7 +118,7 @@ export const PhysioBoard = ({ physioId } = {}) => {
           than being dropped on desktop: an outstanding count is the reason to look
           at a tab you aren't already on — on the selected pill it goes white-on-indigo,
           since a slate badge on a filled tab reads as disabled. */}
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4 md:border-b md:border-slate-200 md:pb-2" data-testid="physio-view-bar">
+      <div className={`flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4 md:border-b md:border-slate-200 md:pb-2 ${activeTab === "profile" ? "hidden md:flex" : "flex"}`} data-testid="physio-view-bar">
       <div className="hidden flex-wrap items-center gap-2 overflow-x-auto md:flex" data-testid="physio-view-tabs">
         {VIEW_TABS.map((tab) => {
           const Icon = tab.icon;
@@ -143,11 +161,20 @@ export const PhysioBoard = ({ physioId } = {}) => {
         <PatientsTab physioId={physioId} onCountChange={setPatientsCount} toolbarSlot={slotFor("patients")} />
       </div>
 
+      {/* My Profile stands in the board's place rather than over it, so the bar below stays
+          put and Treatment takes the physio straight back — the page is left the way every
+          other one here is, by going somewhere else. Mounted only while it is the tab: it
+          reads a month of attendance, which is not a request to make for a tab nobody
+          opened. */}
+      {activeTab === "profile" && (
+        <MyProfilePage user={user} roleLabel={roleLabel} onBack={() => setActiveTab("treatment")} />
+      )}
+
       {/* Phones only. It used to render at every width, so a desk got a bar pinned
           across the bottom of the window for a switcher that belongs at the top. */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500 pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="physio-bottom-nav">
         <div className="mx-auto flex max-w-lg items-stretch justify-around">
-          {VIEW_TABS.map((tab) => {
+          {BOTTOM_TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
             const count = badgeFor[tab.key] || 0;
@@ -156,23 +183,28 @@ export const PhysioBoard = ({ physioId } = {}) => {
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition ${
+                title={tab.label}
+                aria-label={tab.label}
+                aria-current={isActive ? "page" : undefined}
+                className={`flex flex-1 items-center justify-center py-3.5 transition ${
                   isActive ? "text-white" : "text-slate-200"
                 }`}
                 data-testid={`physio-bottom-tab-${tab.key}`}
               >
-                <span className="relative">
+                {/* The selected glyph is picked out by a disc behind it, not by the word
+                    under it: with the labels gone, white-on-slate against slate-on-slate
+                    is too small a difference to find at a glance. */}
+                <span className={`relative flex h-9 w-9 items-center justify-center rounded-full ${isActive ? "bg-white/20" : ""}`}>
                   <Icon className="h-5 w-5" />
                   {count > 0 && (
                     <span
-                      className="absolute -right-2 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white"
+                      className="absolute right-0 top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white"
                       data-testid={`physio-bottom-tab-badge-${tab.key}`}
                     >
                       {count > 99 ? "99+" : count}
                     </span>
                   )}
                 </span>
-                {tab.label}
               </button>
             );
           })}
@@ -694,9 +726,44 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   // When nothing's picked the summary above shows Overall; the week strip below
   // always keeps today selected by default regardless.
   const toolbar = (
-    <div className="flex flex-wrap items-center gap-2" data-testid="physio-treatment-toolbar">
-      {searchOpen ? (
-        <div className="relative w-full sm:w-[240px]">
+    <div className="flex w-full items-center gap-2 md:w-auto" data-testid="physio-treatment-toolbar">
+      {/* All / Ongoing / Completed. It used to sit on its own row above the summary, which
+          on a phone made the top of this tab two rows of chrome before a single figure.
+          It travels with the rest of the toolbar now, so the whole tool bar is the one
+          row: the three filters on the left, the three controls on the right.
+
+          No count on All: the other two count patients, and the list All shows counts
+          days on one date. A number there would be read as the third of three patient
+          counts and would not be one. */}
+      <div
+        className={`${searchOpen ? "hidden md:flex" : "flex"} min-w-0 flex-1 gap-0.5 overflow-x-auto rounded-lg border border-slate-200 bg-white p-0.5 md:flex-none sm:gap-1 sm:p-1`}
+        data-testid="physio-treatment-subtabs"
+      >
+        {TREATMENT_SUBTABS.map((t) => {
+          const count = t.key === "ongoing" ? courses.ongoing.length : t.key === "completed" ? courses.completed.length : null;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setSubTab(t.key)}
+              aria-current={subTab === t.key ? "page" : undefined}
+              className={`shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-[11px] font-medium transition sm:px-3 sm:text-xs ${
+                subTab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
+              }`}
+              data-testid={`physio-treatment-subtab-${t.key}`}
+            >
+              {t.label}
+              {count !== null && <span className="ml-1 text-[10px] text-slate-400">({count})</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Open, the box takes the room the filter pills were using rather than a row of its
+          own — on a phone there is not enough width for both, and the pills are what the
+          physio just stopped using. */}
+      {searchOpen && (
+        <div className="relative min-w-0 flex-1 md:w-[240px] md:flex-none">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
           <Input
             autoFocus
@@ -715,66 +782,52 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
             <X className="h-4 w-4" />
           </button>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setSearchOpen(true)}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-          data-testid="physio-treatment-search-open"
+      )}
+
+      {/* Search, Date Filter, Refresh — in that order, and the same order the Patients
+          tab puts its three in, so the control under a given thumb is the same control
+          whichever tab is open. */}
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        {!searchOpen && (
+          <button
+            type="button"
+            title="Search"
+            aria-label="Search"
+            onClick={() => setSearchOpen(true)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+            data-testid="physio-treatment-search-open"
+          >
+            <Search className="h-4 w-4" />
+          </button>
+        )}
+        {/* Day board only, like the tiles it drives. Ongoing and Completed are lists of
+            patients as of now — a date range narrows nothing on either, and a filter that
+            visibly does nothing when it is set reads as a broken one. */}
+        {subTab === "all" && (
+          <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered iconOnly phoneIconOnly />
+        )}
+        {/* Grey, matching every other Refresh in the OS — it is the one control that acts
+            rather than filters, so it should not read as another filter chip. */}
+        <Button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+          data-testid="physio-treatment-refresh"
         >
-          <Search className="h-4 w-4" />
-        </button>
-      )}
-      {/* Grey, matching every other Refresh in the OS — it is the one control that acts
-          rather than filters, so it should not read as another filter chip. */}
-      <Button
-        onClick={load}
-        disabled={loading}
-        title="Refresh"
-        aria-label="Refresh"
-        className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-        data-testid="physio-treatment-refresh"
-      >
-        <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-      </Button>
-      {/* Day board only, like the tiles it drives. Ongoing and Completed are lists of
-          patients as of now — a date range narrows nothing on either, and a filter that
-          visibly does nothing when it is set reads as a broken one. */}
-      {subTab === "all" && (
-        <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered iconOnly />
-      )}
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
     </div>
   );
 
   return (
     <div data-testid="physio-treatment-tab">
-      {/* All / Ongoing / Completed. The same pill strip the Patients tab splits its own
-          list with, so one control does one thing across the board rather than each tab
-          inventing its own switcher.
-
-          No count on All: the other two count patients, and the list All shows counts
-          days on one date. A number there would be read as the third of three patient
-          counts and would not be one. */}
-      <div className="mb-3 flex w-fit gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="physio-treatment-subtabs">
-        {TREATMENT_SUBTABS.map((t) => {
-          const count = t.key === "ongoing" ? courses.ongoing.length : t.key === "completed" ? courses.completed.length : null;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setSubTab(t.key)}
-              aria-current={subTab === t.key ? "page" : undefined}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                subTab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
-              }`}
-              data-testid={`physio-treatment-subtab-${t.key}`}
-            >
-              {t.label}
-              {count !== null && <span className="ml-1 text-[10px] text-slate-400">({count})</span>}
-            </button>
-          );
-        })}
-      </div>
+      {/* Portaled into the board's tool bar row above. Kept first here so that if the slot
+          has not mounted yet the fallback still renders where the tool bar belongs —
+          above the summary — rather than under it. */}
+      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
       {/* The tinted panel these sat in is gone — the Head Physio cards sit straight on
           the page, and boxing the same cards here made two identical controls look like
@@ -786,20 +839,25 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
       {subTab === "all" && (
       <div className="mb-4" data-testid="physio-treatment-summary">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall Treatment"}</p>
-        {/* Two by two on a phone rather than four across: at ~85px a card the labels
-            break mid-word and the figures are the only thing left readable. One row from
-            sm up, as before. */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+        {/* Four across at every width, phone included. It used to fold to two by two
+            below sm, which cost the summary a second row on the screen that has the least
+            of it — the phone is where the physio actually reads this. The cards carry
+            `compact` to survive the ~70px that leaves them: below sm the corner disc steps
+            out and the label takes the whole card. */}
+        <div className="grid grid-cols-4 gap-1.5 sm:gap-3">
           <StatTile
+            compact
             icon={Calendar} label="Total Days" value={filterStats.total} color={TILE.total}
             onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="physio-stat-total"
           />
           <StatTile
+            compact
             icon={CheckCircle2} label="Completed" value={filterStats.completed} color={TILE.done}
             sub={filterStats.total ? `${Math.round((filterStats.completed / filterStats.total) * 100)}% done` : null}
             onClick={() => setRowFilter(rowFilter === "completed" ? "all" : "completed")} active={rowFilter === "completed"} testid="physio-stat-completed"
           />
           <StatTile
+            compact
             icon={Clock} label="Pending" value={filterStats.pending} sub="Days left" color={TILE.pending}
             onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
           />
@@ -808,6 +866,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
               the day selected above it, which is exactly what a sub-tab is for — and the
               banner that used to apologise for the mismatch is gone with it. */}
           <StatTile
+            compact
             icon={UserCheck} label="Treatment Completed" value={courses.done} color={TILE.finished}
             sub={courses.patients ? `of ${courses.patients} patients` : null}
             onClick={() => setSubTab("completed")} active={false}
@@ -816,8 +875,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
         </div>
       </div>
       )}
-
-      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
       {/* Sun-Sat week strip — today is always the default selection.
           Kept deliberately short: this is a date picker sitting between the summary and
@@ -2858,42 +2915,87 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
   // Nobody with no days booked counts as finished either: nothing has been completed,
   // so they wait in Ongoing until their course exists.
   const isCompleted = (p) => (p.total_sessions || 0) > 0 && (p.completed_sessions || 0) >= p.total_sessions;
-  const ongoingCount = patients.filter((p) => !isCompleted(p)).length;
-  const completedCount = patients.filter(isCompleted).length;
-  const visiblePatients = patients.filter((p) => (historyTab === "completed" ? isCompleted(p) : !isCompleted(p)));
+
+  const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  // No default range here, unlike Treatment. That tab is a day board and has to open on
+  // some day; this one is a caseload, and a caseload opening pre-narrowed to today would
+  // hide most of it behind a filter the physio never set.
+  const [filterValue, setFilterValue] = useState(null);
+  // Which patients have a treatment day inside the picked range. A patient carries no
+  // date of their own — the course does — so the range is read off the calendar the
+  // Treatment tab already reads, and a patient is in range when one of their days is.
+  const [filterLeadIds, setFilterLeadIds] = useState(null);
+
+  useEffect(() => {
+    if (!filterValue) { setFilterLeadIds(null); return; }
+    let cancelled = false;
+    (async () => {
+      const months = [];
+      let y = filterValue.from.getFullYear(), m = filterValue.from.getMonth();
+      const endY = filterValue.to.getFullYear(), endM = filterValue.to.getMonth();
+      while (y < endY || (y === endY && m <= endM)) {
+        months.push({ year: y, month: m + 1 });
+        m += 1;
+        if (m > 11) { m = 0; y += 1; }
+      }
+      try {
+        const results = await Promise.all(months.map((mo) => physioCalendar(mo.month, mo.year, physioId)));
+        if (cancelled) return;
+        const fromIso = isoOf(filterValue.from);
+        const toIso = isoOf(filterValue.to);
+        const ids = new Set(
+          results
+            .flatMap((r) => r.sessions || [])
+            .filter((sn) => {
+              const d = (sn.slot_time || "").slice(0, 10);
+              return d && d >= fromIso && d <= toIso;
+            })
+            .map((sn) => sn.lead_id)
+        );
+        setFilterLeadIds(ids);
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [filterValue, physioId]);
+
+  // The counts on the two pills follow the search and the date range: they say how many
+  // rows each pill would show, so a count that ignored the filters would be promising
+  // patients the list underneath cannot produce.
+  const matched = patients.filter((p) => {
+    const q = search.trim().toLowerCase();
+    if (q && !String(p.lead_name || "").toLowerCase().includes(q)) return false;
+    if (filterLeadIds && !filterLeadIds.has(p.lead_id)) return false;
+    return true;
+  });
+  const ongoingCount = matched.filter((p) => !isCompleted(p)).length;
+  const completedCount = matched.filter(isCompleted).length;
+  const visiblePatients = matched.filter((p) => (historyTab === "completed" ? isCompleted(p) : !isCompleted(p)));
 
   // Badge is who's still ongoing, not the whole caseload — it counts down to 0 once
-  // every patient has finished their full treatment course.
-  useEffect(() => { onCountChange?.(ongoingCount); }, [ongoingCount, onCountChange]);
+  // every patient has finished their full treatment course. Off the whole caseload, not
+  // off `matched`: the badge is read from the other two tabs, where this tab's search box
+  // and date range are not on screen and cannot explain a number that moved.
+  const outstanding = patients.filter((p) => !isCompleted(p)).length;
+  useEffect(() => { onCountChange?.(outstanding); }, [outstanding, onCountChange]);
 
-  // The third tab had no Refresh at all — its caseload is a snapshot from when the board
-  // opened, so a session completed on Treatment left this list stale with no way to ask
-  // for a fresh one. Portaled into the shared slot like the other two, so the button sits
-  // in the same place whichever tab is open.
+  // Portaled into the shared slot like the other two tabs', so a control sits in the same
+  // place whichever tab is open.
   const toolbar = (
-    <Button
-      onClick={load}
-      disabled={loading}
-      title="Refresh"
-      aria-label="Refresh"
-      className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-      data-testid="physio-patients-refresh"
-    >
-      <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-    </Button>
-  );
-
-  return (
-    <div data-testid="physio-patients-tab">
-      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
-
-      <div className="mb-4 flex gap-1 rounded-lg border border-slate-200 bg-white p-1 w-fit">
+    <div className="flex w-full items-center gap-2 md:w-auto" data-testid="physio-patients-toolbar">
+      {/* Ongoing / Completed, in the tool bar rather than on a row of its own beneath it,
+          so this tab's chrome is the one row the Treatment tab's is. */}
+      <div
+        className={`${searchOpen ? "hidden md:flex" : "flex"} min-w-0 flex-1 gap-0.5 overflow-x-auto rounded-lg border border-slate-200 bg-white p-0.5 md:flex-none sm:gap-1 sm:p-1`}
+        data-testid="physio-patients-subtabs"
+      >
         {[{ key: "ongoing", label: "Ongoing", count: ongoingCount }, { key: "completed", label: "Completed", count: completedCount }].map((t) => (
           <button
             key={t.key}
             type="button"
             onClick={() => setHistoryTab(t.key)}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+            aria-current={historyTab === t.key ? "page" : undefined}
+            className={`shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-[11px] font-medium transition sm:px-3 sm:text-xs ${
               historyTab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
             }`}
             data-testid={`physio-history-subtab-${t.key}`}
@@ -2903,10 +3005,74 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
         ))}
       </div>
 
+      {searchOpen && (
+        <div className="relative min-w-0 flex-1 md:w-[240px] md:flex-none">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search patient by name..."
+            className="h-10 pl-9 pr-9"
+            data-testid="physio-patients-search"
+          />
+          <button
+            type="button"
+            onClick={() => { setSearchOpen(false); setSearch(""); }}
+            className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100"
+            data-testid="physio-patients-search-close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Search, Date Filter, Refresh — the same three in the same order as Treatment.
+          This tab used to carry Refresh alone, so a physio who had learned where the
+          search box was on one tab found nothing there on the next. */}
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        {!searchOpen && (
+          <button
+            type="button"
+            title="Search"
+            aria-label="Search"
+            onClick={() => setSearchOpen(true)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+            data-testid="physio-patients-search-open"
+          >
+            <Search className="h-4 w-4" />
+          </button>
+        )}
+        <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-patients-date-filter" centered iconOnly phoneIconOnly />
+        {/* This tab had no Refresh at all — its caseload is a snapshot from when the board
+            opened, so a session completed on Treatment left this list stale with no way to
+            ask for a fresh one. */}
+        <Button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+          data-testid="physio-patients-refresh"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4" data-testid="physio-patients-tab">
+      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
+
       {visiblePatients.length === 0 && !loading ? (
         <div className="text-center py-16">
           <Users className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">{historyTab === "completed" ? "No completed patients yet" : "No patients assigned yet"}</p>
+          <p className="text-sm text-slate-400">
+            {search.trim() || filterValue
+              ? "No patients match this search"
+              : historyTab === "completed" ? "No completed patients yet" : "No patients assigned yet"}
+          </p>
         </div>
       ) : (
         // A table, like the other lists on the board, rather than one tall card per

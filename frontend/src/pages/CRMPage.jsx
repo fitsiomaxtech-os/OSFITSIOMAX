@@ -1367,7 +1367,10 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showPhysioBoard && (
-          <PhysioBoard />
+          // user/roleLabel are for the board's own My Profile stop — the fourth glyph on
+          // the phone's bottom bar, which renders the same page this one does from the
+          // header button, inside the board so the bar stays under it.
+          <PhysioBoard user={auth.user} roleLabel={roleLabel} />
         )}
 
         {showDietBoard && (
