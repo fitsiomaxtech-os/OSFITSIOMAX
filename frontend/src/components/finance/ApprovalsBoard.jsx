@@ -51,6 +51,35 @@ const CATEGORIES = [
 const MODE_LABELS = { upi: "UPI", account_transfer: "Bank Transfer", cheque: "Cheque", cash: "Cash", card: "Card", partial: "Partial" };
 const modeLabel = (m) => MODE_LABELS[m] || (m && m !== "unknown" ? m.charAt(0).toUpperCase() + m.slice(1) : "—");
 
+const uniq = (xs) => [...new Set(xs.filter(Boolean))];
+
+// Approved payments, one row per lead. Each payment is still signed off on its own while
+// pending, but once through, a consultation fee and a treatment fee from the same person
+// are one person's money and read as one line. Store counter sales carry no lead and stay
+// a row each. Order follows the first (newest) payment of each lead, as the list came.
+const groupByLead = (rows) => {
+  const groups = [];
+  const byLead = new Map();
+  rows.forEach((tx) => {
+    const g = tx.lead_id ? byLead.get(tx.lead_id) : null;
+    if (g) { g.items.push(tx); return; }
+    const fresh = { key: tx.lead_id || tx.id, items: [tx] };
+    if (tx.lead_id) byLead.set(tx.lead_id, fresh);
+    groups.push(fresh);
+  });
+  return groups.map((g) => {
+    const dates = g.items.map((t) => (t.collected_at || "").slice(0, 10)).filter(Boolean).sort();
+    return {
+      ...g,
+      head: g.items[0],
+      total: g.items.reduce((sum, t) => sum + (Number(t.amount) || 0), 0),
+      modes: uniq(g.items.map((t) => modeLabel(t.payment_mode))),
+      approvers: uniq(g.items.map((t) => t.approved_by)),
+      dateLabel: dates.length === 0 ? "" : dates[0] === dates[dates.length - 1] ? dates[0] : `${dates[0]} – ${dates[dates.length - 1]}`,
+    };
+  });
+};
+
 // Same set a Branch Admin picks from when collecting a fee (V3MarkInstallmentPaidInput
 // and its siblings across v3_packages.py) — not a separate list invented for this filter.
 const PAYMENT_MODES = [
@@ -324,14 +353,16 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
 
   useEffect(() => { load(); }, [load]);
 
-  const undo = async (tx) => {
-    setBusyId(tx.id);
+  // One approved row can hold several payments of the same lead, so Undo takes them all
+  // back to pending, where each is approved on its own again.
+  const undo = async (group) => {
+    setBusyId(group.key);
     try {
-      await unapproveTransaction(tx.id);
-      toast.success("Approval removed");
-      await load();
-      onChanged();
+      for (const tx of group.items) await unapproveTransaction(tx.id);
+      toast.success(group.items.length > 1 ? `${group.items.length} approvals removed` : "Approval removed");
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+    await load();
+    onChanged();
     setBusyId(null);
   };
 
@@ -589,7 +620,46 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
             <p className="px-4 py-8 text-center text-sm text-slate-400">
               {view === "pending" ? "Nothing waiting on approval." : "Nothing approved yet."}
             </p>
-          ) : rows.map((tx) => (
+          ) : view === "approved" ? groupByLead(rows).map((g) => (
+            <div
+              key={g.key}
+              className="flex items-center justify-between gap-3 px-4 py-3"
+              data-testid={`finance-approval-row-${g.key}`}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-slate-800">
+                  {g.head.patient_name}
+                  {g.items.length > 1 && (
+                    <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      {g.items.length} payments
+                    </span>
+                  )}
+                </p>
+                <p className="truncate text-xs text-slate-500">
+                  {g.head.branch_name || "—"} · {g.items.map((t, i) => (
+                    <span key={t.id}>
+                      {i > 0 && " + "}
+                      <span className="capitalize">{t.category}</span>
+                      {g.items.length > 1 && <> {fmt(t.amount)}</>}
+                    </span>
+                  ))} · {g.modes.join(", ") || "—"} · {g.dateLabel}
+                  {g.approvers.length > 0 && <> · approved by {g.approvers.join(", ")}</>}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="text-sm font-bold text-emerald-600">{fmt(g.total)}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => undo(g)}
+                  disabled={busyId === g.key}
+                  data-testid={`finance-unapprove-${g.key}`}
+                >
+                  <RotateCcw className="mr-1 h-3.5 w-3.5" />Undo
+                </Button>
+              </div>
+            </div>
+          )) : rows.map((tx) => (
             <div
               key={tx.id}
               className={`flex items-center justify-between gap-3 px-4 py-3 transition-colors ${selected.has(tx.id) ? "bg-emerald-50/50" : ""}`}
