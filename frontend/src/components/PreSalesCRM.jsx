@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, rescheduleFollowUp, scheduleAppointment, getBranches, leadActivity, deleteLead,
+  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, rescheduleFollowUp, scheduleAppointment, getBranches, leadActivity,
   listTestimonials, addTestimonial, deleteTestimonial, getDashboardOverview,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
@@ -13,6 +13,7 @@ import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { SourcePill } from "@/components/marketing/SourcePill";
 import { LeadsAnalyticsDashboard } from "@/components/marketing/LeadsAnalyticsDashboard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
+import { DeleteLeadDialog } from "@/components/DeleteLeadDialog";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import { MilkDateInput, MilkDateTextInput, MilkTimeInput } from "@/components/ui/milk-calendar";
@@ -1655,39 +1656,14 @@ export const PreSalesCRM = ({
         <CreateLeadModal onClose={() => setShowCreate(false)} onSaved={load} branchId={branchId} isSuperAdmin={isSuperAdminMasterView} />
       )}
 
+      {/* Now the shared dialog, so this and Branch Admin's Delete Patient ask the same
+          question and make the same call for what is one and the same record. */}
       {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="presales-delete-dialog">
-          <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-rose-100">
-                <Trash2 className="h-5 w-5 text-rose-600" />
-              </div>
-              <div>
-                <h3 className="text-base font-semibold text-slate-900" data-testid="presales-delete-title">Delete lead?</h3>
-                <p className="mt-1 text-xs text-slate-500">This will permanently delete <b className="text-slate-700">{confirmDelete.name || "this lead"}</b> along with its activity history and follow-ups. This cannot be undone.</p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" onClick={() => setConfirmDelete(null)} data-testid="presales-delete-cancel">Cancel</Button>
-              <Button
-                onClick={async () => {
-                  try {
-                    await deleteLead(confirmDelete.id);
-                    toast.success(`Deleted ${confirmDelete.name || "lead"}`);
-                    setConfirmDelete(null);
-                    load();
-                  } catch (e) {
-                    toast.error(e?.response?.data?.detail || "Delete failed");
-                  }
-                }}
-                className="bg-rose-600 hover:bg-rose-700"
-                data-testid="presales-delete-confirm"
-              >
-                Yes, Delete
-              </Button>
-            </div>
-          </div>
-        </div>
+        <DeleteLeadDialog
+          lead={confirmDelete}
+          onClose={() => setConfirmDelete(null)}
+          onDeleted={() => { setConfirmDelete(null); load(); }}
+        />
       )}
 
       {role === "pre_sales" && (

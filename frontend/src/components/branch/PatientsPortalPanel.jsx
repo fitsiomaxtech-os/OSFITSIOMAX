@@ -10,11 +10,12 @@ import { toast } from "@/components/ui/sonner";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { QuickDateFilterBar } from "@/components/QuickDateFilterBar";
 import {
-  getBranchBoard, updateLead, deleteLead, listFitness, listZumba,
+  getBranchBoard, updateLead, listFitness, listZumba,
   getPortalAccountStatus, createOrResetPortalAccount,
   emailPortalLogin, setPortalBlocked, setPortalAutoSkip,
 } from "@/lib/api";
 import { PortalControlsCard } from "@/components/branch/PortalControlsCard";
+import { DeleteLeadDialog } from "@/components/DeleteLeadDialog";
 // Was a local copy of waNumber, identical to the three still inlined elsewhere. Now that
 // lib/phone.js exists this one points at it — the others can follow as they're touched.
 import { waNumber } from "@/lib/phone";
@@ -539,27 +540,13 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
   const [emailInput, setEmailInput] = useState(lead.email || "");
   const [creating, setCreating] = useState(false);
   const [justCreated, setJustCreated] = useState(null); // { email, password } | null
+  // A reset is not undoable and changes the login for everyone on it, so the button asks
+  // before it fires rather than resetting on the click that reached it.
+  const [confirmingReset, setConfirmingReset] = useState(false);
 
-  // Typed, not a window.confirm — this is a real hard delete with no undo, wiping the
-  // patient's whole history (Branch Leads, Consultant, Physio, Diet, portal access, every
-  // payment on file) and no longer keeping any of it in a past finance report. A click is
-  // too little friction for that.
+  // The same dialog and the same call as the Delete button on Pre-Sales' lead list — one
+  // record, one way of deleting it. See DeleteLeadDialog.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleteTyped, setDeleteTyped] = useState("");
-  const [deleting, setDeleting] = useState(false);
-
-  const confirmDelete = async () => {
-    if (deleteTyped.trim().toUpperCase() !== "DELETE") { toast.error('Type "DELETE" to confirm'); return; }
-    setDeleting(true);
-    try {
-      await deleteLead(lead.id);
-      toast.success(`${lead.name || "Patient"} deleted`);
-      onDeleted(lead.id);
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to delete patient");
-      setDeleting(false);
-    }
-  };
 
   const loadAccount = useCallback(async () => {
     try { setAccount(await getPortalAccountStatus(lead.id)); } catch { setAccount({ exists: false }); }
@@ -586,14 +573,27 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
 
   const generateAccess = async () => {
     setCreating(true);
+    setConfirmingReset(false);
     try {
       const result = await createOrResetPortalAccount(lead.id, { email: emailInput.trim() || undefined });
       setJustCreated(result);
-      setAccount({ exists: true, phone: result.phone, email: result.email, shared_with: result.shared_with || [] });
+      // Carry the new password straight onto the panel — what is shown above must be the
+      // password that now signs in, without waiting for the popup to be reopened.
+      setAccount((a) => ({
+        ...a,
+        exists: true,
+        phone: result.phone,
+        email: result.email,
+        password: result.password || a?.password || "",
+        shared_with: result.shared_with || [],
+      }));
       toast.success(
         result.joined_existing ? "Added to the family's existing portal login"
           : account?.exists ? "Portal password reset" : "Portal access created",
       );
+      // A patient joining a family's login inherits its password and is handed none back,
+      // so the panel asks the server what it now is rather than showing nothing.
+      if (result.joined_existing) await loadAccount();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to create portal access");
     }
@@ -610,6 +610,8 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
     try {
       const result = await emailPortalLogin(lead.id);
       setJustCreated(result);
+      // Sending again is a reset on the server, so the password shown above changes too.
+      setAccount((a) => ({ ...a, password: result.password || a?.password || "", email_status: result.email_status }));
       if (result.email_status === "sent") toast.success(`New password emailed to ${result.email}`);
       else toast.warning("Password reset, but the email did not go — share it on WhatsApp below");
     } catch (err) {
@@ -652,6 +654,16 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
     // Same-tab handoff, not window.open(..., "_blank") — that leaves the tab on a
     // blank white screen on the way back on mobile (see PhysioBoard's Call/WhatsApp fix).
     window.location.href = `https://wa.me/${num}?text=${encodeURIComponent(portalWhatsAppText(name, justCreated))}`;
+  };
+
+  const copyPassword = async () => {
+    if (!account?.password) return;
+    try {
+      await navigator.clipboard.writeText(account.password);
+      toast.success("Password copied");
+    } catch {
+      toast.error("Could not copy — read it out instead");
+    }
   };
 
   const copyCredentials = async () => {
@@ -739,6 +751,28 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
                   <div className="space-y-0.5 text-xs text-slate-600" data-testid="branch-patient-portal-login">
                     {account.phone && <p>Login phone: <span className="font-semibold text-slate-800">{account.phone}</span></p>}
                     {account.email && <p>Login email: <span className="font-semibold text-slate-800">{account.email}</span></p>}
+                    {/* The password as it stands, shown without asking — staff are the ones
+                        who read it out to the patient, and hiding it behind a reset locked
+                        the rest of a shared family login out over a single lost password. */}
+                    {account.password ? (
+                      <p className="flex items-center gap-1.5">
+                        Password: <span className="font-mono font-semibold text-slate-800" data-testid="branch-patient-portal-password">{account.password}</span>
+                        <button
+                          type="button"
+                          onClick={copyPassword}
+                          className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-600"
+                          title="Copy password"
+                          aria-label="Copy password"
+                          data-testid="branch-patient-portal-copy-password"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </button>
+                      </p>
+                    ) : (
+                      <p className="text-slate-500" data-testid="branch-patient-portal-password-unknown">
+                        Password: not stored for this older login — reset it to see one.
+                      </p>
+                    )}
                     {!account.phone && !account.email && <p className="text-amber-700">This login has no phone or email — reset it after saving a phone number.</p>}
                   </div>
                 )}
@@ -832,16 +866,49 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
                   </div>
                 )}
 
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-xs"
-                  onClick={generateAccess}
-                  disabled={creating || (!account.exists && !savedPhoneOk && !emailInput.trim())}
-                  data-testid="branch-patient-portal-generate"
-                >
-                  {creating ? "Working..." : account.exists ? "Reset Password" : "Generate Portal Access"}
-                </Button>
+                {/* A first Generate makes a login where there was none, so it goes on the
+                    click. A Reset throws away a password the patient may be using right
+                    now — and every family member's with it — so it asks first. */}
+                {account.exists && confirmingReset ? (
+                  <div className="space-y-2 rounded-md border border-violet-300 bg-white p-3" data-testid="branch-patient-portal-reset-confirm">
+                    <p className="text-xs text-slate-700">
+                      Reset the password for {lead.name || "this patient"}? The password above stops working straight away
+                      {(account.shared_with || []).length > 0 && <> — for {account.shared_with.join(", ")} too</>}, and a new one takes its place.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-violet-600 text-xs text-white hover:bg-violet-700"
+                        onClick={generateAccess}
+                        disabled={creating}
+                        data-testid="branch-patient-portal-reset-yes"
+                      >
+                        {creating ? "Working..." : "Confirm Reset"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs"
+                        onClick={() => setConfirmingReset(false)}
+                        disabled={creating}
+                        data-testid="branch-patient-portal-reset-cancel"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs"
+                    onClick={() => (account.exists ? setConfirmingReset(true) : generateAccess())}
+                    disabled={creating || (!account.exists && !savedPhoneOk && !emailInput.trim())}
+                    data-testid="branch-patient-portal-generate"
+                  >
+                    {creating ? "Working..." : account.exists ? "Reset Password" : "Generate Portal Access"}
+                  </Button>
+                )}
 
                 {justCreated?.joined_existing && (
                   <div className="rounded-md border border-violet-300 bg-white p-3 text-xs text-slate-700" data-testid="branch-patient-portal-joined">
@@ -884,60 +951,31 @@ function PatientPortalDetailModal({ lead, onClose, onSaved, onDeleted }) {
               popup, past everything else, so it can't be the thing a scroll lands on. */}
           <div className="space-y-2 rounded-lg border border-rose-200 bg-rose-50/50 p-3" data-testid="branch-patient-danger-zone">
             <p className="text-xs font-semibold uppercase tracking-wide text-rose-600">Delete Patient</p>
-            {!confirmingDelete ? (
-              <>
-                <p className="text-xs text-rose-700">
-                  Permanently erases {lead.name || "this patient"} and everything on file for them — every fee collected, treatment session, and their spot on Branch Leads, the Consultant queue and Physio's board. This cannot be undone.
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-rose-300 text-xs text-rose-700 hover:bg-rose-100"
-                  onClick={() => setConfirmingDelete(true)}
-                  data-testid="branch-patient-delete-open"
-                >
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Patient
-                </Button>
-              </>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-rose-700">
-                  Rs.{feesPaid(lead)} on file for this patient will no longer trace back to a real record. Type DELETE to confirm.
-                </p>
-                <div className="flex gap-2">
-                  <Input
-                    autoFocus
-                    value={deleteTyped}
-                    onChange={(e) => setDeleteTyped(e.target.value)}
-                    placeholder="Type DELETE"
-                    className="h-9 flex-1 bg-white text-sm"
-                    data-testid="branch-patient-delete-input"
-                  />
-                  <Button
-                    size="sm"
-                    className="bg-rose-600 text-xs text-white hover:bg-rose-700"
-                    onClick={confirmDelete}
-                    disabled={deleting || deleteTyped.trim().toUpperCase() !== "DELETE"}
-                    data-testid="branch-patient-delete-confirm"
-                  >
-                    {deleting ? "Deleting..." : "Delete Permanently"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs"
-                    onClick={() => { setConfirmingDelete(false); setDeleteTyped(""); }}
-                    disabled={deleting}
-                    data-testid="branch-patient-delete-cancel"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            )}
+            <p className="text-xs text-rose-700">
+              Permanently erases {lead.name || "this patient"} and everything on file for them — every fee collected, treatment session, and their spot on Branch Leads, the Consultant queue and Physio's board. This cannot be undone.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-rose-300 text-xs text-rose-700 hover:bg-rose-100"
+              onClick={() => setConfirmingDelete(true)}
+              data-testid="branch-patient-delete-open"
+            >
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete Patient
+            </Button>
           </div>
         </div>
       </div>
+
+      {confirmingDelete && (
+        <DeleteLeadDialog
+          lead={lead}
+          noun="patient"
+          extraWarning={feesPaid(lead) > 0 ? `Rs.${feesPaid(lead)} collected from this patient will no longer trace back to a record.` : ""}
+          onClose={() => setConfirmingDelete(false)}
+          onDeleted={onDeleted}
+        />
+      )}
     </div>
   );
 }

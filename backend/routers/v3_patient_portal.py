@@ -35,6 +35,7 @@ from database import v3_col
 from routers.v3_reviews import review_numbers_for_lead
 from utils import now_iso, now_utc
 from security import hash_password, verify_password
+from portal_secret import open_password, seal_password
 from routers.v3_password_reset import _hash_token, _mask_email, _send_or_503
 from email_utils import SmtpNotConfigured, send_email
 from deps import v3_require_roles, is_branch_admin_role, works_org_wide
@@ -181,7 +182,10 @@ async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_
         raise HTTPException(status_code=404, detail="Patient not found")
     account = await v3_col("patient_portal_accounts").find_one(
         {"lead_id": lead_id},
-        {"_id": 0, "phone": 1, "email": 1, "created_at": 1, "blocked": 1, "created_via": 1, "email_status": 1},
+        {
+            "_id": 0, "phone": 1, "email": 1, "created_at": 1, "blocked": 1,
+            "created_via": 1, "email_status": 1, "password_sealed": 1,
+        },
     )
     auto_skip = bool(lead.get("portal_auto_skip"))
     if not account:
@@ -192,6 +196,10 @@ async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_
         "exists": True,
         "phone": phone,
         "email": email,
+        # The password in force, for the desk to read out. "" for a login made before it
+        # was kept readable — the popup then offers a reset rather than showing nothing
+        # without saying why.
+        "password": await open_password(account.get("password_sealed") or ""),
         "created_at": account.get("created_at"),
         "shared_with": [p["name"] for p in await _patients_for([s["lead_id"] for s in siblings])],
         "blocked": bool(account.get("blocked")),
@@ -253,14 +261,20 @@ async def _save_portal_login(lead: dict, user, phone: str, email: str, supplied:
     if joined_existing:
         password = None
         password_hash = siblings[0].get("password_hash", "")
+        password_sealed = siblings[0].get("password_sealed", "")
     else:
         password = supplied or _generate_password()
         password_hash = hash_password(password)
+        password_sealed = await seal_password(password)
 
+    # Two copies of the password: `password_hash`, which a sign-in is checked against, and
+    # `password_sealed`, which the Patients popup can read back to show the desk the
+    # password actually in force. See portal_secret.py for why the second is encrypted.
     login_fields = {
         "phone": phone,
         "email": email,
         "password_hash": password_hash,
+        "password_sealed": password_sealed,
         "updated_at": now,
         "updated_by": user.full_name,
     }
@@ -280,7 +294,12 @@ async def _save_portal_login(lead: dict, user, phone: str, email: str, supplied:
     if password is not None and siblings:
         await v3_col("patient_portal_accounts").update_many(
             {"id": {"$in": [s["id"] for s in siblings]}},
-            {"$set": {"password_hash": password_hash, "updated_at": now, "updated_by": user.full_name}},
+            {"$set": {
+                "password_hash": password_hash,
+                "password_sealed": password_sealed,
+                "updated_at": now,
+                "updated_by": user.full_name,
+            }},
         )
 
     shared_with = [p["name"] for p in await _patients_for([s["lead_id"] for s in siblings])]
@@ -1136,7 +1155,14 @@ async def patient_portal_reset_password(payload: PortalResetIn):
     lead_ids = [a["lead_id"] for a in accounts]
     await v3_col("patient_portal_accounts").update_many(
         {"id": {"$in": [a["id"] for a in accounts]}},
-        {"$set": {"password_hash": hash_password(payload.new_password), "updated_at": now, "updated_by": "Patient"}},
+        {"$set": {
+            "password_hash": hash_password(payload.new_password),
+            # In step with the hash, so the desk is never read out a password the patient
+            # has since replaced with one of their own.
+            "password_sealed": await seal_password(payload.new_password),
+            "updated_at": now,
+            "updated_by": "Patient",
+        }},
     )
     # Every open sign-in on these patients ends: whoever had the old password is out.
     await v3_col("patient_portal_sessions").delete_many({"$or": [{"lead_id": {"$in": lead_ids}}, {"lead_ids": {"$in": lead_ids}}]})
