@@ -11,6 +11,20 @@ const MODE_LABELS = {
 };
 
 /**
+ * Whether the sentence the branch typed is the only thing there is to approve this
+ * against.
+ *
+ * Cash with no reference on it: no invoice, no transfer to look up, nobody else's record
+ * of the payment. This used to be read off `petty_cash`, which is the tin's own test and
+ * stops at Rs.1,000 — so a Rs.5,000 cash payment out of a branch drawer, which has no
+ * more paperwork behind it than a Rs.200 one, had its reason run in with the date and the
+ * branch on a line that clips. The bigger the cash payment, the more that sentence is
+ * worth reading before initialling it.
+ */
+const reasonIsTheOnlyEvidence = (exp) =>
+  (exp.payment_mode || "").trim().toLowerCase() === "cash" && !(exp.reference || "").trim();
+
+/**
  * What the branches have asked to spend, for the person who signs it off.
  *
  * The same two questions the income side of this tab asks — what is waiting, and what has
@@ -144,11 +158,9 @@ export const ExpenseApprovalsPanel = ({
                     {exp.category}
                     {exp.paid_to ? <span className="font-normal text-slate-500"> · to {exp.paid_to}</span> : null}
                   </span>
-                  {/* Which of these came out of a tin. Marked because it changes what there
-                      is to approve against: rent arrives with an invoice and a transfer to
-                      check, petty cash arrives with a sentence the branch typed and nothing
-                      else -- so that sentence gets a line of its own below rather than
-                      being run in with the date and the reference. */}
+                  {/* Which of these came out of a tin, which is a smaller question than
+                      what there is to approve it against -- see reasonIsTheOnlyEvidence,
+                      which is what moves the branch's sentence onto a line of its own. */}
                   {exp.petty_cash ? (
                     <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700" data-testid={`finance-expense-approvals-petty-${exp.id}`}>
                       <Coins className="h-2.5 w-2.5" /> Petty cash
@@ -157,9 +169,9 @@ export const ExpenseApprovalsPanel = ({
                 </p>
                 <p className="truncate text-xs text-slate-500">
                   {[exp.branch_name, exp.expense_date, MODE_LABELS[exp.payment_mode] || exp.payment_mode,
-                    exp.reference, ...(exp.petty_cash ? [] : [exp.note])].filter(Boolean).join(" · ")}
+                    exp.reference, ...(reasonIsTheOnlyEvidence(exp) ? [] : [exp.note])].filter(Boolean).join(" · ")}
                 </p>
-                {exp.petty_cash && exp.note ? (
+                {reasonIsTheOnlyEvidence(exp) && exp.note ? (
                   <p className="break-words text-xs font-medium text-slate-700" data-testid={`finance-expense-approvals-reason-${exp.id}`}>
                     “{exp.note}”
                   </p>
