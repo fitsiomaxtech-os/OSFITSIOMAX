@@ -16,6 +16,7 @@ import lead_control
 # What a sheet column may be mapped onto, and how a mapped row is written. Shared with
 # the importer so the dropdown cannot offer a field the import would ignore.
 import lead_mapping
+import lead_purge
 from pydantic import BaseModel
 from typing import Literal
 
@@ -558,6 +559,9 @@ async def delete_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles("sup
     res = await v3_col("leads").delete_one({"id": lead_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
+    # The whole patient, not just the row — see lead_purge. Without this their reviews,
+    # treatment days and portal login outlived them on every other board.
+    await lead_purge.delete_lead_trail([lead_id])
     return {"message": "Lead deleted"}
 
 
@@ -566,6 +570,7 @@ async def bulk_delete_leads(payload: BulkDelete, _: V3UserOut = Depends(v3_requi
     if not payload.lead_ids:
         return {"deleted": 0}
     res = await v3_col("leads").delete_many({"id": {"$in": payload.lead_ids}})
+    await lead_purge.delete_lead_trail(payload.lead_ids)
     return {"deleted": res.deleted_count}
 
 

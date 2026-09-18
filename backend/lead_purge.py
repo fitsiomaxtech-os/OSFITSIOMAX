@@ -89,6 +89,38 @@ async def delete_lead_trail(lead_ids: List[str]) -> None:
     await _remove_document_files(lead_ids)
     for coll in LEAD_REFERENCING_COLLECTIONS:
         await v3_col(coll).delete_many({"lead_id": {"$in": lead_ids}})
+    # A family member's portal sign-in lists every patient it can open under `lead_ids`.
+    # Their session is theirs and stays; the patient who is gone comes off its list.
+    await v3_col("patient_portal_sessions").update_many(
+        {"lead_ids": {"$in": lead_ids}}, {"$pull": {"lead_ids": {"$in": lead_ids}}}
+    )
+
+
+async def sweep_orphaned_trails() -> int:
+    """Clear every trail record whose lead no longer exists. Run on every startup.
+
+    The deletes above only clean up after themselves from the day each one called
+    `delete_lead_trail`. Anything deleted by a path that did not — the Marketing board's
+    delete did not until 2026-09-18 — left its reviews, treatment days and portal login
+    behind, still listed under the patient's name on the Review and Physio boards. This
+    is what makes such a patient gone after the fact, and keeps any future path that
+    forgets from leaving a ghost past the next restart.
+
+    Refuses to run against an empty `leads` collection: on a fresh or half-restored
+    database every trail record would look orphaned, and the sweep would take them all.
+    """
+    if not await v3_col("leads").find_one({}, {"_id": 1}):
+        return 0
+    live = set(await v3_col("leads").distinct("id"))
+    orphaned: set = set()
+    for coll in LEAD_REFERENCING_COLLECTIONS:
+        # Only rows that name a lead: auth tokens in `sessions`, and any row filed
+        # without a patient, carry no lead_id and are not this sweep's business.
+        ids = await v3_col(coll).distinct("lead_id", {"lead_id": {"$nin": [None, ""]}})
+        orphaned.update(i for i in ids if isinstance(i, str) and i not in live)
+    if orphaned:
+        await delete_lead_trail(list(orphaned))
+    return len(orphaned)
 
 
 # The Danger Zone row, and what the Branch Leads board asks before drawing its bin icon.
