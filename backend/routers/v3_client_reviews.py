@@ -43,7 +43,7 @@ from physio_scope import consultant_of_lead, resolve_consultant_doctor
 from routers.v3_feedback import _rating
 from routers.v3_patient_portal import _current_patient_lead_id, _lead_or_404
 from schemas.v3 import V3UserOut
-from utils import now_iso
+from utils import clinic_day_of, now_iso
 
 router = APIRouter(prefix="/api/v3")
 
@@ -192,6 +192,53 @@ async def physio_star_ratings(lead_ids: List[str], physio_ids: List[str]) -> Dic
         lid: {"weeks": e["weeks"], "average": _average(e["values"]), "count": len(e["values"])}
         for lid, e in out.items()
     }
+
+
+async def session_star_ratings(lead_id: str, days: List[dict]) -> Dict[str, List[int]]:
+    """The client's stars for their Physio, pinned to the treatment day each was given on,
+    keyed by session id. Stars only, like physio_star_ratings -- never the words.
+
+    A weekly review lands on the last day of the week it rates: that is the day whose
+    completion opened it. A Feedback-tab (anytime) review lands on the day booked on the
+    clinic date it was given, or failing that the latest day before it. Only reviews of the
+    Physio on that day; a row with no physio on it counts for whoever treated that day."""
+    if not days:
+        return {}
+    rows = await v3_col(COLLECTION).find(
+        {"lead_id": lead_id, "kind": KIND_PHYSIO, "source": {"$in": [SOURCE_WEEK, SOURCE_ANYTIME]},
+         "skipped": {"$ne": True}},
+        {"_id": 0, "source": 1, "track": 1, "week_number": 1, "rating": 1, "person_id": 1,
+         "created_at": 1, "updated_at": 1},
+    ).to_list(1000)
+
+    def number(d):
+        return int(d.get("session_number") or d.get("day_number") or 0)
+
+    last_of_week: Dict[str, dict] = {}
+    for d in days:
+        key = star_key(d.get("track") or "treatment", week_of(d))
+        if key not in last_of_week or number(d) > number(last_of_week[key]):
+            last_of_week[key] = d
+    dated = sorted((d for d in days if d.get("slot_time")), key=lambda d: str(d["slot_time"]))
+
+    out: Dict[str, List[int]] = {}
+    for r in rows:
+        if not r.get("rating"):
+            continue
+        if r.get("source") == SOURCE_WEEK:
+            day = last_of_week.get(star_key(r.get("track"), r.get("week_number")))
+        else:
+            when = clinic_day_of(r.get("created_at") or r.get("updated_at"))
+            before = [d for d in dated if when and str(d["slot_time"])[:10] <= when]
+            same = [d for d in before if str(d["slot_time"])[:10] == when]
+            day = (same or before or [None])[-1]
+        if not day or not day.get("id"):
+            continue
+        person = _text(r.get("person_id"))
+        if person and _text(day.get("physio_id")) and person != _text(day.get("physio_id")):
+            continue
+        out.setdefault(day["id"], []).append(r["rating"])
+    return out
 
 
 async def _course_days(lead_id: str) -> List[dict]:

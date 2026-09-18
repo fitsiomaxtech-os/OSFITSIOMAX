@@ -3248,6 +3248,22 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
+                        {/* The client's star rating for this day: a weekly review sits on
+                            the last day of its week, a Feedback-tab one on the day it was
+                            given. Stars only — the words are never sent to the physio. */}
+                        {(s.star_ratings || []).map((r, i) => (
+                          <span
+                            key={i}
+                            title={`Client rating: ${r} of 5`}
+                            className="flex items-center gap-0.5 rounded-full bg-amber-50 px-2 py-0.5"
+                            data-testid={`physio-session-stars-${s.id}`}
+                          >
+                            {[1, 2, 3, 4, 5].map((n) => (
+                              <Star key={n} className={`h-3 w-3 ${n <= r ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
+                            ))}
+                            <span className="ml-0.5 text-[10px] font-semibold text-amber-700">{r}</span>
+                          </span>
+                        ))}
                         {/* Which course the day belongs to, named as the Treatment table
                             names it — a patient can be running both at once. */}
                         <span className={`hidden rounded-full px-2 py-0.5 text-[9px] font-semibold sm:inline ${s.track === "rehab" ? "bg-cyan-100 text-cyan-700" : "bg-sky-100 text-sky-700"}`}>

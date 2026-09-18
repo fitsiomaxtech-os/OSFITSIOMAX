@@ -24,7 +24,7 @@ from routers.v3_reviews import (
 from physio_scope import physio_lead_ids, physio_owns_lead, resolve_physio_doctor
 # The clients' weekly star ratings -- stars only; the Treatment Feedback is not for the
 # Physio's eyes (see physio_star_ratings).
-from routers.v3_client_reviews import physio_star_ratings
+from routers.v3_client_reviews import physio_star_ratings, session_star_ratings
 
 router = APIRouter(prefix="/api/v3")
 
@@ -443,6 +443,12 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
         # Rehab courses are not cut into weeks; leaving this unset would read as week 0.
         row.setdefault("week_number", None)
     sessions = sorted(sessions + rehab, key=lambda r: r.get("slot_time") or "")
+
+    # The client's stars for their Physio, on the treatment day each one belongs to, so
+    # the day list can show the rating beside the session it was given for. Stars only.
+    stars = await session_star_ratings(lead_id, sessions)
+    for row in sessions:
+        row["star_ratings"] = stars.get(row.get("id"), [])
 
     assessments = await v3_col("weekly_assessments").find(
         {"lead_id": lead_id}, {"_id": 0}
