@@ -182,6 +182,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
       // the end of its own day rather than to some invented hour inside it.
       at: r.review_date ? `${r.review_date}T${r.review_time || "99:99"}` : "",
       who: r.physio_name || "",
+      // The client's stars for the week this review covers; consultations carry none.
+      rating: r.client_rating || null,
     })),
   ]
     // In the order the day is worked -- 10:00 AM, then 3:00 PM, then 5:00 PM -- the same
@@ -593,7 +595,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
 
               <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-sm">
+                <table className="w-full min-w-[820px] text-sm">
                   <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
                     <tr>
                       {/* Patient stays left — it's the column the eye scans down to find
@@ -603,6 +605,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
                       <th className="px-4 py-2.5 text-left font-semibold">Patient</th>
                       <th className="px-4 py-2.5 text-center font-semibold">Patient No.</th>
                       <th className="px-4 py-2.5 text-center font-semibold">Phone</th>
+                      <th className="px-4 py-2.5 text-center font-semibold">Rating</th>
                       <th className="px-4 py-2.5 text-center font-semibold">Stage</th>
                       <th className="px-4 py-2.5 text-center font-semibold">Expert / Branch</th>
                       <th className="px-4 py-2.5 text-center font-semibold">When</th>
@@ -611,7 +614,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {groupedAllRows.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">{emptyAllText}</td></tr>
+                      <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">{emptyAllText}</td></tr>
                     ) : groupedAllRows.map((g, i) => {
                       const st = groupStage(g);
                       const many = g.entries.length > 1;
@@ -633,6 +636,18 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
                         </td>
                         <td className="px-4 py-3 text-center font-mono text-[11px] text-slate-400">{g.patientNo || "—"}</td>
                         <td className="px-4 py-3 text-center text-slate-600">{g.phone || "—"}</td>
+                        <td className="px-4 py-3 text-center">
+                          {/* The latest week's stars among this patient's reviews here. */}
+                          {(() => {
+                            const rating = [...g.entries].reverse().find((e) => e.rating)?.rating;
+                            return rating ? (
+                              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700" data-testid={`hp-all-rating-${g.key}`}>
+                                <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                {rating}
+                              </span>
+                            ) : <span className="text-slate-300">—</span>;
+                          })()}
+                        </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[st.tone]}`}>
                             {st.label}
