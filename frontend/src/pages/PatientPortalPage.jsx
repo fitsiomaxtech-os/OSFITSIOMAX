@@ -1018,6 +1018,40 @@ function DietCard({ diet }) {
   );
 }
 
+/** The client's Review Record: every Consultant review raised on their course, with the
+    date it was booked for, whether it has been done, and the Consultant's suggestions.
+    Shown on Overview (it answers "where am I in my course") and again under Treatment,
+    where it sits with the diagnosis it follows from. Renders nothing before the first
+    review is raised, rather than an empty card on a brand-new patient's screen. */
+function ReviewRecordCard({ reviews, testid = "patient-portal-review-record" }) {
+  if (!reviews || reviews.length === 0) return null;
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid={testid}>
+      <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+          <ClipboardCheck className="h-4 w-4 text-sky-500" /> Review Record
+        </h2>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {reviews.map((r, i) => (
+          <div key={r.id || i} className="px-4 py-3" data-testid={`${testid}-${r.review_number}`}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex-1 text-xs font-semibold text-slate-700">{ordinal(r.review_number)} Review</p>
+              <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
+                r.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+              }`}>
+                {r.status === "completed" ? "Completed" : "In Progress"}
+              </span>
+            </div>
+            {r.review_date && <p className="mt-0.5 text-[10px] text-slate-400">{r.review_date}</p>}
+            {r.head_physio_suggestions && <p className="mt-1.5 text-xs text-slate-600">{r.head_physio_suggestions}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function TreatmentTab({ data, reviews = null, onReviewed }) {
   return (
     <div className="space-y-4" data-testid="patient-portal-treatment-tab">
@@ -1058,31 +1092,7 @@ export function TreatmentTab({ data, reviews = null, onReviewed }) {
           would suggest a plan they were never put on. */}
       <DietCard diet={data.diet} />
 
-      {data.reviews && data.reviews.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3">
-            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-              <ClipboardCheck className="h-4 w-4 text-sky-500" /> Reviews
-            </h2>
-          </div>
-          <div className="divide-y divide-slate-50">
-            {data.reviews.map((r, i) => (
-              <div key={i} className="px-4 py-3" data-testid={`patient-portal-review-${r.review_number}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="flex-1 text-xs font-semibold text-slate-700">{ordinal(r.review_number)} Review</p>
-                  <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-                    r.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                  }`}>
-                    {r.status === "completed" ? "Completed" : "In Progress"}
-                  </span>
-                </div>
-                {r.review_date && <p className="mt-0.5 text-[10px] text-slate-400">{r.review_date}</p>}
-                {r.head_physio_suggestions && <p className="mt-1.5 text-xs text-slate-600">{r.head_physio_suggestions}</p>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <ReviewRecordCard reviews={data.reviews} testid="patient-portal-review" />
     </div>
   );
 }
@@ -1469,6 +1479,11 @@ function ProfileTab({ data }) {
           </div>
         </div>
       )}
+
+      {/* The Consultant's review schedule. On Overview because it is the one thing a
+          client checks between visits — when their next review falls and what came out
+          of the last one — and Overview is where they land. */}
+      <ReviewRecordCard reviews={data.reviews} />
 
       <PatientDocuments />
 
