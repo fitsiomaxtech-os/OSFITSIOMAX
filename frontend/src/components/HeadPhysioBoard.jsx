@@ -77,8 +77,13 @@ const WORK_TABS = [
   { key: "all", label: "All", icon: LayoutList, color: "#0d9488" },
   // What the consultant's patients said: the star rating and written feedback from each
   // weekly review, read-only. Not a queue, so it carries no count.
-  { key: "client_reviews", label: "Client Reviews", icon: Star, color: "#f59e0b" },
+  // Hidden for now, not removed — flip `hidden` off to bring the tab back. The panel it
+  // opens is untouched, it just has no card or bottom-bar button to reach it.
+  { key: "client_reviews", label: "Client Reviews", icon: Star, color: "#f59e0b", hidden: true },
 ];
+
+// The tabs actually drawn, in the card row and the bottom bar alike.
+const VISIBLE_WORK_TABS = WORK_TABS.filter((t) => !t.hidden);
 
 // The two queues All merges, and the labels its own filter offers. Kept beside WORK_TABS
 // because the keys have to match the `kind` each row is flattened to.
@@ -423,8 +428,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
           {/* items-stretch on the phone row too, so the cards come out level there as well
               as in the grid — they hold different amounts of text and the row has to answer
               to the tallest rather than each card to itself. */}
-          <div className={`-mx-1 flex items-stretch gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid ${TAB_GRID_COLS[WORK_TABS.length] || "sm:grid-cols-4"} sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0`} data-testid="hp-work-tabs">
-            {WORK_TABS.map((t) => {
+          <div className={`-mx-1 flex items-stretch gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid ${TAB_GRID_COLS[VISIBLE_WORK_TABS.length] || "sm:grid-cols-4"} sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0`} data-testid="hp-work-tabs">
+            {VISIBLE_WORK_TABS.map((t) => {
               const n = t.key === "client_reviews" ? "★"
                 : t.key === "consultations" ? (consultStages[firstStage] || 0)
                 : t.key === "review" ? reviewCount
@@ -744,7 +749,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
       {/* Mobile bottom bar — the Head Physio works this board on a phone between
           patients, where the cards at the top are a stretch away. Same tabs, thumb-high. */}
       <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-600 bg-slate-500 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] sm:hidden" data-testid="hp-bottom-nav">
-        {WORK_TABS.map((t) => {
+        {VISIBLE_WORK_TABS.map((t) => {
           const Icon = t.icon;
           const active = workTab === t.key;
           return (
