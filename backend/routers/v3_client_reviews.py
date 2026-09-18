@@ -11,9 +11,11 @@ Kept apart from two things with a similar name:
 Every review is its own row, with a `kind` (who is rated) and a `source` (what prompted it):
 
   * kind "physio", source "week" -- every 7 days of treatment (or rehab) the client rates
-    their Physio: 1-5 stars and written feedback, one row per week. A week is due once every
-    day in it is completed; the portal then asks in a pop-up for each due week finished
-    since PHYSIO_REVIEW_START. Optional: Skip stops the asking. Weekly reviews briefly also
+    their Physio: 1-5 stars and Treatment Feedback, one row per week. A week is due once
+    every day in it is completed; the portal's Sessions tab then asks in a pop-up for each
+    due week finished since PHYSIO_REVIEW_START. Mandatory: there is no Skip, and the
+    Physio cannot Send to Review while one is owed (see weeks_owed). The Physio reads the
+    stars only -- never the words (see physio_star_ratings). Weekly reviews briefly also
     rated the Consultant; those rows stay readable but are no longer asked for.
   * source "anytime" -- either kind, from the Feedback tab, whenever the client wants.
   * source "session" / "review" -- the earlier per-session Physio and per-clinical-Review
@@ -38,7 +40,7 @@ from pydantic import BaseModel
 from database import v3_col
 from deps import v3_require_roles, is_branch_admin_role, is_head_physio_role
 from physio_scope import consultant_of_lead, resolve_consultant_doctor
-from routers.v3_feedback import AUDIENCE_WEEKLY_REVIEW, AUTHOR_PATIENT, STATUS_NEW, _rating
+from routers.v3_feedback import _rating
 from routers.v3_patient_portal import _current_patient_lead_id, _lead_or_404
 from schemas.v3 import V3UserOut
 from utils import now_iso
@@ -46,8 +48,6 @@ from utils import now_iso
 router = APIRouter(prefix="/api/v3")
 
 COLLECTION = "client_reviews"
-# Weeks whose review pop-up the client skipped: {lead_id, track, week_number, skipped_at}.
-SKIPS_COLLECTION = "client_review_skips"
 MAX_TEXT = 2000
 
 KIND_PHYSIO = "physio"
@@ -136,21 +136,60 @@ def course_weeks(days: List[dict]) -> List[dict]:
     return out
 
 
-def pending_weeks(weeks: List[dict], rows: List[dict],
-                  skipped: Optional[set] = None, since: str = PHYSIO_REVIEW_START) -> List[dict]:
-    """Completed weeks, finished since `since`, oldest first, with no Physio review yet and
-    not skipped."""
+def pending_weeks(weeks: List[dict], rows: List[dict], since: str = PHYSIO_REVIEW_START) -> List[dict]:
+    """Completed weeks, finished since `since`, oldest first, with no Physio review yet."""
     given = {(r.get("track"), r.get("week_number"))
              for r in rows if r.get("source") == SOURCE_WEEK and r.get("kind") == KIND_PHYSIO}
-    skipped = skipped or set()
     out = []
     for w in weeks:
         key = (w["track"], w["week_number"])
-        if not w["complete"] or w["finished_at"][:10] < since or key in skipped or key in given:
+        if not w["complete"] or w["finished_at"][:10] < since or key in given:
             continue
         out.append(w)
     out.sort(key=lambda w: w["finished_at"])
     return out
+
+
+async def weeks_owed(lead_id: str) -> List[dict]:
+    """The completed weeks this client still has to rate. Send to Review waits on these:
+    the Physio's hand-off to the Consultant goes up with the client's verdict on the week,
+    not ahead of it."""
+    rows = await v3_col(COLLECTION).find(
+        {"lead_id": lead_id, "kind": KIND_PHYSIO, "source": SOURCE_WEEK, "skipped": {"$ne": True}},
+        {"_id": 0, "kind": 1, "source": 1, "track": 1, "week_number": 1},
+    ).to_list(500)
+    return pending_weeks(course_weeks(await _course_days(lead_id)), rows)
+
+
+def star_key(track: str, week_number) -> str:
+    return f"{track or 'treatment'}:{week_number}"
+
+
+async def physio_star_ratings(lead_ids: List[str], physio_ids: List[str]) -> Dict[str, dict]:
+    """What a Physio may see of their clients' weekly reviews: the stars, per week and on
+    average, for each lead. Never the Treatment Feedback -- that is read by management and
+    the Consultant (Client Reviews), and is left out of the projection so it cannot leak.
+
+    Only the weeks rated for this Physio; a row with no physio on it (a week whose days
+    carried none) is counted for whoever is treating the client now."""
+    if not lead_ids:
+        return {}
+    rows = await v3_col(COLLECTION).find(
+        {"lead_id": {"$in": lead_ids}, "kind": KIND_PHYSIO, "source": SOURCE_WEEK,
+         "skipped": {"$ne": True}, "person_id": {"$in": list(physio_ids) + ["", None]}},
+        {"_id": 0, "lead_id": 1, "track": 1, "week_number": 1, "rating": 1},
+    ).to_list(10000)
+    out: Dict[str, dict] = {}
+    for r in rows:
+        if not r.get("rating"):
+            continue
+        entry = out.setdefault(r["lead_id"], {"weeks": {}, "values": []})
+        entry["weeks"][star_key(r.get("track"), r.get("week_number"))] = r["rating"]
+        entry["values"].append(r["rating"])
+    return {
+        lid: {"weeks": e["weeks"], "average": _average(e["values"]), "count": len(e["values"])}
+        for lid, e in out.items()
+    }
 
 
 async def _course_days(lead_id: str) -> List[dict]:
@@ -260,7 +299,7 @@ def summarise(rows: List[dict]) -> dict:
 
 @router.get("/patient-portal/review")
 async def portal_my_review(lead_id: str = Depends(_current_patient_lead_id)):
-    """Everything the portal's Weekly Review card, its pop-up and the Feedback tab draw from."""
+    """Everything the Sessions tab's Review buttons, its pop-up and the Feedback tab draw from."""
     lead = await _lead_or_404(lead_id)
     rows = await v3_col(COLLECTION).find(
         {"lead_id": lead_id, "kind": {"$in": [KIND_PHYSIO, KIND_CONSULTANT]}, "skipped": {"$ne": True}}, {"_id": 0}
@@ -268,41 +307,23 @@ async def portal_my_review(lead_id: str = Depends(_current_patient_lead_id)):
     team = await care_team(lead)
     weeks = course_weeks(await _course_days(lead_id))
     week_rows = [r for r in rows if r.get("source") == SOURCE_WEEK]
-    skipped = {
-        (s.get("track"), s.get("week_number"))
-        for s in await v3_col(SKIPS_COLLECTION).find({"lead_id": lead_id}, {"_id": 0}).to_list(500)
-    }
+    pending = pending_weeks(weeks, week_rows)
     return {
         **team,
         "weeks": weeks,
-        "weeks_pending": pending_weeks(weeks, week_rows, skipped),
-        # Skipped ones too: the Overview tab keeps offering them after the pop-up is skipped.
-        "weeks_unreviewed": pending_weeks(weeks, week_rows),
+        "weeks_pending": pending,
+        # Same list under its older name, for a portal build from before Skip was retired.
+        "weeks_unreviewed": pending,
         "week_reviews": week_rows,
         "anytime_reviews": [r for r in rows if r.get("source") == SOURCE_ANYTIME],
     }
 
 
-class WeekSkipIn(BaseModel):
-    track: str = "treatment"
-    week_number: int
-
-
-@router.post("/patient-portal/review/week/skip")
-async def portal_skip_week(payload: WeekSkipIn, lead_id: str = Depends(_current_patient_lead_id)):
-    """The client closed a week's review pop-up with Skip. It stops asking for that week;
-    the week's Review button still opens it whenever they choose."""
-    if payload.track not in TRACKS:
-        raise HTTPException(status_code=400, detail="Unknown course")
-    await _lead_or_404(lead_id)
-    match = {"lead_id": lead_id, "track": payload.track, "week_number": payload.week_number}
-    await v3_col(SKIPS_COLLECTION).update_one(match, {"$set": {**match, "skipped_at": now_iso()}}, upsert=True)
-    return {"message": "Skipped. You can review this week any time from Sessions."}
-
-
 @router.post("/patient-portal/review/week")
 async def portal_review_week(payload: WeekReviewIn, lead_id: str = Depends(_current_patient_lead_id)):
-    """Stars and feedback for the Physio on one completed week. Sending again changes it."""
+    """Stars and Treatment Feedback for the Physio on one completed week. Sending again
+    changes it. Kept in Client Reviews only -- not filed to Patient Feedback, which is the
+    client's conversation with the clinic rather than a verdict on a week."""
     if payload.track not in TRACKS:
         raise HTTPException(status_code=400, detail="Unknown course")
     lead = await _lead_or_404(lead_id)
@@ -330,62 +351,7 @@ async def portal_review_week(payload: WeekReviewIn, lead_id: str = Depends(_curr
         "consultant_id": team["consultant"]["id"],
         "consultant_name": team["consultant"]["name"],
     })
-    await file_week_feedback(lead, row, week)
     return {"message": f"Thank you for reviewing week {week['week_number']}.", "review": row}
-
-
-def week_feedback_text(row: dict, week: dict) -> str:
-    """The Patient Feedback message for a weekly review: what week, which physio, the
-    stars, and the client's words."""
-    noun = "Rehab Day" if week["track"] == "rehab" else "Session"
-    first, last = week.get("first_number"), week.get("last_number")
-    span = "" if first is None else (f" ({noun} {first})" if first == last else f" ({noun}s {first}-{last})")
-    title = f"{'Rehab ' if week['track'] == 'rehab' else ''}Week {week['week_number']} review{span}"
-    physio = f" - Physio {row['person_name']}" if row.get("person_name") else ""
-    stars = "\u2605" * row["rating"] + "\u2606" * (5 - row["rating"])
-    return f"{title}{physio}\n{stars} {row['rating']}/5\n\n{row['comment']}"
-
-
-async def file_week_feedback(lead: dict, row: dict, week: dict) -> None:
-    """The review's written feedback, as a Patient Feedback thread Super Admin, the Branch
-    Admin and the Consultant all read (see AUDIENCE_WEEKLY_REVIEW). One thread per weekly
-    review: changing the review rewrites its opening message rather than adding another."""
-    col = v3_col("patient_feedback")
-    body = week_feedback_text(row, week)
-    now = now_iso()
-    existing = await col.find_one({"client_review_id": row["id"]}, {"_id": 0})
-    if existing:
-        messages = list(existing.get("messages") or [])
-        if messages:
-            messages[0] = {**messages[0], "body": body}
-        await col.update_one({"id": existing["id"]}, {"$set": {
-            "message": body, "messages": messages, "rating": row["rating"], "updated_at": now,
-        }})
-        return
-    thread = {
-        "id": str(uuid.uuid4()),
-        "lead_id": lead.get("id"),
-        "branch_id": lead.get("branch_id"),
-        "consultant_id": row.get("consultant_id") or "",
-        "consultant_name": row.get("consultant_name") or "",
-        "patient_name": _text(lead.get("name")),
-        "patient_phone": _text(lead.get("phone")),
-        "rating": row["rating"],
-        "message": body,
-        "audience": AUDIENCE_WEEKLY_REVIEW,
-        "client_review_id": row["id"],
-        "status": STATUS_NEW,
-        "note": "",
-        "created_at": now,
-    }
-    thread["messages"] = [{
-        "id": str(uuid.uuid4()),
-        "author": AUTHOR_PATIENT,
-        "author_name": thread["patient_name"],
-        "body": body,
-        "created_at": now,
-    }]
-    await col.insert_one(dict(thread))
 
 
 @router.post("/patient-portal/review/anytime")

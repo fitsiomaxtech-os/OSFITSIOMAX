@@ -99,15 +99,9 @@ export const patientPortalMyReview = async () => {
   return data;
 };
 
-/** Stars and feedback for the Physio and the Consultant on one completed week (every 7 days). */
+/** Stars and Treatment Feedback for the Physio on one completed week (every 7 days). */
 export const patientPortalReviewWeek = async (payload) => {
   const { data } = await portalApi.post("/patient-portal/review/week", payload, { headers: authHeaders() });
-  return data;
-};
-
-/** Skip a week's review pop-up; it stops asking, and the week can still be reviewed later. */
-export const patientPortalSkipWeekReview = async ({ track, week_number }) => {
-  const { data } = await portalApi.post("/patient-portal/review/week/skip", { track, week_number }, { headers: authHeaders() });
   return data;
 };
 

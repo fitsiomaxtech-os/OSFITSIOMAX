@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import HTTPException  # noqa: E402
 
 from routers.v3_client_reviews import (  # noqa: E402
-    course_weeks, pending_weeks, required_comment, required_rating, split_legacy, summarise, week_feedback_text, week_of,
+    course_weeks, pending_weeks, required_comment, required_rating, split_legacy, star_key, summarise, week_of,
 )
 
 
@@ -72,9 +72,16 @@ class TestPendingWeeks:
         out = pending_weeks(self.WEEKS, rows, since="2026-09-16")
         assert [(w["track"], w["week_number"]) for w in out] == [("rehab", 1)]
 
-    def test_skipped_weeks_are_not_asked_again(self):
-        out = pending_weeks(self.WEEKS, [], skipped={("treatment", 1)}, since="2026-09-16")
-        assert [(w["track"], w["week_number"]) for w in out] == [("rehab", 1)]
+    def test_weeks_before_the_start_date_are_not_owed(self):
+        out = pending_weeks(self.WEEKS, [], since="2026-10-01")
+        assert out == []
+
+
+class TestStarKey:
+    def test_matches_the_treatment_table(self):
+        assert star_key("treatment", 2) == "treatment:2"
+        assert star_key("rehab", 1) == "rehab:1"
+        assert star_key(None, 3) == "treatment:3"
 
 
 class TestRequiredComment:
@@ -114,12 +121,3 @@ class TestSummarise:
         s = summarise(rows)
         assert s["total"] == 4 and s["average"] == 3.5 and s["low"] == 1 and s["anytime"] == 1
         assert s["people"][0] == {"name": "Dr Abdul", "count": 2, "average": 3.5}
-
-
-class TestWeekFeedbackText:
-    def test_names_week_physio_stars_and_words(self):
-        week = {"track": "treatment", "week_number": 1, "first_number": 1, "last_number": 7}
-        row = {"rating": 4, "comment": "Much better", "person_name": "Priya"}
-        text = week_feedback_text(row, week)
-        assert text.startswith("Week 1 review (Sessions 1-7) - Physio Priya\n")
-        assert "★★★★☆ 4/5" in text and text.endswith("\n\nMuch better")

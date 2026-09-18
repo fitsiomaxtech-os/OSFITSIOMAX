@@ -15,7 +15,6 @@ import {
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewWeek,
-  patientPortalSkipWeekReview,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -1433,7 +1432,7 @@ function ForgotPasswordFlow({ initialLogin = "", onDone, onCancel }) {
   );
 }
 
-function ProfileTab({ data, reviews = null, onReviewed }) {
+function ProfileTab({ data }) {
   const Row = ({ label, value }) => (
     !value ? null : (
       <div>
@@ -1445,8 +1444,6 @@ function ProfileTab({ data, reviews = null, onReviewed }) {
 
   return (
     <div className="space-y-4" data-testid="patient-portal-profile-tab">
-      <OverviewWeeklyReview reviews={reviews} onReviewed={onReviewed} />
-
       <div className="rounded-lg border border-slate-200 bg-white p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Your Details</p>
         <div className="grid grid-cols-2 gap-3">
@@ -1925,11 +1922,13 @@ function ReviewForm({ initial = null, placeholder, submitLabel = "Submit review"
   );
 }
 
-/** The Review pop-up. Without `onClose` it cannot be dismissed — that is the required one. */
-function ReviewDialog({ title, subtitle, onClose, children, footer, testid }) {
+/** The Review pop-up. Without `onClose` it cannot be dismissed — that is the required one.
+    `underNav` sits it beneath the bottom nav, so a required pop-up holds the tab it is on
+    without locking the client out of the others. */
+function ReviewDialog({ title, subtitle, onClose, children, footer, testid, underNav = false }) {
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4"
+      className={`fixed inset-0 flex items-center justify-center bg-slate-900/60 p-4 ${underNav ? "z-30 pb-20" : "z-[60]"}`}
       onClick={onClose || undefined}
       data-testid={testid}
     >
@@ -1992,8 +1991,8 @@ const savedForWeek = (reviews, w) => (reviews?.week_reviews || []).find(
   (r) => r.kind === "physio" && r.track === w.track && r.week_number === w.week_number,
 );
 
-/** Every 7 days of treatment: the Physio's star rating and the client's written feedback,
-    each in its own box. */
+/** Every 7 days of treatment: the Physio's star rating and the client's Treatment Feedback,
+    each in its own box. Both are required. */
 function WeekReviewForm({ week, reviews, onDone, testid }) {
   const saved = savedForWeek(reviews, week);
   const physioName = week.physio_name || reviews?.physio?.name || "";
@@ -2004,7 +2003,7 @@ function WeekReviewForm({ week, reviews, onDone, testid }) {
 
   const save = async () => {
     if (!rating) { toast.error("Tap the stars to rate your physio"); return; }
-    if (!comment.trim()) { toast.error("Write a few words of feedback"); return; }
+    if (!comment.trim()) { toast.error("Write your Treatment Feedback"); return; }
     setSaving(true);
     try {
       const res = await patientPortalReviewWeek({ track: week.track, week_number: week.week_number, rating, comment });
@@ -2031,13 +2030,13 @@ function WeekReviewForm({ week, reviews, onDone, testid }) {
         </div>
       </div>
       <div className={box} data-testid={`${testid}-feedback`}>
-        <p className={heading}>Feedback</p>
+        <p className={heading}>Treatment Feedback</p>
         <textarea
           rows={4}
           maxLength={2000}
           value={comment}
           onChange={(e) => setComment(e.target.value)}
-          placeholder="How was your physio this week?"
+          placeholder="How was your treatment this week?"
           className={`${inputBox} bg-white`}
           data-testid={`${testid}-comment`}
         />
@@ -2087,84 +2086,21 @@ function WeekReviewButton({ track, number, reviews, onReviewed }) {
   );
 }
 
-function OverviewWeekRow({ week, reviews, onReviewed }) {
-  return (
-    <div className="flex items-center gap-3 px-3 py-2.5">
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-slate-700">{weekTitle(week)}</p>
-        <p className="text-[10px] text-slate-400">
-          {[weekRange(week), week.physio_name || reviews?.physio?.name].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-      <WeekReviewButton track={week.track} number={week.last_number} reviews={reviews} onReviewed={onReviewed} />
-    </div>
-  );
-}
-
-/** Overview's Weekly Review card: every completed week still waiting for a Physio review —
-    including ones whose pop-up was skipped — then the weeks already reviewed. */
-function OverviewWeeklyReview({ reviews, onReviewed }) {
-  const waiting = reviews?.weeks_unreviewed || reviews?.weeks_pending || [];
-  const reviewed = (reviews?.weeks || []).filter((w) => w.complete && savedForWeek(reviews, w));
-  if (!waiting.length && !reviewed.length) return null;
-  const row = (w) => <OverviewWeekRow key={`${w.track}-${w.week_number}`} week={w} reviews={reviews} onReviewed={onReviewed} />;
-  return (
-    <div className="rounded-lg border border-amber-200 bg-white" data-testid="patient-portal-overview-reviews">
-      <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-3 py-2">
-        <Star className="h-4 w-4 text-amber-500" />
-        <p className="flex-1 text-xs font-semibold uppercase tracking-wide text-amber-700">Weekly Review</p>
-        {waiting.length > 0 && (
-          <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold text-white">
-            {waiting.length} waiting
-          </span>
-        )}
-      </div>
-      <div className="divide-y divide-slate-100">
-        {waiting.map(row)}
-        {reviewed.map(row)}
-      </div>
-    </div>
-  );
-}
-
-/** The Review pop-up that opens by itself once a week of treatment is completed and not yet
-    reviewed. Optional: Skip (or the close button) stops it asking for that week, which can
-    still be reviewed later from the Weekly Review card on Overview. */
+/** The Review pop-up that opens by itself on the Sessions tab once a week of treatment is
+    completed and not yet reviewed. Mandatory: no Skip and no close button — the Physio's
+    Send to Review waits on it. It sits under the bottom nav, so the client can still leave
+    for another tab; it is back the next time they open Sessions. */
 function WeekReviewGate({ reviews, onChanged }) {
-  const [skipping, setSkipping] = useState(false);
   const pending = reviews?.weeks_pending || [];
   if (!pending.length) return null;
   const week = pending[0];
-
-  const skip = async () => {
-    setSkipping(true);
-    try {
-      await patientPortalSkipWeekReview({ track: week.track, week_number: week.week_number });
-      onChanged?.();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not skip. Please try again.");
-    } finally {
-      setSkipping(false);
-    }
-  };
 
   return (
     <ReviewDialog
       title={`Review ${weekTitle(week)}`}
       subtitle={`${weekRange(week) ? `${weekRange(week)} completed. ` : ""}How was your week? Rate your physio${pending.length > 1 ? ` — ${pending.length} weeks are waiting` : ""}.`}
-      onClose={skipping ? undefined : skip}
+      underNav
       testid="portal-week-review-gate"
-      footer={(
-        <Button
-          variant="outline"
-          className="mt-2 w-full"
-          disabled={skipping}
-          onClick={skip}
-          data-testid="portal-week-review-gate-skip"
-        >
-          {skipping ? "Skipping…" : "Skip"}
-        </Button>
-      )}
     >
       <WeekReviewForm
         key={`${week.track}-${week.week_number}`}
@@ -2255,13 +2191,14 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
         {activeTab === "sessions" && <SessionsTab data={data} reviews={reviews} onReviewed={loadReviews} />}
         {activeTab === "treatment" && <TreatmentTab data={data} reviews={reviews} onReviewed={loadReviews} />}
         {activeTab === "payment" && <PaymentTab data={data} />}
-        {activeTab === "profile" && <ProfileTab data={data} reviews={reviews} onReviewed={loadReviews} />}
+        {activeTab === "profile" && <ProfileTab data={data} />}
         {activeTab === "feedback" && (
           <FeedbackTab data={data} onSeen={clearFeedbackBadge} />
         )}
       </div>
 
-      <WeekReviewGate reviews={reviews} onChanged={loadReviews} />
+      {/* Sessions tab only — the review lives there, beside the week's last day. */}
+      {activeTab === "sessions" && <WeekReviewGate reviews={reviews} onChanged={loadReviews} />}
 
       {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal
           shows it at all widths — so the slate is reverted from md up rather than applied
@@ -2275,7 +2212,6 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
             // written back on since this patient last opened it. Clears on open — see
             // clearFeedbackBadge and patient_portal_my_feedback's seen stamp.
             const badge = t.key === "feedback" ? (data.feedback_unread || 0)
-              : t.key === "profile" ? (reviews?.weeks_unreviewed?.length || 0)
               : t.key === "sessions" ? (reviews?.weeks_pending?.length || 0) : 0;
             return (
               <button

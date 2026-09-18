@@ -454,7 +454,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
   // proxy for head office while they were the only reader without one -- and stopped
   // being one the moment a consultant could open this board. A consultant has no branch
   // either, so they were about to be shown the audience strip and every branch's name.
-  const isHeadOffice = headOffice && rows.some((r) => ["super_admin", "consultant", "physio", "weekly_review"].includes(r.audience || "branch_admin"));
+  const isHeadOffice = headOffice && rows.some((r) => ["super_admin", "consultant", "physio"].includes(r.audience || "branch_admin"));
   const byAudience = useMemo(
     () => (audience === "all" ? rows
       : audience === "consultant" ? rows.filter((r) => ["consultant", "physio"].includes(r.audience || "branch_admin"))
@@ -679,8 +679,6 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
     // who cannot open it. The retired physio audience is folded in here rather than given a
     // fourth tab: it is the same thing under the name it was offered under for half a day.
     { key: "consultant", label: "Direct to a consultant", icon: Stethoscope, count: rows.filter((r) => ["consultant", "physio"].includes(r.audience || "branch_admin")).length },
-    // The written feedback from each client's weekly Physio review, filed by the portal.
-    { key: "weekly_review", label: "Weekly review", icon: Star, count: rows.filter((r) => r.audience === "weekly_review").length },
     { key: "branch_admin", label: "Branch-wise", icon: Building2, count: rows.filter((r) => (r.audience || "branch_admin") === "branch_admin").length },
   ];
 

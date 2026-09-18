@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Star,
   UserCheck,
   Users,
   UserX,
@@ -429,6 +430,32 @@ const TREATMENT_SUBTABS = [
   { key: "ongoing", label: "Ongoing" },
   { key: "completed", label: "Completed" },
 ];
+
+/**
+ * The client's weekly star rating, as the Physio sees it: stars only. The Treatment
+ * Feedback the client wrote beside them is not sent to this board at all (see
+ * physio_star_ratings in v3_client_reviews.py) — management and the Consultant read it.
+ */
+const StarBadge = ({ value, count, testid }) => (
+  value ? (
+    <span
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+      title={count ? `Average of ${count} weekly review${count === 1 ? "" : "s"}` : undefined}
+      data-testid={testid}
+    >
+      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+      {Number(value).toFixed(count ? 1 : 0)}
+    </span>
+  ) : null
+);
+
+// Which week a Treatment row's stars belong to. Treatment days carry their booked week;
+// rehab days do not, so every 7 days make one — the same rule as week_of on the server.
+const starWeekOf = (r) => (r.track === "rehab" || !r.week)
+  ? Math.floor(((r.sessionNumber || 1) - 1) / 7) + 1
+  : r.week;
+
+const rowStars = (r) => r.lead?.star_weeks?.[`${r.track || "treatment"}:${starWeekOf(r)}`] || null;
 
 function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   const [leads, setLeads] = useState([]);
@@ -915,6 +942,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                             {reviewsSoFar} Review{reviewsSoFar === 1 ? "" : "s"}
                           </span>
                           {isReviewDay && <span className="rounded-full bg-violet-600 px-1.5 py-0.5 font-semibold text-white">Review Today</span>}
+                          <StarBadge value={rowStars(r)} />
                         </>
                       ) : (
                         <span>{r.label}</span>
@@ -944,22 +972,25 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                   heading after it floated a hand-width clear of the badges beneath it — and
                   the columns shifted again each time the day brought different names. The
                   percentages below must total 100. */}
-              <table className="w-full min-w-[820px] table-fixed text-sm">
+              <table className="w-full min-w-[920px] table-fixed text-sm">
                 <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
                   <tr>
                     {/* Time and Patient stay left — they are the columns the eye scans down
                         to find a row, and a ragged left edge is what makes that hard. What
                         follows them is a single centred badge per cell, so those headings
                         centre too rather than sitting off the end of their own column. */}
-                    <th className="w-[12%] px-4 py-2.5 font-semibold">Time</th>
-                    <th className="w-[25%] px-4 py-2.5 font-semibold">Patient</th>
-                    <th className="w-[12%] px-4 py-2.5 text-center font-semibold">Day</th>
-                    <th className="w-[14%] px-4 py-2.5 text-center font-semibold">Reviews</th>
-                    <th className="w-[16%] px-4 py-2.5 text-center font-semibold">Status</th>
+                    <th className="w-[11%] px-4 py-2.5 font-semibold">Time</th>
+                    <th className="w-[20%] px-4 py-2.5 font-semibold">Patient</th>
+                    <th className="w-[10%] px-4 py-2.5 text-center font-semibold">Day</th>
+                    <th className="w-[13%] px-4 py-2.5 text-center font-semibold">Reviews</th>
+                    {/* The client's stars for the week this day sits in. Stars only: the
+                        Treatment Feedback beside them is not the Physio's to read. */}
+                    <th className="w-[13%] px-4 py-2.5 text-center font-semibold">Star Rating</th>
+                    <th className="w-[13%] px-4 py-2.5 text-center font-semibold">Status</th>
                     {/* Which course the day belongs to. Treatment and Rehab share a physio,
                         a room and a calendar, so without this the two read as one list and
                         05/36 beside 05/26 says nothing about what either is. */}
-                    <th className="w-[15%] px-4 py-2.5 text-center font-semibold">Package</th>
+                    <th className="w-[14%] px-4 py-2.5 text-center font-semibold">Package</th>
                     <th className="w-[6%] px-4 py-2.5" />
                   </tr>
                 </thead>
@@ -1001,6 +1032,11 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                               {reviewsSoFar} Review{reviewsSoFar === 1 ? "" : "s"}
                             </span>
                           ) : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {rowStars(r)
+                            ? <StarBadge value={rowStars(r)} testid={`treatment-row-stars-${r.key}`} />
+                            : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-3 text-center">
                           {r.done ? (
@@ -1168,6 +1204,33 @@ const ordinal = (n) => {
   const suffix = v >= 11 && v <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
   return `${n}${suffix}`;
 };
+
+/**
+ * Send for Review, held until the client has rated every completed week (star + Treatment
+ * Feedback, from the Client Portal's Sessions tab). The server refuses it too; this says
+ * why before the Physio has written their notes.
+ */
+function SendForReviewButton({ patient, onClick, className = "", testid }) {
+  const owed = patient.client_weeks_owed || [];
+  if (owed.length) {
+    const weeks = owed.map((w) => `${w.track === "rehab" ? "Rehab " : ""}Week ${w.week_number}`).join(", ");
+    return (
+      <span
+        className={`inline-flex items-center justify-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-center text-[10px] font-semibold text-amber-700 ${className}`}
+        title={`The client has not rated ${weeks} yet. Ask them to review it in the Client Portal (Sessions tab).`}
+        data-testid={`${testid}-awaiting-client`}
+      >
+        <Star className="h-3 w-3 shrink-0" />
+        Awaiting client review · {weeks}
+      </span>
+    );
+  }
+  return (
+    <Button size="sm" className={`bg-amber-600 text-xs text-white hover:bg-amber-700 ${className}`} onClick={onClick} data-testid={testid}>
+      Send for Review
+    </Button>
+  );
+}
 
 /**
  * Review — the Physio's end of the post-treatment review chain, in one place.
@@ -1432,14 +1495,12 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                 </div>
                 <div className="mt-2 flex gap-2">
                   {p.due_for_review && (
-                    <Button
-                      size="sm"
-                      className="flex-1 bg-amber-600 text-xs text-white hover:bg-amber-700"
+                    <SendForReviewButton
+                      patient={p}
+                      className="flex-1"
                       onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
-                      data-testid={`physio-raise-review-${p.lead_id}`}
-                    >
-                      Send for Review
-                    </Button>
+                      testid={`physio-raise-review-${p.lead_id}`}
+                    />
                   )}
                   <Button
                     size="sm"
@@ -1515,14 +1576,11 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           {p.due_for_review && (
-                            <Button
-                              size="sm"
-                              className="bg-amber-600 text-xs text-white hover:bg-amber-700"
+                            <SendForReviewButton
+                              patient={p}
                               onClick={(e) => { e.stopPropagation(); setDraft({ patient: p, reason: "", physio_notes: "" }); }}
-                              data-testid={`physio-raise-review-row-${p.lead_id}`}
-                            >
-                              Send for Review
-                            </Button>
+                              testid={`physio-raise-review-row-${p.lead_id}`}
+                            />
                           )}
                           {/* Always offered, review or not: the dialog is the only place
                               the Head Physio's written report can be read from this board,
@@ -2936,6 +2994,14 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
                 <div>
                   <p className="text-base font-bold text-slate-600">{p.total_sessions}</p>
                   <p className="text-[9px] text-slate-400">Total</p>
+                </div>
+                {/* The client's weekly star rating of this physio, averaged. Stars only. */}
+                <div data-testid={`physio-patient-stars-${p.lead_id}`}>
+                  <p className="flex items-center justify-center gap-0.5 text-base font-bold text-amber-600 sm:justify-start">
+                    <Star className={`h-3.5 w-3.5 ${p.star_average ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
+                    {p.star_average ? Number(p.star_average).toFixed(1) : <span className="text-slate-300">—</span>}
+                  </p>
+                  <p className="text-[9px] text-slate-400">{p.star_count ? `Rating (${p.star_count})` : "Rating"}</p>
                 </div>
               </div>
               {/* Progress bar */}

@@ -22,6 +22,9 @@ from routers.v3_reviews import (
 # reviews router need it, and this one already imports from that one — a helper living
 # in either would close the loop.
 from physio_scope import physio_lead_ids, physio_owns_lead, resolve_physio_doctor
+# The clients' weekly star ratings -- stars only; the Treatment Feedback is not for the
+# Physio's eyes (see physio_star_ratings).
+from routers.v3_client_reviews import physio_star_ratings
 
 router = APIRouter(prefix="/api/v3")
 
@@ -242,10 +245,13 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
         else:
             r["submitted"] += 1
 
+    stars = await physio_star_ratings(lead_ids, _ids_of(doctor))
+
     patients = []
     for lead in leads:
         patient_sessions = sessions_by_lead.get(lead["id"], [])
         reviews = reviews_by_lead.get(lead["id"], {"submitted": 0, "reviewed": 0})
+        rated = stars.get(lead["id"], {})
         completed = sum(1 for s in patient_sessions if s["status"] == "completed")
         total = len(patient_sessions)
         next_session = next((s for s in patient_sessions if s["status"] == "upcoming"), None)
@@ -280,6 +286,9 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
             "updated_at": lead.get("updated_at"),
             "reviews_submitted": reviews["submitted"],
             "reviews_reviewed": reviews["reviewed"],
+            # The client's weekly star rating of this physio, averaged. No words.
+            "star_average": rated.get("average"),
+            "star_count": rated.get("count", 0),
         })
 
     return {"patients": patients}
@@ -319,6 +328,7 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
     # ends at the Head Physio's review, not at the last day of it, and the tile was calling
     # a patient discharged while the popup behind it still read REVIEW DUE.
     awaiting_review = await leads_awaiting_review(lead_ids)
+    stars = await physio_star_ratings(lead_ids, _ids_of(doctor))
 
     out = []
     for ld in leads:
@@ -328,6 +338,12 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
         dumped["completed_sessions"] = t["completed"]
         dumped["weeks"] = t["weeks"]
         dumped["review_pending"] = ld["id"] in awaiting_review
+        # The Treatment table's Star Rating column: the client's stars for each week,
+        # keyed "treatment:2" / "rehab:1" (star_key), and their average. No words.
+        rated = stars.get(ld["id"], {})
+        dumped["star_weeks"] = rated.get("weeks", {})
+        dumped["star_average"] = rated.get("average")
+        dumped["star_count"] = rated.get("count", 0)
         out.append(dumped)
 
     return {

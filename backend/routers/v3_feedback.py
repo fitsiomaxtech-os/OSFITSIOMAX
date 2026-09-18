@@ -76,16 +76,16 @@ AUDIENCE_CONSULTANT = "consultant"
 # deliberately sent past. Nothing offers it now -- see feedbackTo in the portal.
 AUDIENCE_PHYSIO = "physio"
 
-# Not chosen by the patient: the written feedback from their weekly Physio review
-# (routers/v3_client_reviews.py), filed here so it can be answered. Read by all three desks
-# -- Super Admin, the patient's Branch Admin, and the patient's Consultant -- which is why
-# it is not in BRANCH_HIDDEN_AUDIENCES and is in CONSULTANT_AUDIENCES.
+# Retired: the weekly Physio review's written feedback was briefly filed here as a thread.
+# Patient Feedback is chat and feedback only; the star + Treatment Feedback review lives in
+# Client Reviews (routers/v3_client_reviews.py). Nothing writes it now, and the threads
+# already filed are kept off every board (see list_feedback) rather than deleted.
 AUDIENCE_WEEKLY_REVIEW = "weekly_review"
 
 AUDIENCES = (AUDIENCE_BRANCH, AUDIENCE_SUPER, AUDIENCE_CONSULTANT, AUDIENCE_PHYSIO, AUDIENCE_WEEKLY_REVIEW)
 
-# What a consultant reads: what was addressed to them, and their patients' weekly reviews.
-CONSULTANT_AUDIENCES = (AUDIENCE_CONSULTANT, AUDIENCE_WEEKLY_REVIEW)
+# What a consultant reads: what was addressed to them.
+CONSULTANT_AUDIENCES = (AUDIENCE_CONSULTANT,)
 
 # What a Branch Admin's board must not show, for two different reasons that come to the
 # same query. Super Admin's post is kept from them because half of it is about them. The
@@ -220,8 +220,9 @@ async def list_feedback(
         query["branch_id"] = user.branch_id
         # Anything the patient addressed past the branch is kept off this board -- head
         # office because half of it is about the Branch Admin, the consultant because the
-        # patient wrote to a person. See BRANCH_HIDDEN_AUDIENCES.
-        query["audience"] = {"$nin": list(BRANCH_HIDDEN_AUDIENCES)}
+        # patient wrote to a person. See BRANCH_HIDDEN_AUDIENCES. Plus the retired
+        # weekly-review threads, which are on no board now.
+        query["audience"] = {"$nin": list(BRANCH_HIDDEN_AUDIENCES) + [AUDIENCE_WEEKLY_REVIEW]}
     else:
         # Head office reads everything: what was addressed to it, and what every branch
         # received. It owns the branches, and feedback about a branch it cannot see is
@@ -236,6 +237,8 @@ async def list_feedback(
         # narrowing to one branch stays available.
         if branch_id:
             query["branch_id"] = branch_id
+        # Not the retired weekly-review threads -- see AUDIENCE_WEEKLY_REVIEW.
+        query["audience"] = {"$ne": AUDIENCE_WEEKLY_REVIEW}
 
     rows = await v3_col("patient_feedback").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
     # Named, not just identified. Head office reads this branch by branch, and a heading
