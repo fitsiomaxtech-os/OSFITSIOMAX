@@ -1,11 +1,12 @@
 /**
- * HR Admin > EOD Report — Super Admin's read of every Physio's and Consultant's day.
+ * HR Admin > EOD Report — Super Admin's read of every Physio's, Consultant's and branch's day.
  *
  * A period at a time — All, Today (the default), Yesterday, This Week, or a day or range
- * picked from the calendar icon — narrowed by branch and by a search. The four figures are
- * also the way into their lists: All lists every report filed, Consultant Report and
- * Physio Report narrow that to one desk, and Not Submitted lists each day somebody clocked
- * in without filing one. The server only answers Super Admin. See backend/routers/v3_eod_reports.py.
+ * picked from the calendar icon — narrowed by branch and by a search. The five figures are
+ * also the way into their lists: All lists every report filed, Consultant Report, Physio
+ * Report and Branch Report narrow that to one desk, and Not Submitted lists each day
+ * somebody clocked in without filing one. The server only answers Super Admin. See
+ * backend/routers/v3_eod_reports.py.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -42,18 +43,29 @@ const presetRange = (key, today) => {
   return { from: "", to: "" };
 };
 
-// The four figures, in the order they sit, and what clicking each one lists. Each counts
+// The five figures, in the order they sit, and what clicking each one lists. Each counts
 // reports (or missing ones), not the clients inside them -- the per-report count is on
 // the report's own row.
 const VIEWS = [
   { key: "reports", label: "All", icon: ClipboardList, title: "All reports" },
   { key: "consultant", label: "Consultant Report", icon: Stethoscope, title: "Consultant reports" },
   { key: "physio", label: "Physio Report", icon: HeartPulse, title: "Physio reports" },
+  { key: "branch", label: "Branch Report", icon: Building2, title: "Branch reports" },
   { key: "pending", label: "Not Submitted", icon: AlertOctagon, title: "Clocked in, no report" },
 ];
+// The three that are a kind of report rather than a view over all of them.
+const KINDS = VIEWS.filter((v) => v.key !== "reports" && v.key !== "pending").map((v) => v.key);
 
-const countLabel = (kind) => (kind === "consultant" ? "Consultations" : "Treatments");
-const kindLabel = (kind) => (kind === "consultant" ? "Consultant" : "Physio");
+const KIND_COPY = {
+  consultant: { label: "Consultant", count: "Consultations", clients: "Consultations", badge: "bg-sky-50 text-sky-700" },
+  physio: { label: "Physio", count: "Treatments", clients: "Clients treated", badge: "bg-emerald-50 text-emerald-700" },
+  branch: { label: "Branch", count: "Clients", clients: "Clients the branch saw", badge: "bg-violet-50 text-violet-700" },
+};
+// A report written before its kind existed, or by a role since retired, still has to draw
+// a row -- so every lookup falls back to Physio's wording rather than rendering undefined.
+const copyFor = (kind) => KIND_COPY[kind] || KIND_COPY.physio;
+const countLabel = (kind) => copyFor(kind).count;
+const kindLabel = (kind) => copyFor(kind).label;
 const TABLE_HEADERS = ["Name", "Short Report", "Staff Type", "Branch", "Date", "Submitted Time", "Action"];
 // One line for the table: what they wrote about the day, else who they saw.
 const shortReport = (r) => {
@@ -183,12 +195,11 @@ export const EodReportsPanel = () => {
   const pending = useMemo(() => (data?.pending || []).filter(matches), [data, matches]);
   const totals = useMemo(() => ({
     reports: allReports.length,
-    consultant: allReports.filter((r) => r.kind === "consultant").length,
-    physio: allReports.filter((r) => r.kind === "physio").length,
+    ...Object.fromEntries(KINDS.map((k) => [k, allReports.filter((r) => r.kind === k).length])),
     pending: pending.length,
   }), [allReports, pending]);
   const reports = useMemo(
-    () => (view === "physio" || view === "consultant" ? allReports.filter((r) => r.kind === view) : allReports),
+    () => (KINDS.includes(view) ? allReports.filter((r) => r.kind === view) : allReports),
     [allReports, view],
   );
 
@@ -253,7 +264,7 @@ export const EodReportsPanel = () => {
         </div>
       </div>
 
-      <div className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${loading && data ? "opacity-60" : ""}`}>
+      <div className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 ${loading && data ? "opacity-60" : ""}`}>
         {VIEWS.map((v) => (
           <KPI
             key={v.key}
@@ -340,7 +351,7 @@ export const EodReportsPanel = () => {
                           <p className="text-[11px] text-slate-400">{countLabel(r.kind)}: {r.count}</p>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`rounded px-2 py-0.5 text-xs font-bold ${r.kind === "consultant" ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700"}`}>
+                          <span className={`rounded px-2 py-0.5 text-xs font-bold ${copyFor(r.kind).badge}`}>
                             {kindLabel(r.kind)}
                           </span>
                         </td>
@@ -391,7 +402,7 @@ export const EodReportsPanel = () => {
                 ))}
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{open.kind === "consultant" ? "Consultations" : "Clients treated"}</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{copyFor(open.kind).clients}</p>
                 {open.entries?.length > 0 ? (
                   <ol className="mt-1.5 space-y-1.5">
                     {open.entries.map((e, i) => (

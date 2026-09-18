@@ -1,9 +1,10 @@
 /**
- * EOD Report — the popup a Physio or Consultant gets when they clock out.
+ * EOD Report — the popup a Physio, Consultant or Branch Admin gets when they clock out.
  *
  * Today's clients come pre-filled from their own calendar (treatment and rehab days for a
- * Physio; consultations and reviews for a Consultant). They tick who they actually saw,
- * add a note on each if they want, add anybody the calendar missed, and say something
+ * Physio; consultations and reviews for a Consultant; for a Branch Admin, everyone the
+ * branch saw across all of those books, one row per client). They tick who they actually
+ * saw, add a note on each if they want, add anybody the calendar missed, and say something
  * about the day. The count is the clients ticked.
  *
  * Skip closes it without filing anything. It can be reopened from the clock's "Your day"
@@ -17,9 +18,27 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { eodSubmit } from "@/lib/api";
 
+// Per kind: the count's name, the heading over the list, and the placeholder on a row's
+// note. Everything else about the form is the same three ways.
 const KIND_COPY = {
-  physio: { title: "End of day report", noun: "Treatments", lead: "Clients you treated today" },
-  consultant: { title: "End of day report", noun: "Consultations", lead: "Consultations you took today" },
+  physio: {
+    title: "End of day report",
+    noun: "Treatments",
+    lead: "Clients you treated today",
+    note: "Treatment given / progress (optional)",
+  },
+  consultant: {
+    title: "End of day report",
+    noun: "Consultations",
+    lead: "Consultations you took today",
+    note: "About this consultation (optional)",
+  },
+  branch: {
+    title: "Branch end of day report",
+    noun: "Clients",
+    lead: "Clients your branch saw today",
+    note: "What happened with this client (optional)",
+  },
 };
 
 /** Rows for the form: the report already filed today if there is one, else the calendar. */
@@ -93,7 +112,9 @@ export const EodReportSheet = ({ info, onClose, onSaved }) => {
 
           {rows.length === 0 && (
             <p className="mt-2 rounded-lg border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400">
-              Nothing on your calendar today. Add clients below if you saw any.
+              {info?.kind === "branch"
+                ? "Nothing on the branch's calendar today. Add clients below if any came in."
+                : "Nothing on your calendar today. Add clients below if you saw any."}
             </p>
           )}
 
@@ -128,7 +149,7 @@ export const EodReportSheet = ({ info, onClose, onSaved }) => {
                     value={r.notes || ""}
                     onChange={(e) => update(i, { notes: e.target.value })}
                     maxLength={1000}
-                    placeholder={info?.kind === "consultant" ? "About this consultation (optional)" : "Treatment given / progress (optional)"}
+                    placeholder={copy.note}
                     className="mt-2 h-8 w-full rounded-md border border-slate-200 px-2 text-xs outline-none focus:border-sky-400"
                     data-testid={`eod-row-notes-${i}`}
                   />
@@ -153,7 +174,7 @@ export const EodReportSheet = ({ info, onClose, onSaved }) => {
             onChange={(e) => setSummary(e.target.value)}
             maxLength={3000}
             rows={4}
-            placeholder="How did the day go? Anything management should know?"
+            placeholder={info?.kind === "branch" ? "How did the branch's day go? Anything management should know?" : "How did the day go? Anything management should know?"}
             className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
             data-testid="eod-summary"
           />

@@ -1,11 +1,15 @@
-"""EOD Report -- what a Physio or a Consultant did with their day, written at Clock Out.
+"""EOD Report -- what somebody did with their day, written at Clock Out.
 
-Two kinds, decided by the role of the person writing it:
+Three kinds, decided by the role of the person writing it:
 
   * Physio ("physio") -- the treatments given today: which clients, how many, and a note
     on each. Pre-filled from their own treatment and rehab days on today's date.
   * Consultant ("consultant") -- the consultations taken today, the same way. Pre-filled
     from the consultation appointments and reviews booked against them today.
+  * Branch ("branch") -- the clients the branch saw today, written by the Branch Admin who
+    runs it. Pre-filled from every book the branch keeps at once -- treatment days, rehab
+    days, consultations, diet appointments and reviews -- merged into one row per client
+    rather than one per visit, because the question it answers is who the branch saw.
 
 The pre-fill is only a starting point. The person ticks the clients they actually saw,
 adds anybody the calendar did not know about, and says something about the day. The count
@@ -16,7 +20,8 @@ Asked for by the header's clock when somebody clocks out (see ClockWidget.jsx) a
 skippable there; a skipped day simply has no report, and shows as "Not submitted" on the
 Super Admin's list. One report per person per clinic day: submitting again replaces it.
 
-Read by Super Admin only, from HR Admin > EOD Report.
+Read by Super Admin only, from HR Admin > Staff > EOD Report, where each kind is also its
+own figure to filter the list by.
 """
 
 import uuid
@@ -26,7 +31,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from database import v3_col
-from deps import v3_current_user, v3_require_roles, is_physio_role, is_head_physio_role, PHYSIO_ROLES, HEAD_PHYSIO_ROLES
+from deps import (
+    v3_current_user, v3_require_roles,
+    is_physio_role, is_head_physio_role, is_branch_admin_role,
+    PHYSIO_ROLES, HEAD_PHYSIO_ROLES, BRANCH_ADMIN_ROLES,
+)
 from physio_scope import resolve_physio_doctor
 from schemas.v3 import V3UserOut
 from utils import clinic_today, now_iso
@@ -36,6 +45,7 @@ router = APIRouter(prefix="/api/v3")
 COLLECTION = "eod_reports"
 KIND_PHYSIO = "physio"
 KIND_CONSULTANT = "consultant"
+KIND_BRANCH = "branch"
 MAX_NOTE = 1000
 MAX_SUMMARY = 3000
 MAX_ENTRIES = 100
@@ -59,6 +69,8 @@ def report_kind(role: str) -> Optional[str]:
         return KIND_PHYSIO
     if is_head_physio_role(role):
         return KIND_CONSULTANT
+    if is_branch_admin_role(role):
+        return KIND_BRANCH
     return None
 
 
@@ -160,6 +172,110 @@ async def _consultant_suggestions(user: V3UserOut, on: str) -> List[Dict[str, An
     return out
 
 
+def _one_row_per_client(visits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """A branch's visits, merged into the people behind them.
+
+    A patient with a treatment slot in the morning and a review in the afternoon is one
+    client the branch saw, and clean_entries() drops the second row at submit anyway -- so
+    they are merged here instead, where the labels can be kept ("Session 4 - Review")
+    rather than silently lost. The status is dropped from a merged row: it belonged to one
+    of the visits and would read as if it spoke for all of them.
+    """
+    merged: Dict[str, Dict[str, Any]] = {}
+    for v in sorted(visits, key=lambda x: x["time"]):
+        key = v["lead_id"] or v["client_name"].strip().lower()
+        hit = merged.get(key)
+        if hit is None:
+            merged[key] = {**v, "labels": [v["label"]] if v["label"] else []}
+            continue
+        if v["label"] and v["label"] not in hit["labels"]:
+            hit["labels"].append(v["label"])
+        hit["done"] = hit["done"] or v["done"]
+        hit["status"] = ""
+    out = [{**row, "label": " - ".join(row.pop("labels"))} for row in merged.values()]
+    return sorted(out, key=lambda r: r["time"])
+
+
+async def _branch_suggestions(user: V3UserOut, on: str) -> List[Dict[str, Any]]:
+    """Every client the branch saw today, across all four books it runs at once.
+
+    An Online arm admin is a Branch Admin under another name but has no branch record --
+    see ONLINE_ARM_PRACTICE in deps.py -- so there is nothing to pre-fill and they write
+    the day up from the note and any clients they add by hand.
+    """
+    branch_id = (user.branch_id or "").strip()
+    if not branch_id:
+        return []
+    today = {"$regex": f"^{on}"}
+    visits: List[Dict[str, Any]] = []
+
+    for col, noun, source in (("sessions", "Session", "treatment"), ("rehab_sessions", "Rehab Day", "rehab")):
+        rows = await v3_col(col).find(
+            {"branch_id": branch_id, "slot_time": today},
+            {"_id": 0, "lead_id": 1, "lead_name": 1, "slot_time": 1, "status": 1,
+             "session_number": 1, "day_number": 1},
+        ).to_list(1000)
+        visits += [
+            {
+                "lead_id": r.get("lead_id") or "",
+                "client_name": r.get("lead_name") or "Unknown",
+                "time": str(r.get("slot_time") or "")[11:16],
+                "status": r.get("status") or "",
+                "source": source,
+                "label": f"{noun} {r.get('day_number') or r.get('session_number') or ''}".strip(),
+                # Ticked by default only where the day was actually marked done, exactly as
+                # a Physio's own report does it.
+                "done": r.get("status") == "completed",
+            }
+            for r in rows
+        ]
+
+    appts = await v3_col("appointments").find(
+        {"branch_id": branch_id, "slot_time": today, "status": {"$ne": "cancelled"}},
+        {"_id": 0, "lead_id": 1, "lead_name": 1, "patient_name": 1, "slot_time": 1,
+         "status": 1, "appt_kind": 1},
+    ).to_list(1000)
+    visits += [
+        {
+            "lead_id": a.get("lead_id") or "",
+            "client_name": a.get("lead_name") or a.get("patient_name") or "Unknown",
+            "time": str(a.get("slot_time") or "")[11:16],
+            "status": a.get("status") or "",
+            "source": "diet" if a.get("appt_kind") == "diet" else "consultation",
+            "label": "Diet" if a.get("appt_kind") == "diet" else "Consultation",
+            "done": True,
+        }
+        for a in appts
+    ]
+
+    reviews = await v3_col("reviews").find(
+        {"branch_id": branch_id, "review_date": on},
+        {"_id": 0, "lead_id": 1, "lead_name": 1, "review_time": 1, "status": 1},
+    ).to_list(1000)
+    visits += [
+        {
+            "lead_id": r.get("lead_id") or "",
+            "client_name": r.get("lead_name") or "Unknown",
+            "time": r.get("review_time") or "",
+            "status": r.get("status") or "",
+            "source": "review",
+            "label": "Review",
+            "done": True,
+        }
+        for r in reviews
+    ]
+
+    return _one_row_per_client(visits)
+
+
+# Which pre-fill each kind of report starts from.
+SUGGESTIONS = {
+    KIND_PHYSIO: _physio_suggestions,
+    KIND_CONSULTANT: _consultant_suggestions,
+    KIND_BRANCH: _branch_suggestions,
+}
+
+
 def _public(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not row:
         return None
@@ -179,7 +295,7 @@ async def my_eod_today(user: V3UserOut = Depends(v3_current_user)):
     on = clinic_today()
     if not kind:
         return {"eligible": False, "kind": None, "date": on, "suggestions": [], "report": None}
-    suggestions = await (_physio_suggestions(user, on) if kind == KIND_PHYSIO else _consultant_suggestions(user, on))
+    suggestions = await SUGGESTIONS[kind](user, on)
     report = await v3_col(COLLECTION).find_one({"user_id": user.id, "date": on}, {"_id": 0})
     return {"eligible": True, "kind": kind, "date": on, "suggestions": suggestions, "report": _public(report)}
 
@@ -188,7 +304,7 @@ async def my_eod_today(user: V3UserOut = Depends(v3_current_user)):
 async def submit_eod_today(payload: EodReportIn, user: V3UserOut = Depends(v3_current_user)):
     kind = report_kind(user.role)
     if not kind:
-        raise HTTPException(status_code=403, detail="EOD reports are written by Physios and Consultants")
+        raise HTTPException(status_code=403, detail="EOD reports are written by Physios, Consultants and Branch Admins")
     entries = clean_entries([e.model_dump() for e in payload.entries])
     summary = _text(payload.summary, MAX_SUMMARY)
     if not entries and not summary:
@@ -219,8 +335,8 @@ async def list_eod_reports(
     date_to: Optional[str] = Query(None),
     user: V3UserOut = Depends(v3_require_roles("super_admin")),
 ):
-    """Every report filed between two clinic days (inclusive), and each day a Physio or
-    Consultant clocked in on without filing one.
+    """Every report filed between two clinic days (inclusive), and each day a Physio,
+    Consultant or Branch Admin clocked in on without filing one.
 
     `date` is one day. `date_from`/`date_to` are a range, either end open. Nothing at all
     is every report there is -- the "All" filter.
@@ -246,7 +362,7 @@ async def list_eod_reports(
     missing = [c for c in clocked if c.get("user_id") and (c["user_id"], c.get("date")) not in filed]
     user_ids = sorted({c["user_id"] for c in missing})
     staff = await v3_col("users").find(
-        {"id": {"$in": user_ids}, "role": {"$in": sorted(PHYSIO_ROLES | HEAD_PHYSIO_ROLES)}},
+        {"id": {"$in": user_ids}, "role": {"$in": sorted(PHYSIO_ROLES | HEAD_PHYSIO_ROLES | BRANCH_ADMIN_ROLES)}},
         {"_id": 0, "id": 1, "full_name": 1, "role": 1, "branch_id": 1},
     ).to_list(5000) if user_ids else []
     by_id = {s["id"]: s for s in staff}
