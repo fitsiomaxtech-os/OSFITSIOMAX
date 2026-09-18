@@ -14,7 +14,6 @@ import {
   Clock,
   Eye,
   FileText,
-  PhoneCall,
   RefreshCw,
   Search,
   Send,
@@ -50,12 +49,12 @@ import {
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
-// A patient's contact details are not printed anywhere on this board. The physio works
-// from the name, the patient number and the course; the number itself stays with the
-// branch. Calling and WhatsApp still work from the Patients list — those buttons hand the
-// stored number straight to the phone without ever showing it — so nothing that needs the
-// number is lost. Don't add phone, alternative phone or email back to a row, a popup or a
-// search box here; Branch Admin and Pre-Sales are where those are read.
+// A patient's contact details are not printed anywhere on this board, and the physio
+// cannot reach a patient from it either. The Patients list used to carry the number with
+// Call and WhatsApp buttons beside it; that whole column is gone — the physio works from
+// the name, the patient number and the course, and the number stays with the branch.
+// Don't add phone, alternative phone or email back to a row, a popup, a search box or a
+// dial button here; Branch Admin and Pre-Sales are where those are read and called.
 //
 // The board's three views, rendered twice: an underlined strip along the top on a
 // desk, a fixed bar at the bottom on a phone. Treatment and Patients keep their old
@@ -219,26 +218,6 @@ const weekDatesFor = (iso) => {
   return Array.from({ length: 7 }, (_, i) => shiftIso(sunday, i));
 };
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
-
-/** A stored phone in E.164 for wa.me, which takes digits only — no +, spaces or the
- *  "p:" prefix some records carry. A bare 10-digit number is assumed Indian, matching
- *  every other number in the system; anything already carrying a country code is left
- *  alone. Returns "" when there's nothing dialable, so the button can hide itself. */
-const waNumber = (raw) => {
-  const digits = String(raw || "").replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.length === 10) return `91${digits}`;
-  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
-  return digits;
-};
-
-/** lucide has no WhatsApp glyph and the brand mark can't be approximated with a generic
- *  chat bubble — staff scan for this exact shape. */
-const WhatsAppIcon = ({ className }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884M20.52 3.449C18.24 1.245 15.24.03 12.045 0c-6.472 0-11.734 5.262-11.736 11.735a11.7 11.7 0 001.567 5.87L.057 24l6.607-1.732a11.7 11.7 0 005.376 1.37h.005c6.472 0 11.734-5.262 11.735-11.734a11.68 11.68 0 00-3.26-8.457" />
-  </svg>
-);
 
 // Tile colours. The money boards give every card its own hex and read it back for the
 // figure, the corner disc and the selected ring, so the colour is the card's identity
@@ -2933,12 +2912,11 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
         // A table, like the other lists on the board, rather than one tall card per
         // patient. The arrow opens the patient's detail in a popup; the row opens it too.
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white" data-testid="physio-patients-table">
-          <table className="w-full min-w-[760px] text-left">
+          <table className="w-full min-w-[640px] text-left">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/60 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                 <th className="px-4 py-3">Patient</th>
                 <th className="px-4 py-3">Program</th>
-                <th className="px-4 py-3">Contact</th>
                 <th className="px-4 py-3 text-center">Done</th>
                 <th className="px-4 py-3 text-center">Left</th>
                 <th className="px-4 py-3 text-center">Total</th>
@@ -2979,37 +2957,6 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
                           </span>
                         )}
                         {!(p.tracks || []).length && !(p.review_number > 0) && <span className="text-slate-300">—</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-slate-600">{p.phone || <span className="text-slate-300">—</span>}</span>
-                        <button
-                          type="button"
-                          title="Call"
-                          disabled={!p.phone}
-                          onClick={(e) => { e.stopPropagation(); if (p.phone) window.location.href = `tel:${p.phone.replace(/[^0-9+]/g, "")}`; }}
-                          className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          data-testid={`physio-patient-call-${p.lead_id}`}
-                        >
-                          <PhoneCall className="h-3 w-3" />
-                        </button>
-                        <button
-                          type="button"
-                          title="WhatsApp"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const num = waNumber(p.phone);
-                            if (!num) { toast.error("This patient has no phone number on file"); return; }
-                            // Same-tab navigation: window.open(..., "_blank") can leave mobile
-                            // browsers on a blank tab on the way back from WhatsApp.
-                            window.location.href = `https://wa.me/${num}`;
-                          }}
-                          className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-[#25D366] hover:bg-slate-50"
-                          data-testid={`physio-patient-whatsapp-${p.lead_id}`}
-                        >
-                          <WhatsAppIcon className="h-3.5 w-3.5" />
-                        </button>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-center text-sm font-semibold text-emerald-600">{p.completed_sessions}</td>
