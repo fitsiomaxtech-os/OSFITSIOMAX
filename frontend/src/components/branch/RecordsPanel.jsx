@@ -166,7 +166,15 @@ const BranchTransferRecords = ({ branchId }) => {
         <QuickDateFilterBar value={quickDate} onChange={setQuickDate} testid="transfer-records-quick-date" showCustom={false} />
         <DateFilterPopover value={dateFilter} onChange={applyDateFilter} testid="transfer-records-date-filter" centered iconOnly />
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={load} disabled={loading} title="Refresh" data-testid="transfer-records-refresh">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={load}
+            disabled={loading}
+            className="border-slate-500 bg-slate-500 text-white hover:bg-slate-600 hover:text-white"
+            title="Refresh"
+            data-testid="transfer-records-refresh"
+          >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
           <Button
@@ -214,7 +222,7 @@ const BranchTransferRecords = ({ branchId }) => {
           <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[960px] text-sm">
-                <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
                   <tr>
                     <th className="px-4 py-2.5 font-semibold">Patient</th>
                     <th className="px-4 py-2.5 font-semibold">Contact</th>
