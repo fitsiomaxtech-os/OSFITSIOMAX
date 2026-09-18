@@ -18,7 +18,6 @@ import {
   Search,
   Send,
   Star,
-  UserCheck,
   UserCircle,
   Users,
   UserX,
@@ -261,7 +260,6 @@ const TILE = {
   pending: "#d97706",
   review: "#7c3aed",
   request: "#db2777",
-  finished: "#4f46e5",
 };
 
 // Every 7th treatment day is a review milestone — reviewsSoFar counts how many the patient
@@ -833,18 +831,22 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           the page, and boxing the same cards here made two identical controls look like
           two different ones. The heading stays: it names the range the counts answer to.
 
-          Day board only. Every figure on these four is scoped to a date range, and above
+          Day board only. Every figure on these three is scoped to a date range, and above
           a caseload list that is not tied to a date they would be answering a question
           nobody on that tab is asking. */}
       {subTab === "all" && (
       <div className="mb-4" data-testid="physio-treatment-summary">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall Treatment"}</p>
-        {/* Four across at every width, phone included. It used to fold to two by two
-            below sm, which cost the summary a second row on the screen that has the least
-            of it — the phone is where the physio actually reads this. The cards carry
-            `compact` to survive the ~70px that leaves them: below sm the corner disc steps
-            out and the label takes the whole card. */}
-        <div className="grid grid-cols-4 gap-1.5 sm:gap-3">
+        {/* Three across at every width, phone included. It used to fold two by two below
+            sm, which cost the summary a second row on the screen that has the least of it.
+            The cards carry `compact` for the narrow width a phone leaves them: below sm the
+            corner disc steps out and the label takes the whole card.
+
+            Treatment Completed used to be a fourth card here. It counted finished patients,
+            not days — the one figure in the row that did not answer to the date above it —
+            and the Completed pill in the tool bar already opens that same list with its
+            count beside it. */}
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
           <StatTile
             compact
             icon={Calendar} label="Total Days" value={filterStats.total} color={TILE.total}
@@ -860,17 +862,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
             compact
             icon={Clock} label="Pending" value={filterStats.pending} sub="Days left" color={TILE.pending}
             onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
-          />
-          {/* Opens the Completed sub-tab rather than swapping this list underneath the
-              week strip. It always showed a set of patients that had nothing to do with
-              the day selected above it, which is exactly what a sub-tab is for — and the
-              banner that used to apologise for the mismatch is gone with it. */}
-          <StatTile
-            compact
-            icon={UserCheck} label="Treatment Completed" value={courses.done} color={TILE.finished}
-            sub={courses.patients ? `of ${courses.patients} patients` : null}
-            onClick={() => setSubTab("completed")} active={false}
-            testid="physio-stat-treatment-completed"
           />
         </div>
       </div>
