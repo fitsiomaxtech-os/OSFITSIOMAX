@@ -94,8 +94,15 @@ export const manualToIso = (text) => {
  * When a filter is active the label comes back regardless. "Date Filter" is decoration
  * once you know where the button is; "Last 90 Days" is the state of the screen you are
  * reading, and hiding that would leave numbers filtered with nothing saying so.
+ *
+ * `phoneIconOnly` holds that squaring below sm even while a filter IS active, and only
+ * for the `centered` trigger. It is for a phone toolbar built as a single row: a label
+ * like "12 Sep 2026 - 15 Sep 2026" appearing mid-row shoves everything beside it off the
+ * edge, which is a worse way to lose the state than not printing it. The active styling
+ * and the clear X both stay, so the control still reads as filtering, and the label is
+ * back at sm and up where there is room for it.
  */
-export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false, placeholder = "Date Filter", iconOnly = false, large = false }) => {
+export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false, placeholder = "Date Filter", iconOnly = false, large = false, phoneIconOnly = false }) => {
   const [open, setOpen] = useState(false);
   const [showRange, setShowRange] = useState(false);
   const [rangeFrom, setRangeFrom] = useState("");
@@ -339,11 +346,14 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
           variant="outline"
           title={iconOnly ? activeLabel : undefined}
           aria-label={iconOnly ? activeLabel : undefined}
-          className={`h-10 ${iconOnly && !isActive ? "w-10 px-0" : ""} ${isActive ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}`}
+          className={`h-10 ${iconOnly && !isActive ? "w-10 px-0" : ""} ${
+            phoneIconOnly && iconOnly && isActive ? "w-10 px-0 sm:w-auto sm:px-4" : ""
+          } ${isActive ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}`}
           data-testid={`${testid}-btn`}
         >
-          <CalendarIcon className={`h-4 w-4 ${iconOnly && !isActive ? "" : "mr-2"}`} />
-          {(!iconOnly || isActive) && activeLabel}
+          <CalendarIcon className={`h-4 w-4 ${iconOnly && !isActive ? "" : phoneIconOnly && iconOnly ? "sm:mr-2" : "mr-2"}`} />
+          {(!iconOnly || isActive) &&
+            (phoneIconOnly && iconOnly ? <span className="hidden sm:inline">{activeLabel}</span> : activeLabel)}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="relative w-auto max-w-[calc(100vw-2rem)] p-0" align="start" data-testid={`${testid}-panel`}>

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeftRight, ChevronRight, Download, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeftRight, ChevronRight, Download, RefreshCw, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -53,6 +53,10 @@ const BranchTransferRecords = ({ branchId }) => {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  // Phone only: the field is behind an icon so the toolbar fits one row. Desktop ignores
+  // this entirely -- the field is always on screen there, at any value of searchOpen.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef(null);
   const [direction, setDirection] = useState("all");
   const [open, setOpen] = useState(null);
   // The same pair Branch Leads carries: a preset row and a calendar, combined by overlap.
@@ -125,6 +129,17 @@ const BranchTransferRecords = ({ branchId }) => {
     ], `branch-transfer-records-${new Date().toISOString().slice(0, 10)}.csv`);
   };
 
+  // Opening it puts the cursor in the field -- it took a tap to get there, and a second
+  // tap to type in it is the kind of thing that makes a phone toolbar feel broken.
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
+
+  const toggleSearch = () => {
+    if (searchOpen) setSearch("");
+    setSearchOpen((v) => !v);
+  };
+
   if (!branchId) {
     return <p className="py-10 text-center text-sm text-slate-400">Transfer records are kept per branch.</p>;
   }
@@ -152,10 +167,32 @@ const BranchTransferRecords = ({ branchId }) => {
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+      {/* One line on a phone, three before this: the field had a line, the dates had a
+          line, and the two buttons had a third. Nothing here is new -- the same search,
+          both date controls, refresh and download -- but a 360px line cannot hold them at
+          desk sizing, so below sm the field hides behind its own icon, the dates go micro,
+          and refresh and download shrink to 36px glyphs. sm and up is byte-for-byte the
+          toolbar that was here: wrapping row, full field, worded Download Excel. */}
+      <div className="flex flex-nowrap items-center gap-1 sm:flex-wrap sm:gap-2">
+        {/* Phone only. Opening it swaps the presets out for the field rather than adding
+            the second line this whole change exists to remove; closing clears the term,
+            so a filter can never be left applied with nothing on screen saying so. */}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={toggleSearch}
+          className={`h-9 w-9 shrink-0 p-0 sm:hidden ${searchOpen ? "border-sky-500 bg-sky-50 text-sky-700" : ""}`}
+          title={searchOpen ? "Close search" : "Search"}
+          aria-label={searchOpen ? "Close search" : "Search"}
+          aria-expanded={searchOpen}
+          data-testid="transfer-records-search-toggle"
+        >
+          {searchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+        </Button>
+        <div className={`relative min-w-0 flex-1 sm:block sm:min-w-[200px] sm:max-w-xs ${searchOpen ? "" : "hidden"}`}>
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
+            ref={searchRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search patient, phone, branch..."
@@ -163,16 +200,21 @@ const BranchTransferRecords = ({ branchId }) => {
             data-testid="transfer-records-search"
           />
         </div>
-        <QuickDateFilterBar value={quickDate} onChange={setQuickDate} testid="transfer-records-quick-date" showCustom={false} />
-        <DateFilterPopover value={dateFilter} onChange={applyDateFilter} testid="transfer-records-date-filter" centered iconOnly />
-        <div className="ml-auto flex items-center gap-2">
+        <div className={`min-w-0 flex-1 sm:flex-none sm:block ${searchOpen ? "hidden" : ""}`}>
+          <QuickDateFilterBar value={quickDate} onChange={setQuickDate} testid="transfer-records-quick-date" showCustom={false} micro />
+        </div>
+        <span className="shrink-0 [&_button]:h-9 sm:[&_button]:h-10">
+          <DateFilterPopover value={dateFilter} onChange={applyDateFilter} testid="transfer-records-date-filter" centered iconOnly phoneIconOnly />
+        </span>
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
           <Button
             variant="outline"
             size="sm"
             onClick={load}
             disabled={loading}
-            className="border-slate-500 bg-slate-500 text-white hover:bg-slate-600 hover:text-white"
+            className="h-9 w-9 p-0 border-slate-500 bg-slate-500 text-white hover:bg-slate-600 hover:text-white sm:h-8 sm:w-auto sm:px-3"
             title="Refresh"
+            aria-label="Refresh"
             data-testid="transfer-records-refresh"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -181,11 +223,12 @@ const BranchTransferRecords = ({ branchId }) => {
             size="sm"
             onClick={exportSheet}
             disabled={!rows.length}
-            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            className="h-9 w-9 p-0 bg-emerald-600 text-white hover:bg-emerald-700 sm:h-8 sm:w-auto sm:px-3"
             title="Download as an Excel sheet"
+            aria-label="Download as an Excel sheet"
             data-testid="transfer-records-download"
           >
-            <Download className="mr-1.5 h-4 w-4" /> Download Excel
+            <Download className="h-4 w-4 sm:mr-1.5" /><span className="hidden sm:inline">Download Excel</span>
           </Button>
         </div>
       </div>

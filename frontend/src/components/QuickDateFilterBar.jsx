@@ -33,6 +33,12 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
  *            board that reaches a DateFilterPopover some other way — with it false this
  *            row can express nothing but its own five ranges, so a board without a second
  *            control would lose arbitrary ranges altogether rather than relocate them.
+ *  - micro: for a phone toolbar that has to hold this row AND other controls on one
+ *            line. Below sm the five labels drop to All / 1D / 1W / 1M / 90d and the
+ *            buttons to h-9 with hairline padding, which brings the row to about 150px
+ *            against the ~290 `short` needs -- the difference between fitting beside a
+ *            search icon, a calendar, a refresh and a download, and not. The full label
+ *            is on `title`, and sm and up is untouched: same h-10 buttons, same words.
  */
 
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
@@ -63,11 +69,11 @@ const daysBack = (d, n) => { const x = startOfDay(d); x.setDate(x.getDate() - n)
  * thing somebody opening this board is most likely to be checking.
  */
 export const QUICK_DATE_PRESETS = [
-  { key: "all", label: "All", short: "All", range: () => ({ from: null, to: null }) },
-  { key: "today", label: "Today", short: "Today", range: () => ({ from: startOfDay(new Date()), to: endOfDay(new Date()) }) },
-  { key: "this_week", label: "This Week", short: "Week", range: () => ({ from: mondayOf(new Date()), to: endOfDay(sundayOf(new Date())) }) },
-  { key: "this_month", label: "This Month", short: "Month", range: () => { const t = new Date(); return { from: startOfDay(new Date(t.getFullYear(), t.getMonth(), 1)), to: endOfDay(new Date(t.getFullYear(), t.getMonth() + 1, 0)) }; } },
-  { key: "last_90", label: "Last 90 Days", short: "90d", range: () => ({ from: daysBack(new Date(), 89), to: endOfDay(new Date()) }) },
+  { key: "all", label: "All", short: "All", micro: "All", range: () => ({ from: null, to: null }) },
+  { key: "today", label: "Today", short: "Today", micro: "1D", range: () => ({ from: startOfDay(new Date()), to: endOfDay(new Date()) }) },
+  { key: "this_week", label: "This Week", short: "Week", micro: "1W", range: () => ({ from: mondayOf(new Date()), to: endOfDay(sundayOf(new Date())) }) },
+  { key: "this_month", label: "This Month", short: "Month", micro: "1M", range: () => { const t = new Date(); return { from: startOfDay(new Date(t.getFullYear(), t.getMonth(), 1)), to: endOfDay(new Date(t.getFullYear(), t.getMonth() + 1, 0)) }; } },
+  { key: "last_90", label: "Last 90 Days", short: "90d", micro: "90d", range: () => ({ from: daysBack(new Date(), 89), to: endOfDay(new Date()) }) },
 ];
 
 const quickFilter = (p) => (p.key === "all" ? null : { key: p.key, label: p.label, ...p.range() });
@@ -105,7 +111,7 @@ export const intersectDateFilters = (a, b) => {
   return { key: `${a.key}+${b.key}`, label: `${a.label} · ${b.label}`, from, to };
 };
 
-export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inline = false, showCustom = true }) => {
+export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inline = false, showCustom = true, micro = false }) => {
   // What lights up. All is the resting state, so a cleared filter lights All rather than
   // leaving the row with nothing selected and no way to tell it apart from a custom range.
   const activeKey = value?.key || "all";
@@ -130,8 +136,11 @@ export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inl
           type="button"
           onClick={() => onChange(quickFilter(p))}
           aria-pressed={activeKey === p.key}
-          className={`h-10 min-w-0 flex-1 truncate rounded-md px-1 text-[11px] font-medium transition sm:flex-none ${
-            inline ? "sm:px-2 sm:text-xs 2xl:px-2.5 2xl:text-[13px]" : "sm:px-3 sm:text-sm"
+          title={micro ? p.label : undefined}
+          className={`min-w-0 flex-1 truncate rounded-md font-medium transition sm:flex-none ${
+            micro
+              ? "h-9 px-0.5 text-[10px] sm:h-10 sm:px-3 sm:text-sm"
+              : `h-10 px-1 text-[11px] ${inline ? "sm:px-2 sm:text-xs 2xl:px-2.5 2xl:text-[13px]" : "sm:px-3 sm:text-sm"}`
           } ${
             activeKey === p.key
               ? "bg-sky-600 text-white"
@@ -139,7 +148,7 @@ export const QuickDateFilterBar = ({ value, onChange, testid = "quick-date", inl
           }`}
           data-testid={`${testid}-preset-${p.key}`}
         >
-          <span className="sm:hidden">{p.short}</span>
+          <span className="sm:hidden">{micro ? p.micro : p.short}</span>
           <span className="hidden sm:inline">{p.label}</span>
         </button>
       ))}
