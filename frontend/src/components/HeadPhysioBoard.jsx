@@ -537,7 +537,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               than the dispatched reviews. */}
           {workTab === "client_reviews" && (
             <div data-testid="hp-work-client-reviews">
-              <ClientReviewsPanel />
+              {/* Held to this Consultant's own branch, and with no branch picker to leave
+                  it: a Consultant at Parrys reads Parrys, not the company. "all" is the
+                  no-branch-assigned case, where there is nothing to hold them to. */}
+              <ClientReviewsPanel branchId={effectiveBranchId === "all" ? null : effectiveBranchId} mine={mine} />
             </div>
           )}
 

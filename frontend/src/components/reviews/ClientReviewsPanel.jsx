@@ -3,10 +3,10 @@
  * Consultant Review (the default tab: from each completed 7-day Review, optional) and Physio
  * Review (from each completed session, required). Both also take anytime reviews.
  *
- * One panel, mounted in two places: HR Admin (Super Admin and BDE, every branch, with a
- * branch filter) and the Branch Admin board (one branch, passed in as branchId). The
- * server decides the scope — a Branch Admin only ever gets their own branch back — so this
- * file never has to.
+ * One panel, mounted in three places: HR Admin (Super Admin and BDE, every branch, with a
+ * branch filter), the Branch Admin board (one branch, passed in as branchId) and a
+ * Consultant's own board (`mine`, their branch). The server decides the scope — a Branch
+ * Admin only ever gets their own branch back — so this file never has to.
  *
  * See backend/routers/v3_client_reviews.py.
  */
@@ -478,7 +478,14 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
   );
 };
 
-export const ClientReviewsPanel = ({ branchId = null }) => {
+/**
+ * `mine` — a Consultant reading their own board rather than management reading a desk.
+ * Two filters go away with it: the branch picker, because this reader has one branch and
+ * nothing to say about the others, and the person picker on the Consultant tab, where the
+ * only consultant listed would be themself. What is left is the one pick that answers a
+ * question they actually have: which Physio.
+ */
+export const ClientReviewsPanel = ({ branchId = null, mine = false }) => {
   const [data, setData] = useState({ consultant: [], physio: [], summary: {} });
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState([]);
@@ -505,11 +512,13 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (branchId) return;
+    if (branchId || mine) return;
     getBranches().then((rows) => setBranches(rows || [])).catch(() => {});
-  }, [branchId]);
+  }, [branchId, mine]);
 
   const meta = KINDS.find((k) => k.key === kind);
+  // A Consultant picks a Physio, never a consultant — see `mine` above.
+  const showPerson = !mine || kind === "physio";
   const reviews = useMemo(() => data[kind] || [], [data, kind]);
   const q = search.trim().toLowerCase();
 
@@ -571,10 +580,10 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
               </button>
             ))}
           </div>
-          {!branchId && (
+          {!branchId && !mine && (
             <BranchFilter branches={branches} value={branch} onChange={setBranch} />
           )}
-          <PersonFilter people={people} value={person} onChange={setPerson} meta={meta} />
+          {showPerson && <PersonFilter people={people} value={person} onChange={setPerson} meta={meta} />}
           <div className="relative w-full min-w-0 sm:min-w-[180px] sm:flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search client, ${meta.person.toLowerCase()}...`} className="h-9 pl-9" data-testid="client-reviews-search" />
