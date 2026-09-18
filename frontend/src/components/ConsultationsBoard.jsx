@@ -151,9 +151,6 @@ const isoDate = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
 const longDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 /** "2026-08-03" -> "Monday, 3 Aug" — how a treatment day reads on the plan. */
 const dayLabel = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "short" });
-/** "2026-08-03" -> "Mon, 3 Aug" — the same day on a plan card, which only has a third
- *  of a phone's width to say it in. */
-const shortDayLabel = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" });
 /** "2026-09-09" -> "Wed, 9 Sept" for the appointment chip, with the year added only when
  *  it is not the current one.
  *
@@ -11943,43 +11940,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                                     </div>
                                   );
                                 })}
-                              </div>
-                            )}
-
-                            {treatmentPlan.length > 0 && (
-                              <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="cons-treatment-plan">
-                                {/* One run of day cards, in the order they were fixed. The week
-                                    the package sells them in is already on the header above, and
-                                    repeating it here broke a short plan into rows of one or two.
-                                    Three to a row: as pills on one flowing line each carried the
-                                    day, the date, both ends of the slot and its paid state on a
-                                    single line, which no phone has the width for — stacked inside
-                                    a card, the same facts fit a third of the screen. */}
-                                <div className="grid max-h-40 grid-cols-3 gap-1.5 overflow-y-auto lg:grid-cols-4">
-                                  {treatmentPlan.map((p) => {
-                                    const paid = isPaidSession(p.day);
-                                    return (
-                                      <button
-                                        key={p.slot}
-                                        type="button"
-                                        onClick={() => togglePickedSlot(p.slot)}
-                                        className={`relative flex flex-col items-center gap-0.5 rounded-lg border-2 bg-white px-1 py-1.5 text-[10px] font-bold leading-tight transition ${
-                                          paid
-                                            ? "border-emerald-300 text-emerald-700 hover:border-emerald-500"
-                                            : "border-rose-300 text-rose-700 hover:border-rose-500"
-                                        }`}
-                                        title={`${dayLabel(p.date)} · ${to12h(p.time)} – ${endTime12h(p.time, sessionMinutes)} · ${paid ? "paid" : "unpaid"} — tap to remove`}
-                                        data-testid={`cons-slot-picked-${p.slot}`}
-                                      >
-                                        <X className="absolute right-0.5 top-0.5 h-3 w-3 text-slate-300" />
-                                        <span className={`rounded-full px-1.5 py-0.5 text-[9px] text-white ${paid ? "bg-emerald-600" : "bg-rose-600"}`}>Day {p.day}</span>
-                                        <span className="text-slate-600">{shortDayLabel(p.date)}</span>
-                                        <span className="text-slate-500">{to12h(p.time)}</span>
-                                        <span className={`text-[9px] font-extrabold ${paid ? "text-emerald-600" : "text-rose-600"}`}>{paid ? "PAID" : "UNPAID"}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
                               </div>
                             )}
                           </>
