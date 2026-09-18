@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, CheckCircle2, Minus, RotateCcw, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Check, CheckCircle2, ChevronRight, Minus, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -73,6 +73,7 @@ const groupByLead = (rows) => {
       ...g,
       head: g.items[0],
       total: g.items.reduce((sum, t) => sum + (Number(t.amount) || 0), 0),
+      categories: uniq(g.items.map((t) => t.category)),
       modes: uniq(g.items.map((t) => modeLabel(t.payment_mode))),
       approvers: uniq(g.items.map((t) => t.approved_by)),
       dateLabel: dates.length === 0 ? "" : dates[0] === dates[dates.length - 1] ? dates[0] : `${dates[0]} – ${dates[dates.length - 1]}`,
@@ -280,6 +281,113 @@ const BulkApproveModal = ({ count, total, saving, onClose, onConfirm }) => (
     </div>
   </div>
 );
+
+/**
+ * The approved ledger, as a table — the same shape HR Admin's candidate list has, so a
+ * list of records reads the same way on both desks: a header naming the columns, a row
+ * per record, an action at the end of it and the arrow that opens it.
+ *
+ * A row is a lead, not a payment. The arrow opens it onto the payments underneath, which
+ * is where a single fee can be sent back on its own; the row's own Undo returns all of
+ * them. Nothing else on this board drills in, so opening happens in place rather than
+ * navigating away.
+ */
+const ApprovedTable = ({ groups, busyId, onUndo }) => {
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (key) => setOpen((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[820px] text-sm" data-testid="finance-approved-table">
+        <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+          <tr>
+            <th className="px-4 py-2.5 font-semibold">Patient</th>
+            <th className="px-4 py-2.5 font-semibold">Branch</th>
+            <th className="px-4 py-2.5 font-semibold">Payments</th>
+            <th className="px-4 py-2.5 font-semibold">Mode</th>
+            <th className="px-4 py-2.5 font-semibold">Date</th>
+            <th className="px-4 py-2.5 font-semibold">Approved By</th>
+            <th className="px-4 py-2.5 text-right font-semibold">Amount</th>
+            <th className="px-4 py-2.5" />
+            <th className="px-4 py-2.5" />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {groups.map((g) => {
+            const isOpen = open.has(g.key);
+            return (
+              <Fragment key={g.key}>
+                <tr
+                  onClick={() => toggle(g.key)}
+                  className={`cursor-pointer hover:bg-slate-50 ${isOpen ? "bg-slate-50" : ""}`}
+                  data-testid={`finance-approval-row-${g.key}`}
+                >
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-800">{g.head.patient_name}</p>
+                    {g.items.length > 1 && (
+                      <p className="text-[11px] font-semibold text-emerald-600">{g.items.length} payments</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{g.head.branch_name || "—"}</td>
+                  <td className="px-4 py-3 capitalize text-slate-600">{g.categories.join(", ")}</td>
+                  <td className="px-4 py-3 text-slate-600">{g.modes.join(", ") || "—"}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-slate-500">{g.dateLabel || "—"}</td>
+                  <td className="px-4 py-3 text-slate-500">{g.approvers.join(", ") || "—"}</td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-600">{fmt(g.total)}</td>
+                  {/* The click that acts on a row must not also open it. */}
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onUndo(g)}
+                      disabled={busyId === g.key}
+                      data-testid={`finance-unapprove-${g.key}`}
+                    >
+                      <RotateCcw className="mr-1 h-3.5 w-3.5" />Undo
+                    </Button>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <ChevronRight
+                      className={`ml-auto h-4 w-4 text-slate-300 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                      data-testid={`finance-approval-arrow-${g.key}`}
+                    />
+                  </td>
+                </tr>
+                {isOpen && g.items.map((t) => (
+                  <tr key={t.id} className="bg-slate-50/60 text-xs" data-testid={`finance-approval-detail-${t.id}`}>
+                    <td className="px-4 py-2" />
+                    <td className="px-4 py-2 text-right text-slate-300">↳</td>
+                    <td className="px-4 py-2 capitalize text-slate-600">{t.category}</td>
+                    <td className="px-4 py-2 text-slate-600">{modeLabel(t.payment_mode)}</td>
+                    <td className="whitespace-nowrap px-4 py-2 text-slate-500">{(t.collected_at || "").slice(0, 10)}</td>
+                    <td className="px-4 py-2 text-slate-500">{t.approved_by || "—"}</td>
+                    <td className="px-4 py-2 text-right font-semibold text-emerald-600">{fmt(t.amount)}</td>
+                    <td className="px-4 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => onUndo({ key: t.id, items: [t] })}
+                        disabled={busyId === t.id}
+                        className="text-[11px] font-semibold text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline disabled:opacity-50"
+                        data-testid={`finance-unapprove-one-${t.id}`}
+                      >
+                        Undo this
+                      </button>
+                    </td>
+                    <td className="px-4 py-2" />
+                  </tr>
+                ))}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 /**
  * Accountant > Approvals — "new income collected" waiting on sign-off, every kind of
@@ -620,87 +728,35 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
             <p className="px-4 py-8 text-center text-sm text-slate-400">
               {view === "pending" ? "Nothing waiting on approval." : "Nothing approved yet."}
             </p>
-          ) : view === "approved" ? groupByLead(rows).map((g) => (
-            <div
-              key={g.key}
-              className="flex items-center justify-between gap-3 px-4 py-3"
-              data-testid={`finance-approval-row-${g.key}`}
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-800">
-                  {g.head.patient_name}
-                  {g.items.length > 1 && (
-                    <span className="ml-2 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                      {g.items.length} payments
-                    </span>
-                  )}
-                </p>
-                <p className="truncate text-xs text-slate-500">
-                  {g.head.branch_name || "—"} · {g.items.map((t, i) => (
-                    <span key={t.id}>
-                      {i > 0 && " + "}
-                      <span className="capitalize">{t.category}</span>
-                      {g.items.length > 1 && <> {fmt(t.amount)}</>}
-                    </span>
-                  ))} · {g.modes.join(", ") || "—"} · {g.dateLabel}
-                  {g.approvers.length > 0 && <> · approved by {g.approvers.join(", ")}</>}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <span className="text-sm font-bold text-emerald-600">{fmt(g.total)}</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => undo(g)}
-                  disabled={busyId === g.key}
-                  data-testid={`finance-unapprove-${g.key}`}
-                >
-                  <RotateCcw className="mr-1 h-3.5 w-3.5" />Undo
-                </Button>
-              </div>
-            </div>
-          )) : rows.map((tx) => (
+          ) : view === "approved" ? (
+            <ApprovedTable groups={groupByLead(rows)} busyId={busyId} onUndo={undo} />
+          ) : rows.map((tx) => (
             <div
               key={tx.id}
               className={`flex items-center justify-between gap-3 px-4 py-3 transition-colors ${selected.has(tx.id) ? "bg-emerald-50/50" : ""}`}
               data-testid={`finance-approval-row-${tx.id}`}
             >
-              {view === "pending" && (
-                <TickBox
-                  state={selected.has(tx.id) ? "on" : "off"}
-                  onChange={() => toggleOne(tx.id)}
-                  label={`Select ${tx.patient_name}'s payment`}
-                />
-              )}
+              <TickBox
+                state={selected.has(tx.id) ? "on" : "off"}
+                onChange={() => toggleOne(tx.id)}
+                label={`Select ${tx.patient_name}'s payment`}
+              />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-slate-800">{tx.patient_name}</p>
                 <p className="truncate text-xs text-slate-500">
                   {tx.branch_name || "—"} · <span className="capitalize">{tx.category}</span> · {modeLabel(tx.payment_mode)} · {(tx.collected_at || "").slice(0, 10)}
-                  {view === "approved" && tx.approved_by && <> · approved by {tx.approved_by}</>}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3">
                 <span className="text-sm font-bold text-emerald-600">{fmt(tx.amount)}</span>
-                {view === "pending" ? (
-                  <Button
-                    size="sm"
-                    onClick={() => setApproving(tx)}
-                    className="bg-emerald-600 hover:bg-emerald-700"
-                    data-testid={`finance-approve-${tx.id}`}
-                  >
-                    <CheckCircle2 className="mr-1 h-3.5 w-3.5" />Approve
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => undo(tx)}
-                    disabled={busyId === tx.id}
-                    data-testid={`finance-unapprove-${tx.id}`}
-                  >
-                    <RotateCcw className="mr-1 h-3.5 w-3.5" />Undo
-                  </Button>
-                )}
+                <Button
+                  size="sm"
+                  onClick={() => setApproving(tx)}
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                  data-testid={`finance-approve-${tx.id}`}
+                >
+                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" />Approve
+                </Button>
               </div>
             </div>
           ))}
