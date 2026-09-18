@@ -236,7 +236,7 @@ export const EodReportsPanel = () => {
 
         <BranchScope branches={branches} value={branchId} onChange={setBranchId} />
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {/* Lit with the picked day or range while one is set, with its own clear. */}
           <DateFilterPopover value={custom} onChange={setCustom} testid="eod-date-filter" centered iconOnly />
           <Button
@@ -296,8 +296,9 @@ export const EodReportsPanel = () => {
           <p className="mt-3 rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No EOD reports for this period.</p>
         ) : (
           <>
-            {/* Phones: one card per report. */}
-            <div className="mt-3 space-y-2 sm:hidden" data-testid="eod-report-list-mobile">
+            {/* Phones and tablets: one card per report. The table is min-w-[860px], so at
+                640px it was a seven-column row read through a sideways swipe. */}
+            <div className="mt-3 space-y-2 lg:hidden" data-testid="eod-report-list-mobile">
               {reports.map((r) => (
                 <button
                   key={r.id}
@@ -317,7 +318,7 @@ export const EodReportsPanel = () => {
               ))}
             </div>
 
-            <div className="mt-3 hidden overflow-hidden rounded-lg border border-slate-200 bg-white sm:block" data-testid="eod-report-list">
+            <div className="mt-3 hidden overflow-hidden rounded-lg border border-slate-200 bg-white lg:block" data-testid="eod-report-list">
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[860px] text-sm">
                   <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">

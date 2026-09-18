@@ -103,6 +103,19 @@ const Empty = ({ children }) => (
   <p className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">{children}</p>
 );
 
+/** A column heading and its figure, stacked — one cell of a table read on a phone.
+ *
+ *  The registers here are eight and nine columns wide, and a column heading is what makes
+ *  a figure mean something: "08:42" under nothing could be either end of the day. Behind a
+ *  sideways swipe the heading is the first thing off the screen, so on a phone each cell
+ *  carries its own. */
+const Cell = ({ label, children, tone = "text-slate-700" }) => (
+  <div className="min-w-0">
+    <p className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+    <p className={`truncate font-semibold ${tone}`}>{children}</p>
+  </div>
+);
+
 
 // ---------- filtering a roster ----------
 
@@ -154,9 +167,12 @@ const optionsFor = (rows, filters, key) => {
  *  lists grow. */
 const RosterFilterBar = ({ rows, filters, onChange, shown, total, testid }) => {
   const active = ROSTER_FILTERS.filter((f) => filters[f.key]);
+  // Two up on a phone rather than three across it: at a third of 360px "All Departments"
+  // arrives as "All Depa…", and a filter nobody can read is a filter nobody sets. The
+  // funnel goes with them -- it labels a row, and on a phone the row is a block.
   return (
-    <div className="flex flex-wrap items-center gap-2" data-testid={testid}>
-      <Filter className="h-4 w-4 shrink-0 text-slate-400" />
+    <div className="grid w-full grid-cols-2 items-center gap-2 sm:flex sm:w-auto sm:flex-wrap" data-testid={testid}>
+      <Filter className="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" />
       {ROSTER_FILTERS.map((f) => {
         const options = optionsFor(rows, filters, f.key);
         const value = filters[f.key];
@@ -170,7 +186,7 @@ const RosterFilterBar = ({ rows, filters, onChange, shown, total, testid }) => {
             value={value}
             onChange={(e) => onChange({ ...filters, [f.key]: e.target.value })}
             title={f.label}
-            className={`h-9 max-w-[190px] rounded-md border px-2 text-sm font-medium ${
+            className={`h-9 w-full min-w-0 rounded-md border px-2 text-sm font-medium sm:w-auto sm:max-w-[190px] ${
               value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"
             }`}
             data-testid={`${testid}-${f.key}`}
@@ -185,7 +201,7 @@ const RosterFilterBar = ({ rows, filters, onChange, shown, total, testid }) => {
           <Button variant="ghost" size="sm" onClick={() => onChange({ ...NO_FILTERS })} data-testid={`${testid}-clear`}>
             <X className="h-4 w-4" />Clear
           </Button>
-          <span className="text-xs font-medium text-slate-500" data-testid={`${testid}-count`}>
+          <span className="col-span-2 text-xs font-medium text-slate-500 sm:col-span-1" data-testid={`${testid}-count`}>
             Showing {shown} of {total}
           </span>
         </>
@@ -226,7 +242,7 @@ const MarkPicker = ({ value, disabled, onPick, testid }) => (
           disabled={disabled}
           title={disabled ? `${m.label} — locked by an approved request` : m.label}
           onClick={() => onPick(on ? "" : m.key)}
-          className={`h-7 min-w-[28px] rounded-md border px-1.5 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${on ? m.on : `bg-white ${m.off}`}`}
+          className={`h-8 min-w-[34px] rounded-md border px-1.5 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-40 sm:h-7 sm:min-w-[28px] ${on ? m.on : `bg-white ${m.off}`}`}
           data-testid={`${testid}-${m.key}`}
         >
           {m.short}
@@ -244,7 +260,7 @@ const TimeBox = ({ value, disabled, onChange, testid }) => (
     value={value || ""}
     disabled={disabled}
     onChange={(e) => onChange(e.target.value)}
-    className="h-8 w-[104px] rounded-md border border-slate-200 px-2 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-1 focus:ring-sky-300 disabled:bg-slate-50 disabled:text-slate-300"
+    className="h-9 w-full min-w-0 rounded-md border border-slate-200 px-2 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-1 focus:ring-sky-300 disabled:bg-slate-50 disabled:text-slate-300 sm:h-8 sm:w-[104px]"
     data-testid={testid}
   />
 );
@@ -301,13 +317,13 @@ const PERIODS = [
 /** The pill row that picks the span. Its own control rather than a select, because four
  *  choices that are switched between constantly should be one click, not two. */
 const PeriodPicker = ({ value, onChange, testid }) => (
-  <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" data-testid={testid}>
+  <div className="grid w-full grid-cols-4 gap-1 rounded-lg bg-slate-100 p-1 sm:flex sm:w-auto sm:items-center" data-testid={testid}>
     {PERIODS.map((p) => (
       <button
         key={p.key}
         type="button"
         onClick={() => onChange(p.key)}
-        className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+        className={`rounded-md px-2 py-1.5 text-xs font-semibold transition sm:px-3 sm:text-sm ${
           value === p.key ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
         }`}
         data-testid={`${testid}-${p.key}`}
@@ -349,8 +365,11 @@ const DayDetailModal = ({ row, date, onClose, onSaved }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="hr-att-detail">
+    // A sheet off the bottom of a phone rather than a box floated in the middle of one:
+    // centred, a panel this tall leaves a sliver of backdrop top and bottom and its
+    // controls sit where a thumb cannot reach. From sm it is the dialog it always was.
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-lg overflow-auto rounded-t-2xl bg-white p-4 shadow-xl sm:max-h-[90vh] sm:rounded-2xl sm:p-5" onClick={(e) => e.stopPropagation()} data-testid="hr-att-detail">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <EmployeeAvatar employee={row} size={40} />
@@ -450,7 +469,7 @@ const DayDetailModal = ({ row, date, onClose, onSaved }) => {
           )}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="ghost" onClick={onClose}>Close</Button>
           {!row.locked && (
             <Button onClick={save} disabled={saving} data-testid="hr-att-detail-save">
@@ -519,31 +538,31 @@ export const AttendanceTab = () => {
   return (
     <div className="space-y-4" data-testid="hr-attendance-tab">
       <Card>
-        <CardContent className="flex flex-wrap items-center gap-2 p-3">
+        <CardContent className="flex flex-col gap-2 p-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:p-3">
           <PeriodPicker value={period} onChange={setPeriod} testid="hr-att-period" />
 
           {period === "day" && (
-            <div className="w-[170px]">
+            <div className="w-full sm:w-[170px]">
               <MilkDateInput value={day} max={data?.today || todayIso()} accent="sky" iconLeft onChange={(e) => setDay(e.target.value)} data-testid="hr-att-date" />
             </div>
           )}
           {period === "range" && (
-            <div className="flex items-center gap-2">
-              <div className="w-[160px]">
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <div className="w-full min-w-0 sm:w-[160px]">
                 <MilkDateInput value={from} max={data?.today || todayIso()} accent="sky" iconLeft onChange={(e) => setFrom(e.target.value)} data-testid="hr-att-from" />
               </div>
               <span className="text-xs text-slate-400">to</span>
-              <div className="w-[160px]">
+              <div className="w-full min-w-0 sm:w-[160px]">
                 <MilkDateInput value={to} min={from} max={data?.today || todayIso()} accent="sky" iconLeft onChange={(e) => setTo(e.target.value)} data-testid="hr-att-to" />
               </div>
             </div>
           )}
           {period === "month" && (
-            <div className="flex items-center gap-1">
+            <div className="flex w-full items-center justify-center gap-1 sm:w-auto">
               <Button variant="outline" size="icon" onClick={() => setMonth(shiftMonth(month, -1))} title="Previous month" data-testid="hr-att-month-prev">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <span className="min-w-[140px] text-center text-sm font-semibold text-slate-800" data-testid="hr-att-month">{prettyMonth(month)}</span>
+              <span className="min-w-[140px] flex-1 text-center text-sm font-semibold text-slate-800 sm:flex-none" data-testid="hr-att-month">{prettyMonth(month)}</span>
               <Button
                 variant="outline"
                 size="icon"
@@ -557,11 +576,11 @@ export const AttendanceTab = () => {
             </div>
           )}
           {period === "year" && (
-            <div className="flex items-center gap-1">
+            <div className="flex w-full items-center justify-center gap-1 sm:w-auto">
               <Button variant="outline" size="icon" onClick={() => setYear(String(Number(year) - 1))} title="Previous year" data-testid="hr-att-year-prev">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <span className="min-w-[80px] text-center text-sm font-semibold text-slate-800" data-testid="hr-att-year">{year}</span>
+              <span className="min-w-[80px] flex-1 text-center text-sm font-semibold text-slate-800 sm:flex-none" data-testid="hr-att-year">{year}</span>
               <Button
                 variant="outline"
                 size="icon"
@@ -588,7 +607,7 @@ export const AttendanceTab = () => {
             size="sm"
             onClick={() => load(params)}
             disabled={loading}
-            className="ml-auto border border-slate-200 bg-slate-100 text-slate-700 shadow-none hover:bg-slate-200"
+            className="w-full border border-slate-200 bg-slate-100 text-slate-700 shadow-none hover:bg-slate-200 sm:ml-auto sm:w-auto"
             data-testid="hr-att-refresh"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
@@ -610,7 +629,82 @@ export const AttendanceTab = () => {
       </div>
 
       {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : (
-        <Card className="overflow-hidden">
+        <>
+        {/* Phones: one card per person. The register is eight columns wide and a row of it
+            is only useful read whole -- a status means nothing without the two times
+            beside it -- so behind a sideways swipe somebody sees a name and half a
+            department. The same rows, the same figures, stacked. */}
+        <div className="space-y-2 md:hidden" data-testid="hr-att-cards">
+          {shown.map((r) => {
+            // On a single day the card opens that person's day, as the eye does on the
+            // table. Over a span there is no one day to open, so it is not a button.
+            const openDay = single ? () => setOpened(r) : null;
+            return (
+              <div
+                key={r.employee_id}
+                role={openDay ? "button" : undefined}
+                tabIndex={openDay ? 0 : undefined}
+                onClick={openDay || undefined}
+                onKeyDown={openDay ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDay(); } } : undefined}
+                className={`rounded-xl border border-slate-200 bg-white p-3 ${openDay ? "cursor-pointer active:bg-slate-50" : ""}`}
+                data-testid={`hr-att-card-${r.employee_id}`}
+              >
+                <div className="flex items-start gap-3">
+                  <EmployeeAvatar employee={r} size={36} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-slate-800">{r.full_name}</p>
+                    <p className="truncate text-xs text-slate-400">
+                      {[r.designation || r.employee_code, r.department, r.branch_name].filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                  {single && <StatusBadge status={r.status} auto={r.auto} />}
+                </div>
+
+                <div className="mt-2 grid grid-cols-3 gap-2 border-t border-slate-100 pt-2 text-xs">
+                  {single ? (
+                    <>
+                      <Cell label="Check in">{r.check_in ? prettyTime(r.check_in) : "—"}</Cell>
+                      <Cell label="Check out">{r.check_out ? prettyTime(r.check_out) : "—"}</Cell>
+                    </>
+                  ) : (
+                    <>
+                      <Cell label="Days present">{r.present_days}</Cell>
+                      <Cell label="Days away" tone={r.away_days ? "text-rose-600" : "text-slate-400"}>{r.away_days}</Cell>
+                    </>
+                  )}
+                  <Cell label="Worked" tone="text-slate-800">{hours(r.worked_minutes)}</Cell>
+                </div>
+
+                {(r.break_minutes > 0 || r.permission_days > 0 || openDay) && (
+                  <div className="mt-2 flex items-center gap-x-3 gap-y-1 text-[11px]">
+                    {r.break_minutes > 0 && (
+                      <span className="inline-flex shrink-0 items-center gap-1 text-violet-600">
+                        <Coffee className="h-3.5 w-3.5 shrink-0" />
+                        <span className="font-semibold">{duration(r.break_minutes)}</span>
+                        <span className="text-slate-400">({r.break_count})</span>
+                      </span>
+                    )}
+                    {r.permission_days > 0 && (
+                      <span className="inline-flex min-w-0 items-center gap-1 text-sky-600" data-testid={`hr-att-card-permission-${r.employee_id}`}>
+                        <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate font-semibold">
+                          {duration(r.permission_minutes)} permission
+                          {!single && r.permission_days > 1 ? ` (${r.permission_days}d)` : ""}
+                        </span>
+                      </span>
+                    )}
+                    {openDay && <Eye className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-300" />}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {shown.length === 0 && (
+            <Empty>{filtered ? "Nobody matches these filters." : "No active employees."}</Empty>
+          )}
+        </div>
+
+        <Card className="hidden overflow-hidden md:block">
           <CardContent className="p-0">
             <div className="overflow-auto">
               <table className="min-w-full text-sm">
@@ -720,6 +814,7 @@ export const AttendanceTab = () => {
             </div>
           </CardContent>
         </Card>
+        </>
       )}
 
       {opened && (
@@ -1070,8 +1165,8 @@ const AddRecordModal = ({ employeeId, reasons, onClose, onSaved, onReasonAdded }
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="hr-pay-add-record">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-md overflow-auto rounded-t-2xl bg-white p-4 shadow-xl sm:max-h-none sm:rounded-2xl sm:p-5" onClick={(e) => e.stopPropagation()} data-testid="hr-pay-add-record">
         <div className="flex items-start justify-between gap-3">
           <p className="font-bold text-slate-800">Add salary record</p>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700" data-testid="hr-pay-add-record-close">
@@ -1140,7 +1235,7 @@ const AddRecordModal = ({ employeeId, reasons, onClose, onSaved, onReasonAdded }
           <Input id="hr-pay-rec-note" className="mt-1" value={note} onChange={(e) => setNote(e.target.value.slice(0, 300))} placeholder="Optional" data-testid="hr-pay-rec-note" />
         </div>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" disabled={saving || adding} onClick={save} data-testid="hr-pay-rec-save">
             <Check className="h-4 w-4" />{saving ? "Saving…" : "Add record"}
@@ -1199,11 +1294,13 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50" data-testid="hr-pay-employee-page">
       <div className="shrink-0 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex w-full max-w-5xl items-center gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex w-full max-w-5xl items-center gap-2 px-3 py-3 sm:gap-3 sm:px-6">
           <button type="button" onClick={onClose} className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" aria-label="Back to payroll" data-testid="hr-pay-employee-back">
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <EmployeeAvatar employee={{ full_name: slip.employee_name }} size={44} />
+          {/* The avatar is the one thing here a phone can spare: the name, the desk and
+              the figure all have to be read, and it is a coloured initial. */}
+          <span className="hidden sm:block"><EmployeeAvatar employee={{ full_name: slip.employee_name }} size={44} /></span>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-slate-800">{slip.employee_name}</h2>
             <p className="truncate text-xs text-slate-500">{slip.designation || slip.department || ""}</p>
@@ -1211,10 +1308,10 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
           </div>
           <div className="shrink-0 text-right">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Current salary</p>
-            <p className="text-lg font-extrabold text-emerald-600" data-testid="hr-pay-current-salary">{money(totals.current ?? slip.base)}</p>
+            <p className="text-base font-extrabold text-emerald-600 sm:text-lg" data-testid="hr-pay-current-salary">{money(totals.current ?? slip.base)}</p>
           </div>
         </div>
-        <div className="mx-auto flex w-full max-w-5xl gap-1.5 px-4 pb-2 sm:px-6" data-testid="hr-pay-emp-tabs">
+        <div className="mx-auto flex w-full max-w-5xl gap-1.5 px-3 pb-2 sm:px-6" data-testid="hr-pay-emp-tabs">
           {[
             { key: "payslip", label: "Salary / Payslip", icon: Wallet },
             { key: "history", label: "Salary History", icon: Clock3 },
@@ -1239,7 +1336,7 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl space-y-4 px-4 py-5 sm:px-6">
+        <div className="mx-auto w-full max-w-5xl space-y-4 px-3 py-4 sm:px-6 sm:py-5">
           {loading ? <p className="py-10 text-center text-sm text-slate-400">Loading…</p> : tab === "payslip" ? (
             <>
               <div>
@@ -1262,7 +1359,37 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
                       No month has been generated for them yet.
                     </p>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <>
+                    {/* Nine columns of figures is the one table here that cannot be
+                        swiped: the net is the last of them, and it is the column a month
+                        gets looked up for. So on a phone each month is a card with its
+                        net at the top. */}
+                    <div className="space-y-2 p-3 lg:hidden" data-testid="hr-pay-income-cards">
+                      {income.map((m) => (
+                        <div key={m.month} className="rounded-xl border border-slate-200 p-3" data-testid={`hr-pay-income-card-${m.month}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-700">{prettyMonth(m.month)}</p>
+                              <p className="text-[11px] text-slate-400">Base {money(m.base)} · {m.payable_days}/{m.days_in_month} days</p>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <p className="text-sm font-extrabold text-sky-700">{money(m.net_payable)}</p>
+                              <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${RUN_TONE[m.status] || "bg-slate-100 text-slate-500"}`}>
+                                {m.status || "—"}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-100 pt-2 text-[11px]">
+                            <span className="text-slate-600">Earned {money(m.earned)}</span>
+                            {Number(m.lop_days) > 0 && <span className="font-semibold text-rose-600">LOP {m.lop_days}</span>}
+                            {Number(m.bonus) > 0 && <span className="font-semibold text-emerald-600">+{money(m.bonus)}</span>}
+                            {Number(m.deduction) > 0 && <span className="font-semibold text-rose-600">−{money(m.deduction)}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="hidden overflow-x-auto lg:block">
                       <table className="min-w-full text-sm" data-testid="hr-pay-income-history">
                         <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                           <tr>
@@ -1298,6 +1425,7 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
                         </tbody>
                       </table>
                     </div>
+                    </>
                   )}
                 </CardContent>
               </Card>
@@ -1330,7 +1458,49 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
                       Nothing on record. Add what they joined on to start the timeline.
                     </p>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <>
+                    {/* Newest first here too, and the number still counts from the figure
+                        they joined on. */}
+                    <div className="space-y-2 p-3 lg:hidden" data-testid="hr-pay-record-cards">
+                      {[...records].reverse().map((r) => (
+                        <div key={r.id} className="rounded-xl border border-slate-200 p-3" data-testid={`hr-pay-record-card-${r.id}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-700">
+                                <span className="mr-1.5 font-normal text-slate-400">{r.number}.</span>{prettyRecordMonth(r.effective_from)}
+                              </p>
+                              <p className="text-[11px] text-slate-500">{monthsLabel(r.months, r.current)}</p>
+                            </div>
+                            <div className="flex shrink-0 items-start gap-1">
+                              <p className="text-sm font-bold text-emerald-600">{money(r.amount)}</p>
+                              <button
+                                type="button"
+                                onClick={() => removeRecord(r.id)}
+                                className="rounded p-1 text-rose-400 transition hover:bg-rose-50 hover:text-rose-600"
+                                aria-label={`Remove the record from ${prettyRecordMonth(r.effective_from)}`}
+                                data-testid={`hr-pay-record-card-delete-${r.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${toneOf(reasonBy[r.reason])}`}>
+                              {reasonBy[r.reason]?.label || r.reason}
+                            </span>
+                            {r.change === null || r.change === 0 ? null : (
+                              <span className={`text-[11px] font-bold ${r.change > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                                {r.change > 0 ? "+" : "−"}{money(Math.abs(r.change))}
+                                {r.percent === null || r.percent === undefined ? "" : ` (${Math.abs(r.percent).toFixed(1)}%)`}
+                              </span>
+                            )}
+                          </div>
+                          {r.note ? <p className="mt-1 text-[11px] text-slate-400">{r.note}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="hidden overflow-x-auto lg:block">
                       <table className="min-w-full text-sm" data-testid="hr-pay-records">
                         <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                           <tr>
@@ -1384,6 +1554,7 @@ const EmployeePayPage = ({ slip, onClose, onSaved }) => {
                         </tbody>
                       </table>
                     </div>
+                    </>
                   )}
                 </CardContent>
               </Card>
@@ -1489,46 +1660,50 @@ export const PayrollTab = () => {
   return (
     <div className="space-y-4" data-testid="hr-payroll-tab">
       <Card>
-        <CardContent className="flex flex-wrap items-center gap-2 p-3">
-          <Button variant="outline" size="icon" onClick={() => setMonth(shiftMonth(month, -1))} title="Previous month" data-testid="hr-pay-prev">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="min-w-[150px] text-center text-sm font-semibold text-slate-800" data-testid="hr-pay-month">{prettyMonth(month)}</span>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={month >= todayIso().slice(0, 7)}
-            onClick={() => setMonth(shiftMonth(month, 1))}
-            title="Next month"
-            data-testid="hr-pay-next"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+        <CardContent className="flex flex-col gap-2 p-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:p-3">
+          {/* Which month, and what its run is. One group, so the two arrows stay either
+              side of the month they move when the bar stacks on a phone. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="icon" onClick={() => setMonth(shiftMonth(month, -1))} title="Previous month" data-testid="hr-pay-prev">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-[150px] flex-1 text-center text-sm font-semibold text-slate-800 sm:flex-none" data-testid="hr-pay-month">{prettyMonth(month)}</span>
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={month >= todayIso().slice(0, 7)}
+              onClick={() => setMonth(shiftMonth(month, 1))}
+              title="Next month"
+              data-testid="hr-pay-next"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
 
-          {status && (
-            <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${RUN_TONE[status] || "bg-slate-100 text-slate-600"}`} data-testid="hr-pay-status">
-              {status}
-            </span>
-          )}
-          {data?.preview && (
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500" data-testid="hr-pay-preview-badge">
-              Preview
-            </span>
-          )}
+            {status && (
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${RUN_TONE[status] || "bg-slate-100 text-slate-600"}`} data-testid="hr-pay-status">
+                {status}
+              </span>
+            )}
+            {data?.preview && (
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500" data-testid="hr-pay-preview-badge">
+                Preview
+              </span>
+            )}
+          </div>
 
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
             {/* Narrows the lists, not the totals. The tiles above describe the month's run
                 and go on saying what it comes to while somebody looks for one person in
                 it — a search that quietly rewrote them would answer "what is this month"
                 with "what did I just type". The count beside the box says how many are
                 left, so nothing is hidden silently. */}
-            <div className="relative">
+            <div className="relative w-full sm:w-auto">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search name, code, department…"
-                className="h-9 w-52 rounded-md border border-slate-200 pl-7 pr-7 text-sm outline-none transition focus:border-sky-400 focus:ring-1 focus:ring-sky-300"
+                className="h-9 w-full rounded-md border border-slate-200 pl-7 pr-7 text-sm outline-none transition focus:border-sky-400 focus:ring-1 focus:ring-sky-300 sm:w-52"
                 data-testid="hr-pay-search"
               />
               {query && (
@@ -1548,25 +1723,25 @@ export const PayrollTab = () => {
                 {slips.length} of {everyone.length}
               </span>
             )}
-            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!slips.length} title={query.trim() ? "Exports what the search leaves" : "Exports the whole month"} data-testid="hr-pay-csv">
+            <Button variant="outline" size="sm" className="flex-1 sm:flex-none" onClick={exportCsv} disabled={!slips.length} title={query.trim() ? "Exports what the search leaves" : "Exports the whole month"} data-testid="hr-pay-csv">
               <Download className="h-4 w-4" />CSV
             </Button>
             {status !== "paid" && (
-              <Button variant="outline" size="sm" disabled={busy || (status && status !== "draft")} onClick={() => act(() => hrGeneratePayroll(month), `${prettyMonth(month)} generated from the register.`)} data-testid="hr-pay-generate">
+              <Button variant="outline" size="sm" className="flex-1 sm:flex-none" disabled={busy || (status && status !== "draft")} onClick={() => act(() => hrGeneratePayroll(month), `${prettyMonth(month)} generated from the register.`)} data-testid="hr-pay-generate">
                 <RefreshCw className="h-4 w-4" />{run ? "Regenerate" : "Generate run"}
               </Button>
             )}
             {status === "draft" && (
-              <Button size="sm" disabled={busy} onClick={() => act(() => hrPayrollStatus(month, "finalised"), `${prettyMonth(month)} finalised.`)} data-testid="hr-pay-finalise">
+              <Button size="sm" className="flex-1 sm:flex-none" disabled={busy} onClick={() => act(() => hrPayrollStatus(month, "finalised"), `${prettyMonth(month)} finalised.`)} data-testid="hr-pay-finalise">
                 <Check className="h-4 w-4" />Finalise
               </Button>
             )}
             {status === "finalised" && (
               <>
-                <Button variant="outline" size="sm" disabled={busy} onClick={() => act(() => hrPayrollStatus(month, "draft"), `${prettyMonth(month)} reopened.`)} data-testid="hr-pay-reopen">
+                <Button variant="outline" size="sm" className="flex-1 sm:flex-none" disabled={busy} onClick={() => act(() => hrPayrollStatus(month, "draft"), `${prettyMonth(month)} reopened.`)} data-testid="hr-pay-reopen">
                   <Undo2 className="h-4 w-4" />Reopen
                 </Button>
-                <Button size="sm" disabled={busy} onClick={() => act(() => hrPayrollStatus(month, "paid"), `${prettyMonth(month)} marked paid.`)} data-testid="hr-pay-paid">
+                <Button size="sm" className="flex-1 sm:flex-none" disabled={busy} onClick={() => act(() => hrPayrollStatus(month, "paid"), `${prettyMonth(month)} marked paid.`)} data-testid="hr-pay-paid">
                   <Wallet className="h-4 w-4" />Mark paid
                 </Button>
               </>
@@ -1730,8 +1905,8 @@ const NewRequestModal = ({ employees, onClose, onSaved }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()} data-testid="hr-approval-modal">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-lg overflow-auto rounded-t-2xl bg-white p-4 shadow-xl sm:max-h-[90vh] sm:rounded-2xl sm:p-5" onClick={(e) => e.stopPropagation()} data-testid="hr-approval-modal">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-slate-800">New request</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700" data-testid="hr-approval-modal-close"><X className="h-5 w-5" /></button>
@@ -1771,7 +1946,7 @@ const NewRequestModal = ({ employees, onClose, onSaved }) => {
           </div>
 
           {kind.dated && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">From</span>
                 <MilkDateInput value={form.from_date} accent="sky" centered title="Pick the first day" onChange={(e) => set({ from_date: e.target.value })} data-testid="hr-approval-from" />
@@ -1784,7 +1959,7 @@ const NewRequestModal = ({ employees, onClose, onSaved }) => {
           )}
 
           {kind.timed && (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Day</span>
                 <MilkDateInput value={form.from_date} accent="sky" centered title="Which day?" onChange={(e) => set({ from_date: e.target.value })} data-testid="hr-approval-perm-day" />
@@ -1832,7 +2007,7 @@ const NewRequestModal = ({ employees, onClose, onSaved }) => {
           )}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button onClick={submit} disabled={saving} data-testid="hr-approval-save">{saving ? "Saving..." : "Log request"}</Button>
         </div>
@@ -1919,14 +2094,14 @@ export const ApprovalsTab = () => {
         <Stat label="All requests" value={(counts.pending || 0) + (counts.approved || 0) + (counts.rejected || 0)} active={filter === "all"} onClick={() => setFilter("all")} testid="hr-appr-f-all" />
       </div>
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-slate-500">
           {filter === "all" ? "Every request"
             : filter === "from_staff" ? "Pending requests people raised for themselves"
               : `${filter[0].toUpperCase()}${filter.slice(1)} requests`}
           {" · approving a leave marks the register; a permission notes the hours beside it."}
         </p>
-        <Button onClick={() => setAdding(true)} data-testid="hr-appr-new"><Plus className="h-4 w-4" />New request</Button>
+        <Button className="w-full shrink-0 sm:w-auto" onClick={() => setAdding(true)} data-testid="hr-appr-new"><Plus className="h-4 w-4" />New request</Button>
       </div>
 
       {loading ? <p className="text-sm text-slate-500">Loading...</p> : rows.length === 0 ? (
@@ -1966,19 +2141,19 @@ export const ApprovalsTab = () => {
                     </p>
                   </div>
 
-                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${STATUS_TONE[row.status]}`}>{row.status}</span>
+                  <div className="flex w-full items-center gap-1.5 border-t border-slate-100 pt-2 sm:w-auto sm:shrink-0 sm:flex-wrap sm:border-0 sm:pt-0">
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${STATUS_TONE[row.status]}`}>{row.status}</span>
                     {row.status === "pending" ? (
                       <>
-                        <Button size="sm" onClick={() => decide(row, "approved")} data-testid={`hr-appr-approve-${row.id}`}><Check className="h-4 w-4" />Approve</Button>
-                        <Button size="sm" variant="outline" onClick={() => decide(row, "rejected")} data-testid={`hr-appr-reject-${row.id}`}><Ban className="h-4 w-4" />Reject</Button>
+                        <Button size="sm" className="flex-1 sm:flex-none" onClick={() => decide(row, "approved")} data-testid={`hr-appr-approve-${row.id}`}><Check className="h-4 w-4" />Approve</Button>
+                        <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => decide(row, "rejected")} data-testid={`hr-appr-reject-${row.id}`}><Ban className="h-4 w-4" />Reject</Button>
                       </>
                     ) : (
-                      <Button size="sm" variant="outline" onClick={() => decide(row, "pending")} title="Undo this decision" data-testid={`hr-appr-reopen-${row.id}`}>
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => decide(row, "pending")} title="Undo this decision" data-testid={`hr-appr-reopen-${row.id}`}>
                         <Undo2 className="h-4 w-4" />Reopen
                       </Button>
                     )}
-                    <button type="button" onClick={() => remove(row)} title="Delete request" className="p-1.5 text-slate-400 hover:text-rose-600" data-testid={`hr-appr-delete-${row.id}`}>
+                    <button type="button" onClick={() => remove(row)} title="Delete request" className="shrink-0 p-1.5 text-slate-400 hover:text-rose-600" data-testid={`hr-appr-delete-${row.id}`}>
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
@@ -2021,7 +2196,7 @@ const QuoteEditor = ({ draft, setDraft, onSave, onCancel, saving, testid }) => (
         onChange={(e) => setDraft((d) => ({ ...d, author: e.target.value }))}
         onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
         placeholder="Who said it (optional)"
-        className="max-w-xs bg-white"
+        className="w-full bg-white sm:max-w-xs"
         data-testid={`${testid}-author`}
       />
       <span className="text-xs text-slate-400">{draft.text.length}/{MAX_QUOTE}</span>
@@ -2102,7 +2277,7 @@ export const QuotesTab = () => {
       {/* Today's quote, shown the way staff will see it. The board is written here and
           read at /hr/quotes/today, so this card is the same answer that endpoint gives. */}
       <Card className="border-2 border-sky-100 bg-gradient-to-br from-sky-50 to-white">
-        <CardContent className="p-5">
+        <CardContent className="p-4 sm:p-5">
           <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-600">
             <Quote className="h-3.5 w-3.5" />Quote of the day · {prettyDate(data.date)}
           </p>
@@ -2122,7 +2297,7 @@ export const QuotesTab = () => {
           ) : data.today ? (
             <>
               <div className="mt-2 flex items-start justify-between gap-3">
-                <p className="text-lg font-semibold leading-snug text-slate-800" data-testid="hr-quote-today">“{data.today.text}”</p>
+                <p className="text-base font-semibold leading-snug text-slate-800 sm:text-lg" data-testid="hr-quote-today">“{data.today.text}”</p>
                 <button
                   type="button"
                   onClick={() => startEdit(data.today, "today")}
@@ -2164,9 +2339,9 @@ export const QuotesTab = () => {
             data-testid="hr-quote-text"
           />
           <div className="flex flex-wrap items-center gap-2">
-            <Input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Who said it (optional)" className="max-w-xs" data-testid="hr-quote-author" />
+            <Input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Who said it (optional)" className="w-full sm:max-w-xs" data-testid="hr-quote-author" />
             <span className="text-xs text-slate-400">{text.length}/{MAX_QUOTE}</span>
-            <Button className="ml-auto" onClick={add} disabled={saving} data-testid="hr-quote-add"><Plus className="h-4 w-4" />Add</Button>
+            <Button className="ml-auto w-full sm:w-auto" onClick={add} disabled={saving} data-testid="hr-quote-add"><Plus className="h-4 w-4" />Add</Button>
           </div>
         </CardContent>
       </Card>

@@ -117,7 +117,7 @@ const ReviewDetail = ({ review: r, meta, onClose }) => (
             </span>
           </div>
 
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-3 text-sm sm:grid-cols-2">
             <DetailField label={meta.person}>{r.person_name || "—"}</DetailField>
             <DetailField label="For">
               {sessionLabel(r) || "—"}
@@ -172,12 +172,12 @@ const BranchFilter = ({ branches, value, onChange }) => {
   }`;
 
   return (
-    <div className="inline-flex items-center">
+    <div className="flex w-full items-center sm:inline-flex sm:w-auto">
       <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(""); }}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
-            className={`h-9 max-w-[240px] justify-between gap-2 ${active ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : "text-slate-600"}`}
+            className={`h-9 min-w-0 flex-1 justify-between gap-2 sm:max-w-[240px] ${active ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : "text-slate-600"}`}
             data-testid="client-reviews-branch"
           >
             <span className="flex min-w-0 items-center gap-2">
@@ -259,12 +259,12 @@ const PersonFilter = ({ people, value, onChange, meta }) => {
   }`;
 
   return (
-    <div className="inline-flex items-center">
+    <div className="flex w-full items-center sm:inline-flex sm:w-auto">
       <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(""); }}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
-            className={`h-9 max-w-[240px] justify-between gap-2 ${active ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : "text-slate-600"}`}
+            className={`h-9 min-w-0 flex-1 justify-between gap-2 sm:max-w-[240px] ${active ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : "text-slate-600"}`}
             data-testid="client-reviews-person"
           >
             <span className="flex min-w-0 items-center gap-2">
@@ -386,7 +386,7 @@ const inDates = (r, range) => {
   return !Number.isNaN(d.getTime()) && d >= range.from && d <= range.to;
 };
 
-/** Table from tablet up, the same rows as cards on a phone — the shape of the HR candidate list. */
+/** Table from desktop up, the same rows as cards below it — the shape of the HR candidate list. */
 const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
   if (!rows.length) {
     return (
@@ -398,7 +398,7 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
 
   return (
     <>
-      <div className="space-y-2 sm:hidden" data-testid="client-reviews-list-mobile">
+      <div className="space-y-2 lg:hidden" data-testid="client-reviews-list-mobile">
         {rows.map((r) => (
           <button
             key={r.id}
@@ -423,7 +423,7 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
         ))}
       </div>
 
-      <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="client-reviews-list">
+      <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white lg:block" data-testid="client-reviews-list">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] text-sm">
             <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
@@ -554,14 +554,16 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
     <div className="space-y-4" data-testid="client-reviews-panel">
       {/* One bar, in the order it is read: which reviews, where, how many stars, who, when. */}
       <Card>
-        <CardContent className="flex flex-wrap items-center gap-2 p-2.5">
-          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" data-testid="client-reviews-kind">
+        <CardContent className="flex flex-col gap-2 p-2 sm:flex-row sm:flex-wrap sm:items-center sm:p-2.5">
+          {/* Consultant or Physio: two halves of the phone's width, because these are the
+              switch the whole panel hangs off and the count beside each label needs room. */}
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 sm:flex sm:items-center" data-testid="client-reviews-kind">
             {KINDS.map((k) => (
               <button
                 key={k.key}
                 type="button"
                 onClick={() => switchKind(k.key)}
-                className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-semibold transition ${kind === k.key ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+                className={`min-w-0 truncate rounded-md px-2 py-1.5 text-xs font-semibold transition sm:whitespace-nowrap sm:px-3 sm:text-sm ${kind === k.key ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
                 data-testid={`client-reviews-kind-${k.key}`}
               >
                 {k.label}
@@ -573,18 +575,18 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
             <BranchFilter branches={branches} value={branch} onChange={setBranch} />
           )}
           <PersonFilter people={people} value={person} onChange={setPerson} meta={meta} />
-          <div className="relative min-w-[180px] flex-1">
+          <div className="relative w-full min-w-0 sm:min-w-[180px] sm:flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search client, ${meta.person.toLowerCase()}...`} className="h-9 pl-9" data-testid="client-reviews-search" />
           </div>
           {/* Filters on the day the review was given. */}
-          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" data-testid="client-reviews-dates">
+          <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1 sm:flex sm:items-center" data-testid="client-reviews-dates">
             {DATE_PRESETS.map((p) => (
               <button
                 key={p.key}
                 type="button"
                 onClick={() => setDateFilter(presetFilter(p))}
-                className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${presetKey(dateFilter) === p.key ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+                className={`min-w-0 truncate rounded-md px-1.5 py-1.5 text-[11px] font-semibold transition sm:whitespace-nowrap sm:px-2.5 sm:text-xs ${presetKey(dateFilter) === p.key ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
                 data-testid={`client-reviews-date-${p.key}`}
               >
                 {p.label}
@@ -594,25 +596,27 @@ export const ClientReviewsPanel = ({ branchId = null }) => {
           {/* The shared Date Filter, as the calendar icon for an exact day or a range. Handed
               null while a pill is lit so it does not echo the pill beside it, and pinned to
               the bar's height from out here rather than by a prop other boards share. */}
-          <span className="[&>div>button]:h-9 [&>div>button:first-child]:min-w-9">
-            <DateFilterPopover
-              value={presetKey(dateFilter) ? null : dateFilter}
-              onChange={setDateFilter}
-              centered
-              iconOnly
-              testid="client-reviews-date"
-            />
-          </span>
-          <Button
-            onClick={load}
-            disabled={loading}
-            title="Refresh"
-            aria-label="Refresh"
-            className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-            data-testid="client-reviews-refresh"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
+          <div className="flex items-center justify-end gap-2 sm:contents">
+            <span className="[&>div>button]:h-9 [&>div>button:first-child]:min-w-9">
+              <DateFilterPopover
+                value={presetKey(dateFilter) ? null : dateFilter}
+                onChange={setDateFilter}
+                centered
+                iconOnly
+                testid="client-reviews-date"
+              />
+            </span>
+            <Button
+              onClick={load}
+              disabled={loading}
+              title="Refresh"
+              aria-label="Refresh"
+              className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+              data-testid="client-reviews-refresh"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

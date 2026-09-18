@@ -49,13 +49,13 @@ const MonthPicker = ({ value, label, active, onChange }) => {
         <button
           type="button"
           title="Pick a month"
-          className={`flex h-10 items-center gap-2 rounded-md border px-3 text-xs font-semibold transition ${
+          className={`flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-md border px-3 text-xs font-semibold transition sm:flex-none sm:justify-start ${
             active ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
           }`}
           data-testid="hr-perf-month"
         >
           <CalendarDays className="h-4 w-4 shrink-0" />
-          <span className="whitespace-nowrap">{label}</span>
+          <span className="truncate sm:whitespace-nowrap">{label}</span>
           <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       </PopoverTrigger>
@@ -105,7 +105,7 @@ const FilterSelect = ({ value, onChange, options, title, testid }) => {
         <button
           type="button"
           title={title}
-          className={`flex h-10 w-40 items-center justify-between gap-2 rounded-md border px-3 text-xs font-semibold transition ${
+          className={`flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-md border px-3 text-xs font-semibold transition sm:w-40 ${
             value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
           }`}
           data-testid={testid}
@@ -248,18 +248,24 @@ export const PerformancePanel = () => {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-          <FilterSelect value={branch} onChange={setBranch} options={branchOptions} title="Filter by branch" testid="hr-perf-branch" />
-          <FilterSelect value={role} onChange={setRole} options={ROLE_FILTERS} title="Filter by role" testid="hr-perf-role" />
+        {/* Two filters, four periods, a month and a Refresh. On a phone they are three
+            stacked rows -- the filters two up, the periods four across, the month with
+            Refresh beside it -- because in one row they are nine controls in 360px and
+            every label arrives truncated. From sm it is the single bar it always was. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center lg:justify-start">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2">
+            <FilterSelect value={branch} onChange={setBranch} options={branchOptions} title="Filter by branch" testid="hr-perf-branch" />
+            <FilterSelect value={role} onChange={setRole} options={ROLE_FILTERS} title="Filter by role" testid="hr-perf-role" />
+          </div>
 
-          <div className="flex h-10 overflow-hidden rounded-md border border-slate-200 bg-white" role="group" aria-label="Period">
+          <div className="grid w-full grid-cols-4 overflow-hidden rounded-md border border-slate-200 bg-white sm:flex sm:h-10 sm:w-auto" role="group" aria-label="Period">
             {PERIOD_PILLS.map((p) => (
               <button
                 key={p.key}
                 type="button"
                 onClick={() => pickPill(p.key)}
                 aria-pressed={pill === p.key}
-                className={`whitespace-nowrap px-3 text-xs font-semibold transition ${pill === p.key ? "bg-sky-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+                className={`h-10 min-w-0 truncate px-1 text-[11px] font-semibold transition sm:whitespace-nowrap sm:px-3 sm:text-xs ${pill === p.key ? "bg-sky-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}
                 data-testid={`hr-perf-period-${p.key}`}
               >
                 {p.label}
@@ -267,24 +273,26 @@ export const PerformancePanel = () => {
             ))}
           </div>
 
-          {/* Any month, and only a month. Weekly and Quarterly show their span here instead. */}
-          <MonthPicker
-            value={month}
-            active={period === "month"}
-            label={period === "month" ? prettyMonth(month) : (data?.label || "…")}
-            onChange={(ym) => { setPeriod("month"); setMonth(ym); }}
-          />
+          <div className="flex items-center gap-2">
+            {/* Any month, and only a month. Weekly and Quarterly show their span here instead. */}
+            <MonthPicker
+              value={month}
+              active={period === "month"}
+              label={period === "month" ? prettyMonth(month) : (data?.label || "…")}
+              onChange={(ym) => { setPeriod("month"); setMonth(ym); }}
+            />
 
-          <Button
-            onClick={load}
-            disabled={loading}
-            title="Refresh"
-            aria-label="Refresh"
-            className="h-10 w-10 shrink-0 border border-slate-200 bg-slate-100 p-0 text-slate-700 shadow-none hover:bg-slate-200"
-            data-testid="hr-perf-refresh"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
+            <Button
+              onClick={load}
+              disabled={loading}
+              title="Refresh"
+              aria-label="Refresh"
+              className="h-10 w-10 shrink-0 border border-slate-200 bg-slate-100 p-0 text-slate-700 shadow-none hover:bg-slate-200"
+              data-testid="hr-perf-refresh"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -294,7 +302,7 @@ export const PerformancePanel = () => {
         </p>
       ) : (
         <>
-          <div className="space-y-2 sm:hidden" data-testid="hr-perf-mobile">
+          <div className="space-y-2 lg:hidden" data-testid="hr-perf-mobile">
             {rows.map((r) => (
               <div key={r.employee_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-perf-card-${r.employee_id}`}>
                 <div className="flex items-start justify-between gap-2">
@@ -304,16 +312,17 @@ export const PerformancePanel = () => {
                   </div>
                   <GradePill grade={r.grade} score={r.score} />
                 </div>
-                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                  <div><p className="text-[10px] uppercase tracking-wider text-slate-400">Attendance</p><Attendance r={r} /></div>
-                  <div><p className="text-[10px] uppercase tracking-wider text-slate-400">Work</p><Work r={r} /></div>
-                  <div><p className="text-[10px] uppercase tracking-wider text-slate-400">Rating</p><Rating r={r} /></div>
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-slate-100 pt-2 text-xs sm:grid-cols-4">
+                  <div className="min-w-0"><p className="text-[10px] uppercase tracking-wider text-slate-400">Attendance</p><Attendance r={r} /></div>
+                  <div className="min-w-0"><p className="text-[10px] uppercase tracking-wider text-slate-400">Work Done</p><Work r={r} /></div>
+                  <div className="min-w-0"><p className="text-[10px] uppercase tracking-wider text-slate-400">Rating</p><Rating r={r} /></div>
+                  <div className="min-w-0"><p className="text-[10px] uppercase tracking-wider text-slate-400">Leave</p><span className="font-semibold text-slate-700">{r.leave_days ? `${r.leave_days}d` : "—"}</span></div>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="hr-perf-desktop">
+          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white lg:block" data-testid="hr-perf-desktop">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] text-sm">
                 <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
