@@ -18,7 +18,6 @@ import {
   Search,
   Send,
   Star,
-  UserCheck,
   UserCircle,
   Users,
   UserX,
@@ -253,15 +252,15 @@ const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 
 // Tile colours. The money boards give every card its own hex and read it back for the
 // figure, the corner disc and the selected ring, so the colour is the card's identity
-// rather than decoration. Naming them here keeps one meaning per colour across the three
-// places this board shows tiles — pending is amber wherever it appears.
+// rather than decoration. Naming them here keeps one meaning per colour across the two
+// places this board still shows tiles — the Review tab and a patient's detail page —
+// so pending is amber wherever it appears.
 const TILE = {
   total: "#0284c7",
   done: "#059669",
   pending: "#d97706",
   review: "#7c3aed",
   request: "#db2777",
-  finished: "#4f46e5",
 };
 
 // Every 7th treatment day is a review milestone — reviewsSoFar counts how many the patient
@@ -541,15 +540,10 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
   const dayRows = useMemo(() => rowsFor(selectedDate), [rowsFor, selectedDate]);
 
-  // Which of the three summary tiles is narrowing the day's list — "all" (the
-  // default, tapping "Total Days") shows everything; "completed"/"pending" isolate
-  // just that group. Tapping an already-active tile clears back to "all".
-  const [rowFilter, setRowFilter] = useState("all");
-
   // Which of the three sub-tabs is open. "all" is the day board; the other two swap it
-  // for a caseload list, so the tiles and the week strip — both of which answer questions
-  // about a date — come off screen with it rather than sitting above a list they do not
-  // describe.
+  // for a caseload list, so the week strip and the date filter — both of which answer a
+  // question about a date — come off screen with it rather than sitting above a list they
+  // do not describe.
   const [subTab, setSubTab] = useState("all");
 
   /**
@@ -620,15 +614,16 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let rows = dayRows.filter((r) => matches(r.lead, q));
-    if (rowFilter === "completed") rows = rows.filter((r) => r.done);
-    else if (rowFilter === "pending") rows = rows.filter((r) => !r.done);
+    // Done/pending used to be a filter as well, set by tapping the Completed or Pending
+    // summary tile. Those tiles are gone, so the day's list is the day's list and the
+    // ordering below is the only thing separating the two groups.
+    const rows = dayRows.filter((r) => matches(r.lead, q));
     // Incomplete cards always show first, completed (green) cards always last —
     // each group keeps its own time order from rowsFor's sort.
     const incomplete = rows.filter((r) => !r.done);
     const completed = rows.filter((r) => r.done);
     return [...incomplete, ...completed];
-  }, [dayRows, search, rowFilter, matches]);
+  }, [dayRows, search, matches]);
 
   /**
    * The caseload the open sub-tab is showing — Ongoing or Completed, never the day board.
@@ -658,11 +653,14 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
   const countFor = (date) => sessions.filter((s) => (s.slot_time || "").startsWith(date)).length;
 
-  // Meta Ads-style date filter for the summary tile only — separate from the week
-  // strip below, which always keeps its own single selected day. Defaults to Today
-  // rather than Overall, same as the week strip's own default. Picking a preset
-  // whose range is a single day (Today, Yesterday, an exact calendar date) also
-  // jumps the week strip there, since there's no ambiguity about which day to show.
+  // Meta Ads-style date filter — separate from the week strip below, which always keeps
+  // its own single selected day. Defaults to Today rather than Overall, same as the week
+  // strip's own default. Picking a preset whose range is a single day (Today, Yesterday,
+  // an exact calendar date) also jumps the week strip there, since there's no ambiguity
+  // about which day to show.
+  //
+  // It used to drive the four summary cards above the strip. Those are gone; what it still
+  // feeds is the Treatment badge on the tab bar, which counts the days left in the range.
   const [filterValue, setFilterValue] = useState(() => {
     const from = new Date();
     from.setHours(0, 0, 0, 0);
@@ -719,16 +717,13 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
   // Icon-only search that expands on tap, plus the Meta-style date filter. Rendered
   // into the board's tab row rather than here, so on a desk it sits beside the tabs
-  // instead of below the summary. Portaled rather than lifted into the board so this
+  // instead of below the list. Portaled rather than lifted into the board so this
   // tab keeps its own search text and date range — Review has its own pair, and one
   // shared filter would let a range picked over there silently narrow this tab.
-  //
-  // When nothing's picked the summary above shows Overall; the week strip below
-  // always keeps today selected by default regardless.
   const toolbar = (
     <div className="flex w-full items-center gap-2 md:w-auto" data-testid="physio-treatment-toolbar">
-      {/* All / Ongoing / Completed. It used to sit on its own row above the summary, which
-          on a phone made the top of this tab two rows of chrome before a single figure.
+      {/* All / Ongoing / Completed. It used to sit on its own row beneath this one, which
+          on a phone made the top of this tab two rows of chrome before a single patient.
           It travels with the rest of the toolbar now, so the whole tool bar is the one
           row: the three filters on the left, the three controls on the right.
 
@@ -800,9 +795,9 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
             <Search className="h-4 w-4" />
           </button>
         )}
-        {/* Day board only, like the tiles it drives. Ongoing and Completed are lists of
-            patients as of now — a date range narrows nothing on either, and a filter that
-            visibly does nothing when it is set reads as a broken one. */}
+        {/* Day board only, like the week strip it moves. Ongoing and Completed are lists
+            of patients as of now — a date range narrows nothing on either, and a filter
+            that visibly does nothing when it is set reads as a broken one. */}
         {subTab === "all" && (
           <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered iconOnly phoneIconOnly />
         )}
@@ -825,68 +820,21 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   return (
     <div data-testid="physio-treatment-tab">
       {/* Portaled into the board's tool bar row above. Kept first here so that if the slot
-          has not mounted yet the fallback still renders where the tool bar belongs —
-          above the summary — rather than under it. */}
+          has not mounted yet the fallback still renders where the tool bar belongs — at the
+          top of the tab — rather than under the list. */}
       {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
-      {/* The tinted panel these sat in is gone — the Head Physio cards sit straight on
-          the page, and boxing the same cards here made two identical controls look like
-          two different ones. The heading stays: it names the range the counts answer to.
-
-          Day board only. Every figure on these four is scoped to a date range, and above
-          a caseload list that is not tied to a date they would be answering a question
-          nobody on that tab is asking. */}
-      {subTab === "all" && (
-      <div className="mb-4" data-testid="physio-treatment-summary">
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall Treatment"}</p>
-        {/* Four across at every width, phone included. It used to fold to two by two
-            below sm, which cost the summary a second row on the screen that has the least
-            of it — the phone is where the physio actually reads this. The cards carry
-            `compact` to survive the ~70px that leaves them: below sm the corner disc steps
-            out and the label takes the whole card. */}
-        <div className="grid grid-cols-4 gap-1.5 sm:gap-3">
-          <StatTile
-            compact
-            icon={Calendar} label="Total Days" value={filterStats.total} color={TILE.total}
-            onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="physio-stat-total"
-          />
-          <StatTile
-            compact
-            icon={CheckCircle2} label="Completed" value={filterStats.completed} color={TILE.done}
-            sub={filterStats.total ? `${Math.round((filterStats.completed / filterStats.total) * 100)}% done` : null}
-            onClick={() => setRowFilter(rowFilter === "completed" ? "all" : "completed")} active={rowFilter === "completed"} testid="physio-stat-completed"
-          />
-          <StatTile
-            compact
-            icon={Clock} label="Pending" value={filterStats.pending} sub="Days left" color={TILE.pending}
-            onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
-          />
-          {/* Opens the Completed sub-tab rather than swapping this list underneath the
-              week strip. It always showed a set of patients that had nothing to do with
-              the day selected above it, which is exactly what a sub-tab is for — and the
-              banner that used to apologise for the mismatch is gone with it. */}
-          <StatTile
-            compact
-            icon={UserCheck} label="Treatment Completed" value={courses.done} color={TILE.finished}
-            sub={courses.patients ? `of ${courses.patients} patients` : null}
-            onClick={() => setSubTab("completed")} active={false}
-            testid="physio-stat-treatment-completed"
-          />
-        </div>
-      </div>
-      )}
-
       {/* Sun-Sat week strip — today is always the default selection.
-          Kept deliberately short: this is a date picker sitting between the summary and
-          the day's list, and at its old height it pushed the first patient below the fold
-          on a laptop. The month line and the day cells both lost their spare padding.
+          Kept deliberately short: this is a date picker sitting above the day's list, and
+          at its old height it pushed the first patient below the fold on a laptop. The
+          month line and the day cells both lost their spare padding.
 
           The arrows sit beside the strip and centre against its full height rather than
           riding in the month line. They step the week — the row of days — so pinned to the
           label they floated above the thing they move.
 
-          Day board only, with the tiles: a date picker over a list that is not filtered by
-          a date is a control that does nothing when it is used, which reads as broken. */}
+          Day board only: a date picker over a list that is not filtered by a date is a
+          control that does nothing when it is used, which reads as broken. */}
       {subTab === "all" && (
       <div className="mb-3 flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2" data-testid="physio-treatment-week-strip">
         <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Previous week" data-testid="physio-week-prev">
@@ -1471,8 +1419,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
 
       {/* New Review / Requests / Assigned / Completed — same hand-off the patient
           actually moves through, one bucket at a time; New Review is the default.
-          The same tile the Treatment summary uses, so both tabs of this board filter
-          through one control rather than two that happen to sit on the same screen.
+          The board's one figure card, the same one a patient's detail page draws.
           Three across on a phone; all five from sm up. */}
       <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3" data-testid="physio-review-buckets">
         {REVIEW_TABS.map((t) => (
