@@ -1136,6 +1136,9 @@ export const CRMPage = ({ auth, onLogout }) => {
             // Who is reading, said outright. A consultant has no branch either, so the
             // board cannot work this out from the absence of one.
             headOffice={showSuperAdminBoard}
+            // Developer Access is Super Admin's and the BDE's only -- the same two roles
+            // the server's developer-password gate lets through.
+            developerAccess={role === "super_admin" || role === "business_dev"}
             onClose={() => setShowFeedback(false)}
             onCounts={(data) => setFeedbackUnread(data?.unread || 0)}
           />

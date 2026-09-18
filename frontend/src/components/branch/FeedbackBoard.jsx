@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
 import {
-  devDeleteFeedback, devResetFeedbackToNew, listBranchFeedback, moveBranchFeedback, replyBranchFeedback, unlockDangerZone,
+  deleteFeedbackChat, devDeleteFeedback, devResetFeedbackToNew, getFeedbackChatDelete, listBranchFeedback, setFeedbackChatDelete, moveBranchFeedback, replyBranchFeedback, unlockDangerZone,
 } from "@/lib/api";
 
 // What can have happened to a ticket, in the order it is worked through. A ticket arrives
@@ -129,7 +129,7 @@ const Avatar = ({ name, tone, size = "h-9 w-9 text-[11px]" }) => (
  * headings called Priya with three phone numbers under them and nothing to say from the
  * outside that they were one person.
  */
-const ClientRow = ({ client, active, onSelect, showBranch, picking, pickedCount, onPick }) => (
+const ClientRow = ({ client, active, onSelect, showBranch, picking, pickedCount, onPick, onDelete, deleting }) => (
   <div className={`flex items-stretch border-l-2 transition ${active ? "border-sky-500 bg-sky-50/70" : "border-transparent hover:bg-slate-50"}`}>
   {/* Developer tools only: ticks every ticket this client has on the list. A checkbox beside
       the row rather than inside it, because a checkbox inside a button is not clickable on
@@ -174,6 +174,21 @@ const ClientRow = ({ client, active, onSelect, showBranch, picking, pickedCount,
       </div>
     </div>
   </button>
+  {/* Chat Delete, when a developer has switched it on. Beside the row for the same reason
+      the checkbox is: a button inside a button is not clickable on its own. */}
+  {onDelete && (
+    <button
+      type="button"
+      onClick={() => onDelete(client)}
+      disabled={deleting}
+      className="flex shrink-0 items-center px-3 text-slate-300 transition hover:text-rose-600 disabled:opacity-50"
+      title="Delete this chat"
+      aria-label={`Delete ${client.name || "this patient"}'s chat`}
+      data-testid={`feedback-chat-delete-${client.key}`}
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
+  )}
   </div>
 );
 
@@ -404,7 +419,7 @@ const TicketPane = ({ client, ticket, onPickTicket, onMove, onSend, moving, send
  * above the thread. Merging them into one conversation would be the opposite mistake:
  * answering about the parking would close the complaint about the Physio.
  */
-export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false }) => {
+export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false, developerAccess = false }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [moving, setMoving] = useState(null);
@@ -429,12 +444,18 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
   const [unlocking, setUnlocking] = useState(false);
   const [picked, setPicked] = useState(() => new Set());
   const [devBusy, setDevBusy] = useState("");
+  // Chat Delete: the bin on each client row. Server-side, so switching it here turns it on
+  // for every board, and the delete endpoint refuses while it is off.
+  const [chatDelete, setChatDelete] = useState(false);
+  const [chatDeleteSaving, setChatDeleteSaving] = useState(false);
+  const [deletingClient, setDeletingClient] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await listBranchFeedback(branchId);
       setRows(data.feedback || []);
+      setChatDelete(!!data.chat_delete_enabled);
       setError("");
       onCounts?.(data);
     } catch (e) {
@@ -598,12 +619,46 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
     try {
       await unlockDangerZone(passwordInput);
       setDevPassword(passwordInput);
+      getFeedbackChatDelete(passwordInput).then((r) => setChatDelete(!!r.enabled)).catch(() => {});
       setAskingPassword(false);
       setPasswordInput("");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Could not unlock");
     } finally {
       setUnlocking(false);
+    }
+  };
+
+  const toggleChatDelete = async () => {
+    const next = !chatDelete;
+    setChatDeleteSaving(true);
+    try {
+      const r = await setFeedbackChatDelete(devPassword, next);
+      setChatDelete(!!r.enabled);
+      toast.success(`Chat Delete ${r.enabled ? "on" : "off"}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not change Chat Delete");
+    } finally {
+      setChatDeleteSaving(false);
+    }
+  };
+
+  // Every ticket of this client's that the list is showing, in one go. The patient's portal
+  // loses them too, so it is confirmed first.
+  const deleteChat = async (c) => {
+    const ids = c.tickets.map((t) => t.id);
+    if (!ids.length) return;
+    const who = c.name || "this patient";
+    if (!window.confirm(`Delete ${who}'s chat?\n\n${ids.length} ticket(s) and every message on them will be removed from this board and from the patient's portal. This cannot be undone.`)) return;
+    setDeletingClient(c.key);
+    try {
+      const res = await deleteFeedbackChat(ids);
+      toast.success(`${who}'s chat deleted (${res.deleted} ticket(s))`);
+      await load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not delete that chat");
+    } finally {
+      setDeletingClient(null);
     }
   };
 
@@ -709,7 +764,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
             <h2 className="truncate text-base font-semibold text-slate-800">Patient Feedback</h2>
             <p className="truncate text-xs text-slate-400">What patients have written about their care</p>
           </div>
-          {!devPassword && !askingPassword && (
+          {developerAccess && !devPassword && !askingPassword && (
             <Button
               variant="ghost"
               size="sm"
@@ -726,7 +781,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
           </Button>
         </div>
 
-        {!devPassword && askingPassword && (
+        {developerAccess && !devPassword && askingPassword && (
           <form onSubmit={unlockDev} className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-2 sm:px-6" data-testid="feedback-dev-password">
             <span className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
               <Lock className="h-3.5 w-3.5" /> Developer password
@@ -747,9 +802,25 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
           </form>
         )}
 
-        {devPassword && (
+        {developerAccess && devPassword && (
           <div className="flex flex-wrap items-center gap-2 border-t border-rose-200 bg-rose-50 px-4 py-2 sm:px-6" data-testid="feedback-dev-toolbar">
             <span className="text-xs font-semibold text-rose-800">Developer tools · demo &amp; testing only</span>
+            <div className="flex items-center gap-1.5 rounded-md border border-rose-200 bg-white px-2 py-1 text-xs font-medium text-rose-800" title="Show a delete button on each client in the list">
+              Chat Delete
+              <button
+                type="button"
+                role="switch"
+                aria-checked={chatDelete}
+                aria-label="Chat Delete"
+                disabled={chatDeleteSaving}
+                onClick={toggleChatDelete}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition disabled:opacity-50 ${chatDelete ? "bg-rose-600" : "bg-slate-300"}`}
+                data-testid="feedback-chat-delete-toggle"
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${chatDelete ? "translate-x-4" : "translate-x-0.5"}`} />
+              </button>
+              <span className={chatDelete ? "text-rose-700" : "text-slate-400"}>{chatDelete ? "On" : "Off"}</span>
+            </div>
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-rose-700">
               <input
                 type="checkbox"
@@ -910,6 +981,8 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts, headOffice = false 
                           picking={!!devPassword}
                           pickedCount={c.tickets.filter((t) => picked.has(t.id)).length}
                           onPick={pick}
+                          onDelete={chatDelete ? deleteChat : undefined}
+                          deleting={deletingClient === c.key}
                         />
                       ))}
                     </div>

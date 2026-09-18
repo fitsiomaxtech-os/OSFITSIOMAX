@@ -185,27 +185,11 @@ async def _consultant_scope(user: V3UserOut) -> Optional[dict]:
     return {"audience": {"$in": list(CONSULTANT_AUDIENCES)}, "consultant_id": {"$in": ids}}
 
 
-@router.get("/branch/feedback")
-async def list_feedback(
-    branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
-):
-    """The feedback addressed to whoever is asking, and the count their bell reads.
+async def _board_query(user: V3UserOut, branch_id: Optional[str]) -> Optional[dict]:
+    """What this reader's board is made of, as a query -- or None when it is nothing at all.
 
-    A branch reads its own post and nothing else: what its patients sent it, for its branch
-    only. What a patient addressed to head office is kept off that board deliberately — it
-    was sent that way because the patient did not want the branch reading it, and half of
-    those are about the Branch Admin themselves.
-
-    Head office reads all of it, its own and every branch's. It owns the branches, and
-    feedback about a branch it cannot see is oversight it cannot do. The asymmetry is the
-    point rather than an oversight: confidentiality runs upward, not down.
-
-    Super Admin may narrow to one branch; a Branch Admin is always held to theirs.
-
-    unread is the New column rather than a flag of its own. A bell counting things nobody
-    has picked up is the same question the first column already answers, and a second
-    number kept beside it is one that can disagree with what is on screen.
+    Shared by the list and by Chat Delete, so nobody can delete a ticket their own board
+    would not have shown them.
     """
     query: dict = {}
     consultant = await _consultant_scope(user)
@@ -216,7 +200,7 @@ async def list_feedback(
         query = consultant
     elif is_branch_admin_role(user.role):
         if not user.branch_id:
-            return {"feedback": [], "counts": {s: 0 for s in STATUSES}, "unread": 0}
+            return None
         query["branch_id"] = user.branch_id
         # Anything the patient addressed past the branch is kept off this board -- head
         # office because half of it is about the Branch Admin, the consultant because the
@@ -240,6 +224,34 @@ async def list_feedback(
         # Not the retired weekly-review threads -- see AUDIENCE_WEEKLY_REVIEW.
         query["audience"] = {"$ne": AUDIENCE_WEEKLY_REVIEW}
 
+    return query
+
+
+@router.get("/branch/feedback")
+async def list_feedback(
+    branch_id: Optional[str] = Query(None),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """The feedback addressed to whoever is asking, and the count their bell reads.
+
+    A branch reads its own post and nothing else: what its patients sent it, for its branch
+    only. What a patient addressed to head office is kept off that board deliberately — it
+    was sent that way because the patient did not want the branch reading it, and half of
+    those are about the Branch Admin themselves.
+
+    Head office reads all of it, its own and every branch's. It owns the branches, and
+    feedback about a branch it cannot see is oversight it cannot do. The asymmetry is the
+    point rather than an oversight: confidentiality runs upward, not down.
+
+    Super Admin may narrow to one branch; a Branch Admin is always held to theirs.
+
+    unread is the New column rather than a flag of its own. A bell counting things nobody
+    has picked up is the same question the first column already answers, and a second
+    number kept beside it is one that can disagree with what is on screen.
+    """
+    query = await _board_query(user, branch_id)
+    if query is None:
+        return {"feedback": [], "counts": {s: 0 for s in STATUSES}, "unread": 0, "chat_delete_enabled": False}
     rows = await v3_col("patient_feedback").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
     # Named, not just identified. Head office reads this branch by branch, and a heading
     # of "5f2c…" is an id rather than a branch. Looked up here rather than copied onto the
@@ -270,7 +282,7 @@ async def list_feedback(
     unread = counts[STATUS_NEW] + sum(
         1 for r in rows if r["awaiting_staff"] and r["status"] != STATUS_NEW
     )
-    return {"feedback": rows, "counts": counts, "unread": unread}
+    return {"feedback": rows, "counts": counts, "unread": unread, "chat_delete_enabled": await chat_delete_enabled()}
 
 
 @router.patch("/branch/feedback/{feedback_id}")
@@ -464,4 +476,65 @@ async def dev_delete_feedback(
     too. Only the tickets: the lead and anything else of theirs is left alone."""
     ids = _clean_ids(payload)
     result = await v3_col("patient_feedback").delete_many({"id": {"$in": ids}})
+    return {"deleted": result.deleted_count}
+
+
+# ---- Chat Delete: a bin on each client in the list, switched on and off in Developer Access ----
+#
+# Off unless a developer switches it on. The same shape as the Branch Leads delete button
+# (lead_purge.DELETE_BUTTON_SETTING_ID): whether this install wants the button is a
+# developer's call, and the endpoint refuses while it is off, not just the icon hiding.
+
+CHAT_DELETE_SETTING_ID = "feedback_chat_delete"
+
+
+async def chat_delete_enabled() -> bool:
+    row = await v3_col("app_settings").find_one({"id": CHAT_DELETE_SETTING_ID}, {"_id": 0})
+    return bool(row and row.get("enabled"))
+
+
+class ChatDeleteSettingIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/branch/feedback/dev/chat-delete")
+async def get_chat_delete(_: V3UserOut = Depends(require_developer_password)):
+    return {"enabled": await chat_delete_enabled()}
+
+
+@router.put("/branch/feedback/dev/chat-delete")
+async def set_chat_delete(
+    payload: ChatDeleteSettingIn,
+    user: V3UserOut = Depends(require_developer_password),
+):
+    await v3_col("app_settings").update_one(
+        {"id": CHAT_DELETE_SETTING_ID},
+        {"$set": {
+            "id": CHAT_DELETE_SETTING_ID,
+            "enabled": payload.enabled,
+            "updated_by": user.full_name,
+            "updated_at": now_iso(),
+        }},
+        upsert=True,
+    )
+    return {"enabled": payload.enabled}
+
+
+@router.post("/branch/feedback/delete-chat")
+async def delete_client_chat(
+    payload: FeedbackIdsIn,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Delete one client's tickets, thread and all, from the bin on the client list.
+
+    Only while Chat Delete is on, and only tickets this reader's own board shows -- a Branch
+    Admin cannot reach head office's post through a guessed id.
+    """
+    if not await chat_delete_enabled():
+        raise HTTPException(status_code=403, detail="Chat Delete is switched off")
+    ids = _clean_ids(payload)
+    query = await _board_query(user, None)
+    if query is None:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    result = await v3_col("patient_feedback").delete_many({**query, "id": {"$in": ids}})
     return {"deleted": result.deleted_count}

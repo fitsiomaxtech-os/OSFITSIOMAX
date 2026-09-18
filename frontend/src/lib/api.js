@@ -969,6 +969,11 @@ export const replyBranchFeedback = async (feedbackId, body, askResolved = false)
 // calls: resetting never deletes, deleting never resets.
 export const devResetFeedbackToNew = async (ids, password) => (await api.post("/branch/feedback/dev/reset-to-new", { ids }, { headers: developerHeaders(password) })).data;
 export const devDeleteFeedback = async (ids, password) => (await api.post("/branch/feedback/dev/delete", { ids }, { headers: developerHeaders(password) })).data;
+// Chat Delete: the bin on each client in the Patient Feedback list. Switched in Developer
+// Access; the board reads it back as `chat_delete_enabled` on the list.
+export const getFeedbackChatDelete = async (password) => (await api.get("/branch/feedback/dev/chat-delete", { headers: developerHeaders(password) })).data;
+export const setFeedbackChatDelete = async (password, enabled) => (await api.put("/branch/feedback/dev/chat-delete", { enabled }, { headers: developerHeaders(password) })).data;
+export const deleteFeedbackChat = async (ids) => (await api.post("/branch/feedback/delete-chat", { ids })).data;
 
 // ---- Zumba (Branch Admin's own tab) ----
 // Not a clinical journey and so not a lead: no stage, no consultation, no discharge. The
