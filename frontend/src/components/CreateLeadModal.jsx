@@ -7,7 +7,12 @@ import { createManualLead, getBranches } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { loadSession } from "@/lib/session";
 
-const SOURCE_OPTIONS = ["Meta", "SEO", "Referral", "Walk-In", "Website", "CSV Import", "Google Sheets", "Other"];
+// Suggestions, not a closed list: Source is typed by hand here, so a lead that came in
+// over the phone from a channel nobody has named yet can still be filed as what it was
+// rather than as "Other". "CSV Import" and "Google Sheets" are left out on purpose --
+// those are stamped by the importers themselves (see backend/routers/v3_google_sheets.py),
+// and a lead somebody is typing into this form by definition did not arrive off a sheet.
+const SOURCE_SUGGESTIONS = ["Meta", "SEO", "Referral", "Walk-In", "Website", "Instagram", "WhatsApp", "Phone Call", "Other"];
 // Exported because a board that reads a lead back has to name its Department the same way
 // the form that set it did -- a raw "offline_physio" on a detail card is the stored value
 // leaking through rather than a label.
@@ -51,7 +56,7 @@ export const LEAD_DATA_FIELDS = [
 const blankLeadData = Object.fromEntries(LEAD_DATA_FIELDS.map((f) => [f.key, ""]));
 
 const blank = {
-  name: "", source_tab: "Other", email: "", phone: "", alternative_phone: "",
+  name: "", source_tab: "", email: "", phone: "", alternative_phone: "",
   address: "", city: "", state: "", department: "", condition: "",
   months_of_pain: "", age: "", gender: "", occupation: "",
   expected_consultation_date: "", branch_id: "",
@@ -125,6 +130,9 @@ export const CreateLeadModal = ({ onClose, onSaved, branchId = null, lockedDepar
     if (branchId) payload.branch_id = branchId;
     else if (!["offline_physio", "offline_fitness"].includes(payload.department)) payload.branch_id = "";
     payload.source_type = "manual";
+    // Left blank, the lead reads as "Manual" rather than as an empty channel -- the
+    // dashboards group on source_tab and an empty string would be its own silent bucket.
+    payload.source_tab = String(payload.source_tab || "").trim() || "Manual";
     const VERTICAL_MAP = {
       online_physio: "online_physiotherapy",
       offline_fitness: "offline_fitness",
@@ -186,7 +194,18 @@ export const CreateLeadModal = ({ onClose, onSaved, branchId = null, lockedDepar
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name *"><Input placeholder="Full name" value={form.name} onChange={(e) => set("name", e.target.value)} data-testid="lead-create-name" /></Field>
             <Field label="Source">
-              <Select value={form.source_tab} onChange={(v) => set("source_tab", v)} options={SOURCE_OPTIONS} testid="lead-create-source" />
+              {/* A plain input with a suggestion list rather than a dropdown: the common
+                  channels stay one click away, and anything else can just be typed. */}
+              <Input
+                placeholder="e.g. Referral, Walk-In"
+                list="lead-create-source-options"
+                value={form.source_tab}
+                onChange={(e) => set("source_tab", e.target.value)}
+                data-testid="lead-create-source"
+              />
+              <datalist id="lead-create-source-options">
+                {SOURCE_SUGGESTIONS.map((o) => <option key={o} value={o} />)}
+              </datalist>
             </Field>
             <Field label="Email"><Input placeholder="email@example.com" value={form.email} onChange={(e) => set("email", e.target.value)} data-testid="lead-create-email" /></Field>
             <Field label="Phone *"><Input placeholder="+91 9876543210" value={form.phone} onChange={(e) => set("phone", e.target.value)} data-testid="lead-create-phone" /></Field>
