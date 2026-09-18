@@ -480,9 +480,9 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
 
 /**
  * `mine` — a Consultant reading their own board rather than management reading a desk.
- * Two filters go away with it: the branch picker, because this reader has one branch and
- * nothing to say about the others, and the person picker on the Consultant tab, where the
- * only consultant listed would be themself. What is left is the one pick that answers a
+ * Two things go away with it: the branch picker, because this reader has one branch and
+ * nothing to say about the others, and the Consultant tab itself, since a Consultant reads
+ * the Physios, not reviews of themself. What is left is the one pick that answers a
  * question they actually have: which Physio.
  */
 export const ClientReviewsPanel = ({ branchId = null, mine = false }) => {
@@ -517,8 +517,8 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false }) => {
   }, [branchId, mine]);
 
   const meta = KINDS.find((k) => k.key === kind);
-  // A Consultant picks a Physio, never a consultant — see `mine` above.
-  const showPerson = !mine || kind === "physio";
+  // A Consultant sees Physio Review only — see `mine` above.
+  const kinds = mine ? KINDS.filter((k) => k.key === "physio") : KINDS;
   const reviews = useMemo(() => data[kind] || [], [data, kind]);
   const q = search.trim().toLowerCase();
 
@@ -566,24 +566,26 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false }) => {
         <CardContent className="flex flex-col gap-2 p-2 sm:flex-row sm:flex-wrap sm:items-center sm:p-2.5">
           {/* Consultant or Physio: two halves of the phone's width, because these are the
               switch the whole panel hangs off and the count beside each label needs room. */}
-          <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 sm:flex sm:items-center" data-testid="client-reviews-kind">
-            {KINDS.map((k) => (
-              <button
-                key={k.key}
-                type="button"
-                onClick={() => switchKind(k.key)}
-                className={`min-w-0 truncate rounded-md px-2 py-1.5 text-xs font-semibold transition sm:whitespace-nowrap sm:px-3 sm:text-sm ${kind === k.key ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
-                data-testid={`client-reviews-kind-${k.key}`}
-              >
-                {k.label}
-                <span className="ml-1.5 text-xs font-normal text-slate-400">{(data[k.key] || []).length}</span>
-              </button>
-            ))}
-          </div>
+          {kinds.length > 1 && (
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 sm:flex sm:items-center" data-testid="client-reviews-kind">
+              {kinds.map((k) => (
+                <button
+                  key={k.key}
+                  type="button"
+                  onClick={() => switchKind(k.key)}
+                  className={`min-w-0 truncate rounded-md px-2 py-1.5 text-xs font-semibold transition sm:whitespace-nowrap sm:px-3 sm:text-sm ${kind === k.key ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+                  data-testid={`client-reviews-kind-${k.key}`}
+                >
+                  {k.label}
+                  <span className="ml-1.5 text-xs font-normal text-slate-400">{(data[k.key] || []).length}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {!branchId && !mine && (
             <BranchFilter branches={branches} value={branch} onChange={setBranch} />
           )}
-          {showPerson && <PersonFilter people={people} value={person} onChange={setPerson} meta={meta} />}
+          <PersonFilter people={people} value={person} onChange={setPerson} meta={meta} />
           <div className="relative w-full min-w-0 sm:min-w-[180px] sm:flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search client, ${meta.person.toLowerCase()}...`} className="h-9 pl-9" data-testid="client-reviews-search" />
