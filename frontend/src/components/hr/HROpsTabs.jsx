@@ -1762,7 +1762,18 @@ export const PayrollTab = () => {
         <>
           <div className="space-y-2 lg:hidden" data-testid="hr-pay-cards">
             {slips.map((s) => (
-              <div key={s.employee_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-pay-card-${s.employee_id}`}>
+              // A div rather than a button: the card carries no boxes today, but the row
+              // it mirrors does, and the two should stay the same shape. It carries the
+              // button's keyboard behaviour by hand instead.
+              <div
+                key={s.employee_id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpened(s)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpened(s); } }}
+                className="cursor-pointer rounded-xl border border-slate-200 bg-white p-3 active:bg-slate-50"
+                data-testid={`hr-pay-card-${s.employee_id}`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate font-medium text-slate-800">{s.employee_name}</p>
@@ -1770,12 +1781,13 @@ export const PayrollTab = () => {
                   </div>
                   <span className="shrink-0 text-base font-bold text-sky-700">{money(s.net_payable)}</span>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
                   <span>Base {money(s.base)}</span>
                   <span>{s.payable_days}/{s.days_in_month} days</span>
                   {s.lop_days > 0 && <span className="font-semibold text-rose-600">LOP {s.lop_days}</span>}
                   {s.bonus > 0 && <span className="text-emerald-600">+{money(s.bonus)}</span>}
                   {s.deduction > 0 && <span className="text-rose-600">−{money(s.deduction)}</span>}
+                  <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-300" />
                 </div>
               </div>
             ))}
@@ -1797,11 +1809,19 @@ export const PayrollTab = () => {
                       <th className="px-3 py-2 text-right">Bonus</th>
                       <th className="px-3 py-2 text-right">Deduction</th>
                       <th className="px-3 py-2 text-right">Net payable</th>
+                      {/* The chevron's column. Headed with nothing, as the Review and EOD
+                          tables head theirs: it is an affordance, not a figure. */}
+                      <th className="px-3 py-2" />
                     </tr>
                   </thead>
                   <tbody>
                     {slips.map((s, i) => (
-                      <tr key={s.employee_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-pay-row-${s.employee_id}`}>
+                      <tr
+                        key={s.employee_id}
+                        onClick={() => setOpened(s)}
+                        className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                        data-testid={`hr-pay-row-${s.employee_id}`}
+                      >
                         <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                         <td className="px-3 py-2">
                           <p className="font-medium text-slate-800">{s.employee_name}</p>
@@ -1814,20 +1834,34 @@ export const PayrollTab = () => {
                         </td>
                         <td className={`px-3 py-2 text-right ${s.lop_days > 0 ? "font-semibold text-rose-600" : "text-slate-400"}`}>{s.lop_days}</td>
                         <td className="px-3 py-2 text-right text-slate-700">{money(s.earned)}</td>
-                        <td className="px-3 py-2 text-right">
+                        <td className="px-3 py-2 text-right" onClick={editable ? (e) => e.stopPropagation() : undefined}>
                           {editable
                             ? <AmountBox value={s.bonus} onCommit={(n) => adjust(s.employee_id, { bonus: n })} testid={`hr-pay-bonus-${s.employee_id}`} />
                             : <span className={s.bonus ? "text-emerald-600" : "text-slate-400"}>{money(s.bonus)}</span>}
                         </td>
-                        <td className="px-3 py-2 text-right">
+                        <td className="px-3 py-2 text-right" onClick={editable ? (e) => e.stopPropagation() : undefined}>
                           {editable
                             ? <AmountBox value={s.deduction} onCommit={(n) => adjust(s.employee_id, { deduction: n })} testid={`hr-pay-ded-${s.employee_id}`} />
                             : <span className={s.deduction ? "text-rose-600" : "text-slate-400"}>{money(s.deduction)}</span>}
                         </td>
                         <td className="px-3 py-2 text-right font-bold text-sky-700">{money(s.net_payable)}</td>
+                        <td className="px-3 py-2 text-right">
+                          {/* A real button, so the page is reachable from the keyboard --
+                              the row's own click is a convenience for the mouse. */}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setOpened(s); }}
+                            title={`Open ${s.employee_name}'s pay`}
+                            aria-label={`Open ${s.employee_name}'s pay`}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-sky-50 hover:text-sky-700"
+                            data-testid={`hr-pay-open-row-${s.employee_id}`}
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </td>
                       </tr>
                     ))}
-                    {slips.length === 0 && <tr><td colSpan="9" className="px-3 py-6 text-center text-slate-400">{query.trim() ? `Nobody matches “${query.trim()}”.` : "No active employees to pay."}</td></tr>}
+                    {slips.length === 0 && <tr><td colSpan="10" className="px-3 py-6 text-center text-slate-400">{query.trim() ? `Nobody matches “${query.trim()}”.` : "No active employees to pay."}</td></tr>}
                   </tbody>
                 </table>
               </div>
