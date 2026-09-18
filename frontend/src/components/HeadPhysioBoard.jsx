@@ -15,6 +15,7 @@ import {
   Star,
   Stethoscope,
   User,
+  UserCircle,
   Users,
   X,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import { todayIso } from "@/components/WeekStrip";
 import { RescheduledTag } from "@/components/ui/lead-marks";
 import { DayStripFilter, todayFilter, isDayKey } from "@/components/DayStripFilter";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { MyProfilePage } from "@/components/MyProfilePage";
 import {
   getHPMyCalendar,
   hpRecommendPackage,
@@ -85,6 +87,12 @@ const WORK_TABS = [
 // The tabs actually drawn, in the card row and the bottom bar alike.
 const VISIBLE_WORK_TABS = WORK_TABS.filter((t) => !t.hidden);
 
+// A last stop on the phone's bottom bar only, after the work tabs: the Consultant's own
+// profile, the same one the Physio board's bar carries. Not a work tab — it has no card in
+// the row above and nothing to count — so it is appended to the bar rather than to
+// WORK_TABS. On a desk the header's avatar opens the same page.
+const PROFILE_TAB = { key: "profile", label: "My Profile", icon: UserCircle };
+
 // The two queues All merges, and the labels its own filter offers. Kept beside WORK_TABS
 // because the keys have to match the `kind` each row is flattened to.
 const ALL_KINDS = [
@@ -105,8 +113,20 @@ const isDone = (...stages) => stages.some((s) => /complete/i.test(String(s || ""
  * login rather than to the branch. Everything else on the board has always been the
  * branch's queue, so a supervisor saw the branch's consultations beside an empty Review.
  */
-export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, mine = false, search = "", onSearchChange }) => {
+/**
+ * `roleLabel` — passed only where the Consultant has signed in to their own board. It is
+ * what puts My Profile on the phone's bottom bar: a supervisor driving this board from
+ * Operations or Branch Control is not the person it shows, and their profile does not
+ * belong on someone else's bar.
+ */
+export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, mine = false, search = "", onSearchChange, roleLabel }) => {
   const [workTab, setWorkTab] = useState("consultations");
+  const withProfile = roleLabel !== undefined;
+  const profileOpen = withProfile && workTab === "profile";
+  const bottomTabs = withProfile ? [...VISIBLE_WORK_TABS, PROFILE_TAB] : VISIBLE_WORK_TABS;
+  // The phone's search, opened from the toolbar's magnifier. Open, it takes the day
+  // strip's room rather than a row of its own, the way the Physio board's does.
+  const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
   // The one date scope every list answers to, from the day strip (All, then a day either
   // side of today) or the calendar. Starts on Today; null is All.
   const [dateRange, setDateRange] = useState(() => todayFilter());
@@ -371,7 +391,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
           every width. The strip itself is left at the flex default (0 1 auto) — it must
           not grow into that space, and it must still shrink onto its own scroller when
           the toolbar runs out of room. */}
-      <div className="flex flex-wrap items-center gap-2 bg-white p-2 lg:flex-nowrap">
+      {/* One row on a phone too: the day strip on the left, Search / Date Filter / Refresh
+          on the right — the Physio board's tool bar, in the same order. The strip used to
+          take the full width on a row of its own with the two buttons pushed under it. */}
+      <div className={`flex-nowrap items-center gap-2 bg-white p-2 sm:flex-wrap lg:flex-nowrap ${profileOpen ? "hidden sm:flex" : "flex"}`}>
         {/* One search for the whole board, so it works on Review, Rehab and All and not
             only on Consultations. Hidden on a phone, where the header's magnifier does the
             same job without costing a row of vertical space above the lists.
@@ -389,12 +412,50 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
             />
           </div>
         </div>
+        {phoneSearchOpen && (
+          <div className="relative min-w-0 flex-1 sm:hidden">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => onSearchChange && onSearchChange(e.target.value)}
+              placeholder="Search patients..."
+              className="h-10 w-full rounded-md border border-slate-200 pl-9 pr-9 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+              data-testid="hp-phone-search-input"
+            />
+            <button
+              type="button"
+              onClick={() => { setPhoneSearchOpen(false); onSearchChange && onSearchChange(""); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100"
+              aria-label="Close search"
+              data-testid="hp-phone-search-close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         {/* The strip and the calendar icon drive the same single scope; a range typed into
             the calendar simply leaves none of the day buttons lit. */}
-        <div className="flex w-full min-w-0 justify-center sm:w-auto">
+        <div className={`min-w-0 flex-1 justify-center sm:w-auto sm:flex-initial ${phoneSearchOpen ? "hidden sm:flex" : "flex"}`}>
           <DayStripFilter value={dateRange} onChange={setDateRange} testid="hp-date-filter" />
         </div>
-        <div className="ml-auto flex shrink-0 items-center justify-end gap-2 sm:ml-0 sm:flex-1 sm:basis-0">
+        <div className="flex shrink-0 items-center justify-end gap-1.5 sm:ml-0 sm:flex-1 sm:basis-0 sm:gap-2">
+          {/* Phone only; from sm up the box in the left rail is always on screen. Only
+              where the host owns a search to drive — a supervisor's board passes none. */}
+          {onSearchChange && !phoneSearchOpen && (
+            <button
+              type="button"
+              onClick={() => setPhoneSearchOpen(true)}
+              title="Search"
+              aria-label="Search"
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border sm:hidden ${
+                search ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+              data-testid="hp-phone-search-open"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+          )}
           {/* `large` only here: this board's calendar button is the only way to reach a
               date the day strip doesn't cover, so the dialog it opens is sized to be read
               and aimed at rather than squeezed. Other boards keep the compact dialog. */}
@@ -404,6 +465,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
             testid="hp-date-custom"
             centered
             iconOnly
+            phoneIconOnly
             large
           />
           <button
@@ -420,7 +482,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
         </div>
       </div>
 
-      <div className="space-y-4" data-testid="hp-work-view">
+      <div className={`space-y-4 ${profileOpen ? "hidden sm:block" : ""}`} data-testid="hp-work-view">
           {/* The board's navigation and its stage filter in one. Each card carries the
               count behind it, so the day's workload reads without opening anything.
               Two-up on phones, four across from tablet; the bottom bar stays for
@@ -743,13 +805,24 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
         </div>
       )}
 
+      {/* In the board's place on a phone, with the bar still under it; Consultations is the
+          way back. Mounted only while it is the tab — it reads a month of attendance. */}
+      {profileOpen && (
+        <div className="sm:hidden">
+          <MyProfilePage user={user} roleLabel={roleLabel} onBack={() => setWorkTab("consultations")} phoneBar />
+        </div>
+      )}
+
       {/* Sits above the bottom bar on phones so it never covers the nav. */}
       {loading && <div className="fixed bottom-20 right-4 z-40 rounded-md bg-slate-900 px-3 py-2 text-sm text-white sm:bottom-4">Loading...</div>}
 
       {/* Mobile bottom bar — the Head Physio works this board on a phone between
           patients, where the cards at the top are a stretch away. Same tabs, thumb-high. */}
-      <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-600 bg-slate-500 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] sm:hidden" data-testid="hp-bottom-nav">
-        {VISIBLE_WORK_TABS.map((t) => {
+      {/* Glyphs only, like the Physio board's bar: with My Profile added a fourth
+          column leaves "Weekly Review" nowhere to go but two lines. Each keeps its name in
+          title/aria-label for a long press and a screen reader. */}
+      <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-600 bg-slate-500 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(0,0,0,0.06)] sm:hidden" data-testid="hp-bottom-nav">
+        {bottomTabs.map((t) => {
           const Icon = t.icon;
           const active = workTab === t.key;
           return (
@@ -757,7 +830,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               key={t.key}
               type="button"
               onClick={() => setWorkTab(t.key)}
-              className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${
+              title={t.label}
+              aria-label={t.label}
+              aria-current={active ? "page" : undefined}
+              className={`flex flex-1 items-center justify-center py-3.5 transition ${
                 active ? "text-white" : "text-slate-200"
               }`}
               data-testid={`hp-bottom-nav-${t.key}`}
@@ -765,10 +841,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               {/* The active pill was bg-teal-100. On the slate bar the icon inside it is
                   now white, which that pale mint would have swallowed — a translucent
                   white reads as the same chip and leaves the icon legible. */}
-              <span className={`rounded-full px-4 py-1 transition ${active ? "bg-white/20" : ""}`}>
+              <span className={`flex h-9 w-9 items-center justify-center rounded-full transition ${active ? "bg-white/20" : ""}`}>
                 <Icon className="h-5 w-5" />
               </span>
-              {t.label}
             </button>
           );
         })}
