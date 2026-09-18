@@ -4731,9 +4731,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // nothing already-done to carry.
   const sessionsAlreadyDone = isRehabAssign ? 0 : (selectedLead?.completed_sessions || 0);
   const totalSessionsNeeded = Math.max(0, packageSessions - sessionsAlreadyDone);
-  // And the weeks with them. The plan preview groups its days by week, and a resumed
-  // course opening a second "Week 1" beside the one already worked reads as a restart —
-  // the backend numbers the rows it writes the same way, off the same number.
+  // And the weeks with them. A resumed course has to keep counting from the weeks already
+  // worked rather than restarting at one — the backend numbers the rows it writes off the
+  // same number, and the plan's own week stamp has to agree with them.
   const weeksAlreadyDone = isRehabAssign ? 0 : (physioProgress?.weeks_completed || 0);
   // Whether this run of the picker is picking up a course somebody else started.
   const resumingCourse = sessionsAlreadyDone > 0;
@@ -5030,8 +5030,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   const isPaidSession = (dayNumber) => dayNumber <= sessionPayment.paid;
 
   // The plan itself: one treatment session per day, numbered Day 1, Day 2 … in date order
-  // and stamped with the week it falls in — the same week rule the backend records, so a
-  // "03 Week · 9 sessions" package reads as 3 weeks of 3 treatment days.
+  // and stamped with the week it falls in — the same week rule the backend records, kept
+  // in step with the rows it writes even though the preview lists the days straight through.
   const treatmentPlan = useMemo(() => {
     if (sortedPickedSlots.length === 0) return [];
     const firstDay = sortedPickedSlots[0].split("T")[0];
@@ -11859,7 +11859,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                                           ? `${selectedLead.name} already has a ${ownClash} at ${to12h(time)} — move that first, or pick another time`
                                           : taken
                                           ? `Full · ${seats}/${slotCapacity} · ${slotOccupantNames(slot) || "—"}`
-                                          : `${slotRange12h(time, sessionMinutes)} · ${seats}/${slotCapacity} taken${seats ? ` · ${slotOccupantNames(slot)}` : ""}${picked ? ` · Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}` : ""}`}
+                                          : `${slotRange12h(time, sessionMinutes)} · ${seats}/${slotCapacity} taken${seats ? ` · ${slotOccupantNames(slot)}` : ""}${picked ? ` · Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"} — click to unselect` : ""}`}
                                         data-testid={`cons-slot-pick-${time}`}
                                       >
                                         {/* Both ends of the hour, then the seat gauge on the
@@ -11886,7 +11886,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                                             it is not written anywhere else. */}
                                         <div className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] font-semibold ${taken ? "text-amber-700" : picked ? (pickedPaid ? "text-emerald-800" : "text-rose-800") : "text-emerald-700"}`}>
                                           {picked ? (
-                                            <span data-testid={`cons-slot-picked-day-${time}`}>Day {planByDate[pickerDate].day} · {pickedPaid ? "PAID" : "UNPAID"}</span>
+                                            <>
+                                              <span data-testid={`cons-slot-picked-day-${time}`}>Day {planByDate[pickerDate].day} · {pickedPaid ? "PAID" : "UNPAID"}</span>
+                                              {/* Clicking a chosen tile has always freed the day; nothing on the
+                                                  tile said so, so the only way out anyone found was the × on the
+                                                  plan card below. A tag on the tile itself names the way back —
+                                                  it rides inside the tile's own button rather than being one of
+                                                  its own, which a button cannot hold. */}
+                                              <span
+                                                className="inline-flex items-center gap-0.5 rounded border border-current px-1 py-0.5 leading-tight"
+                                                data-testid={`cons-slot-unselect-${time}`}
+                                              >
+                                                <X className="h-2.5 w-2.5" />unselect
+                                              </span>
+                                            </>
                                           ) : held.length > 0 ? (
                                             held.map((tag) => (
                                               <span
@@ -11935,45 +11948,37 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
 
                             {treatmentPlan.length > 0 && (
                               <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="cons-treatment-plan">
-                                {/* Grouped the way the package is sold — "03 Week · 9 sessions" reads back
-                                    as 3 weeks of treatment days, each day one session. Each day carries
-                                    whether the Treatment Fee actually covers it. */}
-                                <div className="max-h-40 space-y-2 overflow-y-auto">
-                                  {[...new Set(treatmentPlan.map((p) => p.week))].map((week) => (
-                                    <div key={week}>
-                                      <p className="mb-1 text-xs font-bold uppercase tracking-wider text-violet-500">Week {week}</p>
-                                      {/* Three to a row. As pills on one flowing line each
-                                          carried the day, the date, both ends of the slot and
-                                          its paid state on a single line, which no phone has
-                                          the width for — stacked inside a card, the same
-                                          facts fit a third of the screen. */}
-                                      <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-4">
-                                        {treatmentPlan.filter((p) => p.week === week).map((p) => {
-                                          const paid = isPaidSession(p.day);
-                                          return (
-                                            <button
-                                              key={p.slot}
-                                              type="button"
-                                              onClick={() => togglePickedSlot(p.slot)}
-                                              className={`relative flex flex-col items-center gap-0.5 rounded-lg border-2 bg-white px-1 py-1.5 text-[10px] font-bold leading-tight transition ${
-                                                paid
-                                                  ? "border-emerald-300 text-emerald-700 hover:border-emerald-500"
-                                                  : "border-rose-300 text-rose-700 hover:border-rose-500"
-                                              }`}
-                                              title={`${dayLabel(p.date)} · ${to12h(p.time)} – ${endTime12h(p.time, sessionMinutes)} · ${paid ? "paid" : "unpaid"} — tap to remove`}
-                                              data-testid={`cons-slot-picked-${p.slot}`}
-                                            >
-                                              <X className="absolute right-0.5 top-0.5 h-3 w-3 text-slate-300" />
-                                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] text-white ${paid ? "bg-emerald-600" : "bg-rose-600"}`}>Day {p.day}</span>
-                                              <span className="text-slate-600">{shortDayLabel(p.date)}</span>
-                                              <span className="text-slate-500">{to12h(p.time)}</span>
-                                              <span className={`text-[9px] font-extrabold ${paid ? "text-emerald-600" : "text-rose-600"}`}>{paid ? "PAID" : "UNPAID"}</span>
-                                            </button>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  ))}
+                                {/* One run of day cards, in the order they were fixed. The week
+                                    the package sells them in is already on the header above, and
+                                    repeating it here broke a short plan into rows of one or two.
+                                    Three to a row: as pills on one flowing line each carried the
+                                    day, the date, both ends of the slot and its paid state on a
+                                    single line, which no phone has the width for — stacked inside
+                                    a card, the same facts fit a third of the screen. */}
+                                <div className="grid max-h-40 grid-cols-3 gap-1.5 overflow-y-auto lg:grid-cols-4">
+                                  {treatmentPlan.map((p) => {
+                                    const paid = isPaidSession(p.day);
+                                    return (
+                                      <button
+                                        key={p.slot}
+                                        type="button"
+                                        onClick={() => togglePickedSlot(p.slot)}
+                                        className={`relative flex flex-col items-center gap-0.5 rounded-lg border-2 bg-white px-1 py-1.5 text-[10px] font-bold leading-tight transition ${
+                                          paid
+                                            ? "border-emerald-300 text-emerald-700 hover:border-emerald-500"
+                                            : "border-rose-300 text-rose-700 hover:border-rose-500"
+                                        }`}
+                                        title={`${dayLabel(p.date)} · ${to12h(p.time)} – ${endTime12h(p.time, sessionMinutes)} · ${paid ? "paid" : "unpaid"} — tap to remove`}
+                                        data-testid={`cons-slot-picked-${p.slot}`}
+                                      >
+                                        <X className="absolute right-0.5 top-0.5 h-3 w-3 text-slate-300" />
+                                        <span className={`rounded-full px-1.5 py-0.5 text-[9px] text-white ${paid ? "bg-emerald-600" : "bg-rose-600"}`}>Day {p.day}</span>
+                                        <span className="text-slate-600">{shortDayLabel(p.date)}</span>
+                                        <span className="text-slate-500">{to12h(p.time)}</span>
+                                        <span className={`text-[9px] font-extrabold ${paid ? "text-emerald-600" : "text-rose-600"}`}>{paid ? "PAID" : "UNPAID"}</span>
+                                      </button>
+                                    );
+                                  })}
                                 </div>
                               </div>
                             )}
