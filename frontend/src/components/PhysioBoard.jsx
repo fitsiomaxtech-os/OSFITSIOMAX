@@ -2910,108 +2910,126 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
           <p className="text-sm text-slate-400">{historyTab === "completed" ? "No completed patients yet" : "No patients assigned yet"}</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {visiblePatients.map((p) => (
-            <button
-              type="button"
-              key={p.lead_id}
-              onClick={() => setSelectedPatient(p)}
-              className="block w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition-shadow hover:shadow-sm"
-              data-testid={`physio-patient-${p.lead_id}`}
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sm font-bold text-sky-700">
-                  {p.lead_name?.charAt(0)?.toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-slate-800">{p.lead_name}</p>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <p className="truncate text-[10px] text-slate-400">
-                      {courseLine(p)}
-                    </p>
-                    {/* Which course this patient is on, in the same two words the
-                        Treatment table and the day rows use. One badge each rather than a
-                        single label: a patient can be running both at once, and naming
-                        only one of them would hide the other. */}
-                    {(p.tracks || []).map((t) => (
-                      <span
-                        key={t}
-                        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${t === "rehab" ? "bg-cyan-100 text-cyan-700" : "bg-sky-100 text-sky-700"}`}
-                        data-testid={`physio-patient-track-${p.lead_id}-${t}`}
+        // A table, like the other lists on the board, rather than one tall card per
+        // patient. The arrow opens the patient's detail in a popup; the row opens it too.
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white" data-testid="physio-patients-table">
+          <table className="w-full min-w-[760px] text-left">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/60 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                <th className="px-4 py-3">Patient</th>
+                <th className="px-4 py-3">Program</th>
+                <th className="px-4 py-3">Contact</th>
+                <th className="px-4 py-3 text-center">Done</th>
+                <th className="px-4 py-3 text-center">Left</th>
+                <th className="px-4 py-3 text-center">Total</th>
+                <th className="px-4 py-3">Rating</th>
+                <th className="px-4 py-3">Progress</th>
+                <th className="w-12 px-4 py-3"><span className="sr-only">View</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {visiblePatients.map((p) => {
+                const pct = p.total_sessions > 0 ? Math.round((p.completed_sessions / p.total_sessions) * 100) : 0;
+                return (
+                  <tr
+                    key={p.lead_id}
+                    onClick={() => setSelectedPatient(p)}
+                    className="cursor-pointer border-b border-slate-100 transition last:border-0 hover:bg-slate-50/70"
+                    data-testid={`physio-patient-${p.lead_id}`}
+                  >
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-slate-800">{p.lead_name}</p>
+                      <p className="text-[11px] text-slate-400">{courseLine(p) || "—"}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      {/* One badge per course: a patient can be running both at once. */}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {(p.tracks || []).map((t) => (
+                          <span
+                            key={t}
+                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${t === "rehab" ? "bg-cyan-100 text-cyan-700" : "bg-sky-100 text-sky-700"}`}
+                            data-testid={`physio-patient-track-${p.lead_id}-${t}`}
+                          >
+                            {t === "rehab" ? "Rehab" : "Treatment"}
+                          </span>
+                        ))}
+                        {p.review_number > 0 && (
+                          <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700">
+                            {ordinal(p.review_number)} Review
+                          </span>
+                        )}
+                        {!(p.tracks || []).length && !(p.review_number > 0) && <span className="text-slate-300">—</span>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-600">{p.phone || <span className="text-slate-300">—</span>}</span>
+                        <button
+                          type="button"
+                          title="Call"
+                          disabled={!p.phone}
+                          onClick={(e) => { e.stopPropagation(); if (p.phone) window.location.href = `tel:${p.phone.replace(/[^0-9+]/g, "")}`; }}
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          data-testid={`physio-patient-call-${p.lead_id}`}
+                        >
+                          <PhoneCall className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          title="WhatsApp"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const num = waNumber(p.phone);
+                            if (!num) { toast.error("This patient has no phone number on file"); return; }
+                            // Same-tab navigation: window.open(..., "_blank") can leave mobile
+                            // browsers on a blank tab on the way back from WhatsApp.
+                            window.location.href = `https://wa.me/${num}`;
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-[#25D366] hover:bg-slate-50"
+                          data-testid={`physio-patient-whatsapp-${p.lead_id}`}
+                        >
+                          <WhatsAppIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-center text-sm font-semibold text-emerald-600">{p.completed_sessions}</td>
+                    <td className="px-4 py-3 text-center text-sm font-semibold text-sky-600">{p.remaining_sessions}</td>
+                    <td className="px-4 py-3 text-center text-sm font-semibold text-slate-600">{p.total_sessions}</td>
+                    {/* The client's weekly star rating of this physio, averaged. Stars only. */}
+                    <td className="px-4 py-3" data-testid={`physio-patient-stars-${p.lead_id}`}>
+                      {p.star_average ? (
+                        <span className="flex items-center gap-1 text-sm font-semibold text-amber-600">
+                          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                          {Number(p.star_average).toFixed(1)}
+                          <span className="text-[10px] font-normal text-slate-400">({p.star_count})</span>
+                        </span>
+                      ) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-[10px] text-slate-400">{pct}%</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        title="View details"
+                        aria-label="View details"
+                        onClick={(e) => { e.stopPropagation(); setSelectedPatient(p); }}
+                        className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                        data-testid={`physio-patient-view-${p.lead_id}`}
                       >
-                        {t === "rehab" ? "Rehab" : "Treatment"}
-                      </span>
-                    ))}
-                    {p.review_number > 0 && (
-                      <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700">
-                        {ordinal(p.review_number)} Review
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => { e.stopPropagation(); if (p.phone) window.location.href = `tel:${p.phone.replace(/[^0-9+]/g, "")}`; }}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    className={`flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-500 ${p.phone ? "hover:bg-slate-50" : "cursor-not-allowed opacity-40"}`}
-                    data-testid={`physio-patient-call-${p.lead_id}`}
-                  >
-                    <PhoneCall className="h-3.5 w-3.5" />
-                  </span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const num = waNumber(p.phone);
-                      if (!num) { toast.error("This patient has no phone number on file"); return; }
-                      // window.open(..., "_blank") hands mobile browsers an ambiguous new-tab/
-                      // popup context — on the way back from WhatsApp that often leaves the
-                      // original tab on a blank white screen. Same-tab navigation (like the
-                      // tel: Call button already uses) hands off to the OS cleanly instead.
-                      window.location.href = `https://wa.me/${num}`;
-                    }}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-[#25D366] hover:bg-slate-50"
-                    data-testid={`physio-patient-whatsapp-${p.lead_id}`}
-                  >
-                    <WhatsAppIcon className="h-4 w-4" />
-                  </span>
-                </div>
-              </div>
-              <div className="mt-3 flex items-center justify-around rounded-lg bg-slate-50 py-2 text-center sm:justify-start sm:gap-6 sm:bg-transparent sm:py-0">
-                <div>
-                  <p className="text-base font-bold text-emerald-600">{p.completed_sessions}</p>
-                  <p className="text-[9px] text-slate-400">Done</p>
-                </div>
-                <div>
-                  <p className="text-base font-bold text-sky-600">{p.remaining_sessions}</p>
-                  <p className="text-[9px] text-slate-400">Left</p>
-                </div>
-                <div>
-                  <p className="text-base font-bold text-slate-600">{p.total_sessions}</p>
-                  <p className="text-[9px] text-slate-400">Total</p>
-                </div>
-                {/* The client's weekly star rating of this physio, averaged. Stars only. */}
-                <div data-testid={`physio-patient-stars-${p.lead_id}`}>
-                  <p className="flex items-center justify-center gap-0.5 text-base font-bold text-amber-600 sm:justify-start">
-                    <Star className={`h-3.5 w-3.5 ${p.star_average ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
-                    {p.star_average ? Number(p.star_average).toFixed(1) : <span className="text-slate-300">—</span>}
-                  </p>
-                  <p className="text-[9px] text-slate-400">{p.star_count ? `Rating (${p.star_count})` : "Rating"}</p>
-                </div>
-              </div>
-              {/* Progress bar */}
-              <div className="mt-3 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-all"
-                  style={{ width: `${p.total_sessions > 0 ? (p.completed_sessions / p.total_sessions) * 100 : 0}%` }}
-                />
-              </div>
-            </button>
-          ))}
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -3027,9 +3045,8 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
   );
 }
 
-// Full page (not a popup) — Sessions / Treatment / Payment History / Profile.
-// Same fixed inset-0 full-bleed pattern as CalendarPage, opened from a patient card
-// in PatientsTab instead of a modal.
+// Popup — Sessions / Treatment / Progression / Profile. Opened from the arrow on a row
+// of the Patients table: full-screen on a phone, a centred panel from sm up.
 export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
   const [detailTab, setDetailTab] = useState("sessions");
   const [lead, setLead] = useState(null);
@@ -3057,6 +3074,13 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
   }, [patient.lead_id, physioId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Escape closes the popup, unless a day is open on top of it — that one closes first.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape" && !viewSession) onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, viewSession]);
 
   const pendingSessions = sessions.filter((s) => s.status !== "completed").length;
   const completedSessions = sessions.filter((s) => s.status === "completed").length;
@@ -3088,15 +3112,17 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-50" data-testid="physio-patient-detail-page">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-testid="physio-patient-detail-page"
+    >
+    <div className="flex h-full w-full max-w-5xl flex-col overflow-hidden bg-slate-50 sm:h-[90vh] sm:rounded-2xl sm:shadow-2xl">
       {/* Everything on this page hangs off one centred column of the same width. Run
           full-bleed, the three tiles stretched the whole of a desktop monitor and nothing
           lined up with anything above or below them. */}
       <div className="shrink-0 border-b border-slate-200 bg-white">
         <div className="mx-auto flex w-full max-w-5xl items-center gap-3 px-4 py-3 sm:px-6">
-          <button type="button" onClick={onClose} className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" data-testid="physio-patient-back">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sm font-bold text-sky-700">
             {(patient.lead_name || "?").charAt(0).toUpperCase()}
           </div>
@@ -3116,6 +3142,9 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
               <p className="text-[10px] uppercase tracking-wide text-slate-400">Days done</p>
             </div>
           )}
+          <button type="button" onClick={onClose} title="Close" aria-label="Close" className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" data-testid="physio-patient-back">
+            <X className="h-5 w-5" />
+          </button>
         </div>
         {sessions.length > 0 && (
           <div className="mx-auto w-full max-w-5xl px-4 pb-3 sm:px-6">
@@ -3326,6 +3355,7 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
           onDone={() => { setViewSession(null); load(); onRefresh?.(); }}
         />
       )}
+    </div>
     </div>
   );
 }
