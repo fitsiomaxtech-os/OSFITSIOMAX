@@ -3066,9 +3066,83 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
           </p>
         </div>
       ) : (
-        // A table, like the other lists on the board, rather than one tall card per
-        // patient. The arrow opens the patient's detail in a popup; the row opens it too.
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white" data-testid="physio-patients-table">
+        <>
+        {/* Cards on a phone, the table from md — the split the Review tab already makes.
+            Eight columns at min-w-[640px] left a phone showing Patient, Program and Done
+            with the rest behind a sideways scroll nobody knew was there: Left, Total, the
+            rating and the progress bar were all off screen. A card stacks the same figures
+            instead, and the whole card opens the patient, like the row does. */}
+        <div className="space-y-2 md:hidden" data-testid="physio-patients-mobile">
+          {visiblePatients.map((p) => {
+            const pct = p.total_sessions > 0 ? Math.round((p.completed_sessions / p.total_sessions) * 100) : 0;
+            return (
+              <button
+                key={p.lead_id}
+                type="button"
+                onClick={() => setSelectedPatient(p)}
+                className="block w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:bg-slate-50/70"
+                data-testid={`physio-patient-card-${p.lead_id}`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                    {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-800">{p.lead_name}</p>
+                    <p className="truncate text-[11px] text-slate-400">{courseLine(p) || "—"}</p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      {(p.tracks || []).map((t) => (
+                        <span
+                          key={t}
+                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${t === "rehab" ? "bg-cyan-100 text-cyan-700" : "bg-sky-100 text-sky-700"}`}
+                        >
+                          {t === "rehab" ? "Rehab" : "Treatment"}
+                        </span>
+                      ))}
+                      {p.review_number > 0 && (
+                        <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700">
+                          {ordinal(p.review_number)} Review
+                        </span>
+                      )}
+                      {p.star_average ? (
+                        <span className="flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                          {Number(p.star_average).toFixed(1)}
+                          <span className="font-normal text-slate-400">({p.star_count})</span>
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <ChevronRight className="mt-2 h-4 w-4 shrink-0 text-slate-300" />
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 px-2 py-1.5 text-center">
+                  <div>
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Done</p>
+                    <p className="text-sm font-semibold text-emerald-600">{p.completed_sessions}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Left</p>
+                    <p className="text-sm font-semibold text-sky-600">{p.remaining_sessions}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Total</p>
+                    <p className="text-sm font-semibold text-slate-600">{p.total_sessions}</p>
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-[10px] text-slate-400">{pct}%</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* A table from md up, like the other lists on the board. The arrow opens the
+            patient's detail in a popup; the row opens it too. */}
+        <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white md:block" data-testid="physio-patients-table">
           <table className="w-full min-w-[640px] text-left">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/60 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
@@ -3155,6 +3229,7 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {selectedPatient && (
