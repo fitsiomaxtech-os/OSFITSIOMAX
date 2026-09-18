@@ -679,13 +679,25 @@ const MonthlyCalendarTab = ({ user }) => {
 
 // ---------- the page ----------
 
-export const MyProfilePage = ({ user, roleLabel, onBack }) => {
+// The Physio board's phone bar: five tabs in one row, so four go to their glyph and Leave
+// goes to its word. Leave is the one kept in words because its glyph — a palm tree — does
+// not say "leave" to anyone who has not already learned it.
+const PHONE_BAR_MODES = { calendar: "icon", attendance: "icon", timeoff: "text", profile: "icon", security: "icon" };
+const PHONE_BAR_TABS = TABS.map((t) => ({ ...t, phone: PHONE_BAR_MODES[t.key] }));
+
+/**
+ * `phoneBar` is for a host that already frames this page on a phone — the Physio board,
+ * which opens it from its own bottom bar. Below sm it drops the Back button and the name
+ * (the bar underneath is the way out, and the header above already carries the name) and
+ * puts all five tabs on one row. From sm up, and for every other host, the page is as it was.
+ */
+export const MyProfilePage = ({ user, roleLabel, onBack, phoneBar = false }) => {
   const [tab, setTab] = useState("attendance");
 
   return (
     <div className="space-y-4" data-testid="my-profile-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
+        <div className={`min-w-0 items-center gap-3 ${phoneBar ? "hidden sm:flex" : "flex"}`}>
           <button
             type="button"
             onClick={onBack}
@@ -706,7 +718,9 @@ export const MyProfilePage = ({ user, roleLabel, onBack }) => {
             four characters is not a tab. shrink-0 keeps the greeting beside it from
             squeezing it back into an ellipsis; the row wraps instead. */}
         <div className="w-full sm:w-auto sm:shrink-0" data-testid="my-profile-tabs-wrap">
-          <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={3} fit />
+          {phoneBar
+            ? <SegmentedTabs tabs={PHONE_BAR_TABS} value={tab} onChange={setTab} testid="my-profile-tabs" fit />
+            : <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={3} fit />}
         </div>
       </div>
 

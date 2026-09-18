@@ -18,6 +18,12 @@
  * so anything that won't survive a sixth of a phone's width gets a shorter name rather
  * than an ellipsis. The full label returns from sm up.
  *
+ * `phone` narrows one tab to half of itself below sm: "icon" drops the words and keeps the
+ * glyph, "text" drops the glyph and keeps the words. For a bar that must stay one row on a
+ * phone with more tabs than fit labelled. An icon-only tab keeps its full label in
+ * title/aria-label, so it is still named for a long press and a screen reader. From sm up
+ * the tab is the ordinary tab again.
+ *
  * `mobileCols` fixes the bar to that many columns on a phone. Four is the ceiling: past
  * that a single row leaves each tab too narrow to read even abbreviated, and two rows of
  * three costs less than a bar nobody can use. Desktop is always one row.
@@ -50,12 +56,16 @@ export const SegmentedTabs = ({ tabs, value, onChange, testid = "segmented-tabs"
       {tabs.map((t) => {
         const Icon = t.icon;
         const active = value === t.key;
+        const iconOnPhone = t.phone !== "text";
+        const wordsOnPhone = t.phone !== "icon";
         return (
           <button
             key={t.key}
             type="button"
             onClick={() => onChange(t.key)}
             aria-current={active ? "page" : undefined}
+            title={t.phone === "icon" ? t.label : undefined}
+            aria-label={t.phone === "icon" ? t.label : undefined}
             className={`flex min-w-0 items-center justify-center ${iconGap} rounded-lg font-semibold transition ${fit ? "sm:shrink-0 sm:whitespace-nowrap" : "sm:flex-1"} sm:gap-1.5 ${mobileCols ? "" : "flex-1"} ${pad} ${
               active
                 ? "bg-white text-slate-900 shadow-sm"
@@ -63,8 +73,10 @@ export const SegmentedTabs = ({ tabs, value, onChange, testid = "segmented-tabs"
             }`}
             data-testid={`${testid}-${t.key}`}
           >
-            {Icon && <Icon className={`h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4 ${active ? "text-sky-600" : ""}`} />}
-            {t.short ? (
+            {Icon && <Icon className={`h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4 ${iconOnPhone ? "" : "hidden sm:block"} ${active ? "text-sky-600" : ""}`} />}
+            {t.phone === "icon" ? (
+              <span className="hidden truncate sm:inline">{t.label}</span>
+            ) : t.short && wordsOnPhone ? (
               <>
                 <span className="truncate sm:hidden">{t.short}</span>
                 <span className="hidden truncate sm:inline">{t.label}</span>
