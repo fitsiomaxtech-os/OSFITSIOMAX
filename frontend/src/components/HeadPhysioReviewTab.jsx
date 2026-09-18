@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { X, AlertTriangle, ChevronDown, ChevronRight, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { hpReviews, hpCompleteReview, physioSessions } from "@/lib/api";
@@ -38,6 +38,17 @@ const stageOf = (r, todayDate) => {
   }
   return { key: "upcoming", label: "Upcoming", done: false, badge: "border-slate-200 bg-slate-50 text-slate-600", card: "border-slate-200" };
 };
+
+// The client's stars for the week this review covers (client_rating from the server),
+// or a dash while they haven't rated it.
+const StarRating = ({ value, testid }) => (
+  value ? (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700" data-testid={testid}>
+      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+      {value}
+    </span>
+  ) : <span className="text-slate-300">—</span>
+);
 
 const StageBadge = ({ stage }) => (
   <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${stage.badge}`}>
@@ -292,6 +303,7 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
                       </p>
                       {r.patient_number && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">{r.patient_number}</span>}
                       <StageBadge stage={st} />
+                      {r.client_rating ? <StarRating value={r.client_rating} /> : null}
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
                       {r.phone || "—"} · Review {dmy(r.review_date)}{r.review_time ? ` · ${to12h(r.review_time)}` : ""} · raised by {r.physio_name || "—"}
@@ -321,15 +333,17 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
 
           <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="hp-review-desktop">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-sm">
+              <table className="w-full min-w-[1000px] text-sm">
                 <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
                   <tr>
                     <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
                     <th className="px-4 py-2.5 font-semibold">Patient</th>
                     <th className="px-4 py-2.5 font-semibold">Phone</th>
                     <th className="px-4 py-2.5 font-semibold">Stage</th>
+                    <th className="px-4 py-2.5 font-semibold">Date</th>
                     {branchId && <th className="px-4 py-2.5 font-semibold">Consultant</th>}
                     <th className="px-4 py-2.5 font-semibold">Recommendation</th>
+                    <th className="px-4 py-2.5 font-semibold">Star Rating</th>
                     <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
                   </tr>
                 </thead>
@@ -348,13 +362,14 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
                         <td className="px-4 py-3 text-slate-600">{r.phone || "—"}</td>
                         <td className="px-4 py-3">
                           <StageBadge stage={st} />
-                          {/* The slot the review was dispatched into, not just its day —
-                              it is booked at an hour on the Consultant's calendar, and a
-                              row that only names the date sends someone to the Branch
-                              board to find out when. */}
-                          <span className="mt-0.5 block text-[11px] text-slate-400">
-                            {dmy(r.review_date)}{r.review_time ? ` · ${to12h(r.review_time)}` : ""}
-                          </span>
+                        </td>
+                        {/* The slot the review was dispatched into, not just its day —
+                            it is booked at an hour on the Consultant's calendar, and a
+                            row that only names the date sends someone to the Branch
+                            board to find out when. */}
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                          {dmy(r.review_date)}
+                          {r.review_time && <span className="block text-[11px] text-slate-400">{to12h(r.review_time)}</span>}
                         </td>
                         {branchId && (
                           <td className="whitespace-nowrap px-4 py-3 font-medium text-violet-700">
@@ -368,6 +383,9 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
                           {r.head_physio_suggestions
                             ? <span className="line-clamp-2">{r.head_physio_suggestions}</span>
                             : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StarRating value={r.client_rating} testid={`hp-review-stars-${r.id}`} />
                         </td>
                         <td className="px-4 py-3 text-right">
                           {!st.done ? (

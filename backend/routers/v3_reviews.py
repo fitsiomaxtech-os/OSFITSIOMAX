@@ -654,6 +654,37 @@ async def branch_send_review(
 
 # ------------------------------------------------------- Head Physio: complete a review
 
+async def _client_week_stars(rows: List[dict]) -> dict:
+    """The client's stars for the week each review covers, keyed by review id -- the Star
+    Rating column on the Consultant's Weekly Review table. Week N's review is matched to the
+    portal's weekly Physio review for treatment week N (review_numbers_for_lead), stars only.
+    Numbered against every review the lead has, not just the ones on this board, so a week
+    reads the same here as it does anywhere else."""
+    lead_ids = list({r.get("lead_id") for r in rows if r.get("lead_id")})
+    if not lead_ids:
+        return {}
+    every = await v3_col("reviews").find(
+        {"lead_id": {"$in": lead_ids}},
+        {"_id": 0, "id": 1, "lead_id": 1, "treatment_days": 1, "raised_at": 1},
+    ).to_list(5000)
+    by_lead: dict = {}
+    for r in every:
+        by_lead.setdefault(r["lead_id"], []).append(r)
+    numbers: dict = {}
+    for revs in by_lead.values():
+        numbers.update(review_numbers_for_lead(revs))
+    rated = await v3_col("client_reviews").find(
+        {"lead_id": {"$in": lead_ids}, "kind": "physio", "source": "week",
+         "track": {"$in": ["treatment", None]}, "skipped": {"$ne": True}},
+        {"_id": 0, "lead_id": 1, "week_number": 1, "rating": 1},
+    ).to_list(10000)
+    by_week = {(c["lead_id"], c.get("week_number")): c["rating"] for c in rated if c.get("rating")}
+    return {
+        r["id"]: by_week.get((r.get("lead_id"), numbers.get(r.get("id"))))
+        for r in rows if r.get("id")
+    }
+
+
 @router.get("/head-physio/reviews")
 async def hp_reviews(
     branch_id: Optional[str] = Query(
@@ -698,10 +729,12 @@ async def hp_reviews(
         return {"today": [], "upcoming": [], "overdue": [], "completed": [], "today_date": _today()}
 
     rows = await v3_col("reviews").find(query, {"_id": 0}).sort("review_date", 1).to_list(2000)
+    stars = await _client_week_stars(rows)
 
     today = _today()
     out = {"today": [], "upcoming": [], "overdue": [], "completed": [], "today_date": today}
     for r in rows:
+        r["client_rating"] = stars.get(r.get("id"))
         if r.get("status") == COMPLETED:
             out["completed"].append(_shape(r))
         elif (r.get("review_date") or "") == today:

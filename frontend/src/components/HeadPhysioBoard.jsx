@@ -73,7 +73,7 @@ const TAB_GRID_COLS = {
 
 const WORK_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar, color: "#0284c7" },
-  { key: "review", label: "Review", icon: ClipboardCheck, color: "#7c3aed" },
+  { key: "review", label: "Weekly Review", icon: ClipboardCheck, color: "#7c3aed" },
   { key: "all", label: "All", icon: LayoutList, color: "#0d9488" },
   // What the consultant's patients said: the star rating and written feedback from each
   // weekly review, read-only. Not a queue, so it carries no count.
