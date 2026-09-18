@@ -790,7 +790,7 @@ export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => 
 };
 
 /**
- * Confirm a bulk delete by typing the word.
+ * Confirm a delete by typing the word.
  *
  * A count and an OK button is the shape of dialog people learn to dismiss, and this one
  * cannot be undone. Typing DELETE costs a second and cannot be done by muscle memory, so
@@ -798,8 +798,14 @@ export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => 
  *
  * The names are listed rather than only counted. "Delete 47 patients" is a number; the
  * list is what lets someone notice a real patient among the junk before it goes.
+ *
+ * `purge` is the row's own bin icon: the patient goes whatever they are carrying, treatment
+ * slots and collected payments included. The select-many bar leaves it off, so a real
+ * patient swept up with an import is refused and named instead. Same dialog either way
+ * because the confirmation is the same act — but the two say different things about what
+ * survives, and that difference is the whole reason to read it.
  */
-function BulkDeleteLeadsModal({ leads, onClose, onDeleted }) {
+function BulkDeleteLeadsModal({ leads, onClose, onDeleted, purge = false }) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const armed = typed.trim().toUpperCase() === "DELETE";
@@ -808,7 +814,7 @@ function BulkDeleteLeadsModal({ leads, onClose, onDeleted }) {
     if (!armed) return;
     setBusy(true);
     try {
-      const res = await bulkDeleteLeads(leads.map((l) => l.id), typed.trim().toUpperCase());
+      const res = await bulkDeleteLeads(leads.map((l) => l.id), typed.trim().toUpperCase(), purge);
       const blocked = res.blocked || [];
       if (res.deleted > 0) toast.success(`${res.deleted} patient${res.deleted > 1 ? "s" : ""} deleted`);
       // Kept apart from the success line: the ones that survived are the point of the
@@ -833,7 +839,9 @@ function BulkDeleteLeadsModal({ leads, onClose, onDeleted }) {
             <Trash2 className="h-4 w-4" /> Delete {leads.length} patient{leads.length > 1 ? "s" : ""}?
           </h3>
           <p className="mt-1 text-[11px] text-slate-500">
-            This removes them and their activity, follow-ups and appointments. It cannot be undone.
+            {purge
+              ? "This removes the patient and everything of theirs — treatment slots, collected payments, appointments, reviews, documents and portal login. It cannot be undone."
+              : "This removes them and their activity, follow-ups and appointments. It cannot be undone."}
           </p>
         </div>
 
@@ -847,10 +855,17 @@ function BulkDeleteLeadsModal({ leads, onClose, onDeleted }) {
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-[11px] text-slate-500">
-            Anyone with treatment sessions or collected payments is kept — they are a patient with a
-            record, not an import to clear. You will be told which.
-          </p>
+          {purge ? (
+            <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-medium text-rose-800" data-testid="branch-delete-purge-warning">
+              Treatment sessions and collected payments go too. Nothing is kept back, and the
+              finance figures this patient is counted in will change.
+            </p>
+          ) : (
+            <p className="mt-3 text-[11px] text-slate-500">
+              Anyone with treatment sessions or collected payments is kept — they are a patient with a
+              record, not an import to clear. You will be told which.
+            </p>
+          )}
         </div>
 
         <div className="border-t p-4">
@@ -928,14 +943,21 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // array is 2,000 scans of it.
   const [picked, setPicked] = useState(() => new Set());
   const [showBulkDelete, setShowBulkDelete] = useState(false);
-  // One patient off the row's Action cell. Goes through the same branch-scoped delete as
-  // the bulk bar, so it keeps that endpoint's refusal of anyone with sessions or payments.
+  // One patient off the row's Action cell. Same branch-scoped endpoint as the bulk bar, but
+  // asked to purge: this one takes the patient's treatment slots and collected payments
+  // with them rather than refusing over them. That is what it is for — a record that is
+  // wrong all the way through cannot be cleared by a delete that steps around its middle.
   const [rowDelete, setRowDelete] = useState(null);
   // The roles that endpoint accepts (branch_admin's aliases included server-side). Anyone
   // else would only be shown a button that 403s.
-  const canDeleteLeads = ["super_admin", "business_dev", "branch_admin", "online_physio_admin", "online_fitness_admin",
+  const deleteRoleAllowed = ["super_admin", "business_dev", "branch_admin", "online_physio_admin", "online_fitness_admin",
     "branch_admin_physio", "branch_admin_fitness", "branch_admin_physio_fitness"]
     .includes(String((currentUser || loadSession()?.user)?.role || "").trim().toLowerCase());
+  // ...and the developer switch in Super Admin > Pipeline Stages > Danger Zone, which the
+  // board carries on every load. `!== false` rather than a truth test so the button is not
+  // pulled out from under the desk for the moment before the first board arrives — absent
+  // reads as on, which is what the server defaults to as well.
+  const canDeleteLeads = deleteRoleAllowed && boardData.lead_delete_enabled !== false;
   // Set when a lead's own detail popup hands off to a Consultation-only stage — tells the
   // embedded ConsultationsBoard which lead to auto-open once it loads, so the handoff lands
   // straight on that lead's own rich modal instead of just the filtered list.
@@ -2520,8 +2542,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                               type="button"
                               onClick={(e) => { e.stopPropagation(); setRowDelete(lead); }}
                               className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                              title="Delete lead"
-                              aria-label={`Delete ${lead.name || "patient"}`}
+                              title="Delete this patient and everything of theirs"
+                              aria-label={`Delete ${lead.name || "patient"} and all their records`}
                               data-testid={`branch-row-delete-${lead.id}`}
                             >
                               <Trash2 className="h-4 w-4" />
@@ -2622,6 +2644,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       {rowDelete && (
         <BulkDeleteLeadsModal
           leads={[rowDelete]}
+          purge
           onClose={() => setRowDelete(null)}
           onDeleted={() => {
             setRowDelete(null);

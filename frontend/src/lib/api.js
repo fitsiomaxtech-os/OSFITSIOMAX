@@ -153,8 +153,11 @@ export const getLeads = async (params) => (await api.get("/leads", { params })).
 export const createManualLead = async (payload) => (await api.post("/leads/manual", payload)).data;
 export const updateLead = async (leadId, payload) => (await api.put(`/leads/${leadId}`, payload)).data;
 export const deleteLead = async (leadId) => (await api.delete(`/leads/${leadId}`)).data;
-// Clearing several at once. Returns what was deleted and what was refused, with reasons.
-export const bulkDeleteLeads = async (leadIds, confirm) => (await api.post("/branch/leads/bulk-delete", { lead_ids: leadIds, confirm })).data;
+// Deleting from Branch Leads. Returns what was deleted and what was refused, with reasons.
+// `purge` drops the server's refusal of anyone carrying treatment sessions or collected
+// payments and takes the patient with all of it — the row's own bin icon; the select-many
+// bar leaves it false so a real patient among an import survives being swept up.
+export const bulkDeleteLeads = async (leadIds, confirm, purge = false) => (await api.post("/branch/leads/bulk-delete", { lead_ids: leadIds, confirm, purge })).data;
 // Same permanent, no-guard delete as deleteLead() above, for several patients at once —
 // no refusal for paid-for history, unlike bulkDeleteLeads. Super Admin only.
 export const bulkHardDeleteLeads = async (leadIds, confirm) => (await api.post("/leads/bulk-hard-delete", { lead_ids: leadIds, confirm })).data;
@@ -632,6 +635,10 @@ export const resetAllLeads = async (password) => (await api.post("/admin/reset-a
 export const resetAllPayments = async (password) => (await api.post("/admin/reset-all-payments", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
 export const getPhysioDayLock = async (password) => (await api.get("/admin/physio-day-lock", { headers: developerHeaders(password) })).data;
 export const setPhysioDayLock = async (password, locked) => (await api.put("/admin/physio-day-lock", { locked }, { headers: developerHeaders(password) })).data;
+// Whether Branch Leads offers its delete at all. Read back from the branch board as
+// `lead_delete_enabled` by everyone else — only the Danger Zone reads and writes it here.
+export const getLeadDeleteButton = async (password) => (await api.get("/admin/lead-delete-button", { headers: developerHeaders(password) })).data;
+export const setLeadDeleteButton = async (password, enabled) => (await api.put("/admin/lead-delete-button", { enabled }, { headers: developerHeaders(password) })).data;
 export const resetAllUsers = async (password) => (await api.post("/admin/reset-all-users", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
 
 // HR

@@ -18,6 +18,7 @@ from deps import (
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
 import lead_control
+import lead_purge
 from seed import create_default_lead_source, sync_lead_source_branch_name
 from routers.v3_finance import REVENUE_ACTIONS
 from routers.v3_inventory import _add_to_stock
@@ -1122,6 +1123,44 @@ async def v3_set_physio_day_lock(
         upsert=True,
     )
     return {"locked": payload.locked}
+
+
+# Whether Branch Leads offers a delete at all. The delete it governs is total — the
+# patient, their treatment slots, their collected payments and every other trail they
+# left (see lead_purge) — which is what makes it the right tool for a mistake and the
+# wrong thing to leave lying on a busy branch's screen by default in every install.
+#
+# A developer setting rather than a role, for the reason the Danger Zone exists: the
+# question is whether this install wants the button, not whether a Branch Admin is
+# senior enough to be trusted with it. Switching it off hides the bin icon and the
+# select-many Delete bar, and the endpoint behind them refuses as well.
+
+
+class LeadDeleteButtonInput(BaseModel):
+    enabled: bool
+
+
+@router.get("/admin/lead-delete-button")
+async def v3_get_lead_delete_button(_: V3UserOut = Depends(require_developer_password)):
+    return {"enabled": await lead_purge.delete_button_enabled()}
+
+
+@router.put("/admin/lead-delete-button")
+async def v3_set_lead_delete_button(
+    payload: LeadDeleteButtonInput,
+    user: V3UserOut = Depends(require_developer_password),
+):
+    await v3_col("app_settings").update_one(
+        {"id": lead_purge.DELETE_BUTTON_SETTING_ID},
+        {"$set": {
+            "id": lead_purge.DELETE_BUTTON_SETTING_ID,
+            "enabled": payload.enabled,
+            "updated_by": user.full_name,
+            "updated_at": now_iso(),
+        }},
+        upsert=True,
+    )
+    return {"enabled": payload.enabled}
 
 
 # What a consultation's Zumba and Fitness referral leaves on a lead. Cleared with the rest of

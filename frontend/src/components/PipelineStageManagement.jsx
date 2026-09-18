@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone, getPhysioDayLock, setPhysioDayLock } from "@/lib/api";
+import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone, getPhysioDayLock, setPhysioDayLock, getLeadDeleteButton, setLeadDeleteButton } from "@/lib/api";
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
@@ -79,6 +79,10 @@ export const PipelineStageManagement = ({ leading = null }) => {
   // Physio Treatment Days date lock: null until read, then true (locked) or false.
   const [dayLock, setDayLock] = useState(null);
   const [savingDayLock, setSavingDayLock] = useState(false);
+  // Whether Branch Leads draws its delete at all. null while unread, so the row can say
+  // Loading rather than guess a state and offer the wrong button.
+  const [deleteButton, setDeleteButton] = useState(null);
+  const [savingDeleteButton, setSavingDeleteButton] = useState(false);
 
   // The tab being looked at, resolved once: `type` is this table's tab id, and for the
   // Branch pair it is not the same string as the pipeline's API type — both tabs are
@@ -133,8 +137,9 @@ export const PipelineStageManagement = ({ leading = null }) => {
 
   // Read once the zone is open, with the password it was opened with.
   useEffect(() => {
-    if (!devPassword) { setDayLock(null); return; }
+    if (!devPassword) { setDayLock(null); setDeleteButton(null); return; }
     getPhysioDayLock(devPassword).then((r) => setDayLock(!!r.locked)).catch(() => setDayLock(null));
+    getLeadDeleteButton(devPassword).then((r) => setDeleteButton(!!r.enabled)).catch(() => setDeleteButton(null));
   }, [devPassword]);
 
   const lockDangerZone = () => {
@@ -182,6 +187,26 @@ export const PipelineStageManagement = ({ leading = null }) => {
       resetFailed(e);
     }
     setSavingDayLock(false);
+  };
+
+  const toggleDeleteButton = async () => {
+    const next = !deleteButton;
+    // Spelled out rather than "Enable delete?": what makes this switch worth a password is
+    // that the button it turns on takes the paid-for records with the patient, and that is
+    // the sentence somebody should read before agreeing to it.
+    const ok = window.confirm(next
+      ? "Turn the Branch Leads delete button ON?\n\nBranch Admins will get a bin icon on every lead row. It deletes the patient outright — treatment slots, collected payments, appointments, documents, portal login and all. It cannot be undone."
+      : "Turn the Branch Leads delete button OFF?\n\nThe bin icon and the select-many Delete bar disappear from Branch Leads, and the server refuses the request even if one is sent. Nothing already deleted comes back.");
+    if (!ok) return;
+    setSavingDeleteButton(true);
+    try {
+      const r = await setLeadDeleteButton(devPassword, next);
+      setDeleteButton(!!r.enabled);
+      toast.success(r.enabled ? "Branch Leads delete button is ON" : "Branch Leads delete button is OFF");
+    } catch (e) {
+      resetFailed(e);
+    }
+    setSavingDeleteButton(false);
   };
 
   const handleResetAllLeads = async () => {
@@ -464,6 +489,36 @@ export const PipelineStageManagement = ({ leading = null }) => {
                 : savingDayLock ? "Saving..."
                 : dayLock ? (<><Unlock className="mr-1 h-4 w-4" /> Unlock</>)
                 : (<><Lock className="mr-1 h-4 w-4" /> Lock</>)}
+            </Button>
+          </div>
+          {/* The one switch here that adds a button to somebody else's screen rather than
+              wiping something. It sits in the Danger Zone because of what that button does,
+              not because turning it on destroys anything by itself. */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3" data-testid="lead-delete-button-card">
+            <div className="min-w-[14rem] flex-1">
+              <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                Branch Leads delete button
+                {deleteButton !== null && (
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${deleteButton ? "bg-rose-100 text-rose-700" : "bg-slate-200 text-slate-700"}`}>
+                    {deleteButton ? "ON" : "OFF"}
+                  </span>
+                )}
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                The bin icon in the Action column. It deletes the patient outright — treatment
+                slots, collected payments, appointments, documents and portal login included.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={toggleDeleteButton}
+              disabled={deleteButton === null || savingDeleteButton}
+              data-testid="lead-delete-button-toggle"
+            >
+              {deleteButton === null ? "Loading..."
+                : savingDeleteButton ? "Saving..."
+                : deleteButton ? (<><Lock className="mr-1 h-4 w-4" /> Turn off</>)
+                : (<><Unlock className="mr-1 h-4 w-4" /> Turn on</>)}
             </Button>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">

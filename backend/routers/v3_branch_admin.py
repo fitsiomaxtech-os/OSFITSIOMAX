@@ -16,6 +16,7 @@ from deps import (
     works_org_wide,
 )
 import lead_control
+import lead_purge
 from constants import (
     V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
     BRANCH_CANCELLED_STAGE, BRANCH_APPOINTMENT_STAGE, SALES_ARM_OFFLINE,
@@ -487,6 +488,10 @@ async def _board_payload(leads: list, branch_id: Optional[str], role: str = "") 
         # branch to scope by: the stage strip must match the Lead Control on the same
         # response, or a flipped branch briefly renders the other mode's stages.
         "stages": branch_stages,
+        # The Danger Zone switch behind the Action column's bin icon. Rides along here
+        # because the setting itself is readable only with the developer password, and
+        # the board must not have to hold that to know whether to draw a button.
+        "lead_delete_enabled": await lead_purge.delete_button_enabled(),
     }
 
 

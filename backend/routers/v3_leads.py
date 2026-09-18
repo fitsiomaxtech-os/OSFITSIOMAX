@@ -12,6 +12,7 @@ from deps import (
 from constants import V3_STAGES
 from stage_utils import first_branch_stage_for, first_branch_stage_for_branch
 import lead_control
+import lead_purge
 from schemas.v3 import (
     V3UserOut, V3LeadCreate, V3LeadUpdate, V3LeadOut,
     V3AssignBranchInput, V3BookAppointmentInput, V3AppointmentOut,
@@ -122,27 +123,6 @@ async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_requir
     return V3LeadOut(**lead)
 
 
-# Every collection that keys a document off a lead — Branch Leads, Consultant/Head Physio,
-# Physio, Diet and Zumba each write their own trail here, all under the same lead_id. Unlike
-# the bulk-delete above, this endpoint carries no "has paid-for history" guard: it is the one
-# place a Super Admin can remove a patient outright, treatment sessions and collected
-# payments included, when that is genuinely what is wanted rather than clearing a bad import.
-_LEAD_REFERENCING_COLLECTIONS = [
-    "lead_activity", "lead_followups", "lead_remarks", "lead_documents",
-    "appointments", "sessions", "reviews", "package_recommendations",
-    "diet_sessions", "rehab_sessions", "weekly_assessments", "zumba_registrations",
-    "patient_portal_accounts", "patient_portal_sessions", "portal_pending",
-]
-
-
-async def _delete_lead_cascade(lead_ids: list[str]) -> None:
-    """Wipes every collection that keys a document off any of these leads. Shared by the
-    single hard-delete below and the bulk hard-delete further down, so the list of
-    collections to clean cannot drift between the two paths."""
-    for coll in _LEAD_REFERENCING_COLLECTIONS:
-        await v3_col(coll).delete_many({"lead_id": {"$in": lead_ids}})
-
-
 @router.delete("/leads/{lead_id}")
 async def v3_delete_lead(
     lead_id: str,
@@ -154,7 +134,7 @@ async def v3_delete_lead(
     res = await v3_col("leads").delete_one({"id": lead_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
-    await _delete_lead_cascade([lead_id])
+    await lead_purge.delete_lead_trail([lead_id])
     return {"message": "Lead deleted", "lead_id": lead_id}
 
 
@@ -162,6 +142,10 @@ async def v3_delete_lead(
 class BulkDeleteLeadsInput(BaseModel):
     lead_ids: list[str]
     confirm: str
+    # Delete the patient outright, treatment slots and collected payments included,
+    # instead of refusing anyone who has them. The row's own bin icon in Branch Leads
+    # sends this; the select-many bar does not. See the endpoint's docstring.
+    purge: bool = False
 
 
 # Paid-for history a lead can be carrying. Kept beside the endpoint that refuses to delete
@@ -185,7 +169,7 @@ async def v3_bulk_delete_leads(
     payload: BulkDeleteLeadsInput,
     user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "branch_admin")),
 ):
-    """Delete several leads at once — for clearing out a bad import.
+    """Delete leads from Branch Leads — a bad import cleared out, or one patient removed.
 
     Permanent, and the reason this is not simply the existing per-lead delete in a loop:
 
@@ -194,15 +178,32 @@ async def v3_bulk_delete_leads(
     reach another branch's patient. Ids that fall outside are reported as such rather than
     silently ignored, so a wrong selection reads as wrong.
 
-    A lead carrying paid-for history is refused. Treatment sessions and collected payments
-    point back at the lead, so deleting one empties a figure the finance board has already
-    reported and orphans a patient's treatment record. Clearing junk from an import is what
-    this is for, and junk has no history — anything that does is a real patient, whatever
-    stage it is sitting in. Those come back named so the refusal is actionable.
-
     The typed confirmation is required here too, not just in the dialog. A bulk delete that
     a stray request can fire is one accident away from a branch's whole lead list.
+
+    Two strengths, and which one is asked for decides what survives:
+
+    Without `purge` — the select-many bar — a lead carrying paid-for history is refused.
+    Treatment sessions and collected payments point back at the lead, so deleting one
+    empties a figure the finance board has already reported. Clearing junk from an import
+    is what that is for, and junk has no history. Refusals come back named, so they are
+    actionable rather than a silent short count.
+
+    With `purge` — the bin icon on a single row — there is no such refusal: the patient
+    goes, and so does everything of theirs, treatment slots and collected payments
+    included. That is what it is for. A patient enrolled by mistake, a duplicate that has
+    already been part-billed, a test record walked through a whole treatment plan: those
+    cannot be cleaned up by a delete that steps around exactly the records that make them
+    a mess. Branch scoping and the typed DELETE still hold, and so does the developer
+    switch checked first — this is not a power an install has unless someone left it on.
     """
+    # The Danger Zone switch. Checked on the server and not merely used to hide the icon:
+    # a button that is only missing from the page is still a request anyone can send.
+    if not await lead_purge.delete_button_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="Deleting patients is switched off for this install",
+        )
     if (payload.confirm or "").strip().upper() != "DELETE":
         raise HTTPException(status_code=400, detail="Type DELETE to confirm")
 
@@ -232,14 +233,17 @@ async def v3_bulk_delete_leads(
         if not works_org_wide(user.role) and lead.get("branch_id") != user.branch_id:
             blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Belongs to another branch"})
             continue
-        if await v3_col("sessions").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1}):
-            blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Has treatment sessions"})
-            continue
-        if await v3_col("lead_activity").find_one(
-            {"lead_id": lead_id, "action": {"$in": _PAID_ACTIONS}}, {"_id": 0, "id": 1}
-        ):
-            blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Has collected payments"})
-            continue
+        # Everything below is the paid-for-history refusal, which a purge is asking us
+        # not to make. Branch scoping above is not optional either way.
+        if not payload.purge:
+            if await v3_col("sessions").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1}):
+                blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Has treatment sessions"})
+                continue
+            if await v3_col("lead_activity").find_one(
+                {"lead_id": lead_id, "action": {"$in": _PAID_ACTIONS}}, {"_id": 0, "id": 1}
+            ):
+                blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Has collected payments"})
+                continue
         deletable.append(lead)
 
     deleted_ids = [l["id"] for l in deletable]
@@ -247,13 +251,14 @@ async def v3_bulk_delete_leads(
         await v3_col("leads").delete_many({"id": {"$in": deleted_ids}})
         # The same trail the single delete clears, so nothing is left pointing at a lead
         # that is gone.
-        await _delete_lead_cascade(deleted_ids)
+        await lead_purge.delete_lead_trail(deleted_ids)
 
     return {
         "deleted": len(deleted_ids),
         "deleted_ids": deleted_ids,
         "blocked": blocked,
         "requested": len(ids),
+        "purged": bool(payload.purge),
     }
 
 
@@ -286,7 +291,7 @@ async def v3_bulk_hard_delete_leads(
         )
 
     res = await v3_col("leads").delete_many({"id": {"$in": ids}})
-    await _delete_lead_cascade(ids)
+    await lead_purge.delete_lead_trail(ids)
     return {"deleted": res.deleted_count, "lead_ids": ids}
 
 
