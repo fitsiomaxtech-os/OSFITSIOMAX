@@ -802,6 +802,14 @@ class ExpenseCreate(BaseModel):
     # ladder stops at ten and a payment of Rs.1,234 does not.
     cash_denominations: Optional[dict] = None
     cash_coins: Optional[float] = 0
+    # Raised from a branch's drawer, whoever is holding the keyboard. The branch screen
+    # sets it; the accountant's own expense form does not. Role alone cannot answer this:
+    # a Super Admin standing in Branch > Accountant Manage is spending a branch's cash and
+    # is no more able to approve their own spending there than the Branch Admin is, yet
+    # the same account entering a central payment on the Finance board is the sign-off.
+    # Without it their drawer expense was written approved and never reached the
+    # accountant's queue at all.
+    from_branch_drawer: Optional[bool] = False
 
 
 class ExpenseDecision(BaseModel):
@@ -893,6 +901,13 @@ async def create_expense(
     eyes on a payment, and holding their own entry in a queue for themselves to sign off
     is a queue of one person's work waiting on that person.
 
+    Which of the two it is comes from the screen it was raised on (`from_branch_drawer`)
+    as well as the role, not from the role alone. Cash out of a branch drawer is a
+    request whoever typed it: Super Admin and Business Dev can both open Branch >
+    Accountant Manage and spend a branch's cash there, and reading only the role wrote
+    theirs approved on the spot, so it skipped the accountant's queue and landed in
+    Expenses Approved with nobody having approved anything.
+
     A branch's expense is theirs whatever the form said. The org-wide option belongs to
     head office — a branch expense with no branch on it is one nobody's books carry.
     """
@@ -908,18 +923,29 @@ async def create_expense(
     branch_id = user.branch_id if raised_by_branch else (payload.branch_id or None)
     reason = (payload.note or "").strip()
 
+    # Money out of a branch drawer: a Branch Admin's expense always is, and anyone else's
+    # is when it was raised on the branch screen. Everything below that a branch expense
+    # is held to — cash only, a reason, no central categories, and no self-approval —
+    # keys off this rather than off the role.
+    from_drawer = raised_by_branch or bool(payload.from_branch_drawer)
+    if from_drawer and not branch_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Pick the branch whose drawer this cash came out of",
+        )
+
     # A branch spends cash and only cash. Everything else it might pay by — a transfer, a
     # card, a cheque — is a payment the accountant makes centrally against a bill, not one
     # a branch settles from the drawer. Pinned here rather than trusted from the form, so a
     # crafted request cannot log a branch card payment that the cash box would never see.
-    payment_mode = "cash" if raised_by_branch else (payload.payment_mode or "").strip()
+    payment_mode = "cash" if from_drawer else (payload.payment_mode or "").strip()
 
     # Rent, Salary and Electricity are head office's to pay — a branch has no float to
     # cover a month of any of them, and an accountant signing off a Rs.80,000 line a branch
     # typed is signing off a figure with nothing behind it. Blocked here as well as left
     # off the branch's category list, because a list is only a suggestion to anyone holding
     # the URL. See BRANCH_BLOCKED_EXPENSE_CATEGORIES.
-    if raised_by_branch and payload.category.strip().lower() in BRANCH_BLOCKED_EXPENSE_CATEGORIES:
+    if from_drawer and payload.category.strip().lower() in BRANCH_BLOCKED_EXPENSE_CATEGORIES:
         raise HTTPException(
             status_code=400,
             detail=f"{payload.category.strip()} is paid centrally by the accountant, not from a branch — pick another category",
@@ -930,7 +956,7 @@ async def create_expense(
     # that sentence is the whole of what the accountant has to sign off on, and it is
     # required of every branch expense rather than only the small ones. An accountant's own
     # entry arrives carrying a payee and a bill number and is left to say why or not.
-    if raised_by_branch and not reason:
+    if from_drawer and not reason:
         raise HTTPException(
             status_code=400,
             detail="Say what the cash was spent on — it is what the accountant approves it on",
@@ -955,9 +981,9 @@ async def create_expense(
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
-        "approved": not raised_by_branch,
-        "approved_by": None if raised_by_branch else user.full_name,
-        "approved_at": None if raised_by_branch else _now(),
+        "approved": not from_drawer,
+        "approved_by": None if from_drawer else user.full_name,
+        "approved_at": None if from_drawer else _now(),
         "rejected": False,
         "rejection_reason": "",
     }

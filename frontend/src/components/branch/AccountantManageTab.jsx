@@ -367,6 +367,14 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, approvedOnl
     getBranches().then(setBranches).catch(() => setBranches([]));
   }, [fixedBranchId, scoped]);
 
+  // A board that hands a branch down can move it while this stays mounted — Super Admin's
+  // branch picker sits above it. Seeding the state once left the tab reading the branch it
+  // opened on, which is a wrong figure everywhere and a wrong drawer on the expense form:
+  // cash spent on screen against one branch would have been filed against another.
+  useEffect(() => {
+    if (fixedBranchId) setOwnBranchId(fixedBranchId);
+  }, [fixedBranchId]);
+
   // Both empty on "all" — no range, every collection ever made.
   const { startDate, endDate } = useMemo(() => {
     const [start, end] = rangeFor(preset, customFrom, customTo);

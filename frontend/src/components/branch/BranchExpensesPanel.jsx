@@ -119,7 +119,7 @@ const StatusChip = ({ row }) => {
   );
 };
 
-const AddExpenseDialog = ({ onClose, onSaved, cashInHand }) => {
+const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId }) => {
   const [form, setForm] = useState({
     category: BRANCH_EXPENSE_CATEGORIES[0], amount: "", expense_date: todayIso(),
     paid_to: "", reference: "", note: "",
@@ -149,6 +149,13 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand }) => {
       await createFinanceExpense({
         ...form,
         amount: amountNum,
+        // Whose drawer the notes came out of, and that they came out of a drawer at all.
+        // Both are sent rather than left to the role: a Super Admin or Business Dev
+        // standing on this screen is spending one branch's cash, and without these two
+        // the server read their expense as head office's own — filed against no branch,
+        // and approved the moment it was written instead of waiting on the accountant.
+        branch_id: branchId || undefined,
+        from_branch_drawer: true,
         payment_mode: "cash",
         cash_denominations: countEntered ? (countedNotes(notes) || {}) : undefined,
         cash_coins: Number(coins) || 0,
@@ -407,7 +414,10 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getFinanceExpenses();
+      // This branch's spending, not every branch's. The drawer figure above the tabs
+      // is one branch's, so a list beside it that counted them all would be two scopes
+      // in one panel.
+      const data = await getFinanceExpenses(branchId ? { branch_id: branchId } : {});
       setRows(data.expenses || []);
       setTotals({
         approved_total: data.approved_total || 0,
@@ -421,7 +431,7 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [branchId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -620,6 +630,8 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
           <Button
             className="ml-auto bg-sky-600 text-white hover:bg-sky-700"
             onClick={() => setAdding(true)}
+            disabled={!branchId}
+            title={branchId ? undefined : "Pick a branch first — the cash comes out of one branch's drawer"}
             data-testid="branch-expense-add"
           >
             <Plus className="mr-1 h-4 w-4" /> Add Expense
@@ -698,6 +710,7 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
           onClose={() => setAdding(false)}
           onSaved={() => { setAdding(false); load(); loadCash(); }}
           cashInHand={cashInHand}
+          branchId={branchId}
         />
       )}
       {handingOver && (
