@@ -1279,8 +1279,10 @@ async def _build_portal_payload(lead: dict) -> dict:
     # patient_portal_my_feedback (the GET the tab fires on open), so the badge clears the
     # moment they look — it counts new replies, not open conversations. Rows with no staff
     # message yet, or seen since the last one, don't count.
+    # Weekly review threads are the staff's record of the client's review, not a chat the
+    # portal shows, so a reply on one must not light a badge the client cannot clear.
     fb_rows = await v3_col("patient_feedback").find(
-        {"lead_id": lead_id},
+        {"lead_id": lead_id, "audience": {"$ne": AUDIENCE_WEEKLY_REVIEW}},
         {"_id": 0, "id": 1, "messages": 1, "message": 1, "reply": 1,
          "replied_at": 1, "handled_at": 1, "patient_name": 1, "created_at": 1,
          "patient_seen_at": 1},
@@ -1629,7 +1631,7 @@ async def patient_portal_my_feedback(lead_id: str = Depends(_current_patient_lea
     the person it is about would change what gets written there.
     """
     rows = await v3_col("patient_feedback").find(
-        {"lead_id": lead_id},
+        {"lead_id": lead_id, "audience": {"$ne": AUDIENCE_WEEKLY_REVIEW}},
         {"_id": 0, "id": 1, "rating": 1, "message": 1, "status": 1, "created_at": 1,
          "audience": 1, "reply": 1, "replied_at": 1, "replied_by": 1, "patient_name": 1,
          "messages": 1},

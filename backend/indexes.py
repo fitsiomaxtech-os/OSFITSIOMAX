@@ -106,6 +106,8 @@ CORE_INDEXES = [
     ("patient_feedback", [("lead_id", 1), ("created_at", -1)], "lead_recent"),
     ("patient_feedback", [("branch_id", 1), ("created_at", -1)], "branch_recent"),
     ("patient_feedback", [("id", 1)], "id"),
+    # The thread a weekly review filed, found again when the client edits that review.
+    ("patient_feedback", [("client_review_id", 1)], "client_review"),
     # Client Reviews: one per client, found by lead from the portal and by branch from the
     # management boards.
     ("client_reviews", [("lead_id", 1)], "lead"),
