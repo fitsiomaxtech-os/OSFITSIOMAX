@@ -14,7 +14,7 @@ import {
   patientPortalForgotPassword, patientPortalVerifyResetOtp, patientPortalResetPassword,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
-  patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewWeek,
+  patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewWeek, patientPortalReviewAnytime,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -1533,6 +1533,8 @@ const PORTAL_TABS = [
  * The client picks one of Super Admin, Branch Admin and their Consultant at a time. Each is
  * its own conversation (the Branch Admin never sees what went to Super Admin), with its own
  * chat and message box. Super Admin takes only SUPER_ADMIN_MESSAGE_LIMIT messages in all.
+ * Branch Admin and Consultant also take a Review — stars and a few words, which HR's
+ * Performance tab counts toward that person's rating. Super Admin is chat only.
  */
 // Mirrors SUPER_ADMIN_MESSAGE_LIMIT in backend/routers/v3_patient_portal.py.
 const SUPER_ADMIN_MESSAGE_LIMIT = 2;
@@ -1569,6 +1571,41 @@ const feedbackSentOn = (iso) => {
 const openThreadOf = (rows) => rows.find((f) => (f.status || "new") !== "resolved") || null;
 
 const audienceOf = (f) => f.audience || "branch_admin";
+
+// The cards that offer Review beside Chat.
+const REVIEWABLE = ["branch_admin", "consultant"];
+
+/** Stars for the chosen Branch Admin or Consultant, with the client's last one above. */
+function PersonReview({ audience, name, last, onSaved }) {
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 p-3" data-testid={`portal-feedback-review-${audience.key}`}>
+      <div>
+        <p className="text-xs font-bold text-slate-700">Review {name}</p>
+        <p className="text-[11px] leading-snug text-slate-500">
+          How has {name} been? Your stars go to management and count toward their performance.
+        </p>
+        {last && (
+          <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-500" data-testid={`portal-feedback-review-last-${audience.key}`}>
+            Your last review:
+            <span className="inline-flex">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <Star key={n} className={`h-3 w-3 ${n <= last.rating ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
+              ))}
+            </span>
+            {feedbackSentOn(last.created_at)}
+          </p>
+        )}
+      </div>
+      <ReviewForm
+        placeholder={`Tell us about ${name} (optional)`}
+        submitLabel={`Submit review for ${name}`}
+        onSubmit={(rating, comment) => patientPortalReviewAnytime({ target: audience.key, rating, comment })}
+        onDone={onSaved}
+        testid={`portal-feedback-review-form-${audience.key}`}
+      />
+    </div>
+  );
+}
 
 /** Every message on the chosen sides, oldest first. One message the client sent to several
     sides at once is stored once per side; it is drawn once, naming everyone it went to. */
@@ -1718,6 +1755,16 @@ function FeedbackTab({ data, onSeen }) {
   const [selected, setSelected] = useState("branch_admin");
   const [sending, setSending] = useState(false);
   const [mine, setMine] = useState([]);
+  // Chat or Review, for the cards that offer both. Chat first, as before.
+  const [mode, setMode] = useState("chat");
+  const [myReviews, setMyReviews] = useState([]);
+
+  const loadReviews = useCallback(() => {
+    patientPortalMyReview()
+      .then((res) => setMyReviews(res?.anytime_reviews || []))
+      .catch(() => { /* only shows the last review; the form works without it */ });
+  }, []);
+  useEffect(() => { loadReviews(); }, [loadReviews]);
 
   const loadMine = useCallback(() => {
     patientPortalMyFeedback()
@@ -1754,6 +1801,10 @@ function FeedbackTab({ data, onSeen }) {
 
   const setDraft = (key, value) => setDrafts((d) => ({ ...d, [key]: value }));
   const chosen = audiences.find((a) => a.key === selected) || null;
+  const reviewable = Boolean(chosen && REVIEWABLE.includes(chosen.key));
+  const reviewing = reviewable && mode === "review";
+  // Newest first from the server.
+  const lastReview = chosen ? myReviews.find((r) => r.kind === chosen.key && r.rating) : null;
   const superSent = mine
     .filter((f) => audienceOf(f) === "super_admin")
     .reduce((n, f) => n + (f.messages || []).filter((m) => m.author === "patient").length, 0);
@@ -1806,7 +1857,7 @@ function FeedbackTab({ data, onSeen }) {
           <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
             <MessageSquareHeart className="h-4 w-4 text-sky-500" />Talk to Management
           </p>
-          <p className="mt-0.5 text-xs text-slate-500">Chat with the management. Pick one person to send to.</p>
+          <p className="mt-0.5 text-xs text-slate-500">Chat with the management, or review your Branch Admin or Consultant. Pick one person.</p>
         </div>
 
         <div>
@@ -1839,7 +1890,35 @@ function FeedbackTab({ data, onSeen }) {
           </div>
         </div>
 
-        {chosen && (
+        {reviewable && (
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1" role="tablist" data-testid="portal-feedback-mode">
+            {[{ key: "chat", label: "Chat", icon: MessageSquareHeart }, { key: "review", label: "Review", icon: Star }].map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                role="tab"
+                aria-selected={mode === m.key}
+                onClick={() => setMode(m.key)}
+                className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${mode === m.key ? "bg-white text-sky-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                data-testid={`portal-feedback-mode-${m.key}`}
+              >
+                <m.icon className="h-3.5 w-3.5" />{m.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {reviewing && (
+          <PersonReview
+            key={`review-${chosen.key}`}
+            audience={chosen}
+            name={nameOf(chosen.key)}
+            last={lastReview}
+            onSaved={loadReviews}
+          />
+        )}
+
+        {chosen && !reviewing && (
           <PersonChat
             key={chosen.key}
             audience={chosen}
@@ -1853,14 +1932,16 @@ function FeedbackTab({ data, onSeen }) {
           />
         )}
 
-        <Button
-          className="w-full"
-          disabled={sending || !canSend}
-          onClick={sendMessage}
-          data-testid="portal-feedback-submit"
-        >
-          {sending ? "Sending…" : chosen ? `Send to ${nameOf(chosen.key)}` : "Send"}
-        </Button>
+        {!reviewing && (
+          <Button
+            className="w-full"
+            disabled={sending || !canSend}
+            onClick={sendMessage}
+            data-testid="portal-feedback-submit"
+          >
+            {sending ? "Sending…" : chosen ? `Send to ${nameOf(chosen.key)}` : "Send"}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

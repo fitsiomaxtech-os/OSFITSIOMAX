@@ -11,13 +11,15 @@ list cannot drift from the screens those records live on:
                    Branch Admin   clients at their branch who converted (dashboard's definition)
                    Pre-Sales      leads they were given that had a slot fixed
                  Every other role has no work figure yet, and is graded on what it does have.
-    Rating       the stars clients gave them from the Client Portal (Physio, Consultant).
+    Rating       the stars clients gave them from the Client Portal (Physio, Consultant,
+                 and Branch Admin -- the Feedback tab's Review of the branch desk, credited
+                 to every Branch Admin posted at that branch).
 
 The grade is 30% attendance, 50% work done, 20% rating. There are no targets, so work done
 is scored against the best in the same role over the same period: the top Physio is 100,
 a Physio with half their completed days is 50. A part a person has no figure for is left
-out and the rest re-weighted, rather than counted as zero -- a Branch Admin has no client
-stars to be marked down for.
+out and the rest re-weighted, rather than counted as zero -- a Branch Admin whose clients
+have not rated the branch is not marked down for it.
 
 Super Admin only.
 """
@@ -219,6 +221,11 @@ async def staff_performance(
             ).to_list(20000) if branches else []
             work = sum(1 for lead in leads if _is_converted(lead))
             work_sub = f"of {len(leads)} leads"
+            ratings = [
+                int(r["rating"]) for r in raw_reviews
+                if r.get("kind") == "branch_admin" and r.get("branch_id") in branches and r.get("rating")
+                and _in(r.get("updated_at") or r.get("created_at"), start, end)
+            ]
 
         elif group == GROUP_PRE_SALES and user_id:
             leads = await v3_col("leads").find(

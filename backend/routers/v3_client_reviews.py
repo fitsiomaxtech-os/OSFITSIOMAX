@@ -18,6 +18,10 @@ Every review is its own row, with a `kind` (who is rated) and a `source` (what p
     stars only -- never the words (see physio_star_ratings). Weekly reviews briefly also
     rated the Consultant; those rows stay readable but are no longer asked for.
   * source "anytime" -- either kind, from the Feedback tab, whenever the client wants.
+  * kind "branch_admin", source "anytime" -- the client's stars for their branch desk, from
+    the Feedback tab's Branch Admin card (Review, beside Chat). Rated against the branch,
+    not one login: `branch_id` is who it is about, and HR Performance credits it to every
+    Branch Admin posted there.
   * source "session" / "review" -- the earlier per-session Physio and per-clinical-Review
     Consultant rows. No longer written, still read by management.
 
@@ -52,6 +56,8 @@ MAX_TEXT = 2000
 
 KIND_PHYSIO = "physio"
 KIND_CONSULTANT = "consultant"
+KIND_BRANCH = "branch_admin"
+ANYTIME_KINDS = (KIND_CONSULTANT, KIND_PHYSIO, KIND_BRANCH)
 SOURCE_WEEK = "week"
 SOURCE_ANYTIME = "anytime"
 
@@ -351,7 +357,7 @@ async def portal_my_review(lead_id: str = Depends(_current_patient_lead_id)):
     """Everything the Sessions tab's Review buttons, its pop-up and the Feedback tab draw from."""
     lead = await _lead_or_404(lead_id)
     rows = await v3_col(COLLECTION).find(
-        {"lead_id": lead_id, "kind": {"$in": [KIND_PHYSIO, KIND_CONSULTANT]}, "skipped": {"$ne": True}}, {"_id": 0}
+        {"lead_id": lead_id, "kind": {"$in": list(ANYTIME_KINDS)}, "skipped": {"$ne": True}}, {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
     team = await care_team(lead)
     weeks = course_weeks(await _course_days(lead_id))
@@ -405,12 +411,16 @@ async def portal_review_week(payload: WeekReviewIn, lead_id: str = Depends(_curr
 
 @router.post("/patient-portal/review/anytime")
 async def portal_review_anytime(payload: AnytimeReviewIn, lead_id: str = Depends(_current_patient_lead_id)):
-    """A review of the Consultant or the Physio from the Feedback tab, whenever the client wants."""
-    if payload.target not in (KIND_CONSULTANT, KIND_PHYSIO):
+    """A review of the Consultant, the Physio or the Branch Admin from the Feedback tab,
+    whenever the client wants."""
+    if payload.target not in ANYTIME_KINDS:
         raise HTTPException(status_code=400, detail="Choose who you are reviewing")
     lead = await _lead_or_404(lead_id)
     rating = required_rating(payload.rating)
-    person = (await care_team(lead))[payload.target]
+    if payload.target == KIND_BRANCH:
+        person = await _branch_desk(lead)
+    else:
+        person = (await care_team(lead))[payload.target]
     if not person["name"]:
         raise HTTPException(status_code=400, detail=f"You do not have a {payload.target} yet")
     row = {
@@ -422,6 +432,14 @@ async def portal_review_anytime(payload: AnytimeReviewIn, lead_id: str = Depends
     }
     await v3_col(COLLECTION).insert_one(dict(row))
     return {"message": "Thank you for your review.", "review": row}
+
+
+async def _branch_desk(lead: dict) -> Dict[str, str]:
+    """Who a Branch Admin review is about: the client's branch, by name."""
+    branch_id = _text(lead.get("branch_id"))
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "branch_name": 1}) if branch_id else None
+    name = _text((branch or {}).get("branch_name"))
+    return {"id": branch_id, "name": f"{name} Branch Admin" if name else ("Branch Admin" if branch_id else "")}
 
 
 # ------------------------------------------------------------------ Management side
@@ -450,14 +468,15 @@ async def list_client_reviews(
     branch_id: Optional[str] = Query(None),
     user: V3UserOut = Depends(v3_require_roles("super_admin", *BDE_ROLES, "branch_admin", "head_physio")),
 ):
-    """Every review management may read, split into Consultant Review and Physio Review.
+    """Every review management may read, split into Consultant, Physio and Branch Admin Review.
 
     A Branch Admin is always held to their own branch, whatever they pass. Super Admin and
     BDE read every branch and may narrow to one. A Consultant reads their own patients'
-    reviews, across branches.
+    reviews, across branches -- never the Branch Admin ones, which are about the desk.
     """
     empty = summarise([])
-    nothing = {"consultant": [], "physio": [], "summary": {"consultant": empty, "physio": empty}}
+    nothing = {"consultant": [], "physio": [], "branch_admin": [],
+               "summary": {"consultant": empty, "physio": empty, "branch_admin": empty}}
     query: dict = {"skipped": {"$ne": True}}
     consultant_ids = None
     if is_head_physio_role(user.role):
@@ -476,7 +495,7 @@ async def list_client_reviews(
 
     raw = await v3_col(COLLECTION).find(query, {"_id": 0}).to_list(10000)
     if consultant_ids is not None:
-        raw = await _for_consultant(raw, consultant_ids)
+        raw = await _for_consultant([r for r in raw if r.get("kind") != KIND_BRANCH], consultant_ids)
     rows = [r for row in raw for r in split_legacy(row)]
     rows.sort(key=lambda r: r.get("updated_at") or r.get("created_at") or "", reverse=True)
 
@@ -492,8 +511,10 @@ async def list_client_reviews(
 
     consultant = [r for r in rows if r.get("kind") == KIND_CONSULTANT]
     physio = [r for r in rows if r.get("kind") == KIND_PHYSIO]
+    branch = [r for r in rows if r.get("kind") == KIND_BRANCH]
     return {
         "consultant": consultant,
         "physio": physio,
-        "summary": {"consultant": summarise(consultant), "physio": summarise(physio)},
+        "branch_admin": branch,
+        "summary": {"consultant": summarise(consultant), "physio": summarise(physio), "branch_admin": summarise(branch)},
     }

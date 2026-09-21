@@ -105,6 +105,12 @@ export const patientPortalReviewWeek = async (payload) => {
   return data;
 };
 
+/** Stars (and optional words) for the Consultant, Physio or Branch Admin, from the Feedback tab. */
+export const patientPortalReviewAnytime = async ({ target, rating, comment }) => {
+  const { data } = await portalApi.post("/patient-portal/review/anytime", { target, rating, comment }, { headers: authHeaders() });
+  return data;
+};
+
 /** What this patient has sent, and where each piece has got to. */
 export const patientPortalMyFeedback = async () => {
   const { data } = await portalApi.get("/patient-portal/feedback", { headers: authHeaders() });

@@ -61,6 +61,7 @@ const presetKey = (f) => (!f ? "all" : DATE_PRESETS.some((p) => p.key === f.key)
 const KINDS = [
   { key: "consultant", label: "Consultant Review", person: "Consultant" },
   { key: "physio", label: "Physio Review", person: "Physio" },
+  { key: "branch_admin", label: "Branch Admin Review", person: "Branch Admin" },
 ];
 
 const ORDINAL = ["", "1st", "2nd", "3rd"];
@@ -251,7 +252,7 @@ const PersonFilter = ({ people, value, onChange, meta }) => {
   const q = query.trim().toLowerCase();
   const listed = q ? people.filter((p) => p.name.toLowerCase().includes(q)) : people;
   const active = Boolean(value);
-  const plural = meta.key === "consultant" ? "Consultants" : "Physios";
+  const plural = meta.key === "consultant" ? "Consultants" : meta.key === "branch_admin" ? "Branch Admins" : "Physios";
   const pick = (name) => { onChange(name); setOpen(false); setQuery(""); };
 
   const row = (selected) => `flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
@@ -372,6 +373,10 @@ const TILES = {
     { key: "weekly", label: "7 Days Review", figure: "weekly", sub: (f) => `Avg ${f.weeklyAvg ?? "—"} ★ · every 7 days of treatment`, icon: Activity, color: "#059669" },
     { key: "rated", label: "Average Rating", figure: "average", sub: (f) => `${f.rated} ratings`, icon: Star, color: "#f59e0b" },
     { key: "anytime", label: "Anytime", figure: "anytime", sub: () => "From the Feedback tab", icon: Clock, color: "#0284c7" },
+  ],
+  branch_admin: [
+    { key: "", label: "All", figure: "total", sub: () => "Every branch admin review", icon: MessageSquareQuote, color: "#4f46e5" },
+    { key: "rated", label: "Average Rating", figure: "average", sub: (f) => `${f.rated} ratings`, icon: Star, color: "#f59e0b" },
   ],
 };
 
@@ -567,7 +572,7 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false }) => {
           {/* Consultant or Physio: two halves of the phone's width, because these are the
               switch the whole panel hangs off and the count beside each label needs room. */}
           {kinds.length > 1 && (
-            <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 sm:flex sm:items-center" data-testid="client-reviews-kind">
+            <div className={`grid ${kinds.length > 2 ? "grid-cols-3" : "grid-cols-2"} gap-1 rounded-lg bg-slate-100 p-1 sm:flex sm:items-center`} data-testid="client-reviews-kind">
               {kinds.map((k) => (
                 <button
                   key={k.key}
