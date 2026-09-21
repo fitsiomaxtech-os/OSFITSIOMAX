@@ -49,8 +49,9 @@ const TABS = [
 const STAFF_TABS = [
   { key: "attendance", label: "Attendance", short: "Attend", icon: CalendarCheck },
   { key: "performance", label: "Performance", short: "Perform", icon: TrendingUp, superAdminOnly: true },
-  // The stars clients give their Consultant and Physio from the Client Portal. Read by
-  // Super Admin and BDE across every branch; Branch Admin has the same panel on its board.
+  // The stars clients give their Physio from the Client Portal. Read by Super Admin and BDE
+  // across every branch; Branch Admin has the same panel on its board, and this one is
+  // narrowed to Physio Review the same way (physioOnly below).
   { key: "client_reviews", label: "Review", icon: Star },
   // What each Physio and Consultant did with their day, filed at Clock Out. The endpoint
   // behind it answers super_admin alone.
@@ -68,7 +69,7 @@ const StaffTab = ({ isSuperAdmin, sub, onSubChange }) => {
       <SegmentedTabs tabs={tabs} value={sub} onChange={onSubChange} testid="hr-staff-subtab" size="sm" mobileCols={4} />
       {sub === "attendance" && <AttendanceTab />}
       {sub === "performance" && isSuperAdmin && <PerformancePanel />}
-      {sub === "client_reviews" && <ClientReviewsPanel />}
+      {sub === "client_reviews" && <ClientReviewsPanel physioOnly />}
       {sub === "eod_report" && isSuperAdmin && <EodReportsPanel />}
       {sub === "payroll" && <PayrollTab />}
       {sub === "approvals" && <ApprovalsTab />}
