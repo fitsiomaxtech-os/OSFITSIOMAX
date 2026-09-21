@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, Coins, HandCoins, Plus, Send, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Coins, HandCoins, Plus, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -394,15 +394,369 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
   );
 };
 
+
+/**
+ * One of the five piles this panel opens on, in the shape HR Admin's own stage cards
+ * wear: white and bordered at rest, its own colour on the label and the figure, and the
+ * colour pulled onto the border with a wash through the card when it is the one being
+ * read. Money first and the count under it — the opposite way round to HR's, where a
+ * count is the whole answer; here what was spent is the answer and how many rows it took
+ * is the footnote.
+ */
+const SummaryCard = ({ label, color, amount, sub, active, onClick, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={active}
+    className={`min-w-0 rounded-xl border-2 px-3 py-3 text-left transition hover:shadow-sm ${
+      active ? "shadow-sm" : "border-slate-200 bg-white"
+    }`}
+    style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
+    data-testid={testid}
+  >
+    <span
+      className="block break-words text-[10px] font-bold uppercase leading-[1.15] tracking-wider sm:truncate sm:text-[11px]"
+      style={{ color }}
+      title={label}
+    >
+      {label}
+    </span>
+    <span className="mt-1 block truncate text-lg font-extrabold leading-tight tabular-nums sm:text-xl" style={{ color }}>
+      {amount}
+    </span>
+    <span className="mt-0.5 block truncate text-[10px] text-slate-400">{sub}</span>
+  </button>
+);
+
+/** The wrapper every list on this panel sits in — HR Admin's list frame exactly: one
+    rounded card, the header band in slate, rows divided rather than boxed. */
+const ListFrame = ({ children, testid }) => (
+  <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid={testid}>
+    <div className="overflow-x-auto">{children}</div>
+  </div>
+);
+
+const EmptyList = ({ children, testid }) => (
+  <p
+    className="rounded-xl border border-dashed border-slate-200 px-3 py-14 text-center text-sm text-slate-400"
+    data-testid={testid}
+  >
+    {children}
+  </p>
+);
+
+/**
+ * Expenses as a list — the same list whichever pile is being read, because a request, a
+ * signed-off expense and a rejected one are one record at three moments of its life, and
+ * three differently shaped tables would say otherwise.
+ *
+ * Two renderings of it, as on HR Admin's own board: cards down a phone, where seven
+ * columns cannot fit and a sideways scrollbar hides half of them, and the table from sm
+ * up.
+ *
+ * @param showBranch  With no branch picked above, these rows are several branches' and
+ *                    the row has to say whose. Scoped to one, it would be that branch's
+ *                    name repeated down the screen.
+ */
+const ExpenseList = ({ rows, loading, empty, showBranch, testid }) => {
+  if (loading) return <EmptyList testid={`${testid}-loading`}>Loading…</EmptyList>;
+  if (!rows.length) return <EmptyList testid="branch-expense-empty">{empty}</EmptyList>;
+
+  return (
+    <>
+      <div className="space-y-2 sm:hidden" data-testid={`${testid}-mobile`}>
+        {rows.map((r) => (
+          <div
+            key={r.id}
+            className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left"
+            data-testid={`branch-expense-card-row-${r.id}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-800">{r.category}</p>
+                <p className="truncate text-xs text-slate-500">{r.paid_to || "Paid to not set"}</p>
+              </div>
+              <span className="shrink-0 text-sm font-bold tabular-nums text-slate-800">{fmt(r.amount)}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+              <span>{r.expense_date || "—"}</span>
+              {showBranch && r.branch_name ? <span>· {r.branch_name}</span> : null}
+              {r.reference ? <span>· {r.reference}</span> : null}
+            </div>
+            <div className="mt-2">
+              <StatusChip row={r} />
+              {r.rejected && r.rejection_reason ? (
+                <span className="mt-1 block text-[10px] text-rose-600">{r.rejection_reason}</span>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <ListFrame testid={`${testid}-desktop`}>
+        <table className="w-full min-w-[860px] text-sm">
+          <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+            <tr>
+              <th className="px-4 py-2.5 font-semibold">S:No</th>
+              <th className="px-4 py-2.5 font-semibold">Date</th>
+              <th className="px-4 py-2.5 font-semibold">Category</th>
+              <th className="px-4 py-2.5 font-semibold">Paid To</th>
+              <th className="px-4 py-2.5 font-semibold">Reference</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Amount</th>
+              <th className="px-4 py-2.5 font-semibold">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r, i) => (
+              <tr key={r.id} className="align-top hover:bg-slate-50" data-testid={`branch-expense-row-${r.id}`}>
+                <td className="px-4 py-3 tabular-nums text-slate-400" data-testid={`branch-expense-sno-${r.id}`}>{i + 1}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-500">{r.expense_date || "—"}</td>
+                <td className="px-4 py-3">
+                  <p className="font-medium text-slate-800">{r.category}</p>
+                  {showBranch && r.branch_name ? <p className="text-[11px] text-slate-400">{r.branch_name}</p> : null}
+                  {r.note ? <p className="text-[11px] text-slate-400">{r.note}</p> : null}
+                  {r.payment_mode && r.payment_mode !== "cash" ? (
+                    <span className="mt-0.5 inline-block rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                      {MODE_LABELS[r.payment_mode] || r.payment_mode}
+                    </span>
+                  ) : null}
+                </td>
+                <td className="break-words px-4 py-3 text-slate-600">{r.paid_to || "—"}</td>
+                <td className="break-words px-4 py-3 text-slate-500">{r.reference || "—"}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-slate-800">
+                  {fmt(r.amount)}
+                  {notesLabel(r.cash_denominations) ? (
+                    <span className="mt-0.5 block text-[10px] font-normal text-slate-400" data-testid={`branch-expense-notes-${r.id}`}>
+                      {notesLabel(r.cash_denominations)}{Number(r.cash_coins) > 0 ? ` + Rs.${r.cash_coins} coins` : ""}
+                    </span>
+                  ) : null}
+                </td>
+                <td className="px-4 py-3">
+                  <StatusChip row={r} />
+                  {r.rejected && r.rejection_reason ? (
+                    <span className="mt-0.5 block text-[10px] text-rose-600">{r.rejection_reason}</span>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ListFrame>
+    </>
+  );
+};
+
+/**
+ * The drawer as a list rather than a figure: every movement that made it, in the order
+ * the sum works, ending on what should be in the drawer now. The Cash In Hand card above
+ * is the answer; this is the working behind it.
+ */
+const CashMovementList = ({ cash }) => {
+  const lines = [
+    {
+      key: "collected",
+      label: "Collected in cash",
+      detail:
+        cash.cash_approved != null || cash.cash_awaiting != null
+          ? `approved ${fmt(cash.cash_approved)} · awaiting ${fmt(cash.cash_awaiting)}`
+          : "cash taken at the desk",
+      amount: cash.collected_cash,
+      sign: "+",
+      tone: "text-slate-700",
+    },
+    { key: "spent", label: "Spent in cash", detail: "expenses paid out of the drawer", amount: cash.cash_spent, sign: "−", tone: "text-rose-600" },
+    { key: "handed", label: "Handed over", detail: "received by the accountant", amount: cash.handed_over, sign: "−", tone: "text-rose-600" },
+  ];
+  if (cash.in_transit > 0) {
+    lines.push({ key: "transit", label: "In transit", detail: "left the branch, not yet received", amount: cash.in_transit, sign: "−", tone: "text-amber-700" });
+  }
+  if (cash.adjustments !== 0) {
+    lines.push({
+      key: "adjustments",
+      label: "Opening / corrections",
+      detail: "set by the accountant",
+      amount: Math.abs(cash.adjustments),
+      sign: cash.adjustments > 0 ? "+" : "−",
+      tone: cash.adjustments < 0 ? "text-rose-600" : "text-emerald-700",
+    });
+  }
+
+  return (
+    <>
+      <div className="space-y-2 sm:hidden" data-testid="branch-cash-movements-mobile">
+        {lines.map((l) => (
+          <div key={l.key} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-slate-800">{l.label}</p>
+              <p className="truncate text-[11px] text-slate-400">{l.detail}</p>
+            </div>
+            <span className={`shrink-0 text-sm font-semibold tabular-nums ${l.tone}`}>{l.sign} {fmt(l.amount)}</span>
+          </div>
+        ))}
+        <div className="flex items-center justify-between gap-3 rounded-xl border-2 border-slate-300 bg-slate-50 p-3">
+          <p className="text-sm font-bold text-slate-700">Cash in hand</p>
+          <span className="text-sm font-bold tabular-nums text-slate-800">{fmt(cash.cash_in_hand)}</span>
+        </div>
+      </div>
+
+      <ListFrame testid="branch-cash-movements-desktop">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+            <tr>
+              <th className="px-4 py-2.5 font-semibold">Movement</th>
+              <th className="px-4 py-2.5 font-semibold">Detail</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Amount</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {lines.map((l) => (
+              <tr key={l.key} className="hover:bg-slate-50" data-testid={`branch-cash-movement-${l.key}`}>
+                <td className="px-4 py-3 font-medium text-slate-800">{l.label}</td>
+                <td className="px-4 py-3 text-[11px] text-slate-400">{l.detail}</td>
+                <td className={`whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums ${l.tone}`}>
+                  {l.sign} {fmt(l.amount)}
+                </td>
+              </tr>
+            ))}
+            <tr className="border-t-2 border-slate-200 bg-slate-50/70">
+              <td className="px-4 py-3 font-bold text-slate-700">Cash in hand</td>
+              <td className="px-4 py-3 text-[11px] text-slate-400">what should be in the drawer now</td>
+              <td className="whitespace-nowrap px-4 py-3 text-right font-bold tabular-nums text-slate-800" data-testid="branch-cash-in-hand">
+                {fmt(cash.cash_in_hand)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </ListFrame>
+    </>
+  );
+};
+
+/** Every handover this branch has sent up, newest first — not only the ones still in the
+    air. A pending one can still be pulled back; a received one is there to be read back
+    against, which is the whole reason the accountant counts it in. */
+const HandoverList = ({ handovers, onCancel }) => {
+  if (!handovers.length) {
+    return (
+      <EmptyList testid="branch-handover-empty">
+        Nothing handed over yet. Hand over cash sends the drawer up to the accountant.
+      </EmptyList>
+    );
+  }
+
+  const chip = (h) => {
+    if (h.status === "received") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+          <CheckCircle2 className="h-3 w-3" /> Received
+        </span>
+      );
+    }
+    if (h.status === "cancelled") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-500">
+          <XCircle className="h-3 w-3" /> Cancelled
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+        <Clock className="h-3 w-3" /> Waiting to be received
+      </span>
+    );
+  };
+
+  return (
+    <>
+      <div className="space-y-2 sm:hidden" data-testid="branch-handover-list-mobile">
+        {handovers.map((h) => (
+          <div key={h.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`branch-handover-card-${h.id}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-800">{fmt(h.amount)}</p>
+                <p className="truncate text-xs text-slate-500">to {h.handed_to || "—"} · {h.on || "—"}</p>
+              </div>
+              {chip(h)}
+            </div>
+            {h.status === "pending" && (
+              <button
+                type="button"
+                onClick={() => onCancel(h.id)}
+                className="mt-2 text-[11px] text-slate-400 underline hover:text-rose-600"
+                data-testid={`branch-handover-cancel-${h.id}`}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <ListFrame testid="branch-handover-list-desktop">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+            <tr>
+              <th className="px-4 py-2.5 font-semibold">Date</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Amount</th>
+              <th className="px-4 py-2.5 font-semibold">Handed To</th>
+              <th className="px-4 py-2.5 font-semibold">Notes Counted</th>
+              <th className="px-4 py-2.5 font-semibold">Status</th>
+              <th className="px-4 py-2.5" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {handovers.map((h) => (
+              <tr key={h.id} className="align-top hover:bg-slate-50" data-testid={`branch-handover-${h.id}`}>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-500">{h.on || "—"}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-slate-800">
+                  {fmt(h.amount)}
+                  {h.received_amount != null && Math.abs(h.variance) >= 0.01 ? (
+                    <span className="mt-0.5 block text-[10px] font-normal text-amber-700">counted in {fmt(h.received_amount)}</span>
+                  ) : null}
+                </td>
+                <td className="px-4 py-3">
+                  <p className="font-medium text-slate-700">{h.handed_to || "—"}</p>
+                  {h.note ? <p className="text-[11px] text-slate-400">{h.note}</p> : null}
+                </td>
+                <td className="px-4 py-3 text-[11px] text-slate-400">
+                  {notesLabel(h.cash_denominations)
+                    ? `${notesLabel(h.cash_denominations)}${Number(h.cash_coins) > 0 ? ` + Rs.${h.cash_coins} coins` : ""}`
+                    : "—"}
+                </td>
+                <td className="px-4 py-3">{chip(h)}</td>
+                <td className="px-4 py-3 text-right">
+                  {h.status === "pending" ? (
+                    <button
+                      type="button"
+                      onClick={() => onCancel(h.id)}
+                      className="text-[11px] text-slate-400 underline hover:text-rose-600"
+                      data-testid={`branch-handover-cancel-${h.id}`}
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ListFrame>
+    </>
+  );
+};
+
+const countLabel = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
 /**
  * @param branchId  Whose drawer to show. Cash in hand belongs to a branch, so with no
- *                  branch in view the figure and the handover button are left out.
+ *                  branch in view the card and the handover button are left out.
  */
 export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   const [rows, setRows] = useState([]);
-  const [totals, setTotals] = useState({ approved_total: 0, approved_count: 0, pending_total: 0, pending_count: 0 });
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState("request"); // "request" | "approved"
+  // Which of the five piles is open. It opens on the request log rather than the drawer:
+  // the drawer is only there when a branch is picked, and this is the expense side.
+  const [view, setView] = useState("request");
   const [adding, setAdding] = useState(false);
   const [handingOver, setHandingOver] = useState(false);
   const [cash, setCash] = useState(null);
@@ -414,17 +768,11 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // This branch's spending, not every branch's. The drawer figure above the tabs
+      // This branch's spending, not every branch's. The drawer figure on the first card
       // is one branch's, so a list beside it that counted them all would be two scopes
       // in one panel.
       const data = await getFinanceExpenses(branchId ? { branch_id: branchId } : {});
       setRows(data.expenses || []);
-      setTotals({
-        approved_total: data.approved_total || 0,
-        approved_count: data.approved_count || 0,
-        pending_total: data.pending_total || 0,
-        pending_count: data.pending_count || 0,
-      });
       onChangedRef.current?.();
     } catch {
       setRows([]);
@@ -464,169 +812,155 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
     }
   };
 
-  const visible = useMemo(
-    () => rows.filter((r) => (view === "approved" ? r.approved : !r.approved)),
-    [rows, view],
-  );
+  // The piles, counted once here rather than read off the endpoint's own totals for the
+  // cards and off the rows for the lists: the figure on a card and the rows it opens are
+  // then the same pass over the same list, and cannot part company.
+  //
+  // Request holds every row, whatever became of it — it is the log of what the branch
+  // asked to spend, not a fourth state beside the other three.
+  const piles = useMemo(() => {
+    const out = {
+      request: { rows, total: 0 },
+      pending: { rows: [], total: 0 },
+      approved: { rows: [], total: 0 },
+      rejected: { rows: [], total: 0 },
+    };
+    rows.forEach((r) => {
+      const amount = Number(r.amount) || 0;
+      out.request.total += amount;
+      const key = r.rejected ? "rejected" : r.approved ? "approved" : "pending";
+      out[key].rows.push(r);
+      out[key].total += amount;
+    });
+    return out;
+  }, [rows]);
 
-  const TABS = [
-    { key: "request", label: "Expense Requests", count: rows.filter((r) => !r.approved).length },
-    { key: "approved", label: "Expenses Approved", count: totals.approved_count },
+  // Cash in hand is a branch's drawer: with no branch picked there is none to show, so
+  // the card drops out rather than standing there empty — and anyone left looking at it
+  // when the branch is cleared is put back on the request log.
+  const showCash = !!branchId && !!cash;
+  const activeView = view === "cash" && !showCash ? "request" : view;
+
+  const CARDS = [
+    ...(showCash
+      ? [{
+          key: "cash",
+          label: "Cash In Hand",
+          color: cash.cash_in_hand < 0 ? "#e11d48" : "#0284c7",
+          amount: fmt(cash.cash_in_hand),
+          sub: cash.opening_set ? "in the drawer now" : "opening not set",
+        }]
+      : []),
+    {
+      key: "request",
+      label: "Expense Request",
+      color: "#6366f1",
+      amount: fmt(piles.request.total),
+      sub: `${countLabel(piles.request.rows.length, "request", "requests")} raised`,
+    },
+    {
+      key: "pending",
+      label: "Pending Approval",
+      color: "#d97706",
+      amount: fmt(piles.pending.total),
+      sub: `${countLabel(piles.pending.rows.length, "request", "requests")} waiting`,
+    },
+    {
+      key: "approved",
+      label: "Approved",
+      color: "#059669",
+      amount: fmt(piles.approved.total),
+      sub: countLabel(piles.approved.rows.length, "expense", "expenses"),
+    },
+    {
+      key: "rejected",
+      label: "Rejected",
+      color: "#e11d48",
+      amount: fmt(piles.rejected.total),
+      sub: `${countLabel(piles.rejected.rows.length, "request", "requests")} sent back`,
+    },
   ];
 
-  const pendingHandovers = handovers.filter((h) => h.status === "pending");
-  const openingSet = cash ? cash.opening_set : true;
+  // What the list under the cards is, per card: what it is called, what it holds, and
+  // what it says when it holds nothing.
+  const LISTS = {
+    request: {
+      title: "Every expense request raised",
+      hint: "Waiting, signed off and sent back — the whole log, newest first",
+      rows: piles.request.rows,
+      empty: "No expenses yet. Add Expense sends a request to the accountant.",
+    },
+    pending: {
+      title: "Waiting on the accountant",
+      hint: "Raised at the branch and not yet signed off",
+      rows: piles.pending.rows,
+      empty: "Nothing waiting. Add Expense sends a request to the accountant.",
+    },
+    approved: {
+      title: "Signed off by the accountant",
+      hint: "Money that has actually gone out of the drawer",
+      rows: piles.approved.rows,
+      empty: "Nothing approved yet.",
+    },
+    rejected: {
+      title: "Sent back by the accountant",
+      hint: "Not spent — raise it again with whatever was asked for",
+      rows: piles.rejected.rows,
+      empty: "Nothing has been sent back.",
+    },
+  };
+
+  const list = LISTS[activeView];
   const cashInHand = cash ? cash.cash_in_hand : null;
 
   return (
     <div className="space-y-4" data-testid="branch-expenses-panel">
-      <div className="flex flex-wrap items-center gap-2" data-testid="branch-expense-totals">
-        <span
-          className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50/70 py-1.5 pl-3 pr-4"
-          data-testid="branch-expense-card-pending"
-        >
-          <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-          <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Approval</span>
-          <span className="text-sm font-bold tabular-nums text-amber-700">{fmt(totals.pending_total)}</span>
-          <span className="text-[11px] text-amber-600/80">
-            · {totals.pending_count} {totals.pending_count === 1 ? "request" : "requests"}
-          </span>
-        </span>
-        <span
-          className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/70 py-1.5 pl-3 pr-4"
-          data-testid="branch-expense-card-approved"
-        >
-          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-          <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Approved</span>
-          <span className="text-sm font-bold tabular-nums text-emerald-700">{fmt(totals.approved_total)}</span>
-          <span className="text-[11px] text-emerald-600/80">
-            · {totals.approved_count} {totals.approved_count === 1 ? "expense" : "expenses"}
-          </span>
-        </span>
+      {/* The five piles, as cards that are also the tabs onto them — the shape HR Admin's
+          stage cards already wear on this system, and for the same reason: a figure you
+          press to read the rows behind it, rather than a row of figures and a tab bar
+          under it saying the same thing twice.
+
+          Two across a phone so the amounts stay readable, five across from lg where there
+          is room for the whole row of them. */}
+      <div
+        className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5"
+        data-testid="branch-expense-summary-cards"
+      >
+        {CARDS.map((c) => (
+          <SummaryCard
+            key={c.key}
+            label={c.label}
+            color={c.color}
+            amount={c.amount}
+            sub={c.sub}
+            active={activeView === c.key}
+            onClick={() => setView(c.key)}
+            testid={`branch-expense-card-${c.key}`}
+          />
+        ))}
       </div>
 
-      {/* The drawer, as a sum that ties out: every cash payment taken, less what was
-          spent in cash, less what has been handed over, is what should be in the drawer.
-          Shown whether or not the accountant has set the opening count; without it the
-          figure is only "since tracking began", said so under it. */}
-      {branchId && cash && (
-        <div
-          className={`rounded-xl border p-3.5 ${
-            cash.cash_in_hand < 0 ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"
-          }`}
-          data-testid="branch-cash-box"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <span className={`rounded-lg p-2 ${cash.cash_in_hand < 0 ? "bg-rose-100" : "bg-emerald-50"}`}>
-                <Coins className={`h-4 w-4 ${cash.cash_in_hand < 0 ? "text-rose-600" : "text-emerald-600"}`} />
-              </span>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cash in hand</p>
-                <p
-                  className={`text-xl font-bold tabular-nums ${cash.cash_in_hand < 0 ? "text-rose-700" : "text-slate-800"}`}
-                  data-testid="branch-cash-in-hand"
-                >
-                  {fmt(cash.cash_in_hand)}
-                </p>
-                {!openingSet && (
-                  <p className="text-[10px] text-amber-700" data-testid="branch-cash-not-set">
-                    Opening cash not set by the accountant — this is collections less spending since tracking began.
-                  </p>
-                )}
-              </div>
-            </div>
-            <Button
-              onClick={() => setHandingOver(true)}
-              className="h-9 bg-amber-600 text-xs text-white hover:bg-amber-700"
-              data-testid="branch-handover-open"
-            >
-              <HandCoins className="mr-1.5 h-3.5 w-3.5" /> Hand over cash
-            </Button>
-          </div>
-
-          {/* The reconciliation, one line each, so the branch can check it against the
-              Income tab (Cash filter: approved + awaiting) and the Expenses list. */}
-          <dl className="mt-3 max-w-sm space-y-1 border-t border-slate-100 pt-2 text-xs" data-testid="branch-cash-breakdown">
-            <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-slate-500">Collected in cash</dt>
-              <dd className="tabular-nums font-medium text-slate-700">{fmt(cash.collected_cash)}</dd>
-            </div>
-            {(cash.cash_approved != null || cash.cash_awaiting != null) && (
-              <div className="flex items-baseline justify-between gap-3 pl-3 text-[11px] text-slate-400">
-                <dt>approved {fmt(cash.cash_approved)} · awaiting {fmt(cash.cash_awaiting)}</dt>
-                <dd />
-              </div>
-            )}
-            <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-slate-500">Spent in cash</dt>
-              <dd className="tabular-nums font-medium text-rose-600">− {fmt(cash.cash_spent)}</dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-slate-500">Handed over</dt>
-              <dd className="tabular-nums font-medium text-rose-600">− {fmt(cash.handed_over)}</dd>
-            </div>
-            {cash.in_transit > 0 && (
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-slate-500">In transit (not yet received)</dt>
-                <dd className="tabular-nums font-medium text-amber-700">− {fmt(cash.in_transit)}</dd>
-              </div>
-            )}
-            {cash.adjustments !== 0 && (
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-slate-500">Opening / corrections</dt>
-                <dd className={`tabular-nums font-medium ${cash.adjustments < 0 ? "text-rose-600" : "text-emerald-700"}`}>
-                  {cash.adjustments > 0 ? "+ " : "− "}{fmt(Math.abs(cash.adjustments))}
-                </dd>
-              </div>
-            )}
-            <div className="flex items-baseline justify-between gap-3 border-t border-slate-200 pt-1">
-              <dt className="font-semibold text-slate-700">Cash in hand</dt>
-              <dd className="tabular-nums font-bold text-slate-800">{fmt(cash.cash_in_hand)}</dd>
-            </div>
-          </dl>
-
-          {pendingHandovers.length > 0 && (
-            <div className="mt-3 space-y-1 border-t border-slate-100 pt-2" data-testid="branch-handovers-pending">
-              {pendingHandovers.map((h) => (
-                <div key={h.id} className="flex flex-wrap items-center gap-2 text-[11px]" data-testid={`branch-handover-${h.id}`}>
-                  <Send className="h-3 w-3 text-amber-500" />
-                  <span className="font-semibold tabular-nums text-slate-700">{fmt(h.amount)}</span>
-                  <span className="text-slate-500">to {h.handed_to} · {h.on}</span>
-                  {notesLabel(h.cash_denominations) ? (
-                    <span className="text-slate-400">({notesLabel(h.cash_denominations)})</span>
-                  ) : null}
-                  <span className="rounded-full bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-700">Waiting to be received</span>
-                  <button
-                    type="button"
-                    onClick={() => pullBackHandover(h.id)}
-                    className="text-slate-400 underline hover:text-rose-600"
-                    data-testid={`branch-handover-cancel-${h.id}`}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
+      {/* What is being read, and the one thing there is to do to it. Add Expense sits on
+          every expense pile rather than only the requests: wanting to log spending does
+          not depend on which pile happened to be open when you thought of it. */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="branch-expense-tabs">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setView(t.key)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === t.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
-              data-testid={`branch-expense-tab-${t.key}`}
-            >
-              {t.label} <span className={view === t.key ? "text-white/70" : "text-slate-400"}>({t.count})</span>
-            </button>
-          ))}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-700" data-testid="branch-expense-list-title">
+            {activeView === "cash" ? "How the drawer got to that figure" : list.title}
+          </p>
+          <p className="text-[11px] text-slate-400">
+            {activeView === "cash" ? "Collections in; spending and handovers out" : list.hint}
+          </p>
         </div>
-        {view === "request" && (
+        {activeView === "cash" ? (
+          <Button
+            onClick={() => setHandingOver(true)}
+            className="ml-auto h-9 bg-amber-600 text-xs text-white hover:bg-amber-700"
+            data-testid="branch-handover-open"
+          >
+            <HandCoins className="mr-1.5 h-3.5 w-3.5" /> Hand over cash
+          </Button>
+        ) : (
           <Button
             className="ml-auto bg-sky-600 text-white hover:bg-sky-700"
             onClick={() => setAdding(true)}
@@ -639,71 +973,31 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full min-w-[860px] table-fixed text-xs">
-          <colgroup>
-            <col className="w-[5%]" />
-            <col className="w-[10%]" />
-            <col className="w-[18%]" />
-            <col className="w-[16%]" />
-            <col className="w-[14%]" />
-            <col className="w-[12%]" />
-            <col className="w-[25%]" />
-          </colgroup>
-          <thead className="bg-slate-50 text-slate-500">
-            <tr>
-              <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">S:No</th>
-              <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Date</th>
-              <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Category</th>
-              <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Paid to</th>
-              <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Reference</th>
-              <th className="px-3 py-2 text-right font-semibold uppercase tracking-wider">Amount</th>
-              <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={7} className="px-3 py-10 text-center text-slate-400">Loading…</td></tr>
-            ) : visible.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-3 py-10 text-center text-slate-400" data-testid="branch-expense-empty">
-                  {view === "approved" ? "Nothing approved yet." : "No requests open. Add Expense sends one to the accountant."}
-                </td>
-              </tr>
-            ) : visible.map((r, i) => (
-              <tr key={r.id} className="border-t border-slate-100 align-top" data-testid={`branch-expense-row-${r.id}`}>
-                <td className="px-3 py-2.5 tabular-nums text-slate-400" data-testid={`branch-expense-sno-${r.id}`}>{i + 1}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-slate-500">{r.expense_date || "—"}</td>
-                <td className="px-3 py-2.5 font-medium text-slate-700">
-                  {r.category}
-                  {r.note ? <span className="block text-[11px] font-normal text-slate-400">{r.note}</span> : null}
-                  {r.payment_mode && r.payment_mode !== "cash" ? (
-                    <span className="mt-0.5 inline-block rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
-                      {MODE_LABELS[r.payment_mode] || r.payment_mode}
-                    </span>
-                  ) : null}
-                </td>
-                <td className="break-words px-3 py-2.5 text-slate-600">{r.paid_to || "—"}</td>
-                <td className="break-words px-3 py-2.5 text-slate-500">{r.reference || "—"}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-slate-800">
-                  {fmt(r.amount)}
-                  {notesLabel(r.cash_denominations) ? (
-                    <span className="mt-0.5 block text-[10px] font-normal text-slate-400" data-testid={`branch-expense-notes-${r.id}`}>
-                      {notesLabel(r.cash_denominations)}{Number(r.cash_coins) > 0 ? ` + Rs.${r.cash_coins} coins` : ""}
-                    </span>
-                  ) : null}
-                </td>
-                <td className="px-3 py-2.5">
-                  <StatusChip row={r} />
-                  {r.rejected && r.rejection_reason ? (
-                    <span className="mt-0.5 block text-[10px] text-rose-600">{r.rejection_reason}</span>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {activeView === "cash" ? (
+        <div className="space-y-4">
+          {!cash.opening_set && (
+            <p
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700"
+              data-testid="branch-cash-not-set"
+            >
+              Opening cash not set by the accountant — this is collections less spending since tracking began.
+            </p>
+          )}
+          <CashMovementList cash={cash} />
+          <div>
+            <p className="mb-2 text-sm font-semibold text-slate-700">Handovers</p>
+            <HandoverList handovers={handovers} onCancel={pullBackHandover} />
+          </div>
+        </div>
+      ) : (
+        <ExpenseList
+          rows={list.rows}
+          loading={loading}
+          empty={list.empty}
+          showBranch={!branchId}
+          testid="branch-expense-list"
+        />
+      )}
 
       {adding && (
         <AddExpenseDialog
