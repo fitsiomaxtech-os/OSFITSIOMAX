@@ -24,8 +24,8 @@ const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 //
 // The Online/Offline split used to be a pill row here, above that board's tab bar, which
 // put it over Payment Schedule, Discount Applied, Closing Balance and Close Books as well
-// — four pages it narrowed nothing on. It is now the board's own row, at the top of the
-// Summary tab beside the payment-mode row; `verticalModeFilter` is the ask for it.
+// — four pages it narrowed nothing on. It is now the board's own group, sharing the
+// Summary tab's filter strip with the payment modes; `verticalModeFilter` asks for it.
 const SummaryTab = ({ branchId, scoped }) => (
   <div className="space-y-4" data-testid="finance-summary-root">
     {/* canSend off: sending a day up for approval is the branch desk's move, and this is
