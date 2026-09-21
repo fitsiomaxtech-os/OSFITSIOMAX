@@ -53,6 +53,7 @@ import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 // lazy boards below: it is on screen for every role from the first paint, so splitting
 // it would only add a round trip to the one control that is always there.
 import { ClockWidget } from "@/components/ClockWidget";
+import { SessionPaymentBell } from "@/components/SessionPaymentBell";
 
 /**
  * The boards, each in its own chunk.
@@ -878,6 +879,9 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showDietBoard = isDietRole(role);
   const showAccountantBoard = role === "accountant";
   const showZumbaBoard = isZumbaRole(role);
+  // Clients whose paid treatment sessions have run out with a balance owing: the desk that
+  // collects it, the accountant who books it, and the physio about to give the next day.
+  const canSeeSessionPayments = showSuperAdminBoard || showBranchBoard || showAccountantBoard || showPhysioBoard;
 
   // What patients have sent past their branch, waiting to be read. Asked once when the
   // board opens rather than polled: feedback arrives at the pace people write it, and a
@@ -940,6 +944,7 @@ export const CRMPage = ({ auth, onLogout }) => {
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <ClockWidget />
+                <SessionPaymentBell />
                 <button type="button" onClick={() => setShowPhysioCalendar(true)} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-calendar">
                   <CalendarDays className="h-5 w-5" />
                 </button>
@@ -1033,6 +1038,7 @@ export const CRMPage = ({ auth, onLogout }) => {
 
                   Only the roles the endpoint answers for: a bell shown to a physio would
                   count nothing and open a 403. */}
+              {canSeeSessionPayments && <SessionPaymentBell />}
               {canReadFeedback && (
                 <button
                   type="button"

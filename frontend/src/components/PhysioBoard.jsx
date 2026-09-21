@@ -33,6 +33,7 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { PhysioTreatmentChips } from "@/components/ui/physio-treatment-chips";
 import { DocumentPreview, useDocumentPreview } from "@/components/ui/document-preview";
 import { MyProfilePage } from "@/components/MyProfilePage";
+import { SESSION_PAYMENT_REFRESH_EVENT } from "@/components/SessionPaymentBell";
 import {
   physioConsultations,
   physioCompleteConsultation,
@@ -3840,12 +3841,21 @@ function CompleteSessionModal({ session, onClose, onDone, sessions }) {
     try {
       // Sent per track rather than both-and-empty: a treatment day posting a rehab note it
       // never showed a box for is how the wrong half got filled in the first place.
-      await physioCompleteSession(session.id, {
+      const done = await physioCompleteSession(session.id, {
         remarks: isRehab ? "" : remarks,
         rehab_remarks: isRehab ? rehabRemarks : "",
         physio_treatments: treatments,
       });
       toast.success("Session completed");
+      // The day just given used up (or nearly used up) what this client has paid for.
+      const alert = done?.payment_alert;
+      if (alert) {
+        (alert.level === "due" ? toast.error : toast.warning)(
+          alert.level === "due" ? "Payment due — inform the Branch Admin" : "Last paid session",
+          { description: alert.message, duration: 12000 },
+        );
+        window.dispatchEvent(new Event(SESSION_PAYMENT_REFRESH_EVENT));
+      }
       onDone();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed");

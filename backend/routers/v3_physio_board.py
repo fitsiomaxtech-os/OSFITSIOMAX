@@ -25,6 +25,9 @@ from physio_scope import physio_lead_ids, physio_owns_lead, resolve_physio_docto
 # The clients' weekly star ratings -- stars only; the Treatment Feedback is not for the
 # Physio's eyes (see physio_star_ratings).
 from routers.v3_client_reviews import physio_star_ratings, session_star_ratings
+# A treatment day that uses up the last paid session tells the branch, the accountant and
+# the physio — see v3_session_payment.
+from routers.v3_session_payment import notify_after_session_complete
 
 router = APIRouter(prefix="/api/v3")
 
@@ -830,6 +833,15 @@ async def physio_complete_session(
     await v3_col("lead_activity").insert_one(activity.copy())
 
     updated = await v3_col(collection).find_one({"id": session_id}, {"_id": 0})
+    # Rehab is its own course with its own fee; only a treatment day draws on the
+    # Treatment Fee's paid sessions. Never lets a completed day fail on the way out.
+    if not is_rehab and updated is not None:
+        try:
+            alert = await notify_after_session_complete(session["lead_id"], user.full_name, user.role)
+        except Exception:
+            alert = None
+        if alert:
+            updated["payment_alert"] = alert
     return updated
 
 

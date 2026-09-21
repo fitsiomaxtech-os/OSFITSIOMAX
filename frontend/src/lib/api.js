@@ -961,6 +961,9 @@ export const recruitmentReorderStages = async (ids) => (await api.post("/recruit
 // The starred and the flagged, both lists in one request so the cards and the rows they
 // count cannot arrive a moment apart.
 export const getDashboardClients = async (branchId) => (await api.get("/dashboard/clients", { params: branchId ? { branch_id: branchId } : {} })).data;
+// Clients whose paid treatment sessions have run out (or have one left) with a Treatment
+// Fee balance still owing -- the header's rupee bell. Scoped per role by the backend.
+export const getSessionPaymentAlerts = async () => (await api.get("/session-payment-alerts")).data;
 export const listBranchFeedback = async (branchId) => (await api.get("/branch/feedback", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const moveBranchFeedback = async (feedbackId, status, reply, note) => (await api.patch(`/branch/feedback/${feedbackId}`, { status, reply, note })).data;
 // Writing back to the patient on their own thread. ask_resolved is how a branch closes one
