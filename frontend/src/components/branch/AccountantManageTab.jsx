@@ -95,6 +95,17 @@ const PAYMENT_MODES = [
   ["cheque", "Cheque"],
 ];
 
+// Online vs offline verticals, for the desks that want to read one side of the business
+// at a time -- the Accountant's own Summary tab asks for it. It lives in here rather than
+// in the board above because it filters the income summary and nothing else: on Payment
+// Schedule, Discount Applied, Closing Balance or Close Books it narrowed nothing while
+// still sitting at the top of the screen looking as though it did.
+const VERTICAL_MODES = [
+  ["all", "All"],
+  ["offline", "Offline"],
+  ["online", "Online"],
+];
+
 // The card, the table it filters to, and the label above that table are one thing, so they
 // are one list rather than three that have to be kept in step.
 // `label` names the section the detail table below is showing; `short` is what fits on a
@@ -319,8 +330,10 @@ const PaymentModes = ({ tx }) => {
  * date range sharing their tab bar (Payment Schedule excepted: a client's outstanding
  * balance is a right-now figure, not one a collection-date range narrows).
  *
- * @param mode  "online" | "offline", an optional vertical filter only the Accountant's
- *              Summary tab passes (and owns the pills for) — left unset everywhere else.
+ * @param verticalModeFilter  Show the All/Offline/Online pills, which this board then
+ *              owns. The Accountant's own Summary tab asks for it; nowhere else does, and
+ *              without it every vertical is counted. The row renders inside the income
+ *              summary, because that is the only thing on this board it narrows.
  * @param approvedOnly  Counts signed-off money and nothing else, which is what the
  *              Accountant's own Summary tab asks for: money the branch has collected but
  *              had nobody sign is not the accountant's income yet, and showing it as such
@@ -332,7 +345,7 @@ const PaymentModes = ({ tx }) => {
  *              off the prop on every render, so an empty one means All Branches rather
  *              than "pick your own", which is what a bare branchId would mean.
  */
-export const AccountantManageTab = ({ branchId: fixedBranchId, mode, approvedOnly = false, scoped = false }) => {
+export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilter = false, approvedOnly = false, scoped = false }) => {
   const [branches, setBranches] = useState([]);
   const [ownBranchId, setOwnBranchId] = useState(fixedBranchId || "");
   // Scoped: whatever the row above says, right now. Otherwise this board's own select,
@@ -349,6 +362,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, approvedOnl
   const [incomeStage, setIncomeStage] = useState(approvedOnly ? "approved" : "requested");
   const [expenseTotals, setExpenseTotals] = useState({ approved_total: 0, approved_count: 0, pending_count: 0 });
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
+  // Which side of the business the income summary is counting, where this board owns
+  // the pills for it. "all" means no filter, same as a caller leaving `mode` unset.
+  const [verticalMode, setVerticalMode] = useState("all");
   const [revenueView, setRevenueView] = useState("collected");
   const [preset, setPreset] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
@@ -383,22 +399,24 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, approvedOnl
 
   const pickDates = (key, from, to) => { setPreset(key); setCustomFrom(from); setCustomTo(to); };
 
-  // "online" | "offline", owned by whichever caller wants the filter (Accountant's own
-  // Summary tab) — undefined everywhere else, which getRevenueOverview reads as no filter
-  // at all, so Branch Admin's own tab and Branch Management's Analytics are unaffected.
+  // "online" | "offline", off this board's own pills where it carries them. Undefined
+  // when it does not, or when All is picked, which getRevenueOverview reads as no filter
+  // at all -- so Branch Admin's own tab and Branch Management's Analytics are unaffected.
+  const verticalFilter = verticalModeFilter && verticalMode !== "all" ? verticalMode : undefined;
+
   const load = useCallback(() => {
     if (preset === "custom" && (!customFrom || !customTo)) return;
     setLoading(true);
     getRevenueOverview({
       branch_id: branchId || undefined,
-      vertical_mode: mode || undefined,
+      vertical_mode: verticalFilter || undefined,
       start_date: startDate || undefined,
       end_date: endDate || undefined,
     })
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [branchId, mode, startDate, endDate, preset, customFrom, customTo]);
+  }, [branchId, verticalFilter, startDate, endDate, preset, customFrom, customTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -676,6 +694,33 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode, approvedOnl
 
           {ledger === "income" && (
           <>
+          {/* Which side of the business, where this board was asked to carry the choice.
+              First thing in the income summary because it scopes every figure under it —
+              the two piles, the eight revenue tiles and the table below them all come back
+              from a fresh read narrowed to the picked side.
+
+              It sits in here rather than above the tab row, where it used to, so it only
+              shows on the page it filters: Payment Schedule, Discount Applied, Closing
+              Balance and Close Books read their own sources and never took any notice of
+              it, and neither does the Expenses ledger beside this one. */}
+          {verticalModeFilter && (
+            <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-vertical-mode-filter">
+              {VERTICAL_MODES.map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setVerticalMode(key)}
+                  className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                    verticalMode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+                  }`}
+                  data-testid={`accountant-manage-vertical-mode-${key}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* The two piles. Above the revenue tiles because it scopes them: the eight
               figures below are the picked pile's, not the day's. */}
           <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-income-stages">

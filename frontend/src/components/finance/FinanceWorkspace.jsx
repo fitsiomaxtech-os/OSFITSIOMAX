@@ -19,44 +19,26 @@ const ALL_KEY = "all";
 // own sort.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
-// Same Online/Offline split every other mode filter in the OS uses, layered on top of
-// Accountant Manage's own board (Branches & Verticals > Analytics > Accountant Manage)
-// rather than a copy of it — Summary is that exact page, branch select and all.
-const SummaryTab = ({ branchId, scoped }) => {
-  const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
-  return (
-    <div className="space-y-4" data-testid="finance-summary-root">
-      <div className="flex flex-wrap items-center gap-2" data-testid="finance-summary-mode-filter">
-        {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setMode(key)}
-            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-              mode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-            }`}
-            data-testid={`finance-summary-mode-${key}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {/* canSend off: sending a day up for approval is the branch desk's move, and this is
-          the desk it gets sent to. What lands here is signed off on the Approvals tab.
+// Accountant Manage's own board (Branches & Verticals > Analytics > Accountant Manage),
+// layered rather than copied — Summary is that exact page, branch select and all.
+//
+// The Online/Offline split used to be a pill row here, above that board's tab bar, which
+// put it over Payment Schedule, Discount Applied, Closing Balance and Close Books as well
+// — four pages it narrowed nothing on. It is now the board's own row, shown beside the
+// payment-mode row inside the income summary it actually filters; `verticalModeFilter`
+// is the ask for it.
+const SummaryTab = ({ branchId, scoped }) => (
+  <div className="space-y-4" data-testid="finance-summary-root">
+    {/* canSend off: sending a day up for approval is the branch desk's move, and this is
+        the desk it gets sent to. What lands here is signed off on the Approvals tab.
 
-          approvedOnly: from this chair income means money that has been signed off. A
-          collection still sitting at a branch desk is the branch's figure, not the
-          accountant's, and counting it here would have this board disagree with the books
-          it is read against. The three piles still show, as figures rather than a filter. */}
-      <AccountantManageTab
-        branchId={branchId}
-        scoped={scoped}
-        mode={mode === "all" ? undefined : mode}
-        approvedOnly
-      />
-    </div>
-  );
-};
+        approvedOnly: from this chair income means money that has been signed off. A
+        collection still sitting at a branch desk is the branch's figure, not the
+        accountant's, and counting it here would have this board disagree with the books
+        it is read against. The three piles still show, as figures rather than a filter. */}
+    <AccountantManageTab branchId={branchId} scoped={scoped} verticalModeFilter approvedOnly />
+  </div>
+);
 
 /**
  * The finance book, one page at a time, in the order the desk works them: the ledger
