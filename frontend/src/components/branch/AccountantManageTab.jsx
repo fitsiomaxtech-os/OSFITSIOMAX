@@ -332,8 +332,9 @@ const PaymentModes = ({ tx }) => {
  *
  * @param verticalModeFilter  Show the All/Offline/Online pills, which this board then
  *              owns. The Accountant's own Summary tab asks for it; nowhere else does, and
- *              without it every vertical is counted. The row renders inside the income
- *              summary, because that is the only thing on this board it narrows.
+ *              without it every vertical is counted. The row sits at the top of the
+ *              Summary tab beside the payment-mode row, the two of them being the scope
+ *              that page is read under.
  * @param approvedOnly  Counts signed-off money and nothing else, which is what the
  *              Accountant's own Summary tab asks for: money the branch has collected but
  *              had nobody sign is not the accountant's income yet, and showing it as such
@@ -641,6 +642,55 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : tab === "summary" ? (
         <div className="space-y-4" data-testid="accountant-manage-summary">
+          {/* The two filter rows, above everything this tab shows rather than tucked
+              inside the income summary: which side of the business, then how the money
+              came in. They read as the scope the page is being looked at under, which is
+              what they are -- every figure below moves when either is pressed.
+
+              Only on this tab. Payment Schedule, Discount Applied, Closing Balance and
+              Close Books read their own sources and take no notice of either row, so up
+              there beside the tab names they would have sat over four pages they narrow
+              nothing on. Here they come and go with the page they belong to. */}
+          {verticalModeFilter && (
+            <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-vertical-mode-filter">
+              {VERTICAL_MODES.map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setVerticalMode(key)}
+                  className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                    verticalMode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+                  }`}
+                  data-testid={`accountant-manage-vertical-mode-${key}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Same set a Branch Admin picks from when collecting the fee in the first
+              place: how it was paid, not whether it has been signed off. It cuts the
+              income ledger only -- an expense is not a collection and carries no such
+              mode -- but it stays on screen with the Expenses side showing rather than
+              disappearing under it, so the scope this tab is being read under does not
+              change shape when the ledger card is pressed. */}
+          <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-payment-mode-filter">
+            {PAYMENT_MODES.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setPaymentModeFilter(key)}
+                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                  paymentModeFilter === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                }`}
+                data-testid={`accountant-manage-payment-mode-${key}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* The one question this tab opens on: money in, or money out. Two cards
               rather than a segmented pill, because the choice carries its own figure —
               a switch that also says what is on each side of it, in the shape the cards
@@ -694,33 +744,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
 
           {ledger === "income" && (
           <>
-          {/* Which side of the business, where this board was asked to carry the choice.
-              First thing in the income summary because it scopes every figure under it —
-              the two piles, the eight revenue tiles and the table below them all come back
-              from a fresh read narrowed to the picked side.
-
-              It sits in here rather than above the tab row, where it used to, so it only
-              shows on the page it filters: Payment Schedule, Discount Applied, Closing
-              Balance and Close Books read their own sources and never took any notice of
-              it, and neither does the Expenses ledger beside this one. */}
-          {verticalModeFilter && (
-            <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-vertical-mode-filter">
-              {VERTICAL_MODES.map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setVerticalMode(key)}
-                  className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-                    verticalMode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-                  }`}
-                  data-testid={`accountant-manage-vertical-mode-${key}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-
           {/* The two piles. Above the revenue tiles because it scopes them: the eight
               figures below are the picked pile's, not the day's. */}
           <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-income-stages">
@@ -795,30 +818,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
                 onClick={() => setRevenueView(v.key)}
                 testid={`revenue-kpi-${v.label.toLowerCase().replace(/\s+/g, "-")}`}
               />
-            ))}
-          </div>
-
-          {/* Under the cards, because it cuts them. On the top line it sat beside Income
-              and Expenses looking like a second choice of the same kind, when it is a
-              filter of what one of them shows — every figure above moves when it is
-              pressed. Same set a Branch Admin picks from when collecting the fee in the
-              first place: how it was paid, not whether it has been signed off.
-
-              No ledger gate on it any more: it renders inside the income side, so there
-              is no longer an Expenses view for it to have to hide from. */}
-          <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-payment-mode-filter">
-            {PAYMENT_MODES.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setPaymentModeFilter(key)}
-                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-                  paymentModeFilter === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
-                }`}
-                data-testid={`accountant-manage-payment-mode-${key}`}
-              >
-                {label}
-              </button>
             ))}
           </div>
 
