@@ -311,16 +311,31 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
 
       {!loading && data && !branchId && (
         <div className="space-y-3" data-testid="branch-cash-rollup">
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
             <Figure label="Collected" value={fmt(data.total?.collected_total)} testId="branch-cash-total-collected" {...card("collected")} />
             <Figure label="Collected (cash)" value={fmt(data.total?.collected_cash)} testId="branch-cash-total-cash" {...card("collected_cash")} />
             <Figure label="Cash spent" value={fmt(data.total?.cash_spent)} testId="branch-cash-total-spent" {...card("cash_spent")} />
+            <Figure
+              label="Branches"
+              value={`${(data.by_branch || []).length} branches`}
+              testId="branch-cash-total-branches"
+              {...card("branches")}
+            />
             <Figure label="Handed over" value={fmt(data.total?.handed_over)} testId="branch-cash-total-handed" {...card("handed_over")} />
             <Figure label="In transit" value={fmt(data.total?.in_transit)} tone="amber" testId="branch-cash-total-transit" {...card("in_transit")} />
             <Figure label="Cash in hand" value={fmt(data.total?.cash_in_hand)} tone="emerald" testId="branch-cash-total-hand" {...card("cash_in_hand")} />
           </div>
-          {kind && <EntriesPanel kind={kind} branchId="" showBranch onClose={() => setKind(null)} />}
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          {kind && kind !== "branches" && <EntriesPanel kind={kind} branchId="" showBranch onClose={() => setKind(null)} />}
+          {/* The per-branch roll-up, behind the Branches card rather than always on screen. */}
+          {kind === "branches" && (
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white" data-testid="branch-cash-branches">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5">
+              <p className="text-sm font-semibold text-slate-800">Branches</p>
+              <span className="text-[11px] text-slate-400">{(data.by_branch || []).length} branches{!scoped ? " · click a branch to open it" : ""}</span>
+              <button type="button" onClick={() => setKind(null)} className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
             <table className="w-full min-w-[720px] text-xs">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
@@ -334,7 +349,12 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
               </thead>
               <tbody>
                 {(data.by_branch || []).map((r) => (
-                  <tr key={r.branch_id} className="border-t border-slate-100" data-testid={`branch-cash-rollup-${r.branch_id}`}>
+                  <tr
+                    key={r.branch_id}
+                    onClick={scoped ? undefined : () => setOwnSel(r.branch_id)}
+                    className={`border-t border-slate-100 ${scoped ? "" : "cursor-pointer hover:bg-slate-50"}`}
+                    data-testid={`branch-cash-rollup-${r.branch_id}`}
+                  >
                     <td className="px-3 py-2.5 font-medium text-slate-700">
                       {r.branch_name}
                       {!r.opening_set && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">opening not set</span>}
@@ -349,6 +369,7 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
 
