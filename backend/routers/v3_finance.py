@@ -3430,6 +3430,131 @@ async def get_branch_cash(
     return {"branch_id": None, "total": total, "by_branch": sorted(rows, key=lambda r: -r["cash_in_hand"])}
 
 
+# The cards on Branch Cash, each of which opens the rows it was summed from.
+BRANCH_CASH_KINDS = ("collected", "collected_cash", "cash_spent", "handed_over", "in_transit", "cash_in_hand")
+
+
+def _cash_share(t: dict) -> float:
+    """The cash part of one collection: all of it for a cash payment, the cash lines of a
+    split, nothing otherwise — the same cut _tally_modes makes for the Cash figure."""
+    split = t.get("payment_split") or []
+    if split:
+        return round(sum(float(l.get("amount") or 0) for l in split if l.get("mode") == "cash"), 2)
+    return round(float(t.get("gross") or 0), 2) if t.get("payment_mode") == "cash" else 0.0
+
+
+@router.get("/finance/branch-cash/entries")
+async def get_branch_cash_entries(
+    kind: str,
+    branch_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
+):
+    """The rows behind one Branch Cash card, read off the same sources _branch_cash_figures
+    sums, so a card and the list it opens agree.
+
+    Every row is one shape — date, branch, type, party, detail, amount — so one table can
+    show any card and filter it by `type`. For cash_in_hand it is the whole movement list
+    the balance is made of: cash collected in, cash spent and handed over out (negative),
+    and the opening count and corrections either way.
+    """
+    if kind not in BRANCH_CASH_KINDS:
+        raise HTTPException(status_code=400, detail="Unknown card")
+    if is_branch_admin_role(user.role):
+        if not user.branch_id:
+            raise HTTPException(status_code=400, detail="Your account is not attached to a branch")
+        branch_id = user.branch_id
+
+    branch_docs = await v3_col("branches").find(
+        {"archived": {"$ne": True}}, {"_id": 0, "id": 1, "branch_name": 1}
+    ).to_list(500)
+    branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+    # The roll-up is summed over live branches only, so the list is too.
+    branch_ids = [branch_id] if branch_id else list(branch_name_map)
+
+    rows = []
+    ledger = kind == "cash_in_hand"
+
+    if kind in ("collected", "collected_cash") or ledger:
+        for bid in branch_ids:
+            rev = await revenue_overview(start_date=None, end_date=None, branch_id=bid, user=user)
+            for t in rev.get("transactions") or []:
+                amount = round(float(t.get("gross") or 0), 2) if kind == "collected" else _cash_share(t)
+                if not amount:
+                    continue
+                mode = t.get("payment_mode") or ""
+                if t.get("payment_split"):
+                    mode = " + ".join(f"{l.get('mode')} {float(l.get('amount') or 0):g}" for l in t["payment_split"])
+                rows.append({
+                    "id": f"col-{t.get('id')}",
+                    "date": (t.get("date") or "")[:10],
+                    "branch_name": branch_name_map.get(bid, ""),
+                    "type": "Cash in" if ledger else (t.get("source") or "other").title(),
+                    "party": t.get("client_name") or "",
+                    "detail": f"{(t.get('source') or '').title()} · {mode}" if ledger else mode,
+                    "status": "Approved" if t.get("approved") else "Awaiting approval",
+                    "amount": amount,
+                })
+
+    if kind == "cash_spent" or ledger:
+        exp_query = {"payment_mode": "cash", "rejected": {"$ne": True}, "branch_id": {"$in": branch_ids}}
+        for e in await v3_col("expenses").find(exp_query, {"_id": 0}).sort("expense_date", -1).to_list(20000):
+            amount = round(float(e.get("amount") or 0), 2)
+            rows.append({
+                "id": f"exp-{e.get('id')}",
+                "date": e.get("expense_date") or "",
+                "branch_name": branch_name_map.get(e.get("branch_id"), ""),
+                "type": "Spent" if ledger else (e.get("category") or "Uncategorized"),
+                "party": e.get("paid_to") or "",
+                "detail": (f"{e.get('category') or ''} · " if ledger else "") + (e.get("note") or ""),
+                "status": "Approved" if _expense_approved(e) else "Awaiting approval",
+                "amount": -amount if ledger else amount,
+            })
+
+    if kind in ("handed_over", "in_transit") or ledger:
+        statuses = {"handed_over": ["received", "disputed"], "in_transit": ["pending"]}.get(kind, list(HANDOVER_STATUSES))
+        ho_query = {"branch_id": {"$in": branch_ids}, "status": {"$in": statuses}}
+        for h in await v3_col("cash_handovers").find(ho_query, {"_id": 0}).sort("raised_at", -1).to_list(5000):
+            pending = h.get("status") == "pending"
+            amount = round(float(
+                (h.get("amount") if pending or h.get("received_amount") is None else h["received_amount"]) or 0
+            ), 2)
+            rows.append({
+                "id": f"ho-{h.get('id')}",
+                "date": h.get("on") or "",
+                "branch_name": branch_name_map.get(h.get("branch_id"), ""),
+                "type": ("In transit" if pending else "Handed over") if ledger else (h.get("status") or "pending").title(),
+                "party": h.get("handed_to") or "",
+                "detail": " · ".join(x for x in [
+                    f"received by {h['received_by']}" if h.get("received_by") else "",
+                    f"variance Rs.{float(h.get('variance') or 0):g}" if float(h.get("variance") or 0) else "",
+                    h.get("note") or "",
+                ] if x),
+                "status": (h.get("status") or "pending").title(),
+                "amount": -amount if ledger else amount,
+            })
+
+    if ledger:
+        for a in await v3_col("cash_adjustments").find({"branch_id": {"$in": branch_ids}}, {"_id": 0}).to_list(5000):
+            rows.append({
+                "id": f"adj-{a.get('id')}",
+                "date": a.get("on") or "",
+                "branch_name": branch_name_map.get(a.get("branch_id"), ""),
+                "type": "Opening" if a.get("reason") == "opening" else "Correction",
+                "party": a.get("created_by") or "",
+                "detail": a.get("note") or "",
+                "status": "",
+                "amount": round(float(a.get("amount") or 0), 2),
+            })
+
+    rows.sort(key=lambda r: r["date"], reverse=True)
+    return {
+        "kind": kind,
+        "branch_id": branch_id or None,
+        "rows": rows,
+        "total": round(sum(r["amount"] for r in rows), 2),
+    }
+
+
 @router.post("/finance/branch-cash/adjustment")
 async def create_cash_adjustment(
     payload: CashAdjustmentCreate,

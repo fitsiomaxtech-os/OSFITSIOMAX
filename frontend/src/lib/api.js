@@ -491,6 +491,7 @@ export const topUpPettyCash = async (payload) => (await api.post("/finance/petty
 // has set its opening figure (opening_set); before that the derived balance is every rupee
 // of cash ever taken and the panel prompts for the count instead.
 export const getBranchCash = async (params = {}) => (await api.get("/finance/branch-cash", { params })).data;
+export const getBranchCashEntries = async (params = {}) => (await api.get("/finance/branch-cash/entries", { params })).data;
 export const setBranchCashAdjustment = async (payload) => (await api.post("/finance/branch-cash/adjustment", payload)).data;
 export const createCashHandover = async (payload) => (await api.post("/finance/cash-handover", payload)).data;
 export const listCashHandovers = async (params = {}) => (await api.get("/finance/cash-handovers", { params })).data;

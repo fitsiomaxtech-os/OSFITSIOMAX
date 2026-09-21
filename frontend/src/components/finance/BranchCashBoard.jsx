@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, Coins, HandCoins, Layers, ShieldCheck } from "lucide-react";
+import { Building2, Coins, HandCoins, Layers, ShieldCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { getBranches, getBranchCash, setBranchCashAdjustment, receiveCashHandover } from "@/lib/api";
+import { getBranches, getBranchCash, getBranchCashEntries, setBranchCashAdjustment, receiveCashHandover } from "@/lib/api";
 import { notesLabel } from "@/lib/denominations";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -11,12 +11,119 @@ const ALL = "all";
 
 const TONE_TEXT = { slate: "text-slate-800", amber: "text-amber-700", emerald: "text-emerald-700" };
 
-const Figure = ({ label, value, tone = "slate", testId }) => (
-  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5" data-testid={testId}>
+const TONE_RING = { slate: "border-sky-500 ring-sky-100", amber: "border-amber-500 ring-amber-100", emerald: "border-emerald-500 ring-emerald-100" };
+
+// A card is a button: clicking it opens the rows it was summed from below the cards, and
+// clicking it again closes them.
+const Figure = ({ label, value, tone = "slate", testId, active = false, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={active}
+    className={`rounded-lg border bg-white px-3 py-2.5 text-left transition hover:border-slate-300 hover:shadow-sm ${active ? `ring-2 ${TONE_RING[tone] || TONE_RING.slate}` : "border-slate-200"}`}
+    data-testid={testId}
+  >
     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
     <p className={`text-lg font-bold tabular-nums ${TONE_TEXT[tone] || TONE_TEXT.slate}`}>{value}</p>
-  </div>
+  </button>
 );
+
+const KIND_LABEL = {
+  collected: "Collected",
+  collected_cash: "Collected (cash)",
+  cash_spent: "Cash spent",
+  handed_over: "Handed over",
+  in_transit: "In transit",
+  cash_in_hand: "Cash in hand",
+};
+
+/** The rows behind one card, with a Type filter off the rows' own types. */
+const EntriesPanel = ({ kind, branchId, showBranch, onClose }) => {
+  const [rows, setRows] = useState(null);
+  const [type, setType] = useState(ALL);
+
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    setType(ALL);
+    getBranchCashEntries({ kind, ...(branchId ? { branch_id: branchId } : {}) })
+      .then((d) => { if (live) setRows(d?.rows || []); })
+      .catch((e) => {
+        if (!live) return;
+        setRows([]);
+        toast.error(e?.response?.data?.detail || "Could not load those entries");
+      });
+    return () => { live = false; };
+  }, [kind, branchId]);
+
+  const types = useMemo(() => {
+    const m = new Map();
+    (rows || []).forEach((r) => m.set(r.type, (m.get(r.type) || 0) + 1));
+    return [...m.entries()];
+  }, [rows]);
+  const shown = (rows || []).filter((r) => type === ALL || r.type === type);
+  const total = shown.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const partyLabel = kind === "cash_spent" ? "Paid to" : kind === "handed_over" || kind === "in_transit" ? "Carried by" : "Party";
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white" data-testid="branch-cash-entries">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-3 py-2.5">
+        <p className="text-sm font-semibold text-slate-800">{KIND_LABEL[kind]}</p>
+        {rows && <span className="text-[11px] text-slate-400">{shown.length} entries · {fmt(total)}</span>}
+        <button type="button" onClick={onClose} className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Close" data-testid="branch-cash-entries-close">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {types.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 px-3 py-2" data-testid="branch-cash-entries-types">
+          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Type</span>
+          {[[ALL, rows.length], ...types].map(([t, n]) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setType(t)}
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${type === t ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+            >
+              {t === ALL ? "All" : t} <span className="opacity-70">{n}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {!rows && <p className="py-8 text-center text-xs text-slate-400">Loading…</p>}
+      {rows && shown.length === 0 && <p className="py-8 text-center text-xs text-slate-400">Nothing here yet.</p>}
+      {rows && shown.length > 0 && (
+        <div className="max-h-[420px] overflow-auto">
+          <table className="w-full min-w-[640px] text-xs">
+            <thead className="sticky top-0 bg-slate-50 text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Date</th>
+                {showBranch && <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Branch</th>}
+                <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Type</th>
+                <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">{partyLabel}</th>
+                <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Detail</th>
+                <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider">Status</th>
+                <th className="px-3 py-2 text-right font-semibold uppercase tracking-wider">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <tr key={r.id} className="border-t border-slate-100">
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-500">{r.date}</td>
+                  {showBranch && <td className="px-3 py-2 text-slate-600">{r.branch_name}</td>}
+                  <td className="px-3 py-2"><span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{r.type}</span></td>
+                  <td className="px-3 py-2 text-slate-700">{r.party || "—"}</td>
+                  <td className="px-3 py-2 text-slate-500">{r.detail || "—"}</td>
+                  <td className="px-3 py-2 text-slate-500">{r.status || "—"}</td>
+                  <td className={`px-3 py-2 text-right font-semibold tabular-nums ${r.amount < 0 ? "text-rose-600" : "text-slate-800"}`}>{fmt(r.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const OpeningCashForm = ({ branchId, branchName, isCorrection, onDone }) => {
   const [amount, setAmount] = useState("");
@@ -146,6 +253,10 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Which card's rows are open below the cards, if any.
+  const [kind, setKind] = useState(null);
+  useEffect(() => { setKind(null); }, [branchId]);
+  const card = (k) => ({ active: kind === k, onClick: () => setKind((cur) => (cur === k ? null : k)) });
 
   useEffect(() => {
     if (scoped) return;
@@ -201,13 +312,14 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
       {!loading && data && !branchId && (
         <div className="space-y-3" data-testid="branch-cash-rollup">
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-            <Figure label="Collected" value={fmt(data.total?.collected_total)} testId="branch-cash-total-collected" />
-            <Figure label="Collected (cash)" value={fmt(data.total?.collected_cash)} testId="branch-cash-total-cash" />
-            <Figure label="Cash spent" value={fmt(data.total?.cash_spent)} testId="branch-cash-total-spent" />
-            <Figure label="Handed over" value={fmt(data.total?.handed_over)} testId="branch-cash-total-handed" />
-            <Figure label="In transit" value={fmt(data.total?.in_transit)} tone="amber" testId="branch-cash-total-transit" />
-            <Figure label="Cash in hand" value={fmt(data.total?.cash_in_hand)} tone="emerald" testId="branch-cash-total-hand" />
+            <Figure label="Collected" value={fmt(data.total?.collected_total)} testId="branch-cash-total-collected" {...card("collected")} />
+            <Figure label="Collected (cash)" value={fmt(data.total?.collected_cash)} testId="branch-cash-total-cash" {...card("collected_cash")} />
+            <Figure label="Cash spent" value={fmt(data.total?.cash_spent)} testId="branch-cash-total-spent" {...card("cash_spent")} />
+            <Figure label="Handed over" value={fmt(data.total?.handed_over)} testId="branch-cash-total-handed" {...card("handed_over")} />
+            <Figure label="In transit" value={fmt(data.total?.in_transit)} tone="amber" testId="branch-cash-total-transit" {...card("in_transit")} />
+            <Figure label="Cash in hand" value={fmt(data.total?.cash_in_hand)} tone="emerald" testId="branch-cash-total-hand" {...card("cash_in_hand")} />
           </div>
+          {kind && <EntriesPanel kind={kind} branchId="" showBranch onClose={() => setKind(null)} />}
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table className="w-full min-w-[720px] text-xs">
               <thead className="bg-slate-50 text-slate-500">
@@ -247,13 +359,14 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
           )}
 
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-            <Figure label="Collected" value={fmt(data.collected_total)} testId="branch-cash-collected" />
-            <Figure label="Collected (cash)" value={fmt(data.collected_cash)} testId="branch-cash-cash" />
-            <Figure label="Spent (cash)" value={fmt(data.cash_spent)} testId="branch-cash-spent" />
-            <Figure label="Handed over" value={fmt(data.handed_over)} testId="branch-cash-handed" />
-            <Figure label="In transit" value={fmt(data.in_transit)} tone="amber" testId="branch-cash-transit" />
-            <Figure label="Cash in hand" value={fmt(data.cash_in_hand)} tone="emerald" testId="branch-cash-hand" />
+            <Figure label="Collected" value={fmt(data.collected_total)} testId="branch-cash-collected" {...card("collected")} />
+            <Figure label="Collected (cash)" value={fmt(data.collected_cash)} testId="branch-cash-cash" {...card("collected_cash")} />
+            <Figure label="Spent (cash)" value={fmt(data.cash_spent)} testId="branch-cash-spent" {...card("cash_spent")} />
+            <Figure label="Handed over" value={fmt(data.handed_over)} testId="branch-cash-handed" {...card("handed_over")} />
+            <Figure label="In transit" value={fmt(data.in_transit)} tone="amber" testId="branch-cash-transit" {...card("in_transit")} />
+            <Figure label="Cash in hand" value={fmt(data.cash_in_hand)} tone="emerald" testId="branch-cash-hand" {...card("cash_in_hand")} />
           </div>
+          {kind && <EntriesPanel kind={kind} branchId={branchId} showBranch={false} onClose={() => setKind(null)} />}
           <p className="text-[11px] text-slate-500" data-testid="branch-cash-reconcile">
             Collected in cash {fmt(data.collected_cash)}
             {(data.cash_approved != null) && <span className="text-slate-400"> (approved {fmt(data.cash_approved)} · awaiting {fmt(data.cash_awaiting)})</span>}
