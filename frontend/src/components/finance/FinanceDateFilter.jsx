@@ -22,19 +22,31 @@ import { DATE_PRESET_LABELS, DATE_PRESET_SHORT } from "@/lib/dateRange";
  * cannot quietly mean something different by one it keeps.
  */
 export const FINANCE_DATE_PRESETS = ["all", "today", "yesterday", "this_week", "this_month", "last_month", "custom"];
-
 /**
- * The dialog behind Custom Range. Two typed dates and one calendar, centred over the board
- * rather than hanging off the button that opened it: a panel anchored to a chip in a
- * toolbar opens across the very figures it is about to filter, and gets clipped by
- * whatever scrolls underneath it.
+ * The whole date filter, as a dialog: the windows down the left, and the calendar and two
+ * typed dates of an arbitrary range on the right.
  *
- * Typed and picked at once, because a range is two dates and people usually arrive knowing
- * which two. Keying 04082026 is quicker than navigating a grid twice; the grid is there
- * for the times you are reading a calendar to decide. Whichever is used the other follows,
- * because they are one value shown two ways rather than two controls to reconcile.
+ * It is the row's own contents rebuilt at a size worth reading, not a second filter. The
+ * toolbar is where a window is changed in one tap while looking at the figures; this is
+ * where you come when you are reading a calendar to decide, or when the row has shortened
+ * to "Yest" and "This Mo" on a phone. Both set the same one value, so a window picked here
+ * lights the same button up there.
+ *
+ * Centred over the board rather than hanging off the button that opened it: a panel
+ * anchored to a chip in a toolbar opens across the very figures it is about to filter, and
+ * gets clipped by whatever scrolls underneath it.
+ *
+ * A preset in the rail applies on the tap and closes, because there is nothing further to
+ * say about it. Custom Range is the one that needs the right-hand side, so it closes
+ * nothing -- it is the heading for the panel already open beside it, lit while that range
+ * is the one in force.
+ *
+ * On the right, typed and picked at once, because a range is two dates and people usually
+ * arrive knowing which two. Keying 04082026 is quicker than navigating a grid twice; the
+ * grid is there for the times you are not. Whichever is used the other follows, because
+ * they are one value shown two ways rather than two controls to reconcile.
  */
-const CustomRangeDialog = ({ from, to, onApply, onClose, testid }) => {
+const FilterByDateDialog = ({ preset, presets, from, to, onPreset, onApply, onClose, testid }) => {
   const [fromText, setFromText] = useState(() => isoToManual(from));
   const [toText, setToText] = useState(() => isoToManual(to));
   // Which end the next tap on the grid fills. Starts on From and moves itself to To, so
@@ -89,13 +101,21 @@ const CustomRangeDialog = ({ from, to, onApply, onClose, testid }) => {
     </div>
   );
 
+  // One row across the top on a phone, a column down the side from sm. Two columns took
+  // three rows to show six windows and pushed the calendar — the thing most people opened
+  // this for — below the fold; the abbreviated labels are what buy the single row, and the
+  // full wording comes back from sm up where the rail has the width for it.
+  const railBtn = (on) => `min-w-0 flex-1 truncate rounded-md px-1 py-2 text-center text-[11px] font-medium transition-colors sm:w-full sm:flex-none sm:px-3 sm:py-2 sm:text-left sm:text-sm ${
+    on ? "bg-sky-100 font-semibold text-sky-700" : "text-slate-700 hover:bg-[#F3EFE6]"
+  }`;
+
   return (
     <div
       className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       data-testid={`${testid}-modal`}
     >
-      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-2xl sm:max-w-2xl" data-testid={`${testid}-panel`}>
         <div className="flex items-center justify-between border-b border-[#EFEAE0] px-4 py-3">
           <p className="text-sm font-bold text-slate-800">Filter by Date</p>
           <button
@@ -110,48 +130,77 @@ const CustomRangeDialog = ({ from, to, onApply, onClose, testid }) => {
           </button>
         </div>
 
-        <div className="space-y-3 p-3">
-          <div className="flex items-stretch gap-2">
-            {field("From", fromText, setFromText, !!fromText && !fromIsoVal, "from")}
-            {field("To", toText, setToText, (!!toText && !toIsoVal) || !orderOk, "to")}
+        <div className="flex flex-col sm:flex-row">
+          {/* The windows this board offers, in the order the toolbar offers them. flex and
+              not a one-column grid from sm up: grid rows stretch to fill the dialog, which
+              would spread six buttons down the whole height of the calendar beside them. */}
+          <div
+            className="flex gap-1 border-b border-[#EFEAE0] p-2 sm:w-44 sm:shrink-0 sm:flex-col sm:gap-0.5 sm:border-b-0 sm:border-r sm:p-3"
+            data-testid={`${testid}-presets`}
+          >
+            {presets.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => (key === "custom" ? setEditing("from") : onPreset(key))}
+                aria-pressed={preset === key}
+                className={railBtn(preset === key)}
+                data-testid={`${testid}-preset-${key}`}
+              >
+                <span className="sm:hidden">{DATE_PRESET_SHORT[key]}</span>
+                <span className="hidden sm:inline">{DATE_PRESET_LABELS[key]}</span>
+              </button>
+            ))}
           </div>
 
-          {/* The grid keeps its own month as the end being filled changes, so picking a
-              From in March leaves March open to pick the To from. */}
-          <MilkCalendar
-            value={editing === "from" ? fromIsoVal : toIsoVal}
-            min={editing === "to" ? fromIsoVal || undefined : undefined}
-            accent="sky"
-            onChange={pickDay}
-            testid={`${testid}-calendar`}
-          />
+          <div className="min-w-0 flex-1 space-y-3 p-3 sm:p-4">
+            <div className="flex items-stretch gap-2">
+              {field("From", fromText, setFromText, !!fromText && !fromIsoVal, "from")}
+              {field("To", toText, setToText, (!!toText && !toIsoVal) || !orderOk, "to")}
+            </div>
 
-          {/* Says which of the two is wrong, rather than only greying Apply out. */}
-          <p className="text-[11px] text-slate-400" data-testid={`${testid}-hint`}>
-            {!orderOk
-              ? <span className="font-semibold text-red-500">From must not be after To.</span>
-              : (fromText && !fromIsoVal) || (toText && !toIsoVal)
-                ? <span className="font-semibold text-red-500">Use DD-MM-YYYY, e.g. 04-08-2026.</span>
-                : `Type both dates, or tap the grid to set ${editing === "from" ? "From" : "To"}.`}
-          </p>
+            {/* The grid keeps its own month as the end being filled changes, so picking a
+                From in March leaves March open to pick the To from.
 
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose} className="flex-1" data-testid={`${testid}-cancel`}>Cancel</Button>
-            <Button
-              onClick={() => onApply(fromIsoVal, toIsoVal)}
-              disabled={!ready}
-              className="flex-1 bg-sky-600 hover:bg-sky-700"
-              data-testid={`${testid}-apply`}
-            >
-              Apply
-            </Button>
+                `lg` because the pane it now sits in is about 460px wide. The seven columns
+                fill whatever they are given either way, so at the default size the cells
+                came out 60px across and 32px tall -- wide flat boxes with a small number
+                somewhere in them, which is a worse target than the number suggests. */}
+            <MilkCalendar
+              value={editing === "from" ? fromIsoVal : toIsoVal}
+              min={editing === "to" ? fromIsoVal || undefined : undefined}
+              accent="sky"
+              size="lg"
+              onChange={pickDay}
+              testid={`${testid}-calendar`}
+            />
+
+            {/* Says which of the two is wrong, rather than only greying Apply out. */}
+            <p className="text-[11px] text-slate-400" data-testid={`${testid}-hint`}>
+              {!orderOk
+                ? <span className="font-semibold text-red-500">From must not be after To.</span>
+                : (fromText && !fromIsoVal) || (toText && !toIsoVal)
+                  ? <span className="font-semibold text-red-500">Use DD-MM-YYYY, e.g. 04-08-2026.</span>
+                  : `Type both dates, or tap the grid to set ${editing === "from" ? "From" : "To"}.`}
+            </p>
+
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onClose} className="flex-1" data-testid={`${testid}-cancel`}>Cancel</Button>
+              <Button
+                onClick={() => onApply(fromIsoVal, toIsoVal)}
+                disabled={!ready}
+                className="flex-1 bg-sky-600 hover:bg-sky-700"
+                data-testid={`${testid}-apply`}
+              >
+                Apply
+              </Button>
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 };
-
 /**
  * The one date control every page of Finance is read through: the windows as a single
  * horizontal row of buttons, with an arbitrary range behind the last of them in a dialog.
@@ -323,10 +372,16 @@ export const FinanceDateFilter = ({
         </span>
       )}
 
+      {/* The dialog carries the same list of windows this row does, so what is offered in
+          one place is what is offered in the other by construction rather than by two
+          boards being kept in step by hand. */}
       {open && (
-        <CustomRangeDialog
+        <FilterByDateDialog
+          preset={preset}
+          presets={presets}
           from={customFrom}
           to={customTo}
+          onPreset={(key) => { onChange(key, customFrom, customTo); setOpen(false); }}
           onClose={() => setOpen(false)}
           onApply={(f, t) => { onChange("custom", f, t); setOpen(false); }}
           testid={`${testid}-custom`}
