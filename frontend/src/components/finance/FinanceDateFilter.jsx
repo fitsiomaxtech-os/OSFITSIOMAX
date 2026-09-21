@@ -8,6 +8,9 @@ import { DATE_PRESET_LABELS, DATE_PRESET_SHORT } from "@/lib/dateRange";
 /**
  * Every window the finance book is read through, in the order they are reached for: the
  * whole book, then today, then the ranges that widen out from it, then an arbitrary one.
+ * Yesterday sits directly under Today and This Month directly under This Week, so reading
+ * the row left to right walks steadily backwards and outwards rather than stepping over a
+ * week to reach a day and over last month to reach this one.
  *
  * "All" is first and is every board's default. A finance page that opened scoped to Today
  * would hide every collection and every expense older than this morning behind a filter
@@ -18,7 +21,7 @@ import { DATE_PRESET_LABELS, DATE_PRESET_SHORT } from "@/lib/dateRange";
  * the days behind them still come from lib/dateRange, so a board can drop a window but
  * cannot quietly mean something different by one it keeps.
  */
-export const FINANCE_DATE_PRESETS = ["all", "today", "this_week", "yesterday", "last_month", "this_month", "custom"];
+export const FINANCE_DATE_PRESETS = ["all", "today", "yesterday", "this_week", "this_month", "last_month", "custom"];
 
 /**
  * The dialog behind Custom Range. Two typed dates and one calendar, centred over the board
@@ -175,6 +178,8 @@ const CustomRangeDialog = ({ from, to, onApply, onClose, testid }) => {
  *                    preset is pressed, so the board keeps them for the next Custom Range.
  * @param presets     which windows this board offers, if not all of them.
  * @param variant     how the row is dressed, and whether it scrolls itself. See VARIANTS.
+ * @param filterIcon  whether to close the row with a calendar button onto the same dialog
+ *                    Custom Range opens, and light it while a range is in force. See below.
  */
 
 /**
@@ -191,30 +196,36 @@ const CustomRangeDialog = ({ from, to, onApply, onClose, testid }) => {
  *
  * `inline` is the toolbar button on a diet, for Summary, where the row shares its line with
  * five tab buttons and the two together have to fit without wrapping. It gives back its
- * padding and a point of type below 2xl, which is roughly a quarter of the row's width, and
- * takes both back on a wide desk where the smaller type would read as a mistake rather than
- * as a fit. It never scrolls itself: the toolbar it sits in is the one scroll container, and
- * a scrolling row inside a scrolling row is a trap to get a mouse out of.
+ * padding and a point of type, which is roughly a quarter of the row's width, and takes both
+ * back on a desk genuinely wide enough for them. It never scrolls itself: the toolbar it
+ * sits in is the one scroll container, and a scrolling row inside a scrolling row is a trap
+ * to get a mouse out of.
+ *
+ * That "wide enough" is 1900px, not 2xl. At 2xl the type and padding grew at 1536px, which
+ * is about 240px before the row had the width for them, so a 1536-1900px window -- an
+ * ordinary laptop, and the width this board is most often read at -- grew its buttons past
+ * the edge and pushed Custom Range and Refresh into a scroll with no bar to show for it.
+ * The row held everything a pixel under 1536 and lost two controls a pixel over it.
  */
 const VARIANTS = {
   toolbar: {
     gap: "gap-1 sm:gap-2",
     scrolls: true,
-    btn: "h-10 shrink-0 rounded-md px-2 text-xs font-medium transition sm:px-3 sm:text-sm",
+    btn: "h-10 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium transition sm:px-3 sm:text-sm",
     on: "bg-sky-600 text-white",
     off: "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
   },
   inline: {
-    gap: "gap-1 2xl:gap-1.5",
+    gap: "gap-1 min-[1900px]:gap-1.5",
     scrolls: false,
-    btn: "h-10 shrink-0 rounded-md px-2 text-xs font-medium transition 2xl:px-3 2xl:text-sm",
+    btn: "h-10 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium transition min-[1900px]:px-3 min-[1900px]:text-sm",
     on: "bg-sky-600 text-white",
     off: "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
   },
   pill: {
     gap: "gap-1.5",
     scrolls: true,
-    btn: "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+    btn: "shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition",
     on: "border-sky-600 bg-sky-600 text-white shadow-sm",
     off: "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600",
   },
@@ -222,7 +233,8 @@ const VARIANTS = {
 
 export const FinanceDateFilter = ({
   preset, customFrom = "", customTo = "", onChange,
-  presets = FINANCE_DATE_PRESETS, variant = "toolbar", testid = "finance-date",
+  presets = FINANCE_DATE_PRESETS, variant = "toolbar", filterIcon = false,
+  testid = "finance-date",
 }) => {
   const [open, setOpen] = useState(false);
   const hasRange = preset === "custom" && customFrom && customTo;
@@ -250,6 +262,31 @@ export const FinanceDateFilter = ({
             <span className="hidden sm:inline">{DATE_PRESET_LABELS[key]}</span>
           </button>
         ))}
+
+        {/* The same dialog Custom Range opens, as a square at the end of the row. It is
+            there so the row ends on something that reads as a control rather than as the
+            last of six windows, and so the date filter is still one recognisable target
+            on a narrow screen where the words have shortened to "Yest" and "This Mo".
+
+            It is the one thing in the row that lights for a state rather than for a
+            press: sky while a custom range is in force, which is also when the chip
+            beside it is spelling that range out. Nothing else can be true of it -- it
+            selects no window of its own -- so lighting it on the preset would be lighting
+            it on something it did not do. */}
+        {filterIcon && (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label="Filter by date"
+            title="Filter by date"
+            className={`flex shrink-0 items-center justify-center transition ${
+              compact ? "rounded-full border p-2" : "h-10 w-10 rounded-md"
+            } ${hasRange ? V.on : V.off}`}
+            data-testid={`${testid}-icon`}
+          >
+            <CalendarDays className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* The range that is actually in force, and the way back into the dialog to change
@@ -265,7 +302,10 @@ export const FinanceDateFilter = ({
             }`}
             data-testid={`${testid}-chip-edit`}
           >
-            <CalendarDays className="h-3.5 w-3.5" />
+            {/* Two calendars 4px apart, both onto the same dialog, read as two controls
+                with one job between them. The lit button keeps the glyph; the chip keeps
+                the dates, which is the part of it nothing else says. */}
+            {!filterIcon && <CalendarDays className="h-3.5 w-3.5" />}
             {isoToManual(customFrom)} to {isoToManual(customTo)}
           </button>
           <button

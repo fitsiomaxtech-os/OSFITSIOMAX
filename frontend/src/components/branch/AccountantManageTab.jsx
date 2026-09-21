@@ -38,6 +38,20 @@ const MAIN_TABS = [
   { key: "closebooks", label: "Close Books", tone: "closing" },
 ];
 
+/**
+ * The windows this toolbar offers, out of the seven lib/dateRange names.
+ *
+ * This Week is the one left off. It shares its line with a branch select and five tab
+ * names, so every window on it is paid for in width the tabs could have had, and a week
+ * counted from Sunday is the window this desk reaches for least: the ledger is read for a
+ * day, for the month that is running, or for the month being closed. The other six are
+ * the ones the accountant actually narrows by.
+ *
+ * Order and words still come from FinanceDateFilter, so dropping one here cannot quietly
+ * make another mean something different than it does on Expense or Profit.
+ */
+const DATE_PRESETS = ["all", "today", "yesterday", "this_month", "last_month", "custom"];
+
 const mainTabClasses = (tab, active) => {
   if (tab.tone === "discount") {
     return active ? "bg-amber-600 text-white shadow-sm" : "text-amber-700 hover:bg-amber-50";
@@ -570,17 +584,23 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
           flex-nowrap, and the only scroll container on this line. Wrapping put the range on
           a second row under the tabs, which is a second band of controls above the figures
           and moves the whole page down whenever the row is one button too wide. Everything
-          in here is shrink-0 and gives back padding rather than width below 2xl, so on any
-          ordinary desk it simply fits; a phone scrolls this one strip sideways instead. */}
+          in here is shrink-0 and gives back padding rather than width under 1900px, so on any
+          ordinary desk it simply fits; a phone scrolls this one strip sideways instead.
+
+          Under 1900px, not under 2xl. The full-size type and padding were taken back at
+          1536px, some 240px before this row had the width for them, so every laptop
+          between the two grew the branch select, five tab names and six windows past the
+          right edge at once -- and since this strip hides its scrollbar, what that looked
+          like was a Custom Range button sliced down the middle and no Refresh at all. */}
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="accountant-manage-maintabs">
         {!fixedBranchId && !scoped && (
-          <div className="flex shrink-0 items-center gap-2 border-r border-slate-200 pl-1.5 pr-2 2xl:pr-3">
+          <div className="flex shrink-0 items-center gap-2 border-r border-slate-200 pl-1.5 pr-2 min-[1900px]:pr-3">
             <label htmlFor="accountant-manage-branch" className="text-xs font-medium text-slate-600">Branch:</label>
             <select
               id="accountant-manage-branch"
               value={branchId}
               onChange={(e) => setBranchId(e.target.value)}
-              className="h-10 rounded-md border border-slate-200 px-2 text-xs text-slate-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 2xl:text-sm"
+              className="h-10 rounded-md border border-slate-200 px-2 text-xs text-slate-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 min-[1900px]:text-sm"
               data-testid="accountant-manage-branch-select"
             >
               <option value="">All Branches</option>
@@ -588,12 +608,12 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
             </select>
           </div>
         )}
-        <div className="flex shrink-0 flex-nowrap gap-1 2xl:gap-1.5">
+        <div className="flex shrink-0 flex-nowrap gap-1 min-[1900px]:gap-1.5">
           {MAIN_TABS.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`h-10 shrink-0 whitespace-nowrap rounded-md px-2 text-center text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 2xl:px-3.5 2xl:text-sm ${mainTabClasses(t, tab === t.key)}`}
+              className={`h-10 shrink-0 whitespace-nowrap rounded-md px-2 text-center text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 min-[1900px]:px-3.5 min-[1900px]:text-sm ${mainTabClasses(t, tab === t.key)}`}
               data-testid={`accountant-manage-maintab-${t.key}`}
             >
               {t.label}
@@ -621,7 +641,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
             customFrom={customFrom}
             customTo={customTo}
             onChange={pickDates}
+            presets={DATE_PRESETS}
             variant="inline"
+            filterIcon
             testid="accountant-manage-window"
           />
           <Button
