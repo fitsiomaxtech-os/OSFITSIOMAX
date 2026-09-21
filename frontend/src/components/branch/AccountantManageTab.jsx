@@ -650,7 +650,10 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
 
               Same strip the tab row above it wears (bordered card, nowrap, its own
               sideways scroll on a phone), with a rule between the groups so the sky pills
-              and the indigo ones do not run together into one row of eleven.
+              and the indigo ones do not run together into one row of eleven. rounded-lg
+              on the pills, not rounded-full: 8px is the corner every other control on
+              this page is cut to, and a lozenge in a squared-off strip read as borrowed
+              from somewhere else.
 
               Only on this tab. Payment Schedule, Discount Applied, Closing Balance and
               Close Books read their own sources and take no notice of either group, so up
@@ -667,7 +670,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
                     key={key}
                     type="button"
                     onClick={() => setVerticalMode(key)}
-                    className={`shrink-0 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                    className={`shrink-0 whitespace-nowrap rounded-lg border px-3.5 py-1.5 text-sm font-medium transition ${
                       verticalMode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
                     }`}
                     data-testid={`accountant-manage-vertical-mode-${key}`}
@@ -690,7 +693,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, verticalModeFilte
                   key={key}
                   type="button"
                   onClick={() => setPaymentModeFilter(key)}
-                  className={`shrink-0 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                  className={`shrink-0 whitespace-nowrap rounded-lg border px-3.5 py-1.5 text-sm font-medium transition ${
                     paymentModeFilter === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
                   }`}
                   data-testid={`accountant-manage-payment-mode-${key}`}
