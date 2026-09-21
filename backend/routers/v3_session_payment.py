@@ -22,8 +22,8 @@ time from their portal, and a Branch Admin can grant it — an extension moves t
 due date and lets the remaining days go ahead unpaid until that date.
 
 Two ways it reaches people:
-  * GET /api/v3/session-payment-alerts — the header's rupee bell, scoped per role: a Branch
-    Admin sees their branch, a Physio their own patients, Accountant / Super Admin all.
+  * GET /api/v3/session-payment-alerts — the header's rupee bell, for Branch Admin (their
+    branch), Super Admin and BDE (all).
   * notify_after_session_complete — called when a physio completes a treatment day. It
     logs the crossing on the client's timeline and, on the day the paid sessions run out,
     emails the branch's admins, the accountants and the physio (when SMTP is configured).
@@ -38,9 +38,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from database import v3_col
-from deps import v3_require_roles, is_branch_admin_role, is_physio_role
+from deps import v3_require_roles, is_branch_admin_role
 from email_utils import send_email, smtp_configured
-from physio_scope import physio_lead_ids, resolve_physio_doctor
 from schemas.v3 import V3UserOut
 from utils import clinic_today, now_iso
 
@@ -247,18 +246,11 @@ async def alerts_for_query(lead_query: dict) -> list:
 
 @router.get("/session-payment-alerts")
 async def session_payment_alerts(
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "accountant", "physio", "super_admin", "business_dev")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev")),
 ):
     """Clients whose paid treatment sessions have run out (or are about to) with a balance
     still owing — the header's rupee bell."""
-    if is_physio_role(user.role):
-        doctor = await resolve_physio_doctor(user.id, user.role)
-        ids = (doctor or {}).get("physio_ids") or ([doctor["id"]] if doctor else [])
-        lead_ids = await physio_lead_ids(ids) if ids else []
-        if not lead_ids:
-            return {"alerts": [], "extension_requests": 0, "due": 0, "last_paid": 0}
-        lead_query = {"id": {"$in": lead_ids}}
-    elif is_branch_admin_role(user.role):
+    if is_branch_admin_role(user.role):
         if not user.branch_id:
             return {"alerts": [], "extension_requests": 0, "due": 0, "last_paid": 0}
         lead_query = {"branch_id": user.branch_id}

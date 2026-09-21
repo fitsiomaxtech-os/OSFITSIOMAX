@@ -880,9 +880,9 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showDietBoard = isDietRole(role);
   const showAccountantBoard = role === "accountant";
   const showZumbaBoard = isZumbaRole(role);
-  // Clients whose paid treatment sessions have run out with a balance owing: the desk that
-  // collects it, the accountant who books it, and the physio about to give the next day.
-  const canSeeSessionPayments = showSuperAdminBoard || showBranchBoard || showAccountantBoard || showPhysioBoard;
+  // Clients whose paid treatment sessions have run out with a balance owing: Branch Admin,
+  // Super Admin and the BDE only.
+  const canSeeSessionPayments = showSuperAdminBoard || showBranchBoard || showBusinessDevBoard;
 
   // What patients have sent past their branch, waiting to be read. Asked once when the
   // board opens rather than polled: feedback arrives at the pace people write it, and a
@@ -945,7 +945,6 @@ export const CRMPage = ({ auth, onLogout }) => {
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <ClockWidget />
-                <SessionPaymentBell />
                 <button type="button" onClick={() => setShowPhysioCalendar(true)} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-calendar">
                   <CalendarDays className="h-5 w-5" />
                 </button>
