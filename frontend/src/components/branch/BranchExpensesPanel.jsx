@@ -392,17 +392,7 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand, branchId, branches }) =>
       toast.success("Cash handed over — waiting for the accountant to receive it");
       onSaved();
     } catch (e) {
-      // 403 here is one particular refusal, and "Not allowed" does not say which: raising
-      // a handover is the branch's statement about money it is sending, so the accountant
-      // is not one of the roles that may make it. Their move on the same cash is to
-      // receive it, which is a different screen -- said here rather than leaving a button
-      // that fails without explaining itself.
-      const detail = e?.response?.data?.detail;
-      toast.error(
-        e?.response?.status === 403
-          ? "Handing cash over is the branch's own move — receive it instead on Finance > Branch Cash."
-          : detail || "Could not record that handover",
-      );
+      toast.error(e?.response?.data?.detail || "Could not record that handover");
     } finally {
       setSaving(false);
     }
@@ -864,6 +854,10 @@ const HandoverList = ({ handovers, onCancel, showBranch }) => {
                 <td className="px-4 py-3">
                   <p className="font-medium text-slate-700">{h.handed_to || "—"}</p>
                   {showBranch && h.branch_name ? <p className="text-[11px] text-slate-400">{h.branch_name}</p> : null}
+                  {/* Who said this cash was on its way. Worth a line since the accountant
+                      can raise one against a branch as well as receive it, so a branch
+                      reading its own drawer can see a handover it did not send up. */}
+                  {h.raised_by ? <p className="text-[11px] text-slate-400">raised by {h.raised_by}</p> : null}
                   {h.note ? <p className="text-[11px] text-slate-400">{h.note}</p> : null}
                 </td>
                 <td className="px-4 py-3 text-[11px] text-slate-400">

@@ -3606,14 +3606,23 @@ async def create_cash_adjustment(
 @router.post("/finance/cash-handover")
 async def create_cash_handover(
     payload: CashHandoverCreate,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "business_dev")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin", "business_dev")),
 ):
     """The branch settles cash to the person who carries it to the accountant.
 
     The notes leave the branch the moment this is raised, so the box drops by the amount
-    straight away — `pending` until the accountant counts it in. Not the accountant's to
-    raise: it is a statement by the branch about money it is sending, and the accountant's
-    move is to receive it.
+    straight away — `pending` until the accountant counts it in.
+
+    The accountant may raise one too, asked for on 2026-09-21: Accountant Master View >
+    Summary > Expenses > Cash In Hand works every branch's drawer, and the desk that reads
+    them is often the one told over the phone that cash is on its way. This used to be
+    refused, on the reasoning that a handover is the branch's own statement about money it
+    is sending. That reasoning still holds for what the row MEANS, and the trade it makes
+    is worth stating plainly: the accountant can also receive, so one person can now both
+    send a branch's cash and count it in, which is the second pair of eyes the two steps
+    existed to be. What stands in its place is the record — `raised_by` and
+    `raised_by_role` are written on every handover, so one the accountant raised against a
+    branch says so, and the branch reads it on its own Cash In Hand list.
     """
     if is_branch_admin_role(user.role):
         if not user.branch_id:
