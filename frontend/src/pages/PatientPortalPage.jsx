@@ -1572,37 +1572,46 @@ const openThreadOf = (rows) => rows.find((f) => (f.status || "new") !== "resolve
 
 const audienceOf = (f) => f.audience || "branch_admin";
 
-// The cards that offer Review beside Chat.
+const STAR_WORDS = { 1: "Poor", 2: "Not great", 3: "Okay", 4: "Good", 5: "Excellent" };
+
+// The cards that offer Review beside Chat — once only per client (ONCE_KINDS on the server).
 const REVIEWABLE = ["branch_admin", "consultant"];
 
-/** Stars for the chosen Branch Admin or Consultant, with the client's last one above. */
+/** Stars for the chosen Branch Admin or Consultant. One time only: once given, the review
+    shows in place of the form and cannot be changed. */
 function PersonReview({ audience, name, last, onSaved }) {
   return (
     <div className="space-y-2 rounded-lg border border-slate-200 p-3" data-testid={`portal-feedback-review-${audience.key}`}>
       <div>
         <p className="text-xs font-bold text-slate-700">Review {name}</p>
         <p className="text-[11px] leading-snug text-slate-500">
-          How has {name} been? Your stars go to management and count toward their performance.
+          {last
+            ? `Thank you — you have reviewed ${name}. A review can be given only once.`
+            : `How has ${name} been? Your stars go to management and count toward their performance. You can review only once, so take a moment.`}
         </p>
-        {last && (
-          <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-500" data-testid={`portal-feedback-review-last-${audience.key}`}>
-            Your last review:
+      </div>
+      {last ? (
+        <div className="rounded-lg bg-amber-50/70 p-3" data-testid={`portal-feedback-review-done-${audience.key}`}>
+          <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex">
               {[1, 2, 3, 4, 5].map((n) => (
-                <Star key={n} className={`h-3 w-3 ${n <= last.rating ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
+                <Star key={n} className={`h-5 w-5 ${n <= last.rating ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
               ))}
             </span>
-            {feedbackSentOn(last.created_at)}
-          </p>
-        )}
-      </div>
-      <ReviewForm
-        placeholder={`Tell us about ${name} (optional)`}
-        submitLabel={`Submit review for ${name}`}
-        onSubmit={(rating, comment) => patientPortalReviewAnytime({ target: audience.key, rating, comment })}
-        onDone={onSaved}
-        testid={`portal-feedback-review-form-${audience.key}`}
-      />
+            <span className="text-xs font-semibold text-amber-700">{STAR_WORDS[last.rating]}</span>
+            <span className="ml-auto text-[10px] text-slate-400">{feedbackSentOn(last.created_at)}</span>
+          </div>
+          {last.comment && <p className="mt-1.5 whitespace-pre-wrap break-words text-xs text-slate-600">{last.comment}</p>}
+        </div>
+      ) : (
+        <ReviewForm
+          placeholder={`Tell us about ${name} (optional)`}
+          submitLabel={`Submit review for ${name}`}
+          onSubmit={(rating, comment) => patientPortalReviewAnytime({ target: audience.key, rating, comment })}
+          onDone={onSaved}
+          testid={`portal-feedback-review-form-${audience.key}`}
+        />
+      )}
     </div>
   );
 }
@@ -1969,8 +1978,6 @@ function StarPicker({ value, onChange, testid, size = "h-7 w-7" }) {
     </div>
   );
 }
-
-const STAR_WORDS = { 1: "Poor", 2: "Not great", 3: "Okay", 4: "Good", 5: "Excellent" };
 
 const inputBox = "w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400";
 

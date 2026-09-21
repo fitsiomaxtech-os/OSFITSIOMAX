@@ -17,7 +17,8 @@ Every review is its own row, with a `kind` (who is rated) and a `source` (what p
     Physio cannot Send to Review while one is owed (see weeks_owed). The Physio reads the
     stars only -- never the words (see physio_star_ratings). Weekly reviews briefly also
     rated the Consultant; those rows stay readable but are no longer asked for.
-  * source "anytime" -- either kind, from the Feedback tab, whenever the client wants.
+  * source "anytime" -- from the Feedback tab. The Physio whenever the client wants; the
+    Consultant and the Branch Admin once only (ONCE_KINDS), and never changed after.
   * kind "branch_admin", source "anytime" -- the client's stars for their branch desk, from
     the Feedback tab's Branch Admin card (Review, beside Chat). Rated against the branch,
     not one login: `branch_id` is who it is about, and HR Performance credits it to every
@@ -58,6 +59,8 @@ KIND_PHYSIO = "physio"
 KIND_CONSULTANT = "consultant"
 KIND_BRANCH = "branch_admin"
 ANYTIME_KINDS = (KIND_CONSULTANT, KIND_PHYSIO, KIND_BRANCH)
+# Reviewed from the Feedback tab one time only per client.
+ONCE_KINDS = (KIND_CONSULTANT, KIND_BRANCH)
 SOURCE_WEEK = "week"
 SOURCE_ANYTIME = "anytime"
 
@@ -411,11 +414,17 @@ async def portal_review_week(payload: WeekReviewIn, lead_id: str = Depends(_curr
 
 @router.post("/patient-portal/review/anytime")
 async def portal_review_anytime(payload: AnytimeReviewIn, lead_id: str = Depends(_current_patient_lead_id)):
-    """A review of the Consultant, the Physio or the Branch Admin from the Feedback tab,
-    whenever the client wants."""
+    """A review of the Consultant, the Physio or the Branch Admin from the Feedback tab.
+    The Physio as often as the client wants; the Consultant and Branch Admin once only."""
     if payload.target not in ANYTIME_KINDS:
         raise HTTPException(status_code=400, detail="Choose who you are reviewing")
     lead = await _lead_or_404(lead_id)
+    if payload.target in ONCE_KINDS and await v3_col(COLLECTION).find_one(
+        {"lead_id": lead_id, "kind": payload.target, "source": SOURCE_ANYTIME, "skipped": {"$ne": True}},
+        {"_id": 0, "id": 1},
+    ):
+        who = "Branch Admin" if payload.target == KIND_BRANCH else "Consultant"
+        raise HTTPException(status_code=409, detail=f"You have already reviewed your {who}. A review can be given only once.")
     rating = required_rating(payload.rating)
     if payload.target == KIND_BRANCH:
         person = await _branch_desk(lead)
