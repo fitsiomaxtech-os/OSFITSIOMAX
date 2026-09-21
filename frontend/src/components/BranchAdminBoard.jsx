@@ -1710,7 +1710,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       ) : activeView === "patients" ? (
         <PatientsPortalPanel branchId={branchId} />
       ) : activeView === "client_reviews" ? (
-        <ClientReviewsPanel branchId={branchId} />
+        <ClientReviewsPanel branchId={branchId} physioOnly />
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel branchId={branchId} />
       ) : activeView === "records" ? (

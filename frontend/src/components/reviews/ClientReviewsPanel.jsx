@@ -489,8 +489,12 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
  * nothing to say about the others, and the Consultant tab itself, since a Consultant reads
  * the Physios, not reviews of themself. What is left is the one pick that answers a
  * question they actually have: which Physio.
+ *
+ * `physioOnly` — the same narrowing without the rest of `mine`: the Branch Admin board,
+ * where this desk only ever answers for its Physios, so the kind switch has nothing to
+ * switch between and goes away.
  */
-export const ClientReviewsPanel = ({ branchId = null, mine = false }) => {
+export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly = false }) => {
   const [data, setData] = useState({ consultant: [], physio: [], summary: {} });
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState([]);
@@ -522,8 +526,9 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false }) => {
   }, [branchId, mine]);
 
   const meta = KINDS.find((k) => k.key === kind);
-  // A Consultant sees Physio Review only — see `mine` above.
-  const kinds = mine ? KINDS.filter((k) => k.key === "physio") : KINDS;
+  // A Consultant, and a Branch Admin, see Physio Review only — see `mine`/`physioOnly` above.
+  const onlyPhysio = mine || physioOnly;
+  const kinds = onlyPhysio ? KINDS.filter((k) => k.key === "physio") : KINDS;
   const reviews = useMemo(() => data[kind] || [], [data, kind]);
   const q = search.trim().toLowerCase();
 
