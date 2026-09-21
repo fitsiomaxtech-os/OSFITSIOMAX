@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getFinanceExpenses, createFinanceExpense,
+  getBranches, getFinanceExpenses, createFinanceExpense,
   getBranchCash, createCashHandover, listCashHandovers, cancelCashHandover,
 } from "@/lib/api";
 import { BRANCH_EXPENSE_CATEGORIES } from "@/lib/expenseCategories";
@@ -119,22 +119,70 @@ const StatusChip = ({ row }) => {
   );
 };
 
-const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId }) => {
+/**
+ * The branch whose drawer this is, asked for in the dialog when the board behind it is
+ * not scoped to one.
+ *
+ * Both of these forms are statements about one branch's cash — the server refuses either
+ * without a branch on it — and until this existed the buttons were simply disabled on
+ * All Branches, which is where this desk usually sits. A disabled button is the screen
+ * refusing to say what it wants; asking here is the same question, put where it can be
+ * answered.
+ */
+const BranchPicker = ({ value, onChange, branches, testid }) => (
+  <div>
+    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Branch *</label>
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
+      data-testid={testid}
+    >
+      <option value="">Pick a branch…</option>
+      {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+    </select>
+    <p className="mt-1 text-[10px] text-slate-400">Whose drawer the cash comes out of.</p>
+  </div>
+);
+
+/** One branch's drawer figure, for a dialog whose branch is picked inside it. The panel
+    behind only holds the figure for a branch it was already scoped to, and an amount
+    checked against nothing is a check that always passes. */
+const usePickedBranchCash = (fixedBranchId, pickedBranchId, fallback) => {
+  const [picked, setPicked] = useState(null);
+
+  useEffect(() => {
+    if (fixedBranchId || !pickedBranchId) { setPicked(null); return undefined; }
+    let alive = true;
+    getBranchCash({ branch_id: pickedBranchId })
+      .then((box) => { if (alive) setPicked(box?.cash_in_hand ?? null); })
+      .catch(() => { if (alive) setPicked(null); });
+    return () => { alive = false; };
+  }, [fixedBranchId, pickedBranchId]);
+
+  return fixedBranchId ? fallback : picked;
+};
+
+const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches }) => {
   const [form, setForm] = useState({
     category: BRANCH_EXPENSE_CATEGORIES[0], amount: "", expense_date: todayIso(),
     paid_to: "", reference: "", note: "",
   });
+  const [pickedBranch, setPickedBranch] = useState("");
   const [notes, setNotes] = useState({});
   const [coins, setCoins] = useState("");
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
+  const spendingBranch = branchId || pickedBranch;
+  const drawer = usePickedBranchCash(branchId, pickedBranch, cashInHand);
   const amountNum = Number(form.amount);
-  const overDrawer = cashInHand != null && amountNum > 0 && amountNum > cashInHand;
+  const overDrawer = drawer != null && amountNum > 0 && amountNum > drawer;
   const counted = noteTotal(notes) + (Number(coins) || 0);
   const countEntered = counted > 0;
 
   const submit = async () => {
+    if (!spendingBranch) { toast.error("Pick the branch whose drawer this cash came out of"); return; }
     if (!(amountNum > 0)) { toast.error("Enter how much was spent"); return; }
     if (!form.paid_to.trim()) { toast.error("Say who it was paid to"); return; }
     // Every branch expense is cash out of the drawer, and cash leaves no invoice behind
@@ -154,7 +202,7 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId }) => {
         // standing on this screen is spending one branch's cash, and without these two
         // the server read their expense as head office's own — filed against no branch,
         // and approved the moment it was written instead of waiting on the accountant.
-        branch_id: branchId || undefined,
+        branch_id: spendingBranch,
         from_branch_drawer: true,
         payment_mode: "cash",
         cash_denominations: countEntered ? (countedNotes(notes) || {}) : undefined,
@@ -187,6 +235,14 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId }) => {
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-5">
+          {!branchId && (
+            <BranchPicker
+              value={pickedBranch}
+              onChange={setPickedBranch}
+              branches={branches}
+              testid="branch-expense-branch"
+            />
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Category *</label>
@@ -249,9 +305,9 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId }) => {
             <Coins className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               <b>Cash.</b> This comes out of the branch drawer.
-              {cashInHand != null && (
+              {drawer != null && (
                 <>
-                  {" "}It holds {fmt(cashInHand)} — {fmt(cashInHand - (amountNum > 0 ? amountNum : 0))} after this.
+                  {" "}It holds {fmt(drawer)} — {fmt(drawer - (amountNum > 0 ? amountNum : 0))} after this.
                   {overDrawer && " That is more than is in it; record it anyway if the money was spent."}
                 </>
               )}
@@ -301,18 +357,23 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId }) => {
   );
 };
 
-const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
+const HandoverDialog = ({ onClose, onSaved, cashInHand, branchId, branches }) => {
   const [form, setForm] = useState({ amount: "", handed_to: "", on: todayIso(), note: "" });
+  const [pickedBranch, setPickedBranch] = useState("");
   const [notes, setNotes] = useState({});
   const [coins, setCoins] = useState("");
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const sendingBranch = branchId || pickedBranch;
+  const drawer = usePickedBranchCash(branchId, pickedBranch, cashInHand);
   const amountNum = Number(form.amount);
-  const overDrawer = cashInHand != null && amountNum > 0 && amountNum > cashInHand;
+  const overDrawer = drawer != null && amountNum > 0 && amountNum > drawer;
   const counted = noteTotal(notes) + (Number(coins) || 0);
   const countEntered = counted > 0;
 
   const submit = async () => {
+    if (!sendingBranch) { toast.error("Pick the branch this cash is being sent from"); return; }
     if (!(amountNum > 0)) { toast.error("Enter how much is being handed over"); return; }
     if (!form.handed_to.trim()) { toast.error("Name who is carrying the cash"); return; }
     if (countEntered && Math.abs(counted - amountNum) >= 0.01) {
@@ -323,6 +384,7 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
     try {
       await createCashHandover({
         ...form,
+        branch_id: sendingBranch,
         amount: amountNum,
         cash_denominations: countEntered ? (countedNotes(notes) || {}) : undefined,
         cash_coins: Number(coins) || 0,
@@ -330,7 +392,17 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
       toast.success("Cash handed over — waiting for the accountant to receive it");
       onSaved();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not record that handover");
+      // 403 here is one particular refusal, and "Not allowed" does not say which: raising
+      // a handover is the branch's statement about money it is sending, so the accountant
+      // is not one of the roles that may make it. Their move on the same cash is to
+      // receive it, which is a different screen -- said here rather than leaving a button
+      // that fails without explaining itself.
+      const detail = e?.response?.data?.detail;
+      toast.error(
+        e?.response?.status === 403
+          ? "Handing cash over is the branch's own move — receive it instead on Finance > Branch Cash."
+          : detail || "Could not record that handover",
+      );
     } finally {
       setSaving(false);
     }
@@ -353,12 +425,20 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand }) => {
           </button>
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-5">
+          {!branchId && (
+            <BranchPicker
+              value={pickedBranch}
+              onChange={setPickedBranch}
+              branches={branches}
+              testid="branch-handover-branch"
+            />
+          )}
           <div>
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Amount *</label>
             <Input type="number" min="0" value={form.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" data-testid="branch-handover-amount" />
-            {cashInHand != null && (
+            {drawer != null && (
               <p className={`mt-1 text-[10px] ${overDrawer ? "text-amber-700" : "text-slate-400"}`}>
-                Drawer holds {fmt(cashInHand)}{overDrawer ? " — that is more than is in it" : ` — ${fmt(cashInHand - (amountNum > 0 ? amountNum : 0))} left after this`}
+                Drawer holds {fmt(drawer)}{overDrawer ? " — that is more than is in it" : ` — ${fmt(drawer - (amountNum > 0 ? amountNum : 0))} left after this`}
               </p>
             )}
           </div>
@@ -829,6 +909,10 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   const [handingOver, setHandingOver] = useState(false);
   const [cash, setCash] = useState(null);
   const [handovers, setHandovers] = useState([]);
+  // Only for the two dialogs, and only where the board above has not already picked one:
+  // both forms are statements about a single branch's cash, so with no branch in view
+  // they have to ask which.
+  const [branches, setBranches] = useState([]);
 
   const onChangedRef = useRef(onChanged);
   useEffect(() => { onChangedRef.current = onChanged; }, [onChanged]);
@@ -874,6 +958,11 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   }, [branchId]);
 
   useEffect(() => { loadCash(); }, [loadCash]);
+
+  useEffect(() => {
+    if (branchId) { setBranches([]); return; }
+    getBranches().then((b) => setBranches(b || [])).catch(() => setBranches([]));
+  }, [branchId]);
 
   const pullBackHandover = async (id) => {
     try {
@@ -1046,8 +1135,6 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
         {activeView === "cash" ? (
           <Button
             onClick={() => setHandingOver(true)}
-            disabled={!branchId}
-            title={branchId ? undefined : "Pick a branch first — cash is handed over out of one branch's drawer"}
             className="ml-auto h-9 bg-amber-600 text-xs text-white hover:bg-amber-700"
             data-testid="branch-handover-open"
           >
@@ -1057,8 +1144,6 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
           <Button
             className="ml-auto bg-sky-600 text-white hover:bg-sky-700"
             onClick={() => setAdding(true)}
-            disabled={!branchId}
-            title={branchId ? undefined : "Pick a branch first — the cash comes out of one branch's drawer"}
             data-testid="branch-expense-add"
           >
             <Plus className="mr-1 h-4 w-4" /> Add Expense
@@ -1098,6 +1183,7 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
           onSaved={() => { setAdding(false); load(); loadCash(); }}
           cashInHand={cashInHand}
           branchId={branchId}
+          branches={branches}
         />
       )}
       {handingOver && (
@@ -1105,6 +1191,8 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
           onClose={() => setHandingOver(false)}
           onSaved={() => { setHandingOver(false); loadCash(); }}
           cashInHand={cashInHand}
+          branchId={branchId}
+          branches={branches}
         />
       )}
     </div>
