@@ -253,10 +253,13 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  // Which card's rows are open below the cards, if any.
-  const [kind, setKind] = useState(null);
-  useEffect(() => { setKind(null); }, [branchId]);
-  const card = (k) => ({ active: kind === k, onClick: () => setKind((cur) => (cur === k ? null : k)) });
+  // Which card's rows are open below the cards, if any. On All Branches the Branches card
+  // is the resting state: it is open by default and closing any other card returns to it,
+  // so the roll-up is never unselected into an empty page.
+  const restKind = branchId ? null : "branches";
+  const [kind, setKind] = useState(restKind);
+  useEffect(() => { setKind(restKind); }, [restKind]);
+  const card = (k) => ({ active: kind === k, onClick: () => setKind((cur) => (cur === k ? restKind : k)) });
 
   useEffect(() => {
     if (scoped) return;
@@ -325,16 +328,13 @@ export const BranchCashBoard = ({ branchId: scopedBranchId, scoped = false }) =>
             <Figure label="In transit" value={fmt(data.total?.in_transit)} tone="amber" testId="branch-cash-total-transit" {...card("in_transit")} />
             <Figure label="Cash in hand" value={fmt(data.total?.cash_in_hand)} tone="emerald" testId="branch-cash-total-hand" {...card("cash_in_hand")} />
           </div>
-          {kind && kind !== "branches" && <EntriesPanel kind={kind} branchId="" showBranch onClose={() => setKind(null)} />}
+          {kind && kind !== "branches" && <EntriesPanel kind={kind} branchId="" showBranch onClose={() => setKind(restKind)} />}
           {/* The per-branch roll-up, behind the Branches card rather than always on screen. */}
           {kind === "branches" && (
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white" data-testid="branch-cash-branches">
             <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5">
               <p className="text-sm font-semibold text-slate-800">Branches</p>
               <span className="text-[11px] text-slate-400">{(data.by_branch || []).length} branches{!scoped ? " · click a branch to open it" : ""}</span>
-              <button type="button" onClick={() => setKind(null)} className="ml-auto rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Close">
-                <X className="h-4 w-4" />
-              </button>
             </div>
             <table className="w-full min-w-[720px] text-xs">
               <thead className="bg-slate-50 text-slate-500">
