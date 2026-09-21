@@ -1056,7 +1056,19 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.get("consultation_decision") != "consultation_treatment":
         raise HTTPException(status_code=400, detail="This patient's consultation was marked 'Consultation Only' — no Treatment Fee to collect")
-    if lead.get("consultation_stage") not in ("Fee Collected", "Physio Assign"):
+    # The honest test for "has the Consultation Fee been collected" is the fee itself, not
+    # the stage that collection usually leaves behind -- the same test collect_diet_fee and
+    # collect_rehab_fee make, and the one this message has always described.
+    #
+    # The stage was never a safe proxy for it. Save & Move stamps the hand-off stage every
+    # time it runs, so a Head Physio editing a decision already made -- correcting the
+    # package, ticking Diet -- sent a lead the desk had already taken the Consultation Fee
+    # from back to 'Consultation Visit'. The Treatment Fee card sits right there on that
+    # panel, offered the moment the Consultation Fee is in, and pressing it was refused for
+    # the rest of the patient's visit with a message about a fee that was already paid.
+    # (hp_consultation_decision no longer marches a lead backwards either; this holds for
+    # every lead already stranded by the ones that did.)
+    if lead.get("package_paid") is None:
         raise HTTPException(status_code=400, detail="Treatment Fee can only be collected after the Consultation Fee has been collected")
     if not lead.get("session_package_id") or lead.get("session_package_price") is None:
         raise HTTPException(status_code=400, detail="No treatment package was selected by the CONSULTANT yet")
@@ -1158,7 +1170,10 @@ async def mark_consultation_completed(lead_id: str, user: V3UserOut = Depends(v3
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.get("consultation_decision") != "consultation_only":
         raise HTTPException(status_code=400, detail="Only a 'Consultation Only' patient can be marked completed here")
-    if lead.get("consultation_stage") not in ("Fee Collected", "Consultation Completed"):
+    # Same test, same reason as collect_treatment_fee above: the fee itself, not the stage
+    # a Head Physio's re-saved decision may have undone. A Consultation Only patient who
+    # had paid and then had their decision edited could not be closed out at all.
+    if lead.get("package_paid") is None:
         raise HTTPException(status_code=400, detail="Consultation Fee must be collected before marking the consultation completed")
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {

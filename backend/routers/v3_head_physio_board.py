@@ -44,6 +44,35 @@ async def _branch_consultation_visit_stage() -> str:
     return await get_stage_name_at("consultation", 1, "Consultation Visit")
 
 
+async def _branch_stage_after_decision(lead: dict) -> str:
+    """Where Branch Admin should find this lead once the consultation is saved.
+
+    Normally the hand-off stage itself. But Save & Move is also how a Head Physio corrects
+    a decision already made, and by then the desk may have taken the Consultation Fee,
+    taken the Treatment Fee, even assigned the treatment physio. Stamping the hand-off
+    stage again marched those leads backwards: the Fee Collected panel vanished from under
+    a Branch Admin mid-collection, and the Treatment Fee -- gated on a stage that had just
+    been undone -- became uncollectable for the rest of the visit.
+
+    So a lead that has already moved past the hand-off stays where it is. Only one still
+    waiting at or before it is placed there.
+    """
+    handoff = await _branch_consultation_visit_stage()
+    current = lead.get("consultation_stage")
+    if not current or current == handoff:
+        return handoff
+    rows = await v3_col("pipeline_stages").find(
+        {"type": "consultation"}, {"_id": 0, "name": 1}
+    ).sort("order", 1).to_list(50)
+    order = {r["name"]: i for i, r in enumerate(rows)}
+    if current in order and handoff in order:
+        return current if order[current] > order[handoff] else handoff
+    # A stage with no row of its own -- "Consultation Completed" is still written to leads
+    # long after its pill was retired. Money already taken is the evidence that the lead is
+    # past the hand-off; anything else belongs at it.
+    return current if lead.get("package_paid") is not None else handoff
+
+
 async def ensure_super_admin_consultant(user: V3UserOut) -> Optional[dict]:
     """The Super Admin's own consultant record, created on first use if it isn't there.
 
@@ -511,7 +540,7 @@ async def hp_consultation_decision(
         "fitness_recommended": bool(payload.fitness_recommended),
         "zumba_recommended": bool(payload.zumba_recommended),
         "head_consultation_stage": await _head_closing_stage(),
-        "consultation_stage": await _branch_consultation_visit_stage(),
+        "consultation_stage": await _branch_stage_after_decision(lead),
         "updated_at": now_iso(),
     }
     # Named the way the Head Physio picked it, so the activity log reads back as the
