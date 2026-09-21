@@ -385,7 +385,7 @@ export const OutstandingAmountBoard = ({ rows, onView }) => {
               ),
               meta: [
                 <StatusBadge status={r.status} />,
-                r.due_date ? `Due ${r.due_date}` : null,
+                r.due_date ? <span className="font-semibold text-red-600">Due {r.due_date}</span> : null,
                 waNumber(r.phone) && <ReminderButton row={r} today={today} compact />,
               ],
               onOpen: onView ? () => onView(r.lead_id) : undefined,
@@ -404,7 +404,7 @@ export const OutstandingAmountBoard = ({ rows, onView }) => {
                   <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Total Bill</th>
                   <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid</th>
                   <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Balance</th>
-                  <th className="w-[9%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Date</th>
+                  <th className="w-[9%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-red-600">Due Date</th>
                   <th className="w-[9%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Status</th>
                   <th className="w-[13%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Action</th>
                 </tr>
@@ -427,7 +427,7 @@ export const OutstandingAmountBoard = ({ rows, onView }) => {
                       <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-700">{fmt(r.total_bill)}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-emerald-600">{fmt(r.paid_amount)}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-amber-600">{fmt(r.balance)}</td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{r.due_date || "—"}</td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-red-600">{r.due_date || "—"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-2 text-center"><StatusBadge status={r.status} /></td>
                       <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2">
                         <div className="flex items-center justify-center gap-1">
