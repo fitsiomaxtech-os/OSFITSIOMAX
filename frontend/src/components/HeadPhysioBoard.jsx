@@ -163,6 +163,25 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
   // that. Which list a row belongs to is the thing this column exists to answer.
   const allRows = useMemo(() => [
     ...consultRows.map((l) => {
+      // A Rehab consultation still to be held is what this row is on the day for, so it
+      // is named and dated as that rather than as the first consultation long finished.
+      const rehabDue = !!l.rehab_after_treatment && !l.rehab_consulted_at && !!l.rehab_consult_date;
+      if (rehabDue) {
+        return {
+          key: `c-${l.id}`,
+          kind: "consult",
+          leadId: l.id,
+          name: l.name || "Unknown",
+          patientNo: l.patient_number || "",
+          phone: l.phone || "",
+          stage: "Rehab Consultation",
+          tone: "sky",
+          when: `${l.rehab_consult_date} ${to12h(l.rehab_consult_time)}`,
+          at: `${l.rehab_consult_date}T${l.rehab_consult_time || "99:99"}`,
+          who: l.rehab_consult_doctor_name || l.assigned_physio_name || "",
+          plan: leadPlanParts(l),
+        };
+      }
       const done = isDone(l.head_consultation_stage, l.consultation_stage);
       return {
         key: `c-${l.id}`,

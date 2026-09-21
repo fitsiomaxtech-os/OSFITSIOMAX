@@ -22,6 +22,7 @@ import {
   getAvailableExperts, getAvailableDates,
   getLeadRemarks, getLeadActivity, getLeadAppointmentCard, leadDocuments,
   saveConsultationDecision, markConsultationCompleted, getBranches,
+  bookRehabConsultation, completeRehabConsultation,
   listTextPresets, addTextPreset, deleteTextPreset,
   getTreatmentTypes, bulkHardDeleteLeads,
   rescheduleCalendarBooking, declineCalendarBooking,
@@ -234,6 +235,21 @@ const LONG_TERM_SERVICES = ["rehab", "fitness"];
 // plan the Consultant had nothing to add to yet -- so this must not read it as unmarked.
 const longTermServices = (lead) =>
   LONG_TERM_SERVICES.filter((k) => lead?.long_term_notes && k in lead.long_term_notes);
+
+/**
+ * Rehab after Treatment. Rehab ticked beside a Treatment package is not sold at the first
+ * consultation: the course runs first, the branch books the patient back in with the
+ * Consultant once it is done, and the package is chosen at that Rehab consultation -- the
+ * Rehab Fee is collected after it, and only then does "Rehab" go on the patient's name.
+ *
+ * `rehabAwaitingConsult` is the stretch in between: marked, and not yet consulted.
+ * `treatmentCourseDone` is the branch's cue to book it -- the physio closed the course,
+ * or every booked treatment day is signed off.
+ */
+const rehabAwaitingConsult = (lead) => !!lead?.rehab_after_treatment && !lead?.rehab_consulted_at;
+const treatmentCourseDone = (lead) =>
+  lead?.physio_stage === "Complete"
+  || ((lead?.total_sessions || 0) > 0 && (lead?.completed_sessions || 0) >= lead.total_sessions);
 
 /**
  * The two things a Diet referral can actually be, revealed once Diet is ticked.
@@ -2489,6 +2505,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // price were settled by the Consultant, so there is nothing to choose before
   // confirming — only the amount, which a discount can still move.
   const [rehabFeeDraft, setRehabFeeDraft] = useState(null);
+  // Rehab after Treatment -- see rehabAwaitingConsult. The branch's booking popup
+  // ({ date, time, remarks } | null), and the package the Consultant picks at the Rehab
+  // consultation itself.
+  const [rehabBookDraft, setRehabBookDraft] = useState(null);
+  const [bookingRehabConsult, setBookingRehabConsult] = useState(false);
+  const [rehabConsultItem, setRehabConsultItem] = useState("");
+  const [savingRehabConsult, setSavingRehabConsult] = useState(false);
   const [collectingRehabFee, setCollectingRehabFee] = useState(false);
   const [dietFeeConfirmDraft, setDietFeeConfirmDraft] = useState(null);
   const [collectingDietFee, setCollectingDietFee] = useState(false);
@@ -2825,6 +2848,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
         // that day" -- the Head Physio's week strip and its own range picker both mean
         // exactly this, which is why those two keep the default scope.
         if (inRange(day(l.appointment_date))) return true;
+        // A Rehab consultation still to be held puts the patient on that day too -- it is
+        // its own appointment and leaves appointment_date on the first consultation.
+        if (rehabAwaitingConsult(l) && l.rehab_consult_date && inRange(day(l.rehab_consult_date))) return true;
         if (dateScope !== "activity") return false;
         // ...and, on the branch's Consultation tab, the day the patient was last worked
         // on. Most of the cards over that board are not about a consultation
@@ -3277,6 +3303,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setAddonPicker(null);
     setPhysioProgress(null);
     setRehabDays(null);
+    setRehabBookDraft(null);
+    setRehabConsultItem("");
     // The appointment card belongs to the patient it was fetched for. The receipt beside
     // it deliberately does not reset here: it outlives the lead dialog on purpose, so a
     // fee that closes the dialog on collection still leaves the receipt on screen.
@@ -3383,6 +3411,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     // Treatment is optional: without it the patient moves to Admin as Consultation only,
     // with whichever other services were ticked.
     const decision = decisionDraft.treatment ? "consultation_treatment" : "consultation_only";
+    const rehabDeferred = decisionDraft.treatment && !selectedLead.rehab_consulted_at;
     let payload = {
       decision,
       // A Diet referral is a referral to the Nutritionist's consultation and nothing else,
@@ -3390,9 +3419,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       // no longer accepts a chart here at all: whether the patient needs one is decided at
       // that consultation, by the Nutritionist, and recommended from their own board.
       diet_recommended: decisionDraft.diet,
-      rehab_referred: decisionDraft.rehab,
+      // Rehab beside a Treatment package waits for the course to finish -- no referral
+      // and no package now; the Rehab consultation afterwards settles both. A patient
+      // already past that consultation keeps the package it chose.
+      rehab_referred: decisionDraft.rehab && !rehabDeferred,
+      rehab_after_treatment: decisionDraft.rehab && rehabDeferred,
       // Only meaningful with the referral, and the server enforces the same pairing.
-      rehab_item_id: decisionDraft.rehab ? decisionDraft.rehab_item_id || null : null,
+      rehab_item_id: decisionDraft.rehab && !rehabDeferred ? decisionDraft.rehab_item_id || null : null,
       fitness_recommended: decisionDraft.fitness,
       zumba_recommended: decisionDraft.zumba,
       zumba_item_id: decisionDraft.zumba ? decisionDraft.zumba_item_id || null : null,
@@ -3418,7 +3451,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setSavingDecision(true);
     try {
       const res = await saveConsultationDecision(selectedLead.id, payload);
-      toast.success(decisionDraft.rehab ? "Moved to Branch Admin — with a Rehab referral" : "Moved to Branch Admin");
+      toast.success(!decisionDraft.rehab ? "Moved to Branch Admin"
+        : rehabDeferred ? "Moved to Branch Admin — Rehab follows the Treatment"
+        : "Moved to Branch Admin — with a Rehab referral");
       // The lead stays open behind the confirmation rather than the board closing it. The
       // popup's three actions all act on this patient, and two of them — Edit and Share —
       // have nothing to work with once the record underneath has gone.
@@ -3441,6 +3476,44 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       toast.error(err?.response?.data?.detail || "Failed to save");
     }
     setSavingDecision(false);
+  };
+
+  // ---- Rehab after Treatment ----
+  // The one lead both handlers replace on the board and in the open popup.
+  const takeLead = (lead) => {
+    setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === lead.id ? lead : l)) }));
+    setSelectedLead(lead);
+  };
+
+  // Branch side: re-appoint the patient with the Consultant for the Rehab consultation.
+  const submitRehabBooking = async () => {
+    if (!rehabBookDraft?.date || !rehabBookDraft?.time) { toast.error("Pick a date and a time"); return; }
+    setBookingRehabConsult(true);
+    try {
+      const res = await bookRehabConsultation(selectedLead.id, rehabBookDraft);
+      takeLead(res.lead);
+      setRehabBookDraft(null);
+      toast.success(`Rehab consultation booked for ${rehabBookDraft.date} at ${to12h(rehabBookDraft.time)}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not book the Rehab consultation");
+    }
+    setBookingRehabConsult(false);
+  };
+
+  // Consultant side: the Rehab package, chosen at the Rehab consultation. This is what puts
+  // the patient on Rehab -- the branch collects the Rehab Fee from here.
+  const submitRehabConsult = async () => {
+    if (!rehabConsultItem) { toast.error("Choose a Rehab package"); return; }
+    setSavingRehabConsult(true);
+    try {
+      const res = await completeRehabConsultation(selectedLead.id, { rehab_item_id: rehabConsultItem });
+      takeLead(res.lead);
+      setRehabConsultItem("");
+      toast.success("Rehab package chosen — sent to the branch to collect the Rehab Fee");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not save the Rehab package");
+    }
+    setSavingRehabConsult(false);
   };
 
   // The saved decision in the shape the receipt and the share text both read.
@@ -3479,7 +3552,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       diet: !!lead.diet_recommended,
       dietConsultation: !!lead.diet_consultation,
       dietChart: !!lead.diet_chart,
-      rehab: !!lead.rehab_referred,
+      rehab: !!lead.rehab_referred || !!lead.rehab_after_treatment,
       fitness: !!lead.fitness_recommended,
       zumba: !!lead.zumba_recommended,
       item_id: lead.session_package_id || "",
@@ -6846,6 +6919,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                           value: selectedLead.rehab_package_name || "Referred",
                           note: selectedLead.rehab_package_sessions ? `${selectedLead.rehab_package_sessions} sessions` : null,
                         },
+                        rehabAwaitingConsult(selectedLead) && {
+                          icon: HeartPulse,
+                          label: "Rehab",
+                          value: "After Treatment",
+                          note: selectedLead.rehab_consult_date
+                            ? `consultation ${selectedLead.rehab_consult_date}${selectedLead.rehab_consult_time ? ` ${to12h(selectedLead.rehab_consult_time)}` : ""}`
+                            : null,
+                        },
                         selectedLead.fitness_recommended && {
                           icon: Dumbbell,
                           label: "Fitness",
@@ -6907,6 +6988,39 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                           ) : (
                             <p className="mt-1 text-[11px] text-slate-500">A plain consultation — nothing else was recommended.</p>
                           )}
+
+                          {/* Rehab after Treatment: the branch's part is the re-appointment.
+                              Offered once the course is complete -- before then it says what
+                              it is waiting for, so nobody books Rehab over treatment days. */}
+                          {rehabAwaitingConsult(selectedLead) && (() => {
+                            const done = treatmentCourseDone(selectedLead);
+                            const booked = !!selectedLead.rehab_consult_date;
+                            return (
+                              <div className="mt-2 rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-2" data-testid="cons-rehab-booking">
+                                <p className="text-[11px] leading-relaxed text-cyan-800">
+                                  {!done
+                                    ? `Rehab follows the Treatment. Book the Rehab consultation once the course is complete${selectedLead.total_sessions ? ` (${selectedLead.completed_sessions || 0}/${selectedLead.total_sessions} days done)` : ""}.`
+                                    : booked
+                                      ? `Rehab consultation booked with ${selectedLead.rehab_consult_doctor_name || "the Consultant"} on ${selectedLead.rehab_consult_date}${selectedLead.rehab_consult_time ? ` at ${to12h(selectedLead.rehab_consult_time)}` : ""}. The Consultant chooses the package there; collect the Rehab Fee after it.`
+                                      : "Treatment is complete. Book the Rehab consultation with the Consultant."}
+                                </p>
+                                {done && (
+                                  <Button
+                                    size="sm"
+                                    className="mt-2 h-8 bg-cyan-600 text-xs text-white hover:bg-cyan-700"
+                                    onClick={() => setRehabBookDraft({
+                                      date: selectedLead.rehab_consult_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+                                      time: selectedLead.rehab_consult_time || "10:00",
+                                      remarks: selectedLead.rehab_consult_remarks || "",
+                                    })}
+                                    data-testid="cons-rehab-book-open"
+                                  >
+                                    <HeartPulse className="mr-1 h-3 w-3" />{booked ? "Reschedule Rehab Consultation" : "Book Rehab Consultation"}
+                                  </Button>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })()}
@@ -6948,7 +7062,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                 // patient referred to it with no package chosen reaches the branch with
                 // nothing to book and nothing to collect -- the same gap Move to Admin is
                 // held open for on the Treatment package above, held here the same way.
-                const rehabReady = !decisionDraft.rehab || !!decisionDraft.rehab_item_id;
+                //
+                // Unless Treatment is ticked too: then Rehab follows the course, and the
+                // package is the Rehab consultation's to choose, not this one's.
+                const rehabDeferred = decisionDraft.treatment && !selectedLead.rehab_consulted_at;
+                const rehabReady = !decisionDraft.rehab || rehabDeferred || !!decisionDraft.rehab_item_id;
                 const canSave = diagnosisReady && summaryReady && treatmentReady && rehabReady;
 
                 // What the Consultant has ticked, in the shelf's own order. The detail column
@@ -7020,6 +7138,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     // calls for one, is recorded on the patient and shown on the branch's own
                     // panel — it was never something this form could answer.
                     return { text: "Diet Consultation", incomplete: false };
+                  }
+                  if (key === "rehab" && rehabDeferred) {
+                    return { text: "After Treatment — package at the Rehab consultation", incomplete: false };
                   }
                   if (key === "rehab" || key === "zumba") {
                     const items = key === "rehab" ? rehabPackageItems : zumbaPackageItems;
@@ -7150,6 +7271,20 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                           recommends it after seeing them — and the Diet Chart Fee is
                           collected then.
                         </p>
+                      </div>
+                    );
+                  }
+
+                  if (key === "rehab" && rehabDeferred) {
+                    return (
+                      <div data-testid="cons-decision-rehab-after-treatment">
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Rehab after Treatment</label>
+                        <p className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-[11px] leading-relaxed text-cyan-800">
+                          Rehab starts once the Treatment course is complete. The branch then
+                          books a Rehab consultation with you, you choose the Rehab package
+                          there, and the Rehab Fee is collected after it.
+                        </p>
+                        {longTermField("rehab")}
                       </div>
                     );
                   }
@@ -7383,6 +7518,63 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       {selectedLead.zumba_recommended && selectedLead.zumba_package_name && (
                         <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-zumba">
                           Zumba Plan: <span className="font-semibold">{selectedLead.zumba_package_name}</span>
+                        </p>
+                      )}
+                      {/* Rehab after Treatment. Waiting on the course, then on the Rehab
+                          consultation the branch books -- where the package is chosen, here,
+                          and the patient goes on to Rehab. */}
+                      {rehabAwaitingConsult(selectedLead) && !selectedLead.rehab_consult_date && (
+                        <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-rehab-after">
+                          Rehab: <span className="font-semibold">After Treatment</span>
+                          <span className="text-slate-400"> · the branch books the Rehab consultation once the course is complete</span>
+                        </p>
+                      )}
+                      {rehabAwaitingConsult(selectedLead) && !!selectedLead.rehab_consult_date && (
+                        <div className="mt-2 rounded-md border border-cyan-200 bg-white p-2.5" data-testid="cons-rehab-consult-panel">
+                          <p className="flex items-center gap-1.5 text-xs font-semibold text-cyan-700">
+                            <HeartPulse className="h-3.5 w-3.5" /> Rehab Consultation
+                            <span className="font-medium text-slate-500">
+                              · {selectedLead.rehab_consult_date}{selectedLead.rehab_consult_time ? ` ${to12h(selectedLead.rehab_consult_time)}` : ""}
+                            </span>
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            Treatment is complete. Choose the Rehab package — the branch collects the Rehab Fee after this.
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-2" data-testid="cons-rehab-consult-options">
+                            {rehabPackageItems.map((i) => (
+                              <button
+                                key={i.id}
+                                type="button"
+                                onClick={() => setRehabConsultItem(i.id)}
+                                className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                  rehabConsultItem === i.id
+                                    ? "border-cyan-600 bg-cyan-600 text-white"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                                data-testid={`cons-rehab-consult-option-${i.id}`}
+                              >
+                                {i.name}
+                              </button>
+                            ))}
+                            {rehabPackageItems.length === 0 && (
+                              <p className="text-xs text-slate-400">No rehab packages in Services and Products yet.</p>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            className="mt-2.5 h-8 bg-cyan-600 text-xs text-white hover:bg-cyan-700"
+                            disabled={!rehabConsultItem || savingRehabConsult}
+                            onClick={submitRehabConsult}
+                            data-testid="cons-rehab-consult-save"
+                          >
+                            {savingRehabConsult ? "Saving..." : "Confirm Rehab Package"}
+                          </Button>
+                        </div>
+                      )}
+                      {!!selectedLead.rehab_after_treatment && !!selectedLead.rehab_consulted_at && (
+                        <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-rehab-done">
+                          Rehab consultation done
+                          <span className="text-slate-400"> · {String(selectedLead.rehab_consulted_at).slice(0, 10)}</span>
                         </p>
                       )}
                       {/* What was written about the long term, read back in full. The badge
@@ -12221,6 +12413,65 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
             )}
 
             {/* Schedule Follow-Up popup */}
+            {rehabBookDraft && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4" data-testid="cons-rehab-book-modal">
+                <div className="w-full max-w-sm overflow-hidden rounded-xl bg-white shadow-xl">
+                  <div className="flex items-center justify-between bg-cyan-600 px-4 py-3 text-white">
+                    <p className="flex items-center gap-2 text-sm font-semibold"><HeartPulse className="h-4 w-4" /> Rehab Consultation</p>
+                    <button onClick={() => setRehabBookDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-rehab-book-close">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="space-y-3 p-4">
+                    <p className="text-xs text-slate-500">
+                      With {selectedLead?.rehab_consult_doctor_name || "the Consultant who saw this patient"}.
+                    </p>
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Date</label>
+                      <input
+                        type="date"
+                        value={rehabBookDraft.date}
+                        onChange={(e) => setRehabBookDraft({ ...rehabBookDraft, date: e.target.value })}
+                        className="h-9 w-full rounded-md border border-slate-200 px-2.5 text-sm"
+                        data-testid="cons-rehab-book-date"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Time</label>
+                      <input
+                        type="time"
+                        value={rehabBookDraft.time}
+                        onChange={(e) => setRehabBookDraft({ ...rehabBookDraft, time: e.target.value })}
+                        className="h-9 w-full rounded-md border border-slate-200 px-2.5 text-sm"
+                        data-testid="cons-rehab-book-time"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Remarks</label>
+                      <textarea
+                        rows={2}
+                        value={rehabBookDraft.remarks}
+                        onChange={(e) => setRehabBookDraft({ ...rehabBookDraft, remarks: e.target.value })}
+                        className="w-full resize-y rounded-md border border-slate-200 px-2.5 py-2 text-sm"
+                        data-testid="cons-rehab-book-remarks"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 border-t border-slate-100 px-4 py-3">
+                    <Button variant="outline" onClick={() => setRehabBookDraft(null)} data-testid="cons-rehab-book-cancel">Cancel</Button>
+                    <Button
+                      className="bg-cyan-600 text-white hover:bg-cyan-700"
+                      disabled={bookingRehabConsult}
+                      onClick={submitRehabBooking}
+                      data-testid="cons-rehab-book-save"
+                    >
+                      {bookingRehabConsult ? "Booking..." : "Book"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {followUpDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4" data-testid="cons-followup-modal">
                 <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">

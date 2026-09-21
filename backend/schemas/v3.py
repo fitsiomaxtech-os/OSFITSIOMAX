@@ -438,6 +438,20 @@ class V3LeadOut(BaseModel):
     # short/long pair to choose between, so there is nothing to store but the mark and
     # whatever was written about it, which may be nothing.
     long_term_notes: Optional[Dict[str, str]] = None
+    # Rehab after Treatment. Ticked beside a Treatment package, Rehab is not sold at the
+    # first consultation: the course is finished first, the branch books the patient back
+    # in with the Consultant, and the package is chosen at that Rehab consultation. Until
+    # then rehab_referred stays False, so no Rehab Fee is asked for and no Rehab pill
+    # lists them -- see hp_complete_rehab_consultation, which is what flips it.
+    rehab_after_treatment: Optional[bool] = False
+    rehab_consult_date: Optional[str] = None
+    rehab_consult_time: Optional[str] = None
+    rehab_consult_doctor_id: Optional[str] = None
+    rehab_consult_doctor_name: Optional[str] = None
+    rehab_consult_remarks: Optional[str] = None
+    rehab_consult_booked_at: Optional[str] = None
+    rehab_consulted_at: Optional[str] = None
+    rehab_consulted_by: Optional[str] = None
     # Who is actually delivering that diet plan, set by branch/assign-diet. This model
     # ignores extras, so without these three the Consultations board could never tell an
     # already-assigned patient from a new one and its Reassign control would never appear.
@@ -912,6 +926,9 @@ class V3ConsultationDecisionInput(BaseModel):
     # written yet arrives as an empty string and stays marked. A service that is not
     # marked is simply not here.
     long_term_notes: Dict[Literal["rehab", "fitness"], str] = {}
+    # Rehab to follow the Treatment course rather than run beside it -- see
+    # V3LeadOut.rehab_after_treatment. Sent instead of rehab_referred, with no package.
+    rehab_after_treatment: bool = False
 
 
 class V3AssignPhysioSessionsInput(BaseModel):

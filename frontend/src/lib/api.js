@@ -919,6 +919,10 @@ export const getBranchTransferRecords = async (branchId) => (await api.get(`/bra
 export const assignRehab = async (payload) => (await api.post("/branch/assign-rehab", payload)).data;
 export const rehabSessionsForLead = async (leadId) => (await api.get(`/branch/rehab-sessions/${leadId}`)).data;
 export const saveConsultationDecision = async (leadId, payload) => (await api.post(`/leads/${leadId}/consultation-decision`, payload)).data;
+// Rehab after Treatment: the branch re-appoints the patient with the Consultant once the
+// course is done, and the Consultant chooses the Rehab package at that consultation.
+export const bookRehabConsultation = async (leadId, payload) => (await api.post(`/leads/${leadId}/rehab-consultation/book`, payload)).data;
+export const completeRehabConsultation = async (leadId, payload) => (await api.post(`/leads/${leadId}/rehab-consultation/complete`, payload)).data;
 export const markConsultationCompleted = async (leadId) => (await api.post(`/leads/${leadId}/mark-consultation-completed`)).data;
 
 export const savePhysioDiagnosis = async (leadId, report, locked = false) => (await api.post(`/leads/${leadId}/physio-diagnosis`, { report, locked })).data;

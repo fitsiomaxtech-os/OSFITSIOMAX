@@ -435,6 +435,33 @@ async def hp_move_head_consultation_stage(
     return {"message": "Stage moved", "lead": V3LeadOut(**updated).model_dump()}
 
 
+async def _rehab_package_fields(item_id: str, mode: str):
+    """The Rehab course's fields on the lead, and the line the activity log says about it.
+
+    Shared by Move to Admin and the Rehab consultation that follows a Treatment course, so
+    a package chosen at either is priced the one way.
+    """
+    rehab_item = await v3_col("store_items").find_one({"id": item_id}, {"_id": 0})
+    if not rehab_item:
+        raise HTTPException(status_code=404, detail="Rehab package not found")
+    if rehab_item.get("item_type") != "session" or rehab_item.get("category") != "rehab":
+        raise HTTPException(status_code=400, detail="That item is not a Rehab package")
+    r_amount = rehab_item.get("price_online") if mode == "online" else rehab_item.get("price_offline")
+    r_sessions = rehab_item.get("sessions_online") if mode == "online" else rehab_item.get("sessions_offline")
+    if rehab_item.get("price_is_total"):
+        r_price = r_amount
+    else:
+        r_price = round(r_amount * r_sessions, 2) if r_amount is not None and r_sessions else r_amount
+    fields = {
+        "rehab_package_id": rehab_item["id"],
+        "rehab_package_name": rehab_item["name"],
+        "rehab_package_price": r_price,
+        "rehab_package_sessions": r_sessions,
+        "rehab_package_mode": mode,
+    }
+    return fields, f" · Rehab: {rehab_item['name']} ({r_sessions} sessions)"
+
+
 @router.post("/leads/{lead_id}/consultation-decision", response_model=dict)
 async def hp_consultation_decision(
     lead_id: str,
@@ -473,6 +500,14 @@ async def hp_consultation_decision(
         # patient too — without this flag there is no way to tell a patient deliberately
         # sent to rehab from one who simply has not been given a package.
         "rehab_referred": bool(payload.rehab_referred),
+        # Rehab after Treatment: only alongside a Treatment package, and only while the
+        # Rehab consultation has not happened yet. Once it has, the package it chose is
+        # on rehab_referred, and a later edit of this decision keeps the mark rather than
+        # sending the patient back to wait for a consultation they have already had.
+        "rehab_after_treatment": bool(
+            (payload.rehab_after_treatment and payload.decision == "consultation_treatment")
+            or (lead.get("rehab_consulted_at") and payload.rehab_referred)
+        ),
         "fitness_recommended": bool(payload.fitness_recommended),
         "zumba_recommended": bool(payload.zumba_recommended),
         "head_consultation_stage": await _head_closing_stage(),
@@ -484,6 +519,8 @@ async def hp_consultation_decision(
     chosen = "Consultation" if payload.decision == "consultation_only" else "Consultation + Treatment"
     if payload.rehab_referred:
         chosen += " + Rehab"
+    elif payload.rehab_after_treatment and payload.decision == "consultation_treatment":
+        chosen += " + Rehab after Treatment"
     if payload.diet_recommended:
         # Named as what it is: the one thing a Consultant can refer for on the diet side.
         # A chart, where the Nutritionist later recommends one, writes its own line.
@@ -501,7 +538,7 @@ async def hp_consultation_decision(
     # What is dropped is a note on a service that ended up unticked: an answer to a
     # question the form is no longer asking.
     ticked = {
-        "rehab": bool(payload.rehab_referred),
+        "rehab": bool(payload.rehab_referred) or bool(payload.rehab_after_treatment),
         "fitness": bool(payload.fitness_recommended),
     }
     long_term_notes = {
@@ -566,25 +603,9 @@ async def hp_consultation_decision(
     # Only accepted alongside the referral — a rehab course on a patient who was never sent
     # to rehab is a fee nobody would know to collect.
     if payload.rehab_referred and payload.rehab_item_id:
-        rehab_item = await v3_col("store_items").find_one({"id": payload.rehab_item_id}, {"_id": 0})
-        if not rehab_item:
-            raise HTTPException(status_code=404, detail="Rehab package not found")
-        if rehab_item.get("item_type") != "session" or rehab_item.get("category") != "rehab":
-            raise HTTPException(status_code=400, detail="That item is not a Rehab package")
-        r_amount = rehab_item.get("price_online") if payload.mode == "online" else rehab_item.get("price_offline")
-        r_sessions = rehab_item.get("sessions_online") if payload.mode == "online" else rehab_item.get("sessions_offline")
-        if rehab_item.get("price_is_total"):
-            r_price = r_amount
-        else:
-            r_price = round(r_amount * r_sessions, 2) if r_amount is not None and r_sessions else r_amount
-        updates.update({
-            "rehab_package_id": rehab_item["id"],
-            "rehab_package_name": rehab_item["name"],
-            "rehab_package_price": r_price,
-            "rehab_package_sessions": r_sessions,
-            "rehab_package_mode": payload.mode,
-        })
-        detail += f" · Rehab: {rehab_item['name']} ({r_sessions} sessions)"
+        rehab_fields, rehab_detail = await _rehab_package_fields(payload.rehab_item_id, payload.mode)
+        updates.update(rehab_fields)
+        detail += rehab_detail
 
     # The Zumba membership, priced the way rehab is — its plan amount is stored divided
     # down to a per-class rate, so rate x classes lands back on the figure the catalogue
@@ -619,6 +640,172 @@ async def hp_consultation_decision(
     })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return {"message": "Saved & moved", "lead": V3LeadOut(**updated).model_dump()}
+
+
+class V3RehabConsultBookInput(BaseModel):
+    date: str  # YYYY-MM-DD
+    time: str  # HH:MM (24h)
+    remarks: Optional[str] = ""
+    # The consultant to see the patient. Omitted means whoever took their first
+    # consultation, which is who the Rehab consultation is normally with.
+    physio_id: Optional[str] = None
+
+
+class V3RehabConsultCompleteInput(BaseModel):
+    rehab_item_id: str
+    mode: Optional[str] = None
+
+
+@router.post("/leads/{lead_id}/rehab-consultation/book", response_model=dict)
+async def hp_book_rehab_consultation(
+    lead_id: str,
+    payload: V3RehabConsultBookInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
+):
+    """Re-appoint a Rehab-after-Treatment patient with the Consultant, once treatment is done.
+
+    Its own appointment row (appt_kind "rehab_consultation") rather than a move of the
+    first consultation's: the consultation follow-up rebooks that row, re-dates the lead's
+    appointment and writes the consultant over assigned_physio_id -- which, this far on, is
+    the physio who delivered the treatment. None of that is true of a patient coming back
+    for Rehab, so nothing here touches the pipeline stages or the first appointment.
+    Booking again moves this booking, never adds a second.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not lead.get("rehab_after_treatment"):
+        raise HTTPException(status_code=400, detail="This patient was not marked for Rehab after Treatment")
+    if lead.get("rehab_consulted_at"):
+        raise HTTPException(status_code=400, detail="The Rehab consultation has already been done")
+    if not payload.date or not payload.time:
+        raise HTTPException(status_code=400, detail="Pick a date and a time")
+
+    doctor_id = payload.physio_id or lead.get("rehab_consult_doctor_id")
+    if not doctor_id:
+        first = await v3_col("appointments").find(
+            {"lead_id": lead_id, "appt_kind": "consultation"}, {"_id": 0, "doctor_id": 1},
+        ).sort("created_at", -1).to_list(1)
+        doctor_id = first[0].get("doctor_id") if first else None
+    doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0}) if doctor_id else None
+    if not doctor:
+        raise HTTPException(status_code=400, detail="No consultant found for this patient")
+
+    slot_time = f"{payload.date}T{payload.time}"
+    clash = await v3_col("appointments").find_one(
+        {"doctor_id": doctor["id"], "slot_time": slot_time, "status": "new_appointment", "lead_id": {"$ne": lead_id}},
+        {"_id": 0, "lead_name": 1},
+    )
+    if clash:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{payload.time} is already booked with {doctor['full_name']}"
+                   + (f" for {clash.get('lead_name')}" if clash.get("lead_name") else ""),
+        )
+
+    now = now_iso()
+    appt_fields = {
+        "branch_id": lead.get("branch_id"),
+        "doctor_id": doctor["id"],
+        "doctor_name": doctor["full_name"],
+        "lead_id": lead_id,
+        "lead_name": lead.get("name"),
+        "patient_name": lead.get("name"),
+        "appointment_date": payload.date,
+        "appointment_time": payload.time,
+        "slot_time": slot_time,
+        "duration": 30,
+        "meet_link": (doctor.get("meet_link") or "").strip(),
+        "status": "new_appointment",
+        "appt_kind": "rehab_consultation",
+        "updated_at": now,
+    }
+    existing = await v3_col("appointments").find_one(
+        {"lead_id": lead_id, "appt_kind": "rehab_consultation", "status": "new_appointment"}, {"_id": 0, "id": 1},
+    )
+    if existing:
+        await v3_col("appointments").update_one({"id": existing["id"]}, {"$set": appt_fields})
+    else:
+        await v3_col("appointments").insert_one({
+            **appt_fields,
+            "id": str(uuid.uuid4()),
+            "notes": "",
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "created_at": now,
+        })
+
+    moved = bool(lead.get("rehab_consult_date"))
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "rehab_consult_date": payload.date,
+        "rehab_consult_time": payload.time,
+        "rehab_consult_doctor_id": doctor["id"],
+        "rehab_consult_doctor_name": doctor["full_name"],
+        "rehab_consult_remarks": (payload.remarks or "").strip(),
+        "rehab_consult_booked_at": now,
+        "updated_at": now,
+    }})
+    verb = "moved to" if moved else "booked for"
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "rehab_consultation_booked",
+        "details": f"Rehab consultation {verb} {payload.date} at {payload.time} with {doctor['full_name']}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Rehab consultation booked", "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/rehab-consultation/complete", response_model=dict)
+async def hp_complete_rehab_consultation(
+    lead_id: str,
+    payload: V3RehabConsultCompleteInput,
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin", "business_dev")),
+):
+    """The Consultant's side of the Rehab consultation: the package, chosen now.
+
+    This is what puts the patient on Rehab. rehab_referred and the package go on together,
+    which is exactly the state Move to Admin leaves a patient referred to Rehab in -- so the
+    branch's Rehab pill, the Rehab Fee and assign-rehab all take it from here unchanged.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not lead.get("rehab_after_treatment"):
+        raise HTTPException(status_code=400, detail="This patient was not marked for Rehab after Treatment")
+    if lead.get("rehab_consulted_at"):
+        raise HTTPException(status_code=400, detail="The Rehab consultation has already been done")
+    if not lead.get("rehab_consult_date"):
+        raise HTTPException(status_code=400, detail="Book the Rehab consultation first")
+
+    mode = payload.mode if payload.mode in ("online", "offline") else (lead.get("session_package_mode") or "offline")
+    rehab_fields, rehab_detail = await _rehab_package_fields(payload.rehab_item_id, mode)
+    now = now_iso()
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        **rehab_fields,
+        "rehab_referred": True,
+        "rehab_consulted_at": now,
+        "rehab_consulted_by": user.full_name,
+        "updated_at": now,
+    }})
+    await v3_col("appointments").update_many(
+        {"lead_id": lead_id, "appt_kind": "rehab_consultation", "status": "new_appointment"},
+        {"$set": {"status": "completed", "updated_at": now}},
+    )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "rehab_consultation_completed",
+        "details": f"Rehab consultation done{rehab_detail}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Rehab package chosen", "lead": V3LeadOut(**updated).model_dump()}
 
 
 def _physio_handover(lead: dict, new_physio_id: str, user: V3UserOut, now: str) -> dict:
