@@ -493,13 +493,21 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
  * `physioOnly` — the same narrowing without the rest of `mine`: the Branch Admin board,
  * where this desk only ever answers for its Physios, so the kind switch has nothing to
  * switch between and goes away.
+ *
+ * `branchPicker` — `branchId` is the opening pick rather than a pin, and the branch filter
+ * is offered on top of it. The Branch Admin board passes it: that reader starts on their
+ * own branch and can widen to any other, or to all of them. The server agrees with this —
+ * it stopped holding a Branch Admin to their own branch on 2026-09-21 (see
+ * backend/routers/v3_client_reviews.py) — so without that prop this panel is still pinned
+ * by whatever branchId it was handed.
  */
-export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly = false }) => {
+export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly = false, branchPicker = false }) => {
   const [data, setData] = useState({ consultant: [], physio: [], summary: {} });
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState([]);
-  // Only offered where no branch was handed in — the HR Admin view across branches.
-  const [branch, setBranch] = useState("");
+  // Offered where no branch was handed in — the HR Admin view across branches — and where
+  // one was handed in as an opening pick rather than a pin (`branchPicker`).
+  const [branch, setBranch] = useState(branchPicker ? branchId || "" : "");
   // Physio Review opens first: the weekly review every 7 days of treatment rates the Physio.
   const [kind, setKind] = useState("physio");
   // Set only by the tiles: where the review came from (see TILES).
@@ -509,7 +517,15 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly =
   const [dateFilter, setDateFilter] = useState(null);
   const [open, setOpen] = useState(null);
 
-  const scope = branchId || branch || null;
+  const showBranchFilter = branchPicker || (!branchId && !mine);
+  // With the picker offered, the pick is the whole answer: "" is every branch, including
+  // for a reader who was handed one.
+  const scope = branchPicker ? branch || null : branchId || branch || null;
+
+  // A board that swaps the branch under a mounted panel sends it back to that branch.
+  // Every board that does so remounts on the swap, so this fires on a real change only —
+  // never undoing a reader's own widening to All Branches.
+  useEffect(() => { if (branchPicker) setBranch(branchId || ""); }, [branchPicker, branchId]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -521,9 +537,9 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly =
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (branchId || mine) return;
+    if (!showBranchFilter) return;
     getBranches().then((rows) => setBranches(rows || [])).catch(() => {});
-  }, [branchId, mine]);
+  }, [showBranchFilter]);
 
   const meta = KINDS.find((k) => k.key === kind);
   // A Consultant, and a Branch Admin, see Physio Review only — see `mine`/`physioOnly` above.
@@ -592,7 +608,7 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly =
               ))}
             </div>
           )}
-          {!branchId && !mine && (
+          {showBranchFilter && (
             <BranchFilter branches={branches} value={branch} onChange={setBranch} />
           )}
           <PersonFilter people={people} value={person} onChange={setPerson} meta={meta} />
