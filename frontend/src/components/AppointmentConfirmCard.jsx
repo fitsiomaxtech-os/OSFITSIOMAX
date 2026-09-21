@@ -8,13 +8,13 @@
 // component now so the Consultations board can hand the same card back off the record,
 // which is the whole point — the second copy has to be the first copy, not a redrawing of
 // it that differs in some detail the patient then queries.
+//
+// WhatsApp, Share and Download send the printed sheet as a PDF (lib/pdf.js). They used to
+// send a PNG card and a typed message; the branches asked for one file type, PDF, only.
 import { CheckCircle2, Download, Printer, Share2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/components/ui/sonner";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
-import { apptCardPng } from "@/lib/apptCard";
-import { waNumber } from "@/lib/phone";
-import { isHandheld } from "@/lib/receipt";
+import { downloadPdf, sharePdf, usePdf, whatsappPdf } from "@/lib/pdf";
 import { PRINTABLE_STYLES, docHeadHtml, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 import { to12h, endTime12h } from "@/lib/time";
 
@@ -60,153 +60,6 @@ export const apptRows = (a, { compact = false } = {}) => [
   ["Booked By", a.bookedBy],
 ];
 
-/**
- * Puts the card PNG on the system clipboard.
- *
- * Safari only honours a ClipboardItem built around an unresolved promise — awaiting the
- * blob first spends the user gesture and the write is refused. Chrome accepts both, so
- * the promise form is tried first and the resolved form is the fallback for anything
- * that rejects it. A false return is not an error: the message still sends, it just
- * arrives without the picture.
- */
-const copyCardToClipboard = async (a) => {
-  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") return false;
-  try {
-    await navigator.clipboard.write([new ClipboardItem({ "image/png": apptCardPng(a) })]);
-    return true;
-  } catch {
-    try {
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": await apptCardPng(a) })]);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-};
-
-// Above the two senders that call them. A const is not hoisted, so the pair only start
-// existing at the line they are written on, and that line was below both callers.
-export const downloadApptCard = async (a, prebuilt) => {
-  try {
-    const blob = prebuilt || await apptCardPng(a);
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `appointment-${a.refNo || "confirmation"}.png`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch {
-    toast.error("Couldn't build the card image");
-  }
-};
-
-/** The confirmation as a note to the patient — the day, the hours, the place, and a line
- *  telling them they're in hand. Short lines, because it is read on a phone in WhatsApp.
- *
- *  Where the appointment carries a meeting link, the place is that link and the message
- *  says so instead of naming a branch. The two endings are exclusive on purpose rather
- *  than the link being one more line on the old one: an address, a map pin and "arrive 10
- *  minutes early" tell a patient to travel, and a patient told to travel to a video call
- *  either goes to a branch that is not expecting them or reads the message as a mistake
- *  and asks. The room is where they are being asked to be, so it is the only place named. */
-/** "14:45" -> "2.45pm", the way the branches write a time in their own messages. */
-const dotTime = (t) => to12h(t).replace(":", ".").replace(" ", "").toLowerCase();
-
-export const apptMessage = (a) => {
-  const meet = (a.meetLink || "").trim();
-  const d = a.date ? new Date(`${a.date}T00:00:00`) : null;
-  const lines = [
-    "Greetings from Fitsiomax",
-    "",
-    "Your appointment is confirmed",
-    "",
-    `Date ${d ? d.toLocaleDateString("en-US", { month: "long", day: "numeric" }) : "—"}`,
-    d ? d.toLocaleDateString("en-US", { weekday: "long" }) : "—",
-    dotTime(a.time),
-  ];
-  if (meet) {
-    lines.push("", "Location: Online (Google Meet)", "", `Join here: ${meet}`, "",
-      "kindly join at least 5 minutes before your scheduled appointment.");
-  } else {
-    if (a.branch) lines.push("", `Location: ${a.branch}`);
-    if (a.mapLocation) lines.push("", "", `Address:  ${a.mapLocation}`);
-    if (a.branchAddress) lines.push("", a.branchAddress);
-    lines.push("", "", "kindly arrive at least 10 minutes before your scheduled appointment.");
-  }
-  // Signed by the branch's own admin and numbers, so the patient knows who to call back.
-  lines.push("", "Regards,", "Admin");
-  if (a.adminName) lines.push(a.adminName);
-  const phones = [a.adminPhone, a.branchPhone].map((p) => (p || "").trim()).filter(Boolean);
-  if (phones.length) lines.push("", ...phones);
-  return lines.join("\n");
-};
-
-/**
- * Opens WhatsApp on the patient's own number with the confirmation already typed, and
- * leaves the card image on the clipboard so it can be pasted in on top.
- *
- * The split is forced by WhatsApp, not chosen: wa.me is the only route that addresses a
- * specific number and it carries text only, while the share sheet is the only route that
- * carries an attachment and it always asks who it is for. The clipboard bridges them —
- * pasting into the chat attaches the card and WhatsApp moves the typed text down into
- * its caption, which is the picture-above/words-below shape the branch is after.
- *
- * Resolves true when the card made it to the clipboard. Both outcomes are reported here,
- * so callers need not.
- */
-export const sendApptOnWhatsApp = async (a) => {
-  const num = waNumber(a.phone);
-  if (!num) { toast.error("This patient has no phone number on file"); return false; }
-
-  // The tab has to be claimed here, synchronously, while the click is still the reason
-  // anything is happening — after the await below the gesture is spent and the popup
-  // blocker takes it. Opened blank and pointed at WhatsApp once the card is copied.
-  // noopener isn't passed because it makes window.open return null; opener is cleared
-  // by hand instead, which buys the same protection while keeping the handle.
-  const tab = isHandheld() ? null : window.open("", "_blank");
-  if (tab) tab.opener = null;
-
-  const copied = await copyCardToClipboard(a);
-  // Both outcomes are worth saying, since the popup itself no longer explains the paste.
-  // On desktop WhatsApp takes its own tab, so this is still on screen when the branch
-  // looks back at the board; on a phone the page navigates away and neither would have
-  // survived anyway.
-  if (copied) toast.success("Card copied — paste it into the chat to send the picture");
-  else toast.message("This browser can't copy the card — use Send Card + Message for the image");
-  const url = `https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`;
-
-  if (tab && !tab.closed) {
-    // Desk: WhatsApp Web gets its own tab and the board stays where it was, so the
-    // "now paste it" prompt is still on screen when the branch looks back.
-    tab.location.href = url;
-  } else {
-    // Phone: same-tab, not window.open(..., "_blank") — that hands mobile browsers an
-    // ambiguous new-tab context and often leaves the app on a blank white screen once
-    // WhatsApp gives control back (caf18a6, same fix on the Physio board).
-    window.location.href = url;
-  }
-  return copied;
-};
-
-/** The card image plus the message, through the OS share sheet — the only path that can
- *  carry an attachment, at the cost of picking the recipient there. */
-export const shareApptCard = async (a) => {
-  try {
-    const blob = await apptCardPng(a);
-    const file = new File([blob], `appointment-${a.refNo || "confirmation"}.png`, { type: "image/png" });
-    if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], text: apptMessage(a) });
-      return;
-    }
-    downloadApptCard(a, blob);
-    toast.success("Card saved — attach it to your message");
-  } catch (err) {
-    if (err?.name === "AbortError") return;  // the user closed the share sheet
-    toast.error("Couldn't build the card image");
-  }
-};
-
-/** The card on its own, for attaching by hand where the share sheet isn't available. */
 // The printed sheet: a calendar tile and the when/where up top, the patient's details and
 // the booking beneath, then the standing instructions. Every field apptRows carries is on it.
 export const apptHtml = (a) => {
@@ -284,7 +137,11 @@ export const apptHtml = (a) => {
  * it to release the card and then move the lead on, a reissue only to dismiss it.
  */
 export function AppointmentConfirmCard({ appt, onClose, testid = "branch-appt-confirm" }) {
+  // WhatsApp, Share and Download all send this one PDF — the printed sheet, as a file.
+  const pdf = usePdf(appt ? apptHtml(appt) : null);
   if (!appt) return null;
+  const pdfName = `appointment-${appt.refNo || "confirmation"}.pdf`;
+  const pdfTitle = `FITSIOMAX Appointment ${appt.refNo || ""}`.trim();
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid={`${testid}-modal`}>
       {/* 90%, this dialog only. zoom rather than transform: scale — zoom shrinks the
@@ -344,7 +201,7 @@ export function AppointmentConfirmCard({ appt, onClose, testid = "branch-appt-co
 
           {/* The two standing instructions, same wording the printed sheet carries.
               The first of them is about travelling to a branch, so an appointment held
-              in a video room is told to join early instead — the same swap apptMessage
+              in a video room is told to join early instead — the same swap the sheet
               makes, and for the same reason: nobody arrives anywhere for this one. */}
           <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50/60 p-3 text-xs leading-relaxed text-teal-800" data-testid={`${testid}-note`}>
             <p>{appt.meetLink ? "Please join the meeting 5 minutes early." : "Please arrive 10 minutes early."}</p>
@@ -378,25 +235,24 @@ export function AppointmentConfirmCard({ appt, onClose, testid = "branch-appt-co
             >
               <Printer className="h-4 w-4" />
             </Button>
-            {/* The one the branch actually reaches for: straight to the patient's own
-                number with the confirmation typed, card image on the clipboard. */}
+            {/* The one the branch actually reaches for: the confirmation PDF to the
+                patient's own number. */}
             <Button
               className="h-10 w-10 shrink-0 bg-[#25D366] p-0 text-white hover:bg-[#1da851]"
-              onClick={() => sendApptOnWhatsApp(appt)}
+              onClick={() => whatsappPdf(pdf, pdfName, pdfTitle, appt.phone)}
               title="Send on WhatsApp"
               aria-label="Send on WhatsApp"
               data-testid={`${testid}-whatsapp`}
             >
               <WhatsAppIcon className="h-4 w-4" />
             </Button>
-            {/* The attachment route proper: the share sheet is the only thing that can
-                carry a file, at the cost of asking who it is going to. */}
+            {/* The PDF through the share sheet, for anyone other than the patient. */}
             <Button
               variant="outline"
               className="h-10 w-10 shrink-0 p-0"
-              onClick={() => shareApptCard(appt)}
-              title="Send Card + Message"
-              aria-label="Send Card + Message"
+              onClick={() => sharePdf(pdf, pdfName, pdfTitle)}
+              title="Share PDF"
+              aria-label="Share PDF"
               data-testid={`${testid}-share-card`}
             >
               <Share2 className="h-4 w-4" />
@@ -404,9 +260,9 @@ export function AppointmentConfirmCard({ appt, onClose, testid = "branch-appt-co
             <Button
               variant="outline"
               className="h-10 w-10 shrink-0 p-0"
-              onClick={() => downloadApptCard(appt)}
-              title="Download Card"
-              aria-label="Download Card"
+              onClick={() => downloadPdf(pdf, pdfName)}
+              title="Download PDF"
+              aria-label="Download PDF"
               data-testid={`${testid}-download`}
             >
               <Download className="h-4 w-4" />

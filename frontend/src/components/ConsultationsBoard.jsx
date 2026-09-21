@@ -28,9 +28,11 @@ import {
   rescheduleCalendarBooking, declineCalendarBooking,
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
+import { pdfJob, whatsappPdf } from "@/lib/pdf";
+import { PRINTABLE_STYLES, docHeadHtml, escapeHtml, rowsHtml } from "@/lib/printable";
 import { loadSession } from "@/lib/session";
 import { endTime12h, slotRange12h, to12h } from "@/lib/time";
-import { ALL_PAYMENT_MODE_LABELS, isHandheld, paymentReference } from "@/lib/receipt";
+import { ALL_PAYMENT_MODE_LABELS, paymentReference } from "@/lib/receipt";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { PortalLoginCreatedDialog } from "@/components/branch/PortalLoginCreatedDialog";
 import { AppointmentConfirmCard } from "@/components/AppointmentConfirmCard";
@@ -479,26 +481,40 @@ export const PlanLine = ({ parts, testId, className = "" }) => {
   );
 };
 
-// What a confirmed treatment reads as, on screen and in a WhatsApp message. One shape
-// for both, so the message cannot say something the popup does not.
-const decisionText = (d) => [
-  `*Treatment confirmed*`,
-  `${d.name}${d.patientNo ? ` (${d.patientNo})` : ""}`,
-  ``,
-  `Plan: ${d.planLabel}`,
-  d.packageName ? `Package: ${d.packageName}` : null,
-  d.perWeek && d.weeks ? `${d.perWeek} sessions weekly x ${d.weeks} weeks = ${d.perWeek * d.weeks} total sessions` : null,
-  ``,
-  `- FITSIOMAX`,
-].filter((l) => l !== null).join("\n");
+// What a confirmed treatment reads as, on screen and in the PDF Share sends. One set of
+// rows for both, so the file cannot say something the popup does not.
+const decisionHtml = (d) => `<!doctype html><html><head><meta charset="utf-8">
+<title>Treatment ${escapeHtml(d.name)}</title><style>${PRINTABLE_STYLES}</style></head>
+<body><div class="doc tone-paid">
+  ${docHeadHtml({
+    title: d.rehab ? "Rehab Referral" : "Treatment Plan",
+    meta: d.patientNo ? [["Patient No.", d.patientNo]] : [],
+    status: d.rehab ? "MOVED TO REHAB" : "TREATMENT CONFIRMED",
+  })}
+  <div class="body">
+    <div class="panel">
+      <p class="label">Patient</p>
+      <div class="name">${escapeHtml(d.name)}</div>
+      ${rowsHtml([
+        ["Plan", d.planLabel],
+        d.packageName ? ["Package", d.packageName] : null,
+        d.perWeek && d.weeks ? ["Sessions", `${d.perWeek} weekly x ${d.weeks} weeks = ${d.perWeek * d.weeks}`] : null,
+      ])}
+    </div>
+  </div>
+  <div class="foot">
+    <div>This is a computer-generated document and needs no signature.</div>
+    <div class="thanks">Thank you for choosing FITSIOMAX</div>
+  </div>
+</div></body></html>`;
 
-const shareDecision = (d) => {
-  const num = waNumber(d.phone);
-  if (!num) { toast.error("This patient has no phone number on file"); return; }
-  const url = `https://wa.me/${num}?text=${encodeURIComponent(decisionText(d))}`;
-  if (isHandheld()) { window.location.href = url; return; }
-  window.open(url, "_blank");
-};
+// Straight to the patient's number, as the PDF — the only file type any of the popups send.
+const shareDecision = (d) => whatsappPdf(
+  pdfJob(decisionHtml(d)),
+  `treatment-${d.patientNo || d.leadId || "plan"}.pdf`,
+  `FITSIOMAX Treatment ${d.name}`,
+  d.phone,
+);
 
 // The Treatment Package options used to cycle through five colours. They are one list of
 // one kind of thing — durations of the same package — so the colour was decorative, and it

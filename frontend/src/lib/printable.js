@@ -173,16 +173,6 @@ export const openPrintable = (html, { print = false } = {}) => {
   return w;
 };
 
-export const downloadPrintable = (html, filename) => {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-};
-
 // A cell that starts with one of these is executed as a formula when the sheet is opened,
 // so a designation somebody typed as "-Senior Physio" would run rather than read. Prefixed
 // with an apostrophe, which Excel strips on display and never evaluates.
@@ -212,18 +202,4 @@ export const downloadCsv = (rows, filename) => {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
-};
-
-/** Native share sheet where the device has one; otherwise the text goes to the clipboard. */
-export const sharePrintable = async (text, title) => {
-  if (navigator.share) {
-    try { await navigator.share({ title, text }); return; }
-    catch { return; } // dismissed the share sheet — not an error worth reporting
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success("Copied — paste it into WhatsApp or email");
-  } catch {
-    toast.error("Couldn't share on this device");
-  }
 };

@@ -2,9 +2,8 @@ import { Calendar, CheckCircle2, Download, Printer, Share2, X } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { LOGO_URL } from "@/lib/printable";
-import {
-  isSchedule, printReceipt, receiptPopupRows, shareReceipt, whatsappReceipt, downloadReceipt,
-} from "@/lib/receipt";
+import { downloadPdf, sharePdf, usePdf, whatsappPdf } from "@/lib/pdf";
+import { isSchedule, printReceipt, receiptHtml, receiptPopupRows } from "@/lib/receipt";
 
 /** round2, the same helper the collect form's own discount readout uses, so the
  *  percentage on the receipt cannot disagree with the one shown while the amount was
@@ -25,7 +24,11 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
  * state and mount this unconditionally.
  */
 export function ReceiptDialog({ receipt, onClose, testid = "cons-receipt" }) {
+  // WhatsApp, Share and Download all send the printed bill as one PDF.
+  const pdf = usePdf(receipt ? receiptHtml(receipt) : null);
   if (!receipt) return null;
+  const pdfName = `${isSchedule(receipt) ? "schedule" : "receipt"}-${receipt.receiptNo}.pdf`;
+  const pdfTitle = `FITSIOMAX ${isSchedule(receipt) ? "Payment Schedule" : "Receipt"} ${receipt.receiptNo}`;
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" data-testid={`${testid}-modal`}>
       {/* 88%, this dialog only. zoom rather than transform: scale — zoom shrinks the
@@ -173,11 +176,11 @@ export function ReceiptDialog({ receipt, onClose, testid = "cons-receipt" }) {
           >
             <Printer className="h-4 w-4" />
           </Button>
-          {/* The one the branch actually reaches for: the receipt is nearly always
+          {/* The one the branch actually reaches for: the receipt PDF is nearly always
               going to the number already printed on it. */}
           <Button
             className="h-10 w-10 shrink-0 bg-[#25D366] p-0 text-white hover:bg-[#1da851]"
-            onClick={() => whatsappReceipt(receipt)}
+            onClick={() => whatsappPdf(pdf, pdfName, pdfTitle, receipt.phone)}
             title="Send on WhatsApp"
             aria-label="Send on WhatsApp"
             data-testid={`${testid}-whatsapp`}
@@ -187,9 +190,9 @@ export function ReceiptDialog({ receipt, onClose, testid = "cons-receipt" }) {
           <Button
             variant="outline"
             className="h-10 w-10 shrink-0 p-0"
-            onClick={() => shareReceipt(receipt)}
-            title="Share"
-            aria-label="Share"
+            onClick={() => sharePdf(pdf, pdfName, pdfTitle)}
+            title="Share PDF"
+            aria-label="Share PDF"
             data-testid={`${testid}-share`}
           >
             <Share2 className="h-4 w-4" />
@@ -197,7 +200,7 @@ export function ReceiptDialog({ receipt, onClose, testid = "cons-receipt" }) {
           <Button
             variant="outline"
             className="h-10 w-10 shrink-0 p-0"
-            onClick={() => downloadReceipt(receipt)}
+            onClick={() => downloadPdf(pdf, pdfName)}
             title={isSchedule(receipt) ? "Download Schedule" : "Download Receipt"}
             aria-label={isSchedule(receipt) ? "Download Schedule" : "Download Receipt"}
             data-testid={`${testid}-download`}

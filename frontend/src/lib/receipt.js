@@ -9,10 +9,8 @@
 // reissues any collection on its ledger, and the collect popups still print the original.
 // One copy of the document is what stops those three handing a patient three different
 // pieces of paper for the same payment.
-import { toast } from "@/components/ui/sonner";
-import { waNumber } from "@/lib/phone";
 import {
-  PRINTABLE_STYLES, docHeadHtml, escapeHtml, rupees, openPrintable, downloadPrintable, sharePrintable,
+  PRINTABLE_STYLES, docHeadHtml, escapeHtml, rupees, openPrintable,
 } from "@/lib/printable";
 
 // "split" is here and not on the collect popups' own lists on purpose: it is never a mode
@@ -172,42 +170,12 @@ export const receiptHtml = (r) => {
 </div></body></html>`;
 };
 
-export const receiptText = (r) => [
-  `FITSIOMAX — Payment Receipt`,
-  ...receiptRows(r).map(([k, v]) => `${k}: ${v}`),
-].join("\n");
-
 export const printReceipt = (r) => openPrintable(receiptHtml(r), { print: true });
-export const downloadReceipt = (r) => downloadPrintable(receiptHtml(r), `receipt-${r.receiptNo}.html`);
-export const shareReceipt = (r) => sharePrintable(receiptText(r), `FITSIOMAX Receipt ${r.receiptNo}`);
+// WhatsApp, Share and Download send receiptHtml as a PDF — see ReceiptDialog and lib/pdf.js.
 
 /** A phone rather than a desk: the two need opposite handoffs, below. */
 export const isHandheld = () => (typeof window !== "undefined"
   && (window.matchMedia?.("(pointer: coarse)").matches || navigator.maxTouchPoints > 0));
-
-/**
- * Straight to the patient's own number with the receipt already typed.
- *
- * Share hands the text to whatever the OS offers and asks who it is going to; this skips
- * that, which is the whole point — the receipt is nearly always going to the person whose
- * number is already on it.
- */
-export const whatsappReceipt = (r) => {
-  const num = waNumber(r.phone);
-  if (!num) { toast.error("This patient has no phone number on file"); return; }
-  const url = `https://wa.me/${num}?text=${encodeURIComponent(receiptText(r))}`;
-  if (isHandheld()) {
-    // Same-tab on a phone. window.open with _blank hands mobile browsers an ambiguous
-    // new-tab context and often leaves the app on a blank white screen once WhatsApp
-    // gives control back — the same fix the appointment card needed (caf18a6).
-    window.location.href = url;
-    return;
-  }
-  // Desk: its own tab, so the board stays where it was. noopener isn't passed because it
-  // makes window.open return null; the opener is cleared by hand for the same protection.
-  const tab = window.open(url, "_blank");
-  if (tab) tab.opener = null;
-};
 
 /**
  * A receipt rebuilt from one row of the finance ledger.
