@@ -1791,6 +1791,11 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   // null when no day is held.
   const [reviewHold, setReviewHold] = useState(null);
   const [reviewHoldMessage, setReviewHoldMessage] = useState("");
+  // Every paid session used with a Treatment Fee balance owing: the next treatment day waits
+  // until the balance is paid or the Branch Admin extends the due date. Off the server, the
+  // same as the review hold, and for treatment days only -- rehab has its own fee.
+  const [paymentHold, setPaymentHold] = useState(null);
+  const [paymentHoldMessage, setPaymentHoldMessage] = useState("");
   const [completeTarget, setCompleteTarget] = useState(null);
   const [absentTarget, setAbsentTarget] = useState(null);
   const [confirmingComplete, setConfirmingComplete] = useState(false);
@@ -1815,6 +1820,8 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
       // the popup would otherwise wall off every day on a deploy that has not landed yet.
       setReviewHold(data.review_hold || null);
       setReviewHoldMessage(data.review_hold_message || "");
+      setPaymentHold(data.payment_hold || null);
+      setPaymentHoldMessage(data.payment_hold_message || "");
       setDayDateLock(data.day_date_lock !== false);
     } catch { /* silent */ }
   }, [lead.id]);
@@ -2041,6 +2048,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
     // counts both. Never the day that reaches the milestone -- that one is
     // what makes the review raisable, and holding it would be a deadlock.
     const heldByReview = !done && !!reviewHold;
+    const heldByPayment = !done && !!paymentHold && (s.track || "treatment") === "treatment";
     // The day the course currently stands on: the lowest-numbered day of this
     // track that is still open. Day 1 until Day 1 is signed off, then Day 2,
     // then Day 3 — one open day at a time, in the order they are worked.
@@ -2251,7 +2259,19 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
             >
               <UserX className="mr-1 h-3 w-3" /> Absent
             </Button>
-            {heldByReview ? (
+            {heldByPayment ? (
+              // Paid sessions used up. Said on the button, as the review hold is; the
+              // banner above the list says what is owed and who can release it.
+              <Button
+                size="sm"
+                disabled
+                className="bg-rose-100 text-xs text-rose-700 hover:bg-rose-100"
+                title={paymentHoldMessage}
+                data-testid={`physio-day-payment-held-${s.id}`}
+              >
+                <AlertCircle className="mr-1 h-3 w-3" /> Payment due
+              </Button>
+            ) : heldByReview ? (
               // A week of treatment is read before the next one is worked.
               // The same refusal the server makes, said on the button that
               // would otherwise offer the day and have the press thrown
@@ -2568,6 +2588,19 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
             <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
               Treatment Days {sessions.length > 0 && <span className="text-slate-400">({completedSessions.length} of {sessions.length} complete)</span>}
             </p>
+
+            {paymentHold && (
+              <div className="mb-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-[11px] text-rose-800" data-testid="physio-payment-hold-banner">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <div>
+                  <p className="font-semibold">Payment due — treatment on hold</p>
+                  <p className="mt-0.5 leading-snug">{paymentHoldMessage}</p>
+                  {paymentHold.extension?.status === "requested" && (
+                    <p className="mt-1 font-semibold text-violet-700">The client has asked the Branch Admin for more time.</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* A review is raisable every seven treatment days. Nothing said so here, so a
                 milestone was only noticed on the Review tab — which is the tab you go to

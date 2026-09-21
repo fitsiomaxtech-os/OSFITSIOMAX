@@ -46,6 +46,9 @@ from routers.v3_feedback import (
     _audience, _rating, _thread,
 )
 from physio_scope import consultant_of_lead
+from routers.v3_session_payment import (
+    extension_of, payment_hold_for_lead, record_extension_request, sessions_paid_for,
+)
 from routers.v3_marketing import normalize_phone
 from schemas.v3 import (
     V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin,
@@ -1340,6 +1343,23 @@ async def _build_portal_payload(lead: dict) -> dict:
     unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", "")) if is_partial else []
     next_due = unpaid[0] if unpaid else None
 
+    # Sessions paid for against sessions had, so the portal can say when treatment is on hold
+    # for the balance and let the client ask the branch for more time.
+    paid_cover = sessions_paid_for(lead)
+    pay_hold = await payment_hold_for_lead(lead["id"]) if paid_cover else None
+    ext = extension_of(lead) or {}
+    session_payment = {
+        "paid_sessions": paid_cover["paid_sessions"],
+        "total_sessions": paid_cover["total_sessions"],
+        "balance": paid_cover["balance"],
+        "on_hold": bool(pay_hold),
+        "completed_sessions": (pay_hold or {}).get("completed_sessions"),
+        "extension_status": ext.get("status") or "",
+        "extension_requested_due_date": ext.get("requested_due_date") or "",
+        "extended_due_date": ext.get("extended_due_date") or "",
+        "extension_decision_note": ext.get("decision_note") or "",
+    } if paid_cover else None
+
     return {
         "patient_name": lead.get("name", "Unknown"),
         "phone": lead.get("phone", ""),
@@ -1500,6 +1520,7 @@ async def _build_portal_payload(lead: dict) -> dict:
             "installments_paid": len([i for i in installments if i.get("paid")]),
             "next_due_amount": next_due.get("amount") if next_due else None,
             "next_due_date": next_due.get("due_date") if next_due else None,
+            "session_payment": session_payment,
             # The third fee. Left out, the portal's own Total was short by whatever the
             # patient paid for their diet consultation — a wrong number on the one screen
             # where the patient checks what they have been charged.
@@ -1525,6 +1546,22 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
     if not lead:
         raise HTTPException(status_code=404, detail="Patient not found")
     return await _build_portal_payload(lead)
+
+
+class V3PaymentExtensionRequestIn(BaseModel):
+    requested_due_date: Optional[str] = None
+    reason: Optional[str] = ""
+
+
+@router.post("/patient-portal/payment-extension")
+async def patient_portal_payment_extension(
+    payload: V3PaymentExtensionRequestIn,
+    lead_id: str = Depends(_current_patient_lead_id),
+):
+    """The client asking their branch for more time to pay the treatment balance. The Branch
+    Admin approves it from the rupee bell, which lets the remaining sessions go ahead."""
+    ext = await record_extension_request(lead_id, payload.requested_due_date, payload.reason or "")
+    return {"extension_status": ext["status"], "requested_due_date": ext.get("requested_due_date") or ""}
 
 
 class V3PatientFeedbackIn(BaseModel):

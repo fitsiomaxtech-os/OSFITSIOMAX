@@ -67,3 +67,45 @@ def test_partial_schedule_without_session_counts_divides_money():
 
 def test_fully_paid_upfront_has_no_alert():
     assert payment_alert({"id": "L2", "session_package_sessions": 10, "treatment_fee_paid": 8000}, 10) is None
+
+
+# ---------- The block past the paid sessions, and the Branch Admin's extension ----------
+from routers.v3_session_payment import extension_active, payment_hold, payment_hold_message  # noqa: E402
+
+
+def _with_ext(ext):
+    return {**BALA, "session_payment_extension": ext}
+
+
+def test_day_13_is_held_once_12_paid_sessions_are_used():
+    assert payment_hold(BALA, 11) is None
+    hold = payment_hold(BALA, 12)
+    assert hold["next_session"] == 13
+    assert "Day 13 is on hold" in payment_hold_message(hold)
+
+
+def test_request_alone_does_not_release_the_hold():
+    hold = payment_hold(_with_ext({"status": "requested", "requested_due_date": "2026-10-15"}), 12)
+    assert hold is not None
+    assert "request for more time" in payment_hold_message(hold)
+
+
+def test_approved_extension_releases_until_its_date():
+    lead = _with_ext({"status": "approved", "extended_due_date": "2026-10-15"})
+    assert extension_active(lead, today="2026-10-15")
+    assert payment_hold(lead, 12, today="2026-09-21") is None
+    assert payment_hold(lead, 13, today="2026-10-15") is None
+    # Past the extended date the remaining days are held again.
+    assert payment_hold(lead, 13, today="2026-10-16") is not None
+
+
+def test_rejected_extension_keeps_the_hold():
+    assert payment_hold(_with_ext({"status": "rejected"}), 12) is not None
+
+
+def test_no_hold_once_balance_is_paid():
+    lead = _lead([
+        {"amount": 9600, "paid": True, "sessions": 12},
+        {"amount": 1600, "paid": True, "sessions": 2},
+    ])
+    assert payment_hold(lead, 12) is None

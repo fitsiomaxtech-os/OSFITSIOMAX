@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { IndianRupee } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/components/ui/sonner";
-import { getSessionPaymentAlerts } from "@/lib/api";
+import { approveSessionPaymentExtension, getSessionPaymentAlerts, rejectSessionPaymentExtension } from "@/lib/api";
 
 // Fired by the Physio board after a day is completed, so the count moves with the press
 // rather than on the next page load.
@@ -18,16 +18,20 @@ const rs = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFraction
  *
  * Red with a count when anyone is past what they paid for, amber when it is only heads-ups.
  * The first load of a browser session also says so in a toast, since a bell is easy to miss.
+ *
+ * Past the paid sessions the next day is held until the balance is paid. `canDecide` (Branch
+ * Admin, Super Admin) adds the way out: approve the client's request for more time, or grant
+ * it at the desk, by picking the date the balance now falls due.
  */
-export function SessionPaymentBell() {
-  const [data, setData] = useState({ alerts: [], due: 0, last_paid: 0 });
+export function SessionPaymentBell({ canDecide = false }) {
+  const [data, setData] = useState({ alerts: [], due: 0, last_paid: 0, extension_requests: 0 });
   const [open, setOpen] = useState(false);
   const announced = useRef(false);
 
   const load = useCallback(() => {
     getSessionPaymentAlerts()
       .then((res) => {
-        const next = res || { alerts: [], due: 0, last_paid: 0 };
+        const next = res || { alerts: [], due: 0, last_paid: 0, extension_requests: 0 };
         setData(next);
         if (announced.current) return;
         announced.current = true;
@@ -83,7 +87,12 @@ export function SessionPaymentBell() {
       <PopoverContent align="end" className="w-[min(92vw,380px)] p-0" data-testid="session-payment-popover">
         <div className="border-b px-4 py-3">
           <p className="text-sm font-semibold text-slate-900">Session payments due</p>
-          <p className="text-[11px] text-slate-500">Clients whose paid sessions are used up, with a balance still owing.</p>
+          <p className="text-[11px] text-slate-500">Clients whose paid sessions are used up, with a balance still owing. Their next session is on hold until paid or extended.</p>
+          {data.extension_requests > 0 && (
+            <p className="mt-1 text-[11px] font-semibold text-violet-700" data-testid="session-payment-extension-count">
+              {data.extension_requests} request{data.extension_requests === 1 ? "" : "s"} for more time waiting
+            </p>
+          )}
         </div>
         <div className="max-h-[60vh] overflow-y-auto">
           {data.alerts.length === 0 ? (
@@ -111,11 +120,128 @@ export function SessionPaymentBell() {
                 </div>
                 <p className="mt-2 text-[11px] leading-snug text-slate-600">{a.message}</p>
                 {a.balance_due_date && <p className="mt-1 text-[10px] text-slate-400">Balance installment due {a.balance_due_date}</p>}
+                <ExtensionRow alert={a} canDecide={canDecide} onDecided={load} />
               </div>
             ))
           )}
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+const todayIso = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/**
+ * The client's request for more time on one alert, and -- for whoever may decide -- the
+ * Approve / Reject controls. Approving moves the balance's due date and lets the remaining
+ * sessions go ahead unpaid until then; it can be granted without a request as well.
+ */
+function ExtensionRow({ alert: a, canDecide, onDecided }) {
+  const ext = a.extension || {};
+  const requested = ext.status === "requested";
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(ext.requested_due_date || "");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const approve = async () => {
+    if (!date) { toast.error("Pick the new due date"); return; }
+    setBusy(true);
+    try {
+      await approveSessionPaymentExtension(a.lead_id, date, note);
+      toast.success(`Extended to ${date} — ${a.name}'s remaining sessions can go ahead`);
+      setOpen(false);
+      onDecided();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not extend");
+    }
+    setBusy(false);
+  };
+  const reject = async () => {
+    setBusy(true);
+    try {
+      await rejectSessionPaymentExtension(a.lead_id, note);
+      toast.success("Request rejected — sessions stay on hold until paid");
+      setOpen(false);
+      onDecided();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not reject");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      {requested && (
+        <div className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-[11px] text-violet-800" data-testid={`session-payment-extension-request-${a.lead_id}`}>
+          <p className="font-semibold">
+            Client asked for more time{ext.requested_due_date ? ` — until ${ext.requested_due_date}` : ""}
+          </p>
+          {ext.reason && <p className="mt-0.5 text-violet-700">&ldquo;{ext.reason}&rdquo;</p>}
+        </div>
+      )}
+      {a.extension_active && (
+        <p className="rounded-md bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700">
+          Extended to {ext.extended_due_date}{ext.decided_by ? ` by ${ext.decided_by}` : ""} — sessions may go ahead
+        </p>
+      )}
+      {ext.status === "rejected" && (
+        <p className="text-[10px] text-slate-400">Request for more time rejected{ext.decided_by ? ` by ${ext.decided_by}` : ""}</p>
+      )}
+      {canDecide && a.level === "due" && !a.extension_active && (
+        open ? (
+          <div className="space-y-1.5 rounded-md border border-slate-200 p-2" data-testid={`session-payment-extension-form-${a.lead_id}`}>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              New due date
+              <input
+                type="date"
+                min={todayIso()}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1 text-xs font-normal normal-case text-slate-800"
+                data-testid={`session-payment-extension-date-${a.lead_id}`}
+              />
+            </label>
+            <input
+              type="text"
+              placeholder="Note (optional)"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="block w-full rounded border border-slate-200 px-2 py-1 text-xs"
+            />
+            <div className="flex gap-1.5">
+              <button type="button" disabled={busy} onClick={approve}
+                className="flex-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                data-testid={`session-payment-extension-approve-${a.lead_id}`}>
+                Allow sessions
+              </button>
+              {requested && (
+                <button type="button" disabled={busy} onClick={reject}
+                  className="flex-1 rounded-md border border-rose-200 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                  data-testid={`session-payment-extension-reject-${a.lead_id}`}>
+                  Reject
+                </button>
+              )}
+              <button type="button" disabled={busy} onClick={() => setOpen(false)}
+                className="rounded-md px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setOpen(true)}
+            className={`w-full rounded-md px-2 py-1 text-[11px] font-semibold ${
+              requested ? "bg-violet-600 text-white hover:bg-violet-700" : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+            }`}
+            data-testid={`session-payment-extension-open-${a.lead_id}`}>
+            {requested ? "Review request" : "Extend due date"}
+          </button>
+        )
+      )}
+    </div>
   );
 }

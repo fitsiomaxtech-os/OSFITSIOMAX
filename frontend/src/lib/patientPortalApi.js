@@ -94,6 +94,16 @@ export const patientPortalSubmitFeedback = async ({ rating, message, audience })
 };
 
 /** The course's weeks, the ones waiting for a review, and past weekly and anytime reviews. */
+// Asking the branch for more time to pay the treatment balance.
+export const patientPortalRequestPaymentExtension = async ({ requestedDueDate, reason }) => {
+  const { data } = await portalApi.post(
+    "/patient-portal/payment-extension",
+    { requested_due_date: requestedDueDate || null, reason },
+    { headers: authHeaders() },
+  );
+  return data;
+};
+
 export const patientPortalMyReview = async () => {
   const { data } = await portalApi.get("/patient-portal/review", { headers: authHeaders() });
   return data;

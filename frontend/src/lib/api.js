@@ -964,6 +964,12 @@ export const getDashboardClients = async (branchId) => (await api.get("/dashboar
 // Clients whose paid treatment sessions have run out (or have one left) with a Treatment
 // Fee balance still owing -- the header's rupee bell. Scoped per role by the backend.
 export const getSessionPaymentAlerts = async () => (await api.get("/session-payment-alerts")).data;
+// A Branch Admin letting the remaining sessions go ahead unpaid by moving the balance's due
+// date, or turning down the client's request for more time.
+export const approveSessionPaymentExtension = async (leadId, extendedDueDate, note) =>
+  (await api.post(`/session-payment/${leadId}/extension/approve`, { extended_due_date: extendedDueDate, note })).data;
+export const rejectSessionPaymentExtension = async (leadId, note) =>
+  (await api.post(`/session-payment/${leadId}/extension/reject`, { note })).data;
 export const listBranchFeedback = async (branchId) => (await api.get("/branch/feedback", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const moveBranchFeedback = async (feedbackId, status, reply, note) => (await api.patch(`/branch/feedback/${feedbackId}`, { status, reply, note })).data;
 // Writing back to the patient on their own thread. ask_resolved is how a branch closes one

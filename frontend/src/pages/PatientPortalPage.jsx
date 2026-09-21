@@ -15,6 +15,7 @@ import {
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewWeek, patientPortalReviewAnytime,
+  patientPortalRequestPaymentExtension,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -1097,7 +1098,97 @@ export function TreatmentTab({ data, reviews = null, onReviewed }) {
   );
 }
 
-export function PaymentTab({ data }) {
+/**
+ * Sessions paid for against the package, and -- once they are used up with a balance owing
+ * -- the hold on treatment and a way to ask the branch for more time to pay. Without
+ * `onChanged` (the staff preview of this screen) the request button is not offered.
+ */
+function SessionPaymentNotice({ sp, onChanged }) {
+  const [asking, setAsking] = useState(false);
+  const [date, setDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const status = sp.extension_status;
+  const canAsk = !!onChanged && status !== "requested" && !(status === "approved" && !sp.on_hold);
+
+  const submit = async () => {
+    if (!reason.trim()) { toast.error("Tell the branch why you need more time"); return; }
+    setBusy(true);
+    try {
+      await patientPortalRequestPaymentExtension({ requestedDueDate: date, reason: reason.trim() });
+      toast.success("Request sent to your branch");
+      setAsking(false);
+      onChanged();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not send the request");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="mt-2 space-y-2" data-testid="portal-session-payment">
+      <p className="text-[11px] text-slate-500">
+        {sp.paid_sessions} of {sp.total_sessions} sessions paid for · balance ₹{money(sp.balance)}
+      </p>
+      {sp.on_hold && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-800" data-testid="portal-session-payment-hold">
+          <p className="font-semibold">Your paid sessions are used up</p>
+          <p className="mt-0.5">Please pay the balance of ₹{money(sp.balance)} to continue with session {sp.paid_sessions + 1}, or ask the branch for more time.</p>
+        </div>
+      )}
+      {status === "requested" && (
+        <p className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-2 text-xs text-violet-800">
+          Your request for more time{sp.extension_requested_due_date ? ` (until ${sp.extension_requested_due_date})` : ""} is with the branch.
+        </p>
+      )}
+      {status === "approved" && !sp.on_hold && (
+        <p className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-700">
+          The branch has extended your balance due date to {sp.extended_due_date}. Your sessions can continue.
+        </p>
+      )}
+      {status === "rejected" && (
+        <p className="text-[11px] text-slate-500">
+          The branch could not extend the due date{sp.extension_decision_note ? `: ${sp.extension_decision_note}` : "."}
+        </p>
+      )}
+      {canAsk && (
+        asking ? (
+          <div className="space-y-2 rounded-md border border-slate-200 p-2.5" data-testid="portal-extension-form">
+            <label className="block text-[11px] font-semibold text-slate-600">
+              Pay by (optional)
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 h-8 text-xs" />
+            </label>
+            <label className="block text-[11px] font-semibold text-slate-600">
+              Reason
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={2}
+                maxLength={500}
+                className="mt-1 block w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs font-normal"
+                data-testid="portal-extension-reason"
+              />
+            </label>
+            <div className="flex gap-2">
+              <Button size="sm" className="h-8 flex-1 text-xs" disabled={busy} onClick={submit} data-testid="portal-extension-submit">
+                Send request
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 text-xs" disabled={busy} onClick={() => setAsking(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button size="sm" variant="outline" className="h-8 w-full text-xs" onClick={() => setAsking(true)} data-testid="portal-extension-open">
+            Ask for more time to pay
+          </Button>
+        )
+      )}
+    </div>
+  );
+}
+
+export function PaymentTab({ data, onChanged }) {
   const p = data.payment || {};
   // All three fees. The diet one was missing, so a patient who paid for a diet
   // consultation was shown a Total that did not include their own money.
@@ -1168,6 +1259,7 @@ export function PaymentTab({ data }) {
         ) : (
           <p className="text-xs text-slate-400">No treatment fee collected yet</p>
         )}
+        {p.session_payment && <SessionPaymentNotice sp={p.session_payment} onChanged={onChanged} />}
       </div>
 
       {/* Only for patients who actually took a diet plan. Diet is optional, so an empty
@@ -2293,7 +2385,7 @@ function PortalDashboard({ onLogout, onSwitchPatient }) {
       <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
         {activeTab === "sessions" && <SessionsTab data={data} reviews={reviews} onReviewed={loadReviews} />}
         {activeTab === "treatment" && <TreatmentTab data={data} reviews={reviews} onReviewed={loadReviews} />}
-        {activeTab === "payment" && <PaymentTab data={data} />}
+        {activeTab === "payment" && <PaymentTab data={data} onChanged={load} />}
         {activeTab === "profile" && <ProfileTab data={data} />}
         {activeTab === "feedback" && (
           <FeedbackTab data={data} onSeen={clearFeedbackBadge} />

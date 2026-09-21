@@ -27,7 +27,7 @@ from physio_scope import physio_lead_ids, physio_owns_lead, resolve_physio_docto
 from routers.v3_client_reviews import physio_star_ratings, session_star_ratings
 # A treatment day that uses up the last paid session tells the branch, the accountant and
 # the physio — see v3_session_payment.
-from routers.v3_session_payment import notify_after_session_complete
+from routers.v3_session_payment import notify_after_session_complete, payment_hold_for_lead, payment_hold_message
 
 router = APIRouter(prefix="/api/v3")
 
@@ -497,6 +497,9 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
     # arithmetic in the browser is a second chance for the button to offer a day the server
     # will refuse. None when nothing is owed.
     hold = await review_hold_for_lead(lead_id)
+    # The same for money: every paid session used with a balance owing and no extension
+    # from the Branch Admin. Treatment days only -- rehab is its own course and fee.
+    pay_hold = await payment_hold_for_lead(lead_id)
 
     # Sent so the popup marks milestones on the same interval the reviews router enforces,
     # instead of carrying its own copy of the number and drifting from it.
@@ -507,6 +510,8 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
         "review_after_days": REVIEW_AFTER_DAYS,
         "review_hold": hold,
         "review_hold_message": review_hold_message(hold) if hold else "",
+        "payment_hold": pay_hold,
+        "payment_hold_message": payment_hold_message(pay_hold) if pay_hold else "",
         # Whether a day may be worked only on its booked date. Switched from the Danger Zone.
         "day_date_lock": await _physio_day_lock_enabled(),
     }
@@ -765,6 +770,13 @@ async def physio_complete_session(
     hold = await review_hold_for_lead(session["lead_id"])
     if hold:
         raise HTTPException(status_code=400, detail=review_hold_message(hold))
+
+    # The client has had every session they paid for and the balance is still owing. The
+    # day waits until it is collected, or until the Branch Admin extends the due date.
+    if not is_rehab:
+        pay_hold = await payment_hold_for_lead(session["lead_id"])
+        if pay_hold:
+            raise HTTPException(status_code=400, detail=payment_hold_message(pay_hold))
 
     # The day's own note is the report. Checked here and not only in the popup: this is
     # what the day-report views read to tell a day that was written up from one that was
