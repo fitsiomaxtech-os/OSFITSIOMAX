@@ -2850,7 +2850,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      rows = rows.filter((l) => `${l.name || ""} ${l.phone || ""}`.toLowerCase().includes(q));
+      rows = rows.filter((l) => `${l.name || ""} ${l.phone || ""} ${l.patient_number || ""}`.toLowerCase().includes(q));
     }
     // Driven from the Branch Leads toolbar above rather than from a control of this
     // board's own: these stages are shown inside that board's stage bar, and two mark

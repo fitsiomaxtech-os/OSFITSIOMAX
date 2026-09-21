@@ -298,7 +298,8 @@ export const PatientsPortalPanel = ({ branchId }) => {
     const list = card === "all" ? inRange : inRange.filter((r) => r.services.includes(card));
     const q = search.trim().toLowerCase();
     if (!q) return list;
-    return list.filter((r) => r.name.toLowerCase().includes(q) || r.phone.includes(q));
+    return list.filter((r) => r.name.toLowerCase().includes(q) || r.phone.includes(q)
+      || (r.lead?.patient_number || "").toLowerCase().includes(q));
   }, [inRange, card, search]);
 
   const openLead = (row) => { if (row.lead) setSelected(row.lead); };

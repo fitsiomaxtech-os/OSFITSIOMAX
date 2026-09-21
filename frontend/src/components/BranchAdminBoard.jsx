@@ -1387,9 +1387,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       });
     }
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      // Trimmed so a Patient Number pasted with a stray space (e.g. "ANN-260921-0001 ")
+      // still matches; patient_number is the branch's own ID for the patient.
+      const q = searchQuery.trim().toLowerCase();
       list = list.filter((l) =>
         l.name?.toLowerCase().includes(q) || l.phone?.includes(q) || l.email?.toLowerCase().includes(q)
+        || l.patient_number?.toLowerCase().includes(q)
       );
     }
     // Applied here, with the other two, rather than to the list alone. This used to narrow
