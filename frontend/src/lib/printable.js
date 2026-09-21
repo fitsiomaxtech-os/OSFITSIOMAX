@@ -40,10 +40,16 @@ export const PRINTABLE_STYLES = `
   .sub{font-size:11.5px;color:#64748b;margin-top:2px}
   .branch{font-size:12px;font-weight:600;color:#334155;margin-top:5px}
   .meta{text-align:right;flex:none}
-  .doc-title{font-size:19px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:1.5px;line-height:1.1}
+  /* -1.5px: letter-spacing puts a gap after the last letter as well, so a right-aligned
+     title hangs 1.5px short of the lines beneath it. Pulled back onto the same edge. */
+  .doc-title{font-size:19px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:1.5px;
+             line-height:1.1;margin-right:-1.5px}
   .meta-line{font-size:11.5px;color:#64748b;margin-top:5px}
   .meta-line b{color:#0f172a;font-weight:600;margin-left:6px}
-  .pill{display:inline-flex;align-items:center;gap:6px;margin-top:9px;padding:4px 11px;border-radius:999px;
+  /* The right padding is a letter-spacing short of the left on every tracked pill below:
+     that trailing gap is inside the box, so matched padding leaves the words looking
+     shifted left. This is what centres them. */
+  .pill{display:inline-flex;align-items:center;gap:6px;margin-top:9px;padding:4px 10.1px 4px 11px;border-radius:999px;
         font-size:10.5px;font-weight:700;letter-spacing:.9px;background:var(--soft);color:var(--accent);border:1px solid var(--edge)}
   .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
 
@@ -62,16 +68,18 @@ export const PRINTABLE_STYLES = `
   .amount .value{font-size:31px;font-weight:800;color:var(--accent);line-height:1.15;margin-top:2px}
   .amount .mode{font-size:12px;color:#475569;margin-top:4px}
   .stamp{position:absolute;left:18px;top:50%;transform:translateY(-50%) rotate(-14deg);border:2.5px solid var(--accent);
-         color:var(--accent);border-radius:8px;padding:3px 10px;font-size:17px;font-weight:800;letter-spacing:3px;opacity:.45}
+         color:var(--accent);border-radius:8px;padding:3px 7px 3px 10px;font-size:17px;font-weight:800;
+         letter-spacing:3px;opacity:.45}
 
   .items{width:100%;border-collapse:collapse;margin-top:22px}
   .items th{text-align:left;font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:#64748b;font-weight:700;
             padding:9px 12px;background:#f8fafc;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0}
   .items td{padding:12px;border-bottom:1px solid #e2e8f0;vertical-align:top;font-size:12.5px}
   .items .num{text-align:right;white-space:nowrap}
+  .items th.num{padding-right:11px}
   .items .desc{font-weight:600}
   .items .desc small{display:block;font-weight:400;color:#64748b;font-size:11.5px;margin-top:2px}
-  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.6px}
+  .badge{display:inline-block;padding:2px 7.4px 2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.6px}
   .badge-paid{background:#dcfce7;color:#15803d}
   .badge-due{background:#fef3c7;color:#b45309}
 
@@ -85,7 +93,7 @@ export const PRINTABLE_STYLES = `
 
   .hero{display:flex;gap:20px;align-items:center;background:var(--soft);border:1px solid var(--edge);border-radius:14px;padding:18px 20px}
   .tile{flex:none;width:100px;border-radius:12px;background:#fff;border:1px solid var(--edge);text-align:center;overflow:hidden}
-  .tile .m{background:var(--accent);color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;padding:5px 0}
+  .tile .m{background:var(--accent);color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;padding:5px 0 5px 2px}
   .tile .d{font-size:38px;font-weight:800;line-height:1.05;padding-top:8px}
   .tile .w{font-size:11px;color:#64748b;padding:2px 0 9px}
   .when{font-size:21px;font-weight:800;color:var(--accent);line-height:1.2}
