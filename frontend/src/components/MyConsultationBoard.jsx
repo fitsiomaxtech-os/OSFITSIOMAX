@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, Building2, Check, ChevronDown, Clock, Loader2, Phone, RefreshCw, Star, Stethoscope, UserCheck, UserRound, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Building2, CalendarDays, Check, ChevronDown, Clock, Loader2, Phone, RefreshCw, Star, Stethoscope, UserCheck, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,7 +12,7 @@ import {
 import { toast } from "@/components/ui/sonner";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { WeekStrip, todayIso } from "@/components/WeekStrip";
-import { LeadMarks, RescheduledTag } from "@/components/ui/lead-marks";
+import { RescheduledTag } from "@/components/ui/lead-marks";
 import { getConsultantSlots, getDoctors, hpResolvedConsultant, listBranchConsultants, reassignConsultant } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
@@ -183,8 +183,9 @@ const ConsultantPicker = ({ branchId, excludeId, onPick }) => {
   );
 };
 
-// The marks spelled out, for the detail panel where there is room for words. The slot
-// cards use the bare icons from LeadMarks, the same ones every other list shows.
+// The marks spelled out, beside the patient's name. The list has room for the words now
+// that it is one row per patient rather than a card per hour, and a row that says "needs
+// attention" does not need the reader to know what a red dot meant.
 const MarkBadges = ({ booking }) => (
   <>
     {booking.is_vip && (
@@ -205,33 +206,47 @@ const KIND_TONE = {
   review: "border-violet-200 bg-violet-50 text-violet-700",
 };
 
-const SLOT_FILTERS = [
+// Booked / Available are gone with the grid: an empty hour is no longer a thing this
+// popup shows, so a filter that selects one would filter to nothing at all.
+const BOOKING_FILTERS = [
   { key: "all", label: "All" },
-  { key: "booked", label: "Booked" },
-  { key: "free", label: "Available" },
   { key: "vip", label: "VIP" },
   { key: "attention", label: "Attention" },
 ];
 
-const slotMatches = (slot, filter) => {
-  const b = slot.bookings || [];
-  if (filter === "booked") return b.length > 0;
-  if (filter === "free") return b.length === 0;
-  if (filter === "vip") return b.some((x) => x.is_vip);
-  if (filter === "attention") return b.some((x) => x.needs_attention);
+const bookingMatches = (bk, filter) => {
+  if (filter === "vip") return !!bk.is_vip;
+  if (filter === "attention") return !!bk.needs_attention;
   return true;
 };
 
+/** "2026-09-26" -> "Sat, 26 Sep 2026" — the date each row is actually on. */
+const dayLabel = (iso) => {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+};
+
 /**
- * One consultant's day: every time slot, who is in it, and which of those patients is a
- * VIP or needs attention. Pick a time to see the patients booked into it.
+ * One consultant's booked patients for a day — name, when, and which branch.
+ *
+ * It used to be the consultant's whole grid: every published hour as a card, with the
+ * empty ones saying "Available". On a normal day that is seventeen empty cards around one
+ * patient, and the patient is what the reader came for — nobody opens another consultant's
+ * day from My Consultation to admire their free hours. The grid also cost a second click:
+ * the patient's details only appeared once their hour was selected.
+ *
+ * So the slots are gone and what was behind them is the list. An hour with nothing in it
+ * simply isn't a row. Availability still lives where it is acted on — the booking popup on
+ * Branch Leads, which is the only place a free hour can actually be taken.
  */
 const ConsultantSlotsModal = ({ branchId, consultant, canAssignToMe = false, onAssigned, onClose }) => {
   const [date, setDate] = useState(todayIso());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("all");
-  const [selectedTime, setSelectedTime] = useState(null);
   // Paging the week quickly fires several requests; only the latest may land.
   const reqId = useRef(0);
 
@@ -252,7 +267,6 @@ const ConsultantSlotsModal = ({ branchId, consultant, canAssignToMe = false, onA
   }, [branchId, consultant.id, date]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setSelectedTime(null); }, [date]);
 
   // Takes this patient's consultation off the consultant whose day this is and onto the
   // reader, keeping the slot — the same move Reassign makes, for one patient at a time.
@@ -280,12 +294,16 @@ const ConsultantSlotsModal = ({ branchId, consultant, canAssignToMe = false, onA
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const slots = useMemo(() => data?.slots || [], [data]);
-  const visible = useMemo(() => slots.filter((s) => slotMatches(s, filter)), [slots, filter]);
-  const selected = useMemo(() => slots.find((s) => s.time === selectedTime) || null, [slots, selectedTime]);
+  // Every patient the consultant holds that day, flattened out of the slots they came in
+  // and ordered by the hour — the grid was the only thing that needed them kept apart.
+  const bookings = useMemo(() => {
+    const rows = (data?.slots || []).flatMap((s) => s.bookings || []);
+    return rows.sort((a, b) => String(a.time || "").localeCompare(String(b.time || "")));
+  }, [data]);
+  const visible = useMemo(() => bookings.filter((bk) => bookingMatches(bk, filter)), [bookings, filter]);
   const summary = data?.summary || {};
 
-  const filterCount = (key) => (key === "all" ? slots.length : slots.filter((s) => slotMatches(s, key)).length);
+  const filterCount = (key) => (key === "all" ? bookings.length : bookings.filter((bk) => bookingMatches(bk, key)).length);
 
   return (
     <div
@@ -301,7 +319,7 @@ const ConsultantSlotsModal = ({ branchId, consultant, canAssignToMe = false, onA
               {consultant.full_name}
             </p>
             <p className="mt-0.5 truncate text-[11px] text-slate-300">
-              {[consultant.specialization, "Time slots & patients"].filter(Boolean).join(" · ")}
+              {[consultant.specialization, "Booked patients"].filter(Boolean).join(" · ")}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -331,7 +349,7 @@ const ConsultantSlotsModal = ({ branchId, consultant, canAssignToMe = false, onA
           <WeekStrip value={date} onChange={setDate} testid="consultant-slots-week" />
 
           <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="consultant-slots-filter">
-            {SLOT_FILTERS.map((f) => {
+            {BOOKING_FILTERS.map((f) => {
               const on = filter === f.key;
               return (
                 <button
@@ -356,121 +374,81 @@ const ConsultantSlotsModal = ({ branchId, consultant, canAssignToMe = false, onA
           </div>
 
           {loading && !data ? (
-            <p className="py-12 text-center text-sm text-slate-400">Loading slots…</p>
-          ) : slots.length === 0 ? (
+            <p className="py-12 text-center text-sm text-slate-400">Loading appointments…</p>
+          ) : bookings.length === 0 ? (
             <div className="py-12 text-center" data-testid="consultant-slots-empty">
-              <Clock className="mx-auto mb-2 h-9 w-9 text-slate-200" />
-              <p className="text-sm text-slate-400">No time slots for {consultant.full_name} on this day.</p>
+              <CalendarDays className="mx-auto mb-2 h-9 w-9 text-slate-200" />
+              <p className="text-sm text-slate-400">No appointments for {consultant.full_name} on this day.</p>
             </div>
           ) : visible.length === 0 ? (
-            <p className="py-12 text-center text-sm text-slate-400">No slots match this filter.</p>
+            <p className="py-12 text-center text-sm text-slate-400">No appointments match this filter.</p>
           ) : (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="consultant-slots-grid">
-              {visible.map((s) => {
-                const b = s.bookings || [];
-                const first = b[0];
-                const vip = b.some((x) => x.is_vip);
-                const attention = b.some((x) => x.needs_attention);
-                const on = s.time === selectedTime;
-                // The mark colours the card's edge so a VIP or flagged hour reads across the
-                // grid before any name is; attention wins where both apply.
-                const edge = attention ? "border-l-rose-500" : vip ? "border-l-amber-400" : b.length ? "border-l-sky-500" : "border-l-slate-200";
-                return (
-                  <button
-                    key={s.time}
-                    type="button"
-                    onClick={() => setSelectedTime(on ? null : s.time)}
-                    aria-pressed={on}
-                    className={`rounded-lg border border-l-4 p-2.5 text-left transition ${edge} ${
-                      on ? "border-teal-500 bg-teal-50 ring-2 ring-teal-400" : b.length ? "border-slate-200 bg-white hover:bg-slate-50" : "border-dashed border-slate-200 bg-slate-50/60 hover:bg-slate-100"
-                    }`}
-                    data-testid={`consultant-slot-${s.time}`}
-                  >
-                    <p className="flex items-center justify-between gap-1 text-xs font-bold text-slate-800">
-                      <span className="flex items-center gap-1"><Clock className="h-3 w-3 text-slate-400" />{to12h(s.time)}</span>
-                      {first && <LeadMarks lead={{ is_vip: vip, needs_attention: attention }} />}
-                    </p>
-                    {first ? (
-                      <p className="mt-1 truncate text-[12px] font-medium text-slate-700">
-                        {first.patient_name}
-                        {b.length > 1 && <span className="ml-1 text-[10px] font-bold text-slate-400">+{b.length - 1}</span>}
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-[12px] text-slate-400">Available</p>
-                    )}
-                    {first && (
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                        {first.kind === "review" ? "Review" : "Consultation"}
-                      </p>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {selected && (
-            <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-4" data-testid="consultant-slot-detail">
-              <p className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-800">
-                <Clock className="h-4 w-4 text-teal-600" />
-                {to12h(selected.time)}
-                <span className="text-xs font-normal text-slate-500">
-                  {selected.bookings.length ? `${selected.bookings.length} patient${selected.bookings.length === 1 ? "" : "s"}` : "Available"}
-                </span>
-              </p>
-              {selected.bookings.length === 0 ? (
-                <p className="text-xs text-slate-500">Nobody is booked into this time yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {selected.bookings.map((bk) => (
-                    <div
-                      key={`${bk.kind}-${bk.id}`}
-                      className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-start sm:justify-between"
-                      data-testid={`consultant-slot-booking-${bk.id}`}
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-sm font-bold text-slate-800">{bk.patient_name}</span>
-                          <MarkBadges booking={bk} />
-                          <RescheduledTag
-                            lead={{ appointment_rescheduled: bk.rescheduled, appointment_rescheduled_from: bk.rescheduled_from }}
-                          />
-                        </div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                          {bk.patient_number && <span className="font-mono">{bk.patient_number}</span>}
-                          {bk.phone && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />{bk.phone}</span>}
-                          {bk.branch_name && (
-                            <span className={bk.branch_id && branchId !== ALL && bk.branch_id !== branchId ? "font-semibold text-amber-700" : ""}>
-                              <Building2 className="mr-0.5 inline h-3 w-3" />{bk.branch_name}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {/* The tag, and under it the one thing to do about it. Only a consultation
-                          can be moved — a review is dispatched to a consultant, not booked. */}
-                      <div className="flex shrink-0 flex-row items-center gap-2 sm:flex-col sm:items-end">
-                        <span className={`rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${KIND_TONE[bk.kind] || KIND_TONE.consultation}`}>
-                          {bk.kind === "review" ? `Review${bk.status === "completed" ? " · Completed" : ""}` : "Consultation"}
-                        </span>
-                        {canAssignToMe && bk.kind === "consultation" && bk.lead_id && (
-                          <Button
-                            size="sm"
-                            onClick={() => assignToMe(bk)}
-                            disabled={assigningId !== null}
-                            className="h-8 gap-1.5 bg-sky-600 px-3 text-xs text-white hover:bg-sky-700"
-                            data-testid={`consultant-slot-assign-me-${bk.id}`}
-                          >
-                            {assigningId === bk.id
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <UserCheck className="h-3.5 w-3.5" />}
-                            Assign to me
-                          </Button>
-                        )}
-                      </div>
+            <div className="space-y-2" data-testid="consultant-appointments-list">
+              {visible.map((bk) => (
+                <div
+                  key={`${bk.kind}-${bk.id}`}
+                  // The mark colours the row's edge, the same way it coloured the card it
+                  // replaces: a VIP or a flagged patient reads down the list before any
+                  // name does, and attention wins where both apply.
+                  className={`flex flex-col gap-2 rounded-lg border border-l-4 border-slate-200 bg-white p-3 sm:flex-row sm:items-start sm:justify-between ${
+                    bk.needs_attention ? "border-l-rose-500" : bk.is_vip ? "border-l-amber-400" : "border-l-sky-500"
+                  }`}
+                  data-testid={`consultant-slot-booking-${bk.id}`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-bold text-slate-800">{bk.patient_name}</span>
+                      <MarkBadges booking={bk} />
+                      <RescheduledTag
+                        lead={{ appointment_rescheduled: bk.rescheduled, appointment_rescheduled_from: bk.rescheduled_from }}
+                      />
                     </div>
-                  ))}
+                    {/* When and where, on their own line under the name — the two things
+                        the grid used to say from the card's position rather than in words. */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-slate-600">
+                      <span className="inline-flex items-center gap-1">
+                        <CalendarDays className="h-3 w-3 text-slate-400" />
+                        {dayLabel(data?.date || date)}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="h-3 w-3 text-slate-400" />
+                        {to12h(bk.time)}
+                      </span>
+                      {bk.branch_name && (
+                        <span className={`inline-flex items-center gap-1 ${bk.branch_id && branchId !== ALL && bk.branch_id !== branchId ? "text-amber-700" : ""}`}>
+                          <Building2 className="h-3 w-3 text-slate-400" />
+                          {bk.branch_name}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                      {bk.patient_number && <span className="font-mono">{bk.patient_number}</span>}
+                      {bk.phone && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />{bk.phone}</span>}
+                    </div>
+                  </div>
+                  {/* The tag, and under it the one thing to do about it. Only a consultation
+                      can be moved — a review is dispatched to a consultant, not booked. */}
+                  <div className="flex shrink-0 flex-row items-center gap-2 sm:flex-col sm:items-end">
+                    <span className={`rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${KIND_TONE[bk.kind] || KIND_TONE.consultation}`}>
+                      {bk.kind === "review" ? `Review${bk.status === "completed" ? " · Completed" : ""}` : "Consultation"}
+                    </span>
+                    {canAssignToMe && bk.kind === "consultation" && bk.lead_id && (
+                      <Button
+                        size="sm"
+                        onClick={() => assignToMe(bk)}
+                        disabled={assigningId !== null}
+                        className="h-8 gap-1.5 bg-sky-600 px-3 text-xs text-white hover:bg-sky-700"
+                        data-testid={`consultant-slot-assign-me-${bk.id}`}
+                      >
+                        {assigningId === bk.id
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : <UserCheck className="h-3.5 w-3.5" />}
+                        Assign to me
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </div>
