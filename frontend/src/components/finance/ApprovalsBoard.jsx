@@ -394,7 +394,7 @@ const RefCell = ({ lead, sub, testId }) => (
 const PendingTable = ({ rows, selected, onToggle, onApprove }) => (
   <div className="overflow-x-auto">
     <table className="w-full min-w-[1240px] text-sm" data-testid="finance-pending-table">
-      <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+      <thead className="border-b border-slate-200 bg-slate-100 text-left text-[11px] uppercase tracking-wider text-slate-700">
         <tr>
           <th className="w-9 px-3 py-2.5" />
           <th className="px-3 py-2.5 font-semibold">Client Name</th>
@@ -494,7 +494,7 @@ const ApprovedTable = ({ groups, busyId, onUndo }) => {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[820px] text-sm" data-testid="finance-approved-table">
-        <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+        <thead className="border-b border-slate-200 bg-slate-100 text-left text-[11px] uppercase tracking-wider text-slate-700">
           <tr>
             <th className="px-4 py-2.5 font-semibold">Patient</th>
             <th className="px-4 py-2.5 font-semibold">Branch</th>
