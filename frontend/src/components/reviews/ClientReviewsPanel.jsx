@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Building2, UserRound, CalendarCheck, Check, ChevronDown, ChevronRight, Clock, MessageSquareQuote, RefreshCw, Search, Star, X } from "lucide-react";
+import { Activity, Building2, UserRound, CalendarCheck, Check, ChevronDown, ChevronRight, Clock, MessageSquareOff, MessageSquareQuote, RefreshCw, Search, Star, X } from "lucide-react";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -380,10 +380,30 @@ const TILES = {
   ],
 };
 
+/**
+ * The staff desks read the same four tiles with the last one swapped. Anytime answers a
+ * question about the Feedback tab, which is not what a staff desk is looking for; Without
+ * Review is: the clients who gave their stars and left no words, the ones somebody would go
+ * and ask. The branch boards keep Anytime.
+ */
+const STAFF_TILES = {
+  physio: TILES.physio.map((t) => (t.key !== "anytime" ? t : {
+    key: "no_comment",
+    label: "Without Review",
+    figure: "noComment",
+    sub: () => "Rated, no words from the client",
+    icon: MessageSquareOff,
+    color: "#64748b",
+  })),
+};
+
 // "weekly" takes in the older per-session and per-clinical-Review rows it replaced.
 const WEEKLY_SOURCES = ["week", "session", "review"];
 const inSource = (r, key) => !key
-  || (key === "rated" ? !!r.rating : key === "weekly" ? WEEKLY_SOURCES.includes(r.source) : r.source === key);
+  || (key === "rated" ? !!r.rating
+    : key === "weekly" ? WEEKLY_SOURCES.includes(r.source)
+    : key === "no_comment" ? !String(r.comment || "").trim()
+    : r.source === key);
 
 const inDates = (r, range) => {
   if (!range?.from || !range?.to) return true;
@@ -654,6 +674,7 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly =
       weekly: from("weekly").length,
       weeklyAvg: average(from("weekly")),
       anytime: from("anytime").length,
+      noComment: from("no_comment").length,
     };
   }, [inPerson]);
 
@@ -686,6 +707,8 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly =
     });
     return out;
   }, [base]);
+
+  const tiles = (staffView && STAFF_TILES[kind]) || TILES[kind];
 
   // Consultants and physios are different people with different tiles, so neither carries across.
   const switchKind = (key) => { setKind(key); setPerson(""); setSource(""); };
@@ -763,7 +786,7 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly =
       </Card>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {TILES[kind].map((t) => (
+        {tiles.map((t) => (
           <StatTile
             key={t.key || "all"}
             label={t.label}
