@@ -322,7 +322,14 @@ export const createShift = async (branchId, payload) => (await api.post(`/branch
 export const updateShift = async (shiftId, payload) => (await api.patch(`/shifts/${shiftId}`, payload)).data;
 export const deleteShift = async (shiftId) => (await api.delete(`/shifts/${shiftId}`)).data;
 export const getShiftRoster = async (branchId, profileType) => (await api.get(`/branches/${branchId}/shift-roster`, { params: { profile_type: profileType } })).data;
-export const setDoctorShift = async (doctorId, shiftId) => (await api.patch(`/doctors/${doctorId}/shift`, { shift_id: shiftId || null })).data;
+// One expert, one or several shifts. Several because a split day is ordinary here — the
+// consultant who takes 8 AM – 1 PM and is back 5 PM – 9 PM works two windows, and rostering
+// them on one 8-to-9 shift would publish every afternoon hour nobody is there for. Takes a
+// single id or an array; an empty one puts them back on the full working day.
+export const setDoctorShift = async (doctorId, shiftIds) => {
+  const ids = (Array.isArray(shiftIds) ? shiftIds : [shiftIds]).filter(Boolean);
+  return (await api.patch(`/doctors/${doctorId}/shift`, { shift_ids: ids, shift_id: ids[0] || null })).data;
+};
 // The branch's WORKING DAY — its hours, its grace before Late, and which days it is closed.
 // A different thing from the shifts above and easy to confuse: a shift is when patients may
 // be booked with an expert, this is when staff are expected in, and it is what HR's
@@ -331,8 +338,12 @@ export const setDoctorShift = async (doctorId, shiftId) => (await api.patch(`/do
 export const getAttendanceRules = async (branchId) => (await api.get(`/branches/${branchId}/attendance-rules`)).data;
 export const saveAttendanceRules = async (branchId, payload) => (await api.put(`/branches/${branchId}/attendance-rules`, payload)).data;
 // A one-off: these particular days run on a different shift, without moving the expert off
-// their usual one. Passing shift_id null puts the days back on it.
-export const setDoctorDayShift = async (doctorId, dates, shiftId) => (await api.patch(`/doctors/${doctorId}/day-shift`, { dates, shift_id: shiftId || null })).data;
+// their usual one. Takes a single id or an array — "this Saturday she works both halves" is
+// one answer — and an empty one puts the days back on their usual shift.
+export const setDoctorDayShift = async (doctorId, dates, shiftIds) => {
+  const ids = (Array.isArray(shiftIds) ? shiftIds : [shiftIds]).filter(Boolean);
+  return (await api.patch(`/doctors/${doctorId}/day-shift`, { dates, shift_ids: ids, shift_id: ids[0] || null })).data;
+};
 
 // ---- Diet Consultation (Nutrition Coach) ----
 export const dietToday = async (params = {}) => (await api.get("/diet/today", { params })).data;

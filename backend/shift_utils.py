@@ -14,11 +14,19 @@ The four below are only the starting point. Every one of them is editable (name 
 ends), and a branch can add its own — the whole point of the tab is that a clinic sets its
 own hours.
 
-Assignment lives on the `doctors` row (`shift_id`), not on the shift, because an expert
-works one shift and their calendar has to be able to answer "which window is mine?" without
-scanning every shift in the branch. Nothing here touches slots that are already published:
-narrowing a shift changes what the *next* day opened will contain, and never silently
-deletes a slot a patient may already be booked into — see remove-slots for that.
+Assignment lives on the `doctors` row (`shift_ids`), not on the shift, because a calendar
+has to be able to answer "which hours are mine?" without scanning every shift in the
+branch. It is a *list* because a split day is ordinary on this floor: a consultant works
+8:00 AM – 1:00 PM, goes home, and is back 5:00 PM – 9:00 PM. Stored as one shift that
+happens to run 8 to 9 it would publish the whole afternoon they are not there; stored as
+two rows it publishes both halves and nothing between them.
+
+`shift_id` is still written alongside as the first of the list, so every older reader of a
+doctor row keeps working and sees the day's first window rather than nothing.
+
+Nothing here touches slots that are already published: narrowing a shift changes what the
+*next* day opened will contain, and never silently deletes a slot a patient may already be
+booked into — see remove-slots for that.
 """
 
 import re
@@ -125,26 +133,138 @@ async def shift_map(shift_ids: Iterable[Optional[str]]) -> Dict[str, dict]:
     return {r["id"]: r for r in rows}
 
 
-def window_of(shift: Optional[dict]) -> dict:
-    """The start/end a calendar should be cut across, with the shift's name for display."""
-    start = (shift or {}).get("start_time")
-    end = (shift or {}).get("end_time")
-    if not shift or parse_hhmm(start) is None or parse_hhmm(end) is None:
-        return {"shift_id": None, "shift_name": "", "start_time": FALLBACK_START, "end_time": FALLBACK_END}
+# How many windows one expert's day may be cut into. Four is already a day nobody works —
+# the real answer is one or two — and the cap is here so a bad caller cannot turn a
+# calendar into a hundred fragments the grid then has to render.
+MAX_SHIFTS_PER_EXPERT = 4
+
+
+def shift_ids_of(doctor: Optional[dict]) -> List[str]:
+    """The shifts an expert works, oldest storage shape included.
+
+    `shift_ids` is the list; `shift_id` is the single value every row carried before split
+    days existed and is still written as the first of the list. Reading both means a row
+    saved by an older build keeps its window instead of re-opening across the full day.
+    """
+    doc = doctor or {}
+    raw = doc.get("shift_ids")
+    if isinstance(raw, list):
+        ids = [s for s in raw if isinstance(s, str) and s]
+        if ids:
+            # De-duplicated in order: the same shift picked twice is one window, and left
+            # in would publish every hour of it twice over.
+            seen, out = set(), []
+            for s in ids:
+                if s not in seen:
+                    seen.add(s)
+                    out.append(s)
+            return out[:MAX_SHIFTS_PER_EXPERT]
+    single = doc.get("shift_id")
+    return [single] if isinstance(single, str) and single else []
+
+
+def _valid_rows(rows: Iterable[Optional[dict]]) -> List[dict]:
+    """The shifts that describe a real window, in clock order.
+
+    A row whose ends are unreadable or inverted is dropped rather than repaired: it would
+    generate no slots anyway, and carrying it forward only puts a window on screen that the
+    grid then refuses to fill.
+    """
+    good = []
+    for row in rows or []:
+        if not row:
+            continue
+        from_min, to_min = parse_hhmm(row.get("start_time")), parse_hhmm(row.get("end_time"))
+        if from_min is None or to_min is None or to_min <= from_min:
+            continue
+        good.append(row)
+    good.sort(key=lambda r: parse_hhmm(r.get("start_time")))
+    return good
+
+
+def merge_segments(rows: List[dict]) -> List[dict]:
+    """Windows that overlap or touch become one.
+
+    Morning (7–14) and Online (7–19) on the same expert are not two days' work, they are
+    one stretch of 7 to 7 — and left as two the grid would offer every hour before 2 PM
+    twice. Split shifts, the case this is all for, do not overlap and so stay two.
+    """
+    merged: List[dict] = []
+    for row in rows:
+        start, end = row.get("start_time"), row.get("end_time")
+        if merged and parse_hhmm(start) <= parse_hhmm(merged[-1]["end_time"]):
+            if parse_hhmm(end) > parse_hhmm(merged[-1]["end_time"]):
+                merged[-1]["end_time"] = end
+            # The absorbed shift still named part of this window, so it keeps its place in
+            # the label and its id in the list.
+            if row.get("name") and row.get("name") not in merged[-1]["shift_names"]:
+                merged[-1]["shift_names"].append(row.get("name"))
+            merged[-1]["shift_ids"].append(row.get("id"))
+            continue
+        merged.append({
+            "shift_id": row.get("id"),
+            "shift_ids": [row.get("id")],
+            "shift_names": [row.get("name")] if row.get("name") else [],
+            "start_time": start,
+            "end_time": end,
+        })
+    out = []
+    for seg in merged:
+        # One segment, one label — "Morning", or "Morning + Online" where two windows ran
+        # into each other.
+        out.append({**seg, "shift_name": " + ".join(seg["shift_names"])})
+        out[-1].pop("shift_names", None)
+    return out
+
+
+def window_of(shift) -> dict:
+    """The window(s) a calendar should be cut across, with a name for display.
+
+    Takes one shift row or a list of them. The reply keeps `start_time` / `end_time` as the
+    outer edges of the day, so every older reader still gets the one answer it expects, and
+    carries `segments` for the callers that publish slots — which must skip the gap between
+    a morning and an evening rather than fill it.
+    """
+    rows = list(shift) if isinstance(shift, (list, tuple)) else ([shift] if shift else [])
+    segments = merge_segments(_valid_rows(rows))
+    if not segments:
+        return {
+            "shift_id": None,
+            "shift_ids": [],
+            "shift_name": "",
+            "start_time": FALLBACK_START,
+            "end_time": FALLBACK_END,
+            "segments": [],
+        }
+    ids = [i for seg in segments for i in seg["shift_ids"]]
     return {
-        "shift_id": shift.get("id"),
-        "shift_name": shift.get("name", ""),
-        "start_time": start,
-        "end_time": end,
+        "shift_id": ids[0],
+        "shift_ids": ids,
+        "shift_name": " + ".join([s["shift_name"] for s in segments if s["shift_name"]]),
+        "start_time": segments[0]["start_time"],
+        "end_time": segments[-1]["end_time"],
+        "segments": [
+            {
+                "shift_id": seg["shift_id"],
+                "shift_name": seg["shift_name"],
+                "start_time": seg["start_time"],
+                "end_time": seg["end_time"],
+            }
+            for seg in segments
+        ],
     }
 
 
-def overrides_of(doctor: dict) -> Dict[str, str]:
-    """The one-off day shifts stored on an expert: {"2026-08-18": "<shift_id>"}.
+def overrides_of(doctor: dict) -> Dict[str, List[str]]:
+    """The one-off day shifts stored on an expert: {"2026-08-18": ["<shift_id>", ...]}.
 
     A shift is the usual pattern, not a contract. Akshya is on Morning and still comes in
     full-time some days, and a roster that cannot say that forces the exception to be
     entered as a permanent change and then remembered back — which nobody does.
+
+    A day's exception is a list for the same reason the usual roster is: "this Saturday she
+    works both halves" is one answer, not two. A day stored as a bare id by an older build
+    reads as a list of one.
 
     Filtered to well-formed dates on the way out: this is a free-form map on a document, so
     a stray key must not reach the calendar as a date it will then fail to render.
@@ -152,7 +272,19 @@ def overrides_of(doctor: dict) -> Dict[str, str]:
     raw = (doctor or {}).get("shift_overrides") or {}
     if not isinstance(raw, dict):
         return {}
-    return {d: s for d, s in raw.items() if isinstance(d, str) and DATE_RE.match(d) and s}
+    out: Dict[str, List[str]] = {}
+    for date, value in raw.items():
+        if not (isinstance(date, str) and DATE_RE.match(date)):
+            continue
+        ids = [s for s in (value if isinstance(value, list) else [value]) if isinstance(s, str) and s]
+        if ids:
+            out[date] = ids[:MAX_SHIFTS_PER_EXPERT]
+    return out
+
+
+def override_shift_ids(doctor: dict) -> List[str]:
+    """Every shift id the overrides mention — what `shift_map` has to be asked for."""
+    return [i for ids in overrides_of(doctor).values() for i in ids]
 
 
 def day_windows_of(doctor: dict, shifts: Dict[str, dict]) -> Dict[str, dict]:
@@ -163,27 +295,33 @@ def day_windows_of(doctor: dict, shifts: Dict[str, dict]) -> Dict[str, dict]:
     and is therefore the answer that needs no explaining.
     """
     out = {}
-    for date, shift_id in overrides_of(doctor).items():
-        shift = shifts.get(shift_id)
-        if shift:
-            out[date] = window_of(shift)
+    for date, ids in overrides_of(doctor).items():
+        rows = [shifts[i] for i in ids if shifts.get(i)]
+        if rows:
+            out[date] = window_of(rows)
     return out
 
 
 async def attach_shifts(doctors: List[dict]) -> List[dict]:
-    """Fill each doctor row's shift_name / shift_start / shift_end from its shift_id.
+    """Fill each doctor row's shift_name / shift_start / shift_end from its shift ids.
 
     Resolved on read instead of copied onto the doctor at assignment time, so editing a
     shift's hours moves every expert on it at once — which is what a shared, named window
     is for.
     """
-    shifts = await shift_map(d.get("shift_id") for d in doctors)
+    shifts = await shift_map(i for d in doctors for i in shift_ids_of(d))
     for doc in doctors:
-        window = window_of(shifts.get(doc.get("shift_id")))
-        # shift_id is cleared too when it points at a deleted shift, so the UI shows
-        # "No shift" rather than a dropdown stuck on a value that no longer exists.
+        window = window_of([shifts.get(i) for i in shift_ids_of(doc)])
+        # The ids are rewritten from what actually resolved, so a shift that has since been
+        # deleted leaves the UI showing "No shift" rather than a control stuck on a value
+        # it has no option for.
         doc["shift_id"] = window["shift_id"]
+        doc["shift_ids"] = window["shift_ids"]
         doc["shift_name"] = window["shift_name"]
         doc["shift_start"] = window["start_time"]
         doc["shift_end"] = window["end_time"]
+        # The halves of a split day, each with its own ends. shift_start/shift_end are only
+        # the outer edges of it, and a grid cut across those would publish the gap between
+        # a morning and an evening as workable time.
+        doc["shift_windows"] = window["segments"]
     return doctors

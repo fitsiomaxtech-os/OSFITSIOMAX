@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Clock, Loader2, Plus, RefreshCw, Save, Salad, Stethoscope, Activity, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronDown, Clock, Loader2, Plus, RefreshCw, Save, Salad, Stethoscope, Activity, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
+import { ShiftPickerModal } from "@/components/ui/shift-picker";
 import { toast } from "@/components/ui/sonner";
 import {
   createShift,
@@ -15,6 +16,7 @@ import {
   updateShift,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
+import { hoursLabel, shiftIdsOf } from "@/lib/shifts";
 
 /**
  * TIME MANAGEMENT — the hours the branch runs, and who works which of them.
@@ -27,6 +29,11 @@ import { to12h } from "@/lib/time";
  * So a window gets a name — Morning, Evening, Online, Full Time — and an expert gets put on
  * one. From then on their CONSULTANT / PHYSIO / DIET calendar is cut across exactly those
  * hours: pick Yamini on Morning here, and her day opens 7 AM – 2 PM over there.
+ *
+ * An expert can be put on more than one, because a split day is ordinary on this floor: the
+ * consultant who works 8 AM – 1 PM, goes home, and is back 5 PM – 9 PM is on a morning and
+ * an evening. Both halves open and the afternoon between them stays closed — which is the
+ * whole point, since a single 8-to-9 shift would offer patients every hour they are away.
  *
  * The four seeded shifts are a starting point, not a rule — name and both ends are editable
  * and a branch can add its own, because every clinic keeps its own hours.
@@ -386,6 +393,10 @@ export const TimeManagementPanel = ({ branchId }) => {
   const [adding, setAdding] = useState(false);
   const [newShift, setNewShift] = useState(NEW_SHIFT);
   const [creating, setCreating] = useState(false);
+  // The expert whose shifts are open in the picker. A dialog rather than a dropdown,
+  // because the question is now "which windows", and a native multi-select is the one
+  // control nobody can tell is multi.
+  const [picking, setPicking] = useState(null);
 
   const kind = CALENDAR_KINDS.find((k) => k.key === profileType) || CALENDAR_KINDS[0];
 
@@ -420,15 +431,20 @@ export const TimeManagementPanel = ({ branchId }) => {
 
   useEffect(() => { loadRoster(); }, [loadRoster]);
 
-  const assign = async (expert, shiftId) => {
+  const assign = async (expert, shiftIds) => {
     setAssigning(expert.id);
     try {
-      const updated = await setDoctorShift(expert.id, shiftId);
+      const updated = await setDoctorShift(expert.id, shiftIds);
+      // Read back off what the server resolved, not off what was ticked: two windows that
+      // overlap come back merged into one, and the branch should be told the day they
+      // actually got rather than the two they picked.
+      const hours = hoursLabel({ segments: updated.shift_windows, start_time: updated.shift_start, end_time: updated.shift_end });
       toast.success(
-        shiftId
-          ? `${expert.full_name} works ${updated.shift_name} · ${windowLabel(updated.shift_start, updated.shift_end)}`
+        updated.shift_id
+          ? `${expert.full_name} works ${updated.shift_name} · ${hours}`
           : `${expert.full_name} taken off their shift`,
       );
+      setPicking(null);
       await loadRoster();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't set the shift");
@@ -454,21 +470,19 @@ export const TimeManagementPanel = ({ branchId }) => {
     setCreating(false);
   };
 
-  // A CONSULTANT is org-wide — one record taking consultations at any branch — so the shift
-  // on them may have been defined by another branch. Offer it alongside this branch's own
-  // rather than showing a dropdown stuck on a value it has no option for.
-  const optionsFor = useMemo(() => {
+  // A CONSULTANT is org-wide — one record taking consultations at any branch — so a shift
+  // on them may have been defined by another branch. Offer those alongside this branch's
+  // own rather than showing a picker with no option behind a window it is displaying.
+  const foreignOptions = useMemo(() => {
     const known = new Set(shifts.map((s) => s.id));
-    return (expert) => {
-      const own = shifts.map((s) => ({ id: s.id, label: `${s.name} · ${windowLabel(s.start_time, s.end_time)}` }));
-      if (expert.shift_id && !known.has(expert.shift_id)) {
-        own.push({
-          id: expert.shift_id,
-          label: `${expert.shift_name || "Shift"} · ${windowLabel(expert.shift_start, expert.shift_end)} (another branch)`,
-        });
-      }
-      return own;
-    };
+    return (expert) =>
+      (expert.shift_windows || [])
+        .filter((w) => w.shift_id && !known.has(w.shift_id))
+        .map((w) => ({
+          id: w.shift_id,
+          label: `${w.shift_name || "Shift"} (another branch)`,
+          hint: windowLabel(w.start_time, w.end_time),
+        }));
   }, [shifts]);
 
   const rostered = experts.filter((e) => e.shift_id).length;
@@ -560,7 +574,9 @@ export const TimeManagementPanel = ({ branchId }) => {
                 <kind.icon className="h-4 w-4 text-violet-500" /> Who Works Which Shift
               </h3>
               <p className="mt-1 text-[11px] text-slate-400">
-                Pick the calendar, then put each {kind.noun} on a shift. Their day on {kind.label} opens across those hours only.
+                Pick the calendar, then put each {kind.noun} on a shift — or on two, for a morning
+                and an evening. Their day on {kind.label} opens across those hours only, and stays
+                closed in between.
               </p>
             </div>
             {experts.length > 0 && (
@@ -600,30 +616,35 @@ export const TimeManagementPanel = ({ branchId }) => {
                     {expert.slots_open > 0 && ` · ${expert.slots_open} slot${expert.slots_open > 1 ? "s" : ""} already published`}
                   </p>
                 </div>
-                {/* The window they will get, stated in full — the dropdown says the name,
-                    this says what it means for their day. */}
+                {/* The hours they will get, stated in full — the control says the names,
+                    this says what it means for their day. Both halves of a split day are
+                    written out: "8:00 AM – 9:00 PM" for a morning-and-evening consultant
+                    would be a working day they do not work. */}
                 <span
                   className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                     expert.shift_id ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"
                   }`}
                   data-testid={`roster-window-${expert.id}`}
                 >
-                  {expert.shift_id ? windowLabel(expert.shift_start, expert.shift_end) : "Full day (no shift)"}
+                  {expert.shift_id
+                    ? hoursLabel({ segments: expert.shift_windows, start_time: expert.shift_start, end_time: expert.shift_end })
+                    : "Full day (no shift)"}
                 </span>
                 <div className="flex shrink-0 items-center gap-2">
                   {assigning === expert.id && <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />}
-                  <select
-                    value={expert.shift_id || ""}
-                    onChange={(e) => assign(expert, e.target.value)}
+                  <button
+                    type="button"
+                    onClick={() => setPicking(expert)}
                     disabled={assigning === expert.id}
-                    className="max-w-[15rem] rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-700"
+                    className="flex max-w-[15rem] items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    title="The working windows this expert's day is opened across"
                     data-testid={`roster-select-${expert.id}`}
                   >
-                    <option value="">No shift — full day</option>
-                    {optionsFor(expert).map((o) => (
-                      <option key={o.id} value={o.id}>{o.label}</option>
-                    ))}
-                  </select>
+                    <span className="min-w-0 truncate">
+                      {expert.shift_name || "No shift — full day"}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
                 </div>
               </div>
             ))
@@ -636,6 +657,20 @@ export const TimeManagementPanel = ({ branchId }) => {
           dropped by a settings change.
         </p>
       </section>
+
+      {/* Which windows one expert works, as a dialog. The list is a set of ticks rather
+          than a one-of-many, because a morning and an evening is one person's day. */}
+      {picking && (
+        <ShiftPickerModal
+          title={`Shifts for ${picking.full_name}`}
+          shifts={shifts}
+          extraOptions={foreignOptions(picking)}
+          value={shiftIdsOf(picking)}
+          saving={assigning === picking.id}
+          onSave={(ids) => assign(picking, ids)}
+          onClose={() => setPicking(null)}
+        />
+      )}
 
       {/* Last, because it is set once and then left alone, where the two above are worked
           with. It is also the only thing on this screen that reaches somebody's pay. */}

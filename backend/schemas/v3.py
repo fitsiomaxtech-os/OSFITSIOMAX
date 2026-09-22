@@ -233,9 +233,15 @@ class V3DoctorOut(BaseModel):
     # name and both ends are resolved from the shift on read, not stored here, so editing
     # a shift's hours moves everyone on it — see shift_utils.attach_shifts.
     shift_id: Optional[str] = None
+    # Several, because a split day is ordinary: 8 AM – 1 PM and back again 5 PM – 9 PM is
+    # two windows on one person. shift_start/shift_end stay the outer edges of the day for
+    # every caller that only wants to say "roughly when"; `shift_windows` is the halves
+    # themselves, which is what a calendar has to publish against.
+    shift_ids: Optional[List[str]] = []
     shift_name: Optional[str] = ""
     shift_start: Optional[str] = None
     shift_end: Optional[str] = None
+    shift_windows: Optional[List[dict]] = []
     created_at: str
 
 

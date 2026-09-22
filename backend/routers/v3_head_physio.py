@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from database import v3_col
 from utils import now_iso, normalize_slot_time, slot_capacity_of, MAX_PHYSIO_SLOT_CAPACITY
-from shift_utils import day_windows_of, overrides_of, shift_map, window_of
+from shift_utils import day_windows_of, override_shift_ids, shift_ids_of, shift_map, window_of
 from deps import v3_require_roles
 from branch_calendar import is_leave
 from schemas.v3 import (
@@ -106,9 +106,12 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
     # `day_shifts` is the exceptions to it — the dates this expert worked something other
     # than their usual shift. Resolved in the same lookup because a month's overrides and
     # the default all point into the same small set of shifts.
-    overrides = overrides_of(doctor)
-    shifts = await shift_map([doctor.get("shift_id"), *overrides.values()])
-    window = window_of(shifts.get(doctor.get("shift_id")))
+    # A list, because a day can be cut into halves: the consultant who works 8 AM to 1 PM
+    # and again 5 PM to 9 PM is rostered on two shifts, and the window below carries both
+    # as `segments` so the grid skips the afternoon between them.
+    own = shift_ids_of(doctor)
+    shifts = await shift_map([*own, *override_shift_ids(doctor)])
+    window = window_of([shifts.get(i) for i in own])
     day_shifts = day_windows_of(doctor, shifts)
 
     return {

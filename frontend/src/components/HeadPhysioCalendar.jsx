@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Calendar as CalendarIcon,
-  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -29,7 +28,8 @@ import {
   setDoctorMeetLink,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
-import { CenteredPicker } from "@/components/ui/milk-calendar";
+import { gridTimesFor, hoursLabel, shiftIdsOf } from "@/lib/shifts";
+import { ShiftPickerModal } from "@/components/ui/shift-picker";
 
 const CONSULTATION_TYPES = [
   { value: "initial", label: "Initial Consultation", color: "bg-blue-100 text-blue-700 border-blue-300" },
@@ -50,12 +50,6 @@ const FALLBACK_SLOT_MINUTES = 30;
 const shortDate = (iso) => {
   const d = new Date(`${iso}T00:00:00`);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-};
-
-/** "07:30" -> 450 minutes past midnight. null for anything that isn't a 24-hour HH:MM. */
-const minutesOf = (hhmm) => {
-  const [h, m] = String(hhmm || "").split(":").map(Number);
-  return Number.isNaN(h) || Number.isNaN(m) ? null : h * 60 + m;
 };
 
 function getDaysInMonth(year, month) {
@@ -249,6 +243,9 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   // control. A native list here is unstyleable and reads as a browser widget beside a
   // calendar that is anything but.
   const [shiftPicker, setShiftPicker] = useState(false);
+  // The same dialog, asked of one day rather than of the roster: "these three Saturdays
+  // run mornings and evenings" without moving the expert off their usual shift.
+  const [dayShiftPicker, setDayShiftPicker] = useState(false);
   const [savingDayShift, setSavingDayShift] = useState(false);
 
   const loadShifts = useCallback(async () => {
@@ -289,8 +286,11 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   // 10:00 PM this calendar used before shifts existed, so an unassigned expert behaves
   // exactly as they always did.
   //
-  // Every generated slot finishes inside the window — a 45-minute slot is not offered at
-  // 1:30 PM on a day that ends at 2:00.
+  // It can be two windows rather than one — `segments` — because a split day is ordinary:
+  // 8:00 AM – 1:00 PM and back 5:00 PM – 9:00 PM. Each half is filled on its own so the
+  // afternoon between them is never published, and every generated slot finishes inside
+  // the half it started in: a 45-minute slot is not offered at 12:30 on a morning that
+  // ends at 1:00.
   const shift = calendarData?.shift || null;
   // Days this expert worked something other than their usual shift, keyed by date. A shift
   // is a pattern, not a contract — a Morning physio who comes in full-time on Tuesday is
@@ -299,18 +299,11 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
 
   /** The window one date is opened across: its own one-off, else the usual, else the default. */
   const windowFor = (date) => (date && dayShifts[date]) || shift || null;
-  const labelOf = (w) => (w?.shift_name ? `${w.shift_name} · ${to12h(w.start_time)} – ${to12h(w.end_time)}` : "");
+  // Both halves spelled out — "Morning + Evening · 8:00 AM – 1:00 PM · 5:00 PM – 9:00 PM".
+  // Naming only the outer ends would read as a day this expert does not work.
+  const labelOf = (w) => (w?.shift_name ? `${w.shift_name} · ${hoursLabel(w)}` : "");
 
-  const gridTimes = (w) => {
-    const slots = [];
-    const step = slotDuration || 30;
-    const from = minutesOf(w?.start_time) ?? 8 * 60;
-    const to = minutesOf(w?.end_time) ?? 22 * 60;
-    for (let m = from; m + step <= to; m += step) {
-      slots.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
-    }
-    return slots;
-  };
+  const gridTimes = (w) => gridTimesFor(w, slotDuration || 30);
 
   // Every free slot of a day, staged as an addition. Anything already published for that
   // date, and anything booked, is skipped so this never duplicates or disturbs a booking.
@@ -329,16 +322,21 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
 
   // Staged days are dropped with it: they were filled in across the old window, and half a
   // morning shift plus half an evening one is not a day anyone meant to publish.
-  const saveShift = async (shiftId) => {
+  const saveShift = async (shiftIds) => {
     if (!selectedDoctor) return;
     setSavingShift(true);
     try {
-      const updated = await setDoctorShift(selectedDoctor.id, shiftId);
+      const updated = await setDoctorShift(selectedDoctor.id, shiftIds);
+      // Read back off what the server resolved rather than off what was ticked: two
+      // windows that overlap come back as one merged stretch, and the expert's day should
+      // be named as it will actually be published.
+      const hours = hoursLabel({ segments: updated.shift_windows, start_time: updated.shift_start, end_time: updated.shift_end });
       toast.success(
-        shiftId
-          ? `${selectedDoctor.full_name} works ${updated.shift_name} · ${to12h(updated.shift_start)} – ${to12h(updated.shift_end)}`
+        updated.shift_id
+          ? `${selectedDoctor.full_name} works ${updated.shift_name} · ${hours}`
           : `${selectedDoctor.full_name} taken off their shift — full day again`,
       );
+      setShiftPicker(false);
       setPendingSlots([]);
       setSelectedDates([]);
       setSelectedDate(null);
@@ -356,12 +354,12 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   //
   // Applies to every day currently selected, because picking three Saturdays and calling
   // them evenings is one decision rather than three.
-  const saveDayShift = async (shiftId) => {
+  const saveDayShift = async (shiftIds) => {
     const dates = selectedDates.length > 0 ? selectedDates : selectedDate ? [selectedDate] : [];
     if (!selectedDoctor || dates.length === 0) return;
     setSavingDayShift(true);
     try {
-      const res = await setDoctorDayShift(selectedDoctor.id, dates, shiftId);
+      const res = await setDoctorDayShift(selectedDoctor.id, dates, shiftIds);
       const nextDayShifts = res?.day_shifts || {};
       // Merged in rather than waiting on a reload, so the grid re-cuts on the same click.
       setCalendarData((prev) => (prev ? { ...prev, day_shifts: nextDayShifts } : prev));
@@ -373,10 +371,11 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
       ]);
       const dayLabel = dates.length === 1 ? shortDate(dates[0]) : `${dates.length} days`;
       toast.success(
-        shiftId
+        nextDayShifts[dates[0]]
           ? `${dayLabel}: ${labelOf(nextDayShifts[dates[0]]) || "shift set"}`
           : `${dayLabel} back on ${shift?.shift_name || "the usual day"}`,
       );
+      setDayShiftPicker(false);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not change the day's shift");
     }
@@ -690,7 +689,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                       for them, and it is the thing to check before clicking a date. */}
                   <p className="truncate text-[10px] text-slate-400">
                     {doc.shift_name
-                      ? `${doc.shift_name} · ${to12h(doc.shift_start)} – ${to12h(doc.shift_end)}`
+                      ? `${doc.shift_name} · ${hoursLabel(doc.shift_windows?.length ? { segments: doc.shift_windows } : { start_time: doc.shift_start, end_time: doc.shift_end })}`
                       : doc.service_type || doc.specialization || roleLabel}
                   </p>
                 </div>
@@ -1043,20 +1042,19 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         <span className="text-[11px] font-medium text-slate-500">
                           {selectedDates.length > 1 ? `These ${selectedDates.length} days work` : "This day works"}
                         </span>
-                        <select
-                          value={(selectedDate && dayShifts[selectedDate]?.shift_id) || ""}
-                          onChange={(e) => saveDayShift(e.target.value)}
+                        <button
+                          type="button"
+                          onClick={() => setDayShiftPicker(true)}
                           disabled={savingDayShift}
-                          className="min-w-0 max-w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-xs font-semibold text-slate-700"
+                          className="flex min-w-0 max-w-full items-center gap-1.5 rounded border border-slate-200 bg-white px-1.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                           data-testid="day-shift-select"
                         >
-                          <option value="">
-                            {shift?.shift_name ? `${shift.shift_name} — as usual` : "The usual working day"}
-                          </option>
-                          {shifts.map((s) => (
-                            <option key={s.id} value={s.id}>{s.name} · {to12h(s.start_time)} – {to12h(s.end_time)}</option>
-                          ))}
-                        </select>
+                          <span className="min-w-0 truncate">
+                            {(selectedDate && dayShifts[selectedDate]?.shift_name)
+                              || (shift?.shift_name ? `${shift.shift_name} — as usual` : "The usual working day")}
+                          </span>
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        </button>
                         <span className="text-[10px] text-slate-400">
                           {isOverridden
                             ? `One-off — ${selectedDoctor.full_name} stays on ${shift?.shift_name || "their usual day"}.`
@@ -1142,59 +1140,49 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
         )}
       </div>
 
-      {/* The shift, picked in the calendar's own dialog. Its clothes come from the date
+      {/* The shifts, picked in the calendar's own dialog. Its clothes come from the date
           picker beside it rather than a copy of them, so the two cannot drift apart.
 
           A dialog and not a dropdown: this control sits in a header above a grid, inside a
           card, and a native list opening over the calendar reads as a browser widget in
-          the middle of something that is anything but. */}
+          the middle of something that is anything but. Ticks and not one-of-many, because
+          a morning and an evening is one person's day. */}
       {shiftPicker && (
-        <CenteredPicker
-          title={`Shift for ${selectedDoctor?.full_name || "this expert"}`}
+        <ShiftPickerModal
+          title={`Shifts for ${selectedDoctor?.full_name || "this expert"}`}
+          shifts={shifts}
+          // A CONSULTANT is org-wide, so a shift on them can be one another branch
+          // defined. Offered as it stands rather than leaving the control naming
+          // something the list cannot show.
+          extraOptions={(shift?.segments || []).filter((w) => w.shift_id && !shifts.some((sh) => sh.id === w.shift_id)).map((w) => ({
+            id: w.shift_id,
+            label: `${w.shift_name || "Shift"} (another branch)`,
+            hint: `${to12h(w.start_time)} – ${to12h(w.end_time)}`,
+          }))}
+          value={shiftIdsOf(shift)}
+          saving={savingShift}
+          onSave={saveShift}
           onClose={() => setShiftPicker(false)}
-          testid="doctor-shift-modal"
-        >
-          <div className="space-y-1">
-            {[
-              { id: "", label: "No shift — full day", hint: "The whole working day is offered" },
-              ...shifts.map((sh) => ({
-                id: sh.id,
-                label: sh.name,
-                hint: `${to12h(sh.start_time)} – ${to12h(sh.end_time)}`,
-              })),
-              // A CONSULTANT is org-wide, so the shift on them can be one another branch
-              // defined. Offered as it stands rather than leaving the control naming
-              // something the list cannot show.
-              ...(shift?.shift_id && !shifts.some((sh) => sh.id === shift.shift_id)
-                ? [{
-                    id: shift.shift_id,
-                    label: `${shift.shift_name} (another branch)`,
-                    hint: `${to12h(shift.start_time)} – ${to12h(shift.end_time)}`,
-                  }]
-                : []),
-            ].map((opt) => {
-              const on = (shift?.shift_id || "") === opt.id;
-              return (
-                <button
-                  key={opt.id || "none"}
-                  type="button"
-                  disabled={savingShift}
-                  onClick={() => { setShiftPicker(false); if (!on) saveShift(opt.id); }}
-                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition disabled:opacity-60 ${
-                    on ? "bg-[#F3EFE6]" : "hover:bg-[#F3EFE6]"
-                  }`}
-                  data-testid={`doctor-shift-option-${opt.id || "none"}`}
-                >
-                  <span className="min-w-0">
-                    <span className={`block truncate text-sm ${on ? "font-bold text-slate-900" : "text-slate-700"}`}>{opt.label}</span>
-                    <span className="block truncate text-[11px] text-slate-500">{opt.hint}</span>
-                  </span>
-                  {on && <CheckCircle2 className="h-4 w-4 shrink-0 text-amber-600" />}
-                </button>
-              );
-            })}
-          </div>
-        </CenteredPicker>
+        />
+      )}
+
+      {/* The same question asked of the days on screen: these particular dates run
+          something other than the usual shift, and the expert stays on theirs. */}
+      {dayShiftPicker && (
+        <ShiftPickerModal
+          title={
+            selectedDates.length > 1
+              ? `These ${selectedDates.length} days work`
+              : `${selectedDate ? shortDate(selectedDate) : "This day"} works`
+          }
+          shifts={shifts}
+          value={shiftIdsOf(selectedDate ? dayShifts[selectedDate] : null)}
+          saving={savingDayShift}
+          onSave={saveDayShift}
+          onClose={() => setDayShiftPicker(false)}
+          noneLabel={shift?.shift_name ? `${shift.shift_name} — as usual` : "The usual working day"}
+          noneHint="No exception: the day runs whatever they are rostered on"
+        />
       )}
     </div>
   );

@@ -27,12 +27,15 @@ from deps import is_branch_admin_role, v3_require_roles
 from schemas.v3 import V3UserOut
 from shift_utils import (
     DATE_RE,
+    MAX_SHIFTS_PER_EXPERT,
     attach_shifts,
     day_windows_of,
     ensure_branch_shifts,
+    override_shift_ids,
     overrides_of,
     parse_hhmm,
     public_shift,
+    shift_ids_of,
     shift_map,
     window_of,
 )
@@ -155,19 +158,57 @@ async def update_shift(shift_id: str, payload: ShiftUpdate, user: V3UserOut = De
 async def delete_shift(shift_id: str, user: V3UserOut = Depends(v3_require_roles(*MANAGE_ROLES))):
     await _shift_for(user, shift_id)
     await v3_col("shifts").delete_one({"id": shift_id})
-    # Everyone on it goes back to no shift rather than keeping a dangling id: their
-    # calendar re-opens across the default day, which is the honest reading of "this
-    # expert has no roster" and is recoverable by assigning another shift.
-    released = await v3_col("doctors").update_many(
-        {"shift_id": shift_id},
-        {"$set": {"shift_id": None, "updated_at": now_iso()}},
-    )
-    return {"deleted": True, "unassigned": released.modified_count}
+    # Everyone on it comes off it rather than keeping a dangling id. Someone who worked
+    # only this shift goes back to the default day — the honest reading of "this expert has
+    # no roster", and recoverable by assigning another. Someone on a split day keeps the
+    # other half: deleting Evening must not also close a consultant's mornings.
+    released = 0
+    async for doc in v3_col("doctors").find({"$or": [{"shift_id": shift_id}, {"shift_ids": shift_id}]}, {"_id": 0}):
+        remaining = [s for s in shift_ids_of(doc) if s != shift_id]
+        await v3_col("doctors").update_one(
+            {"id": doc["id"]},
+            {"$set": {
+                "shift_ids": remaining,
+                "shift_id": remaining[0] if remaining else None,
+                "updated_at": now_iso(),
+            }},
+        )
+        released += 1
+    return {"deleted": True, "unassigned": released}
+
+
+async def _clean_assignment(user: V3UserOut, shift_ids: Optional[List[str]], shift_id: Optional[str]) -> List[str]:
+    """The shifts an expert is being put on, checked and de-duplicated.
+
+    Takes either field: `shift_ids` is what a split day sends, `shift_id` is the single
+    value older callers still send, and both mean the same thing when there is one shift.
+    Every id is checked against the caller's branch before any of them is stored, so a
+    half-valid list never lands as a half-written roster.
+    """
+    wanted = shift_ids if shift_ids is not None else ([shift_id] if shift_id else [])
+    seen, cleaned = set(), []
+    for sid in wanted:
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        cleaned.append(sid)
+    if len(cleaned) > MAX_SHIFTS_PER_EXPERT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"An expert can work at most {MAX_SHIFTS_PER_EXPERT} shifts in a day",
+        )
+    for sid in cleaned:
+        await _shift_for(user, sid)
+    return cleaned
 
 
 class DoctorShiftInput(BaseModel):
-    # None clears the assignment — the expert goes back to the default working day.
+    # An empty list — or a null shift_id — clears the assignment and the expert goes back
+    # to the default working day.
     shift_id: Optional[str] = None
+    # The split day: Morning 8–1 *and* Evening 5–9 on one person. Sent instead of shift_id
+    # by anything that can roster more than one window.
+    shift_ids: Optional[List[str]] = None
 
 
 @router.patch("/doctors/{doctor_id}/shift")
@@ -176,14 +217,25 @@ async def set_doctor_shift(
     payload: DoctorShiftInput,
     user: V3UserOut = Depends(v3_require_roles(*MANAGE_ROLES)),
 ):
+    """Put an expert on one shift, or on several halves of a day.
+
+    Several because a split day is ordinary here: the consultant who takes 8 AM to 1 PM and
+    comes back 5 PM to 9 PM works two windows, not one long one, and publishing the single
+    8-to-9 stretch would offer patients every afternoon hour nobody is there for.
+    """
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     if not doctor:
         raise HTTPException(status_code=404, detail="Expert not found")
-    if payload.shift_id:
-        await _shift_for(user, payload.shift_id)
+    assigned = await _clean_assignment(user, payload.shift_ids, payload.shift_id)
     await v3_col("doctors").update_one(
         {"id": doctor_id},
-        {"$set": {"shift_id": payload.shift_id or None, "updated_at": now_iso()}},
+        {"$set": {
+            "shift_ids": assigned,
+            # Written alongside so every older reader of this row — and every query that
+            # still matches on it — keeps seeing the first window rather than nothing.
+            "shift_id": assigned[0] if assigned else None,
+            "updated_at": now_iso(),
+        }},
     )
     updated = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     return (await attach_shifts([updated]))[0]
@@ -193,8 +245,11 @@ class DayShiftInput(BaseModel):
     # The days being changed, "YYYY-MM-DD". A list because the calendar lets several days be
     # selected at once, and "these three Saturdays are evenings" is one decision, not three.
     dates: List[str]
-    # None puts the days back on the expert's usual shift.
+    # None — or an empty list — puts the days back on the expert's usual shift.
     shift_id: Optional[str] = None
+    # A one-off split day: "this Saturday she works both halves" is one answer, so the
+    # exception takes a list for the same reason the usual roster does.
+    shift_ids: Optional[List[str]] = None
 
 
 @router.patch("/doctors/{doctor_id}/day-shift")
@@ -220,16 +275,15 @@ async def set_doctor_day_shift(
     dates = [d.strip() for d in (payload.dates or []) if isinstance(d, str) and DATE_RE.match(d.strip())]
     if not dates:
         raise HTTPException(status_code=400, detail="Pick at least one date")
-    if payload.shift_id:
-        await _shift_for(user, payload.shift_id)
+    assigned = await _clean_assignment(user, payload.shift_ids, payload.shift_id)
 
     # Read-modify-write the whole map rather than $set-ing one dotted key at a time: the
     # dates come in as a batch and this keeps clearing (removing keys) and setting on the
     # one code path.
     overrides = dict(overrides_of(doctor))
     for date in dates:
-        if payload.shift_id:
-            overrides[date] = payload.shift_id
+        if assigned:
+            overrides[date] = assigned
         else:
             overrides.pop(date, None)
     await v3_col("doctors").update_one(
@@ -237,12 +291,13 @@ async def set_doctor_day_shift(
         {"$set": {"shift_overrides": overrides, "updated_at": now_iso()}},
     )
 
-    shifts = await shift_map([doctor.get("shift_id"), *overrides.values()])
+    stored = {"shift_overrides": overrides}
+    shifts = await shift_map([*shift_ids_of(doctor), *override_shift_ids(stored)])
     return {
         "doctor_id": doctor_id,
         "dates": dates,
-        "shift": window_of(shifts.get(payload.shift_id)) if payload.shift_id else None,
-        "day_shifts": day_windows_of({"shift_overrides": overrides}, shifts),
+        "shift": window_of([shifts.get(i) for i in assigned]) if assigned else None,
+        "day_shifts": day_windows_of(stored, shifts),
     }
 
 
@@ -290,9 +345,14 @@ async def shift_roster(
                 "specialization": e.get("specialization", ""),
                 "profile_type": e.get("profile_type"),
                 "shift_id": e.get("shift_id"),
+                "shift_ids": e.get("shift_ids") or [],
                 "shift_name": e.get("shift_name", ""),
                 "shift_start": e.get("shift_start"),
                 "shift_end": e.get("shift_end"),
+                # Each half of a split day with its own ends — the roster row states both,
+                # because "8:00 AM – 9:00 PM" for a morning-and-evening consultant is a
+                # working day they do not work.
+                "shift_windows": e.get("shift_windows") or [],
                 "slots_open": len(e.get("slots") or []),
             }
             for e in experts
