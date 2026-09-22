@@ -466,7 +466,7 @@ const HandoverDialog = ({ onClose, onSaved, cashInHand, branchId, branches }) =>
 
 
 /**
- * One of the five piles this panel opens on, in the shape HR Admin's own stage cards
+ * One of the four piles this panel opens on, in the shape HR Admin's own stage cards
  * wear: white and bordered at rest, its own colour on the label and the figure, and the
  * colour pulled onto the border with a wash through the card when it is the one being
  * read. Money first and the count under it — the opposite way round to HR's, where a
@@ -896,7 +896,7 @@ const countLabel = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  // Which of the five piles is open. It opens on the request log rather than the drawer:
+  // Which of the four piles is open. It opens on the request log rather than the drawer:
   // the drawer is only there when a branch is picked, and this is the expense side.
   const [view, setView] = useState("request");
   const [adding, setAdding] = useState(false);
@@ -1002,11 +1002,9 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   const showCash = !!cashFigures;
   const activeView = view === "cash" && !showCash ? "request" : view;
 
-  // The five, in the order the desk asked for them. Expense Approved and Approved are the
-  // same signed-off money twice over — asked for as two cards because the desk reads them
-  // as two questions, one about the expenses and one about the money — so they carry the
-  // same figure deliberately, and the second says so under it rather than pretending to
-  // be a sum nobody else has.
+  // The four, in the order the desk asked for them. There was a fifth, Approved, carrying
+  // the same signed-off total over the same rows as Expense Approved — the same card twice
+  // on the screen — so Expense Approved answers both questions on its own.
   const CARDS = [
     ...(showCash
       ? [{
@@ -1040,13 +1038,6 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
       amount: fmt(piles.pending.total),
       sub: `${countLabel(piles.pending.rows.length, "request", "requests")} waiting`,
     },
-    {
-      key: "approved",
-      label: "Approved",
-      color: "#0d9488",
-      amount: fmt(piles.approved.total),
-      sub: "approved spending",
-    },
   ];
 
   // What the list under the cards is, per card: what it is called, what it holds, and
@@ -1070,12 +1061,6 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
       rows: piles.pending.rows,
       empty: "Nothing waiting. Add Expense sends a request to the accountant.",
     },
-    approved: {
-      title: "Approved spending",
-      hint: "The money that has actually gone out — the same rows as Expense Approved, read as a total",
-      rows: piles.approved.rows,
-      empty: "Nothing approved yet.",
-    },
   };
 
   const list = LISTS[activeView];
@@ -1086,15 +1071,15 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
 
   return (
     <div className="space-y-4" data-testid="branch-expenses-panel">
-      {/* The five piles, as cards that are also the tabs onto them — the shape HR Admin's
+      {/* The four piles, as cards that are also the tabs onto them — the shape HR Admin's
           stage cards already wear on this system, and for the same reason: a figure you
           press to read the rows behind it, rather than a row of figures and a tab bar
           under it saying the same thing twice.
 
-          Two across a phone so the amounts stay readable, five across from lg where there
+          Two across a phone so the amounts stay readable, four across from lg where there
           is room for the whole row of them. */}
       <div
-        className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5"
+        className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4"
         data-testid="branch-expense-summary-cards"
       >
         {CARDS.map((c) => (
