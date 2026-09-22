@@ -6,9 +6,11 @@ import {
   Landmark,
   Loader2,
   MapPin,
+  Eye,
   Pencil,
   Plus,
   QrCode,
+  Trash2,
   Upload,
   User,
   X,
@@ -18,6 +20,7 @@ import { toast } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
 import {
   createBankAccount,
+  deleteBankAccount,
   listBankAccounts,
   setBankAccountStatus,
   updateBankAccount,
@@ -284,6 +287,135 @@ const BankFormDialog = ({ account, branchId, branchName, onClose, onSaved }) => 
   );
 };
 
+// The whole card, read-only, at a size a QR can actually be scanned off the screen at.
+// Separate from the form rather than the form with its inputs disabled: what this is for
+// is holding a phone up to the QR at a counter, and a page of greyed-out boxes around it
+// is in the way of that.
+const BankViewDialog = ({ account, onClose, onEdit }) => (
+  <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/40 p-4" data-testid="finance-bank-view-dialog">
+    <div className="my-auto w-full max-w-2xl rounded-2xl bg-white shadow-xl">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-6 py-5">
+        <div className="flex items-start gap-4">
+          <div className="rounded-xl bg-indigo-50 p-3">
+            <Landmark className="h-6 w-6 text-indigo-600" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-slate-900">{account.bank_name}</h3>
+            <p className="text-sm text-slate-500">{account.holder_name}</p>
+          </div>
+        </div>
+        <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="finance-bank-view-close">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      <div className="grid gap-6 px-6 py-5 sm:grid-cols-2">
+        <div className="space-y-3">
+          <ViewRow icon={Banknote} label="UPI ID" value={account.upi_id} />
+          <ViewRow icon={CreditCard} label="Account Number" value={account.account_number} />
+          <ViewRow icon={Building2} label="IFSC Code" value={account.ifsc_code} />
+          <ViewRow icon={MapPin} label="Bank Branch Name" value={account.bank_branch_name} />
+          <ViewRow icon={User} label="Holder Name" value={account.holder_name} />
+          <div>
+            <p className="text-xs text-slate-400">Status</p>
+            <span
+              className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                account.is_active ? "bg-emerald-50 text-emerald-700" : "bg-rose-100 text-rose-700"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${account.is_active ? "bg-emerald-500" : "bg-rose-500"}`} />
+              {account.is_active ? "Active" : "Inactive"}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-4 text-center">
+          <div className="mx-auto flex h-56 w-56 max-w-full items-center justify-center rounded-lg bg-white p-2">
+            {account.qr_image_url ? (
+              <img src={account.qr_image_url} alt={`${account.bank_name} QR`} className="h-full w-full object-contain" />
+            ) : (
+              <QrCode className="h-20 w-20 text-slate-200" />
+            )}
+          </div>
+          <p className="mt-2 text-[11px] text-slate-500">Scan to pay by UPI</p>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-11 rounded-lg border border-slate-200 px-6 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          data-testid="finance-bank-view-done"
+        >
+          Close
+        </button>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex h-11 items-center gap-2 rounded-lg bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+          data-testid="finance-bank-view-edit"
+        >
+          <Pencil className="h-4 w-4" /> Edit
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+const ViewRow = ({ icon: Icon, label, value }) => (
+  <div>
+    <p className="flex items-center gap-1.5 text-xs text-slate-400"><Icon className="h-3.5 w-3.5" />{label}</p>
+    <p className="break-words text-sm font-semibold text-slate-800">{value || "—"}</p>
+  </div>
+);
+
+// Asked before the row goes, and asked by name: the grid can hold two cards for the same
+// bank under different accounts, and "Delete this bank account?" over a grid of look-alike
+// cards is not a question anyone can answer.
+const DeleteBankDialog = ({ account, onCancel, onConfirm, busy }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="finance-bank-delete-dialog">
+    <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+      <div className="flex items-start gap-4 px-6 py-5">
+        <div className="rounded-xl bg-rose-50 p-3">
+          <Trash2 className="h-6 w-6 text-rose-600" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-slate-900">Delete this bank account?</h3>
+          <p className="mt-1 text-sm text-slate-600">
+            {account.bank_name} — {account.holder_name}
+            {account.account_number ? ` (A/c ${account.account_number})` : ""}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            This removes the card and its details for good. To stop offering this account
+            for payment while keeping it on the board, switch it off instead.
+          </p>
+        </div>
+      </div>
+      <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-10 rounded-lg border border-slate-200 px-5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          data-testid="finance-bank-delete-cancel"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy}
+          className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
+          data-testid="finance-bank-delete-confirm"
+        >
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
 const Row = ({ label, value }) => (
   <div className="flex items-baseline justify-between gap-2 text-xs">
     <span className="text-slate-400">{label}</span>
@@ -302,7 +434,10 @@ const Row = ({ label, value }) => (
 export const BankAccountsBoard = ({ branchId, branchName }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [dialog, setDialog] = useState(null); // { account } — null when closed
+  const [dialog, setDialog] = useState(null); // { account } — the Add/Edit popup
+  const [viewing, setViewing] = useState(null); // the card being read, full size
+  const [deleting, setDeleting] = useState(null); // the card awaiting its confirmation
+  const [removing, setRemoving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -329,6 +464,20 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
     } catch (err) {
       setRows((prev) => prev.map((r) => (r.id === acc.id ? { ...r, is_active: acc.is_active } : r)));
       toast.error(err?.response?.data?.detail || "Could not change that account's status");
+    }
+  };
+
+  const remove = async () => {
+    setRemoving(true);
+    try {
+      const { message } = await deleteBankAccount(deleting.id);
+      toast.success(message || "Bank account removed");
+      setDeleting(null);
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not delete this bank account");
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -379,14 +528,6 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
                   <p className={`truncate text-sm font-bold ${acc.is_active ? "text-slate-900" : "text-rose-900"}`} title={acc.bank_name}>{acc.bank_name}</p>
                   <p className="truncate text-xs text-slate-500" title={acc.holder_name}>{acc.holder_name}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setDialog({ account: acc })}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                  data-testid={`finance-bank-edit-${acc.id}`}
-                >
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </button>
               </div>
 
               <div className="mt-3 flex items-center justify-center rounded-lg bg-slate-50 p-2">
@@ -438,9 +579,58 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
                   <Building2 className="h-3 w-3" /> {acc.branch_name || "All Branches"}
                 </span>
               )}
+
+              {/* The three things there are to do with a saved card. `mt-auto` holds this
+                  row to the foot of every card in the row, so cards of different heights
+                  — one with a bank branch typed in, one without — still line their
+                  buttons up. Delete last and apart, in red, since it is the one that
+                  cannot be taken back. */}
+              <div className="mt-auto flex items-center gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setViewing(acc)}
+                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                  data-testid={`finance-bank-view-${acc.id}`}
+                >
+                  <Eye className="h-3.5 w-3.5" /> View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDialog({ account: acc })}
+                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                  data-testid={`finance-bank-edit-${acc.id}`}
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleting(acc)}
+                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  data-testid={`finance-bank-delete-${acc.id}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>
+      )}
+
+      {viewing && (
+        <BankViewDialog
+          account={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => { setDialog({ account: viewing }); setViewing(null); }}
+        />
+      )}
+
+      {deleting && (
+        <DeleteBankDialog
+          account={deleting}
+          busy={removing}
+          onCancel={() => setDeleting(null)}
+          onConfirm={remove}
+        />
       )}
 
       {dialog && (

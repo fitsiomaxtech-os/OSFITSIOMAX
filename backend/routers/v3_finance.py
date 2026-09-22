@@ -3952,3 +3952,24 @@ async def set_bank_account_status(
         {"$set": {"is_active": payload.is_active, "updated_by": user.full_name, "updated_at": _now()}},
     )
     return {"message": "Bank account activated" if payload.is_active else "Bank account deactivated", "is_active": payload.is_active}
+
+
+@router.delete("/finance/bank-accounts/{account_id}")
+async def delete_bank_account(
+    account_id: str,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    """Remove a card entered by mistake — a duplicate, or an account that was never
+    this group's. An account that simply stopped collecting is switched off instead,
+    which is why this is the narrower of the two and sits behind its own confirmation:
+    deleting keeps no record that the account was ever here.
+
+    The QR file is left on disk. It is a few kilobytes, nothing else points at it, and
+    unlinking it here would delete the image out from under a second card that was
+    saved by picking the same upload.
+    """
+    existing = await v3_col("bank_accounts").find_one({"id": account_id}, {"_id": 0, "bank_name": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    await v3_col("bank_accounts").delete_one({"id": account_id})
+    return {"message": f"{existing.get('bank_name') or 'Bank account'} removed"}

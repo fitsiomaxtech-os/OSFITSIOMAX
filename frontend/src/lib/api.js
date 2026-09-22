@@ -516,6 +516,7 @@ export const listBankAccounts = async (params = {}) => (await api.get("/finance/
 export const createBankAccount = async (payload) => (await api.post("/finance/bank-accounts", payload)).data;
 export const updateBankAccount = async (id, payload) => (await api.put(`/finance/bank-accounts/${id}`, payload)).data;
 export const setBankAccountStatus = async (id, isActive) => (await api.post(`/finance/bank-accounts/${id}/status`, { is_active: isActive })).data;
+export const deleteBankAccount = async (id) => (await api.delete(`/finance/bank-accounts/${id}`)).data;
 export const uploadBankQrImage = async (file) => {
   const form = new FormData();
   form.append("file", file);
