@@ -384,9 +384,20 @@ def build_payment_details(payload) -> tuple:
             raise HTTPException(status_code=400, detail="UPI Transaction ID is required")
         txn = payload.upi_transaction_id.strip()
         utr = (payload.upi_utr or "").strip()
+        # Which company UPI ID took the money, when the desk picked one off the list of
+        # them. Recorded rather than required: a payment is a payment whether or not
+        # anyone said where it landed, and every UPI collection taken before the picker
+        # existed has no answer to give.
+        details = {"upi_transaction_id": txn}
+        suffix = f" · UPI txn {txn}"
         if utr:
-            return {"upi_transaction_id": txn, "upi_utr": utr}, f" · UPI txn {txn}, UTR {utr}"
-        return {"upi_transaction_id": txn}, f" · UPI txn {txn}"
+            details["upi_utr"] = utr
+            suffix += f", UTR {utr}"
+        bank_upi = (getattr(payload, "upi_id", "") or "").strip()
+        if bank_upi:
+            details["upi_id"] = bank_upi
+            suffix += f" to {bank_upi}"
+        return details, suffix
 
     if mode == "card":
         # The terminal's transaction id, and nothing else. Card used to be held to an

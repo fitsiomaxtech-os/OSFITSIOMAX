@@ -25,6 +25,7 @@ import {
   bookRehabConsultation, completeRehabConsultation,
   listTextPresets, addTextPreset, deleteTextPreset,
   getTreatmentTypes, bulkHardDeleteLeads,
+  listUpiCollectOptions,
   rescheduleCalendarBooking, declineCalendarBooking,
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
@@ -102,6 +103,7 @@ const SPLIT_PAYMENT_MODES = STANDARD_PAYMENT_MODES.filter((m) => SETTLED_NOW_MOD
 // each of them starts from these. Cleared between tenders on purpose -- a UPI
 // transaction id left over from the last one would be filed against this one.
 const BLANK_TREATMENT_TENDER = {
+  upi_id: "",
   upi_transaction_id: "",
   card_transaction_id: "",
   account_number: "",
@@ -861,6 +863,70 @@ const CashDenominations = ({ amount, notes, onChange, testPrefix }) => {
         </div>
       )}
     </div>
+  );
+};
+
+/**
+ * Which of the company's UPI IDs a payment is being taken into, and the transaction it
+ * left behind. Every Collect popup's UPI step is this pair of fields.
+ *
+ * The list is every branch's active account, not this branch's -- the desk at Parrys is
+ * regularly told to collect into the group's account or another branch's, and a picker
+ * narrowed to the login's own branch left that payment with nowhere truthful to be
+ * recorded. Each option names the branch it belongs to for exactly that reason.
+ *
+ * Fetched once per page load and shared by all five fees below (a Consultation Fee and a
+ * Rehab Fee opened one after the other are the same list), and never blocks the popup:
+ * the transaction id is what the payment cannot be saved without, so a slow or refused
+ * lookup leaves the ID box alone and simply says the list is unavailable.
+ */
+let upiOptionsPromise = null;
+const loadUpiOptions = () => {
+  if (!upiOptionsPromise) upiOptionsPromise = listUpiCollectOptions().catch(() => []);
+  return upiOptionsPromise;
+};
+
+const UpiCollectFields = ({ draft, onChange, testPrefix, required = false }) => {
+  const [options, setOptions] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    loadUpiOptions().then((rows) => { if (alive) setOptions(Array.isArray(rows) ? rows : []); });
+    return () => { alive = false; };
+  }, []);
+
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI ID (paid into)</label>
+        <select
+          value={draft.upi_id || ""}
+          onChange={(e) => onChange({ upi_id: e.target.value })}
+          className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+          data-testid={`${testPrefix}-upi-id`}
+        >
+          <option value="">
+            {options === null ? "Loading UPI IDs..." : options.length ? "Select the UPI ID" : "No UPI IDs saved in Finance > UPI"}
+          </option>
+          {(options || []).map((o) => (
+            <option key={o.id} value={o.upi_id}>
+              {`${o.upi_id} — ${o.bank_name}${o.branch_name ? ` (${o.branch_name})` : ""}`}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-500">
+          UPI Transaction ID {required && <span className="text-rose-500">*</span>}
+        </label>
+        <Input
+          value={draft.upi_transaction_id}
+          onChange={(e) => onChange({ upi_transaction_id: e.target.value })}
+          className="h-9"
+          data-testid={`${testPrefix}-upi-txn`}
+        />
+      </div>
+    </>
   );
 };
 
@@ -4027,7 +4093,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       payment_mode: mode,
       ...(settlesNow ? {} : { amount: String(consultationPrice || ""), discount: "", balance_due_date: "" }),
     });
-    setPackageConfirmDraft({ upi_transaction_id: "", card_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null, cash_notes: {} });
+    setPackageConfirmDraft({ upi_id: "", upi_transaction_id: "", card_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null, cash_notes: {} });
   };
 
   // An Account Transfer records the account the money came out of and the reference it
@@ -4140,6 +4206,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
         return;
       }
       payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
+      // Which company UPI ID it was taken into, when the desk picked one. Sent only
+      // when it was: an empty pick means nobody said, not that it went nowhere.
+      if ((packageConfirmDraft.upi_id || "").trim()) payload.upi_id = packageConfirmDraft.upi_id.trim();
     } else if (mode === "card") {
       if (!attachCardDetails(payload, packageConfirmDraft)) return;
     } else if (BANK_DETAIL_MODES.includes(mode)) {
@@ -4396,6 +4465,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
         payload.denominations = countedNotes(detail.cash_notes);
       } else if (only.mode === "upi") {
         payload.upi_transaction_id = (detail.upi_transaction_id || "").trim();
+        if ((detail.upi_id || "").trim()) payload.upi_id = detail.upi_id.trim();
       } else if (only.mode === "card") {
         if (!attachCardDetails(payload, detail)) return;
       } else if (BANK_DETAIL_MODES.includes(only.mode)) {
@@ -4494,6 +4564,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       fee,
       amount: amount > 0 ? String(amount) : "",
       payment_mode: "cash",
+      upi_id: "",
       upi_transaction_id: "",
       card_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
@@ -4675,6 +4746,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       payload.denominations = countedNotes(draft.cash_notes);
     } else if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
+      if ((draft.upi_id || "").trim()) payload.upi_id = draft.upi_id.trim();
     } else if (mode === "card") {
       if (!attachCardDetails(payload, draft)) return;
     } else if (BANK_DETAIL_MODES.includes(mode)) {
@@ -5310,6 +5382,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       // agreed, alongside the date any balance was already promised for.
       discount: selectedLead.rehab_fee_payment_details?.discount_amount ?? "",
       balance_due_date: (selectedLead.rehab_fee_payment_details?.installments || []).find((i) => !i.paid)?.due_date || "",
+      upi_id: "",
       upi_transaction_id: "",
       card_transaction_id: "",
       account_number: "",
@@ -5443,6 +5516,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
         return;
       }
       payload.upi_transaction_id = rehabFeeDraft.upi_transaction_id.trim();
+      if ((rehabFeeDraft.upi_id || "").trim()) payload.upi_id = rehabFeeDraft.upi_id.trim();
     } else if (mode === "card") {
       if (!attachCardDetails(payload, rehabFeeDraft)) return;
     } else if (BANK_DETAIL_MODES.includes(mode)) {
@@ -5567,6 +5641,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     const settlesNow = SETTLED_NOW_MODES.includes(dietFeeDraft.payment_mode);
     setDietFeeDraft((d) => ({ ...d, amount: String(settlesNow ? round2(price - (Math.max(0, parseFloat(d.discount) || 0))) : price) }));
     setDietFeeConfirmDraft({
+      upi_id: "",
       upi_transaction_id: "",
       card_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "",
@@ -5633,6 +5708,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
           return;
         }
         payload.upi_transaction_id = dietFeeConfirmDraft.upi_transaction_id.trim();
+        if ((dietFeeConfirmDraft.upi_id || "").trim()) payload.upi_id = dietFeeConfirmDraft.upi_id.trim();
       } else if (mode === "card") {
         if (!attachCardDetails(payload, dietFeeConfirmDraft)) return;
       } else if (BANK_DETAIL_MODES.includes(mode)) {
@@ -9934,15 +10010,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     )}
 
                     {!packageConfirmDraft.payment_lines && mode === "upi" && (
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID <span className="text-rose-500">*</span></label>
-                        <Input
-                          value={packageConfirmDraft.upi_transaction_id}
-                          onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, upi_transaction_id: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-collect-fee-upi-txn"
-                        />
-                      </div>
+                      <UpiCollectFields
+                        draft={packageConfirmDraft}
+                        onChange={(patch) => setPackageConfirmDraft({ ...packageConfirmDraft, ...patch })}
+                        testPrefix="cons-collect-fee"
+                        required
+                      />
                     )}
 
                     {/* One field, because one field is all a card swipe leaves behind:
@@ -10376,15 +10449,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         same receipt, on the popup a Branch Admin fills at the desk with
                         the patient waiting. */}
                     {!picking && mode === "upi" && (
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                        <Input
-                          value={treatmentConfirmDraft.upi_transaction_id}
-                          onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, upi_transaction_id: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-upi-txn"
-                        />
-                      </div>
+                      <UpiCollectFields
+                        draft={treatmentConfirmDraft}
+                        onChange={(patch) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, ...patch })}
+                        testPrefix="cons-treatment-fee"
+                      />
                     )}
 
                     {/* One field, because one field is all a card swipe leaves behind:
@@ -10711,15 +10780,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     )}
 
                     {!partialCollectDraft.payment_lines && mode === "upi" && (
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                        <Input
-                          value={partialCollectDraft.upi_transaction_id}
-                          onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, upi_transaction_id: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-partial-collect-upi-txn"
-                        />
-                      </div>
+                      <UpiCollectFields
+                        draft={partialCollectDraft}
+                        onChange={(patch) => setPartialCollectDraft({ ...partialCollectDraft, ...patch })}
+                        testPrefix="cons-partial-collect"
+                      />
                     )}
 
                     {/* One field, because one field is all a card swipe leaves behind:
@@ -10927,10 +10992,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     )}
 
                     {mode === "upi" && (
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                        <Input value={rehabFeeDraft.upi_transaction_id} onChange={(e) => setRehabFeeDraft({ ...rehabFeeDraft, upi_transaction_id: e.target.value })} className="h-9" data-testid="cons-rehab-fee-upi-txn" />
-                      </div>
+                      <UpiCollectFields
+                        draft={rehabFeeDraft}
+                        onChange={(patch) => setRehabFeeDraft({ ...rehabFeeDraft, ...patch })}
+                        testPrefix="cons-rehab-fee"
+                      />
                     )}
 
                     {/* One field, because one field is all a card swipe leaves behind:
@@ -11174,10 +11240,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     )}
 
                     {mode === "upi" && (
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                        <Input value={dietFeeConfirmDraft.upi_transaction_id} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, upi_transaction_id: e.target.value })} className="h-9" data-testid="cons-diet-fee-upi-txn" />
-                      </div>
+                      <UpiCollectFields
+                        draft={dietFeeConfirmDraft}
+                        onChange={(patch) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, ...patch })}
+                        testPrefix="cons-diet-fee"
+                      />
                     )}
 
                     {/* One field, because one field is all a card swipe leaves behind:

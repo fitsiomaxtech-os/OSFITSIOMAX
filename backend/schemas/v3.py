@@ -657,6 +657,11 @@ class V3CollectPackagePaymentInput(BaseModel):
     # UPI
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
+    # Which of the company's own UPI IDs the money was collected into, picked from the
+    # accounts saved in Finance > UPI rather than typed. Optional: it is a fact about
+    # where the money landed, not about whether the payment happened, and the payments
+    # taken before the picker existed have none.
+    upi_id: Optional[str] = None
     # Card -- the transaction id the terminal printed, and nothing else. This used to
     # collect the same four bank fields as an Account Transfer, which no desk can fill in
     # honestly: the swipe hands back one reference and the card itself carries no IFSC.
@@ -771,6 +776,11 @@ class V3CollectTreatmentFeeInput(BaseModel):
     # UPI
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
+    # Which of the company's own UPI IDs the money was collected into, picked from the
+    # accounts saved in Finance > UPI rather than typed. Optional: it is a fact about
+    # where the money landed, not about whether the payment happened, and the payments
+    # taken before the picker existed have none.
+    upi_id: Optional[str] = None
     # Card -- the transaction id the terminal printed, and nothing else. This used to
     # collect the same four bank fields as an Account Transfer, which no desk can fill in
     # honestly: the swipe hands back one reference and the card itself carries no IFSC.
@@ -826,6 +836,11 @@ class V3MarkInstallmentPaidInput(BaseModel):
     # One installment can arrive in more than one tender as readily as a whole fee can
     # -- same shape and the same rules as the split on the collection above.
     payment_lines: Optional[List[V3PaymentLineInput]] = None
+    # Which of the company's own UPI IDs the money was collected into, picked from the
+    # accounts saved in Finance > UPI rather than typed. Optional: it is a fact about
+    # where the money landed, not about whether the payment happened, and the payments
+    # taken before the picker existed have none.
+    upi_id: Optional[str] = None
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
     # Card -- the transaction id the terminal printed, and nothing else. This used to

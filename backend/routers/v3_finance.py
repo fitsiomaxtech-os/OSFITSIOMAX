@@ -2392,13 +2392,20 @@ async def mark_installment_paid(
             # it onto every installment collected from here.
             txn = (payload.upi_transaction_id or "").strip()
             utr = (payload.upi_utr or "").strip()
+            # The company UPI ID it landed in, when the desk picked one -- same rule as
+            # the whole fee's, in build_payment_details (routers/v3_packages.py).
+            bank_upi = (payload.upi_id or "").strip()
             mode_fields = {"upi_transaction_id": txn}
             if utr:
                 mode_fields["upi_utr"] = utr
+            if bank_upi:
+                mode_fields["upi_id"] = bank_upi
             if txn or utr:
                 detail_suffix = f" · UPI txn {txn}"
                 if utr:
                     detail_suffix += f", UTR {utr}"
+                if bank_upi:
+                    detail_suffix += f" to {bank_upi}"
         elif mode == "card":
             # One field: the transaction id off the terminal. Same rule as a card payment
             # against the whole fee -- see build_payment_details in v3_packages.py, which
@@ -3876,6 +3883,57 @@ async def upload_bank_qr_image(
     with open(os.path.join(BANK_QR_UPLOAD_DIR, filename), "wb") as f:
         f.write(contents)
     return {"url": f"/api/v3/uploads/bank_qr/{filename}"}
+
+
+@router.get("/finance/bank-accounts/upi-options")
+async def list_upi_collect_options(
+    _: V3UserOut = Depends(v3_require_roles(
+        "branch_admin", "super_admin", "accountant", "business_dev", "physio", "head_physio", "nutritionist",
+    )),
+):
+    """The UPI IDs a desk can take money into, for the picker on every Collect popup.
+
+    Every branch's, not the caller's own. A patient standing at Parrys can be sent the QR
+    of whichever account the group wants that payment in -- the money lands in one company
+    account either way, and a desk that could only offer its own branch's ID had no way to
+    record a payment taken into another. So the whole list, each entry naming the branch it
+    belongs to, and the group's own accounts (saved against no branch) named as such.
+
+    Switched-off accounts are left out: an account closed at the bank, or a QR taken down
+    off a counter, is exactly the one nobody should be collecting into. The cards already
+    saved against it are untouched -- this list is what is offered next, not what was.
+
+    Separate from the board's own list_bank_accounts above because the two answer different
+    questions: that one is the Finance desk's grid (one branch at a time, active or not,
+    every field of the record), this one is a dropdown at a counter. Which is also why the
+    role list is wide -- every desk that collects a fee needs it -- while what it returns is
+    narrow: the account number and IFSC are nobody's business at the point of payment.
+    """
+    rows = await v3_col("bank_accounts").find(
+        {}, {"_id": 0, "id": 1, "branch_id": 1, "bank_name": 1, "upi_id": 1, "holder_name": 1, "qr_image_url": 1, "is_active": 1},
+    ).sort("created_at", 1).to_list(500)
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    names = {b["id"]: b.get("branch_name", "") for b in branches}
+    out = [
+        {
+            "id": row.get("id"),
+            "upi_id": row.get("upi_id") or "",
+            "bank_name": row.get("bank_name") or "",
+            "holder_name": row.get("holder_name") or "",
+            "qr_image_url": row.get("qr_image_url") or "",
+            "branch_id": row.get("branch_id") or "",
+            # An account saved against no branch belongs to the group, and says so rather
+            # than sitting in the list under a blank.
+            "branch_name": names.get(row.get("branch_id") or "", "") or "All Branches",
+        }
+        for row in rows
+        # Saved before the switch existed means collecting -- same reading as the board's.
+        if row.get("is_active", True) and (row.get("upi_id") or "").strip()
+    ]
+    # Branch by branch, and by bank within a branch, so the desk scans the list the way the
+    # counter thinks: whose account, then which bank.
+    out.sort(key=lambda r: (r["branch_name"].lower(), r["bank_name"].lower()))
+    return out
 
 
 @router.get("/finance/bank-accounts")

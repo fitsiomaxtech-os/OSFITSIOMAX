@@ -513,6 +513,11 @@ export const cancelCashHandover = async (id) => (await api.post(`/finance/cash-h
 // scanned by. The image goes up on its own, ahead of Save, so the popup can show it
 // before anything is committed.
 export const listBankAccounts = async (params = {}) => (await api.get("/finance/bank-accounts", { params })).data;
+// The same accounts read as a picker at a counter: every branch's active UPI ID, not just
+// the caller's own branch's, since a desk can be told to take a payment into any of the
+// group's accounts. Open to every desk that collects a fee, and it hands back only what a
+// counter needs — the UPI ID, the bank, and whose branch it is.
+export const listUpiCollectOptions = async () => (await api.get("/finance/bank-accounts/upi-options")).data;
 export const createBankAccount = async (payload) => (await api.post("/finance/bank-accounts", payload)).data;
 export const updateBankAccount = async (id, payload) => (await api.put(`/finance/bank-accounts/${id}`, payload)).data;
 export const setBankAccountStatus = async (id, isActive) => (await api.post(`/finance/bank-accounts/${id}/status`, { is_active: isActive })).data;
