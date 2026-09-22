@@ -7,6 +7,7 @@ from typing import Optional
 
 from database import v3_col
 from deps import collapse_duplicate_experts, works_org_wide
+from utils import clinic_today
 
 
 def _ids(physio_id) -> list:
@@ -214,6 +215,34 @@ async def covering_lead_ids(ids: list) -> list:
             "lead_id", {"physio_id": {"$in": ids}, "covered_for_physio_id": {"$exists": True}},
         )
     return list(dict.fromkeys(out))
+
+
+async def review_cover_holders(lead_ids: list) -> dict:
+    """Leads whose review is with a covering physio right now: {lead_id: physio_id}.
+
+    A patient stays on their own physio's caseload while a colleague covers them, but the
+    review is raised by whoever is treating them. Read off the patient's latest day up to
+    today: where that day was handed over for an absence, the physio it was handed to holds
+    the review. Otherwise the lead is left out, and the review stays with their own physio.
+    """
+    if not lead_ids:
+        return {}
+    cutoff = clinic_today() + "￿"
+    latest: dict = {}
+    for collection in ("sessions", "rehab_sessions"):
+        rows = await v3_col(collection).find(
+            {"lead_id": {"$in": lead_ids}, "slot_time": {"$nin": [None, ""], "$lte": cutoff}},
+            {"_id": 0, "lead_id": 1, "slot_time": 1, "physio_id": 1, "covered_for_physio_id": 1},
+        ).to_list(20000)
+        for row in rows:
+            held = latest.get(row["lead_id"])
+            if held is None or (row.get("slot_time") or "") > (held.get("slot_time") or ""):
+                latest[row["lead_id"]] = row
+    return {
+        lead_id: row["physio_id"]
+        for lead_id, row in latest.items()
+        if row.get("covered_for_physio_id") and row.get("physio_id")
+    }
 
 
 async def resolve_consultant_doctor(user_id: str, role: str = "") -> Optional[dict]:

@@ -26,7 +26,7 @@ from utils import now_iso, active_doctor_query
 from deps import v3_require_roles, works_org_wide
 from schemas.v3 import V3UserOut
 
-from physio_scope import physio_lead_ids, resolve_physio_doctor
+from physio_scope import physio_lead_ids, resolve_physio_doctor, covering_lead_ids, review_cover_holders
 
 router = APIRouter(prefix="/api/v3")
 
@@ -436,8 +436,22 @@ async def physio_reviews(
     # Off the shared helper, so a rehab patient is reviewable by the physio treating them.
     # This read the sessions collection alone, which holds treatment days and nothing else.
     lead_ids = await physio_lead_ids(ids)
+    # While a colleague is absent, the review goes with the patient to whoever is covering
+    # them: an absent physio is not in to raise it, and the cover is the one treating. So a
+    # patient of theirs held by a cover leaves this list, and one this physio is covering
+    # joins it. See review_cover_holders.
+    covering = [i for i in await covering_lead_ids(ids) if i not in lead_ids]
+    holders = await review_cover_holders(lead_ids + covering)
+    lead_ids = [
+        i for i in lead_ids + covering
+        if (holders[i] in ids if i in holders else i not in covering)
+    ]
     leads = await v3_col("leads").find({"id": {"$in": lead_ids}}, {"_id": 0}).to_list(500)
-    existing = await v3_col("reviews").find({"physio_id": {"$in": ids}}, {"_id": 0}).to_list(500)
+    # Every review on these patients, not only the ones this physio raised: a review raised
+    # by the other physio still covers its week, and missing it would offer the week again.
+    existing = await v3_col("reviews").find(
+        {"$or": [{"physio_id": {"$in": ids}}, {"lead_id": {"$in": lead_ids}}]}, {"_id": 0},
+    ).to_list(2000)
     by_lead: dict = {}
     for r in existing:
         by_lead.setdefault(r["lead_id"], []).append(r)
