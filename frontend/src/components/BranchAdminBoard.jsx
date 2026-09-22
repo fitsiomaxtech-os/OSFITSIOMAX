@@ -668,8 +668,12 @@ const ARM_LIST_WIDTHS = {
   },
 };
 
-// Which of the six get a direct slot on the phone bar. The other three go behind More.
-const BOTTOM_NAV_KEYS = ["pipeline", "review", "consultations"];
+// Which tabs get a direct slot on the phone bar. The rest go behind More.
+//
+// Consultation sits between Leads and Review because that is the order the branch works
+// them in -- a lead is picked up, consulted, then reviewed -- and because it was the one
+// list a Branch Admin opens hourly that still cost two taps behind More.
+const BOTTOM_NAV_KEYS = ["pipeline", "branch_consultation", "review", "consultations"];
 
 // The two desks that only exist in a room. Zumba is a class taught in the branch's studio
 // in two fixed morning slots, and Fitness is the gym's membership roll — who is training,
@@ -1585,9 +1589,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // be answering a question about the viewer.
   ].filter((t) => !(ROOM_ONLY_TABS.includes(t.key) && runsWithoutARoom(currentUser?.role)));
 
-  // The phone bar carries three of the six plus More; the desktop strip above still shows
-  // all six. Both halves come off VIEW_TABS, so a tab added there lands in one or the
-  // other rather than being dropped.
+  // The phone bar carries four of them plus More; the desktop strip above still shows
+  // every one. Both halves come off VIEW_TABS, so a tab added there lands in one or the
+  // other rather than being dropped -- and in VIEW_TABS order, which is what puts
+  // Consultation between Leads and Review on the bar without a second list to keep in step.
   const bottomTabs = VIEW_TABS.filter((t) => BOTTOM_NAV_KEYS.includes(t.key));
   const moreTabs = VIEW_TABS.filter((t) => !BOTTOM_NAV_KEYS.includes(t.key));
 
@@ -2675,10 +2680,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           two fixed bottom bars fighting for the same spot was the actual bug). The top
           strip scrolls sideways, which left Accountant Manage and Store behind a swipe.
 
-          Three direct slots and a More sheet, rather than all six across the bar: six
-          gave each tab about 60px, which is why every label had to be abbreviated to fit
-          in the first place. Columns are counted rather than hardcoded, so a tab added to
-          VIEW_TABS re-divides the bar instead of leaving a gap. */}
+          Four direct slots and a More sheet, rather than every tab across the bar: all of
+          them would give each about 30px, which is why the labels are abbreviated at all.
+          Columns are counted rather than hardcoded, so a tab added to BOTTOM_NAV_KEYS
+          re-divides the bar instead of leaving a gap. */}
       {!embedded && (
       <nav
         className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-slate-500/85 md:hidden"

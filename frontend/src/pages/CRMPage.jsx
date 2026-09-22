@@ -49,6 +49,14 @@ import {
 } from "@/lib/api";
 import { toast, Toaster } from "@/components/ui/sonner";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 // Everyone's own clock, in the bar above every board. Static rather than one of the
 // lazy boards below: it is on screen for every role from the first paint, so splitting
 // it would only add a round trip to the one control that is always there.
@@ -957,7 +965,89 @@ export const CRMPage = ({ auth, onLogout }) => {
               </div>
             </div>
           )}
-          <div className={`flex flex-wrap items-center justify-between gap-2 ${showPhysioBoard ? "hidden sm:flex" : ""}`}>
+          {/* Branch Admin, mobile only — same trade the Physio header makes above, for the
+              same reason. "Branch Admin" is the one thing the person holding the phone
+              already knows; who they are signed in as and which branch they are signed in
+              to is what they cannot see, and on a shared handset it is the answer that
+              decides whether the next tap goes on the right branch's lead.
+
+              The right-hand cluster is the four controls that do something from here —
+              clock, money, post, account — and nothing else. Logout used to sit beside
+              them as a fifth icon; it now lives under the avatar, where an account action
+              belongs, which also buys the two lines on the left the width to be read. */}
+          {showBranchBoard && (
+            <div className="flex items-center justify-between gap-2 sm:hidden" data-testid="branch-mobile-header">
+              <div className="flex min-w-0 items-center gap-2">
+                <img src={LOGO_URL} alt="Fitsiomax" className="h-9 w-9 shrink-0 rounded-lg object-contain" data-testid="branch-mobile-header-logo" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900" data-testid="branch-mobile-header-name">{auth.user.full_name}</p>
+                  {/* The branch, or the role where there is no branch to name — an org-level
+                      account mounting this board would otherwise get a blank second line. */}
+                  <p className="truncate text-[10px] font-semibold tracking-wide text-sky-600" data-testid="branch-mobile-header-branch">
+                    {myBranchName || roleLabel}
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <ClockWidget />
+                {/* Clients whose sessions have run out owing money. canDecide, because a
+                    Branch Admin is one of the two roles that can act on it — the same
+                    prop the desktop header hands it below. */}
+                {canSeeSessionPayments && <SessionPaymentBell canDecide />}
+                {canReadFeedback && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFeedback(true)}
+                    className="relative shrink-0 rounded-md p-2 text-slate-500 transition hover:bg-amber-50 hover:text-amber-600"
+                    aria-label={feedbackUnread > 0 ? `${feedbackUnread} new client feedback` : "Client feedback"}
+                    data-testid="branch-mobile-header-feedback"
+                  >
+                    <Bell className="h-5 w-5" />
+                    {feedbackUnread > 0 && (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white"
+                        data-testid="branch-mobile-header-feedback-count"
+                      >
+                        {feedbackUnread > 99 ? "99+" : feedbackUnread}
+                      </span>
+                    )}
+                  </button>
+                )}
+                {/* The account menu, and the only place logout is reachable from this
+                    header. The label above the item is not decoration: it is what makes
+                    the menu an account menu rather than a bare button, so there is
+                    something naming the account you are about to sign out of. */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md p-1 hover:bg-slate-50"
+                      aria-label="Account"
+                      data-testid="branch-mobile-header-profile"
+                    >
+                      <EmployeeAvatar employee={auth.user} size={28} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56" data-testid="branch-mobile-header-account-menu">
+                    <DropdownMenuLabel className="pb-1">
+                      <span className="block truncate text-sm font-semibold leading-tight text-slate-900">{auth.user.full_name}</span>
+                      <span className="block truncate text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                        {roleLabel}{myBranchName && ` · ${myBranchName}`}
+                      </span>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={logout} className="text-rose-600 focus:text-rose-700" data-testid="branch-mobile-header-logout">
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          )}
+          {/* Stood down below sm wherever one of the phone headers above has taken over,
+              so the two can never both be on screen. */}
+          <div className={`flex flex-wrap items-center justify-between gap-2 ${showPhysioBoard || showBranchBoard ? "hidden sm:flex" : ""}`}>
             <div className="flex min-w-0 items-center gap-2 sm:gap-4">
               <img src={LOGO_URL} alt="Fitsiomax" className="h-9 w-9 shrink-0 rounded-lg object-contain sm:h-14 sm:w-14" data-testid="header-left-logo" />
               <div className="min-w-0">
