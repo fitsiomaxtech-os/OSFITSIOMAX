@@ -591,6 +591,80 @@ async def branch_reviews(
     }
 
 
+async def review_bookings(date_prefix: str, exclude_review_id: Optional[str] = None) -> List[dict]:
+    """Reviews holding a Consultant's slot, shaped like the appointment rows they sit beside.
+
+    A review sent for a time takes that hour off the Consultant's calendar the same way a
+    consultation does. The pickers read taken hours off appointments alone, so the slot a
+    review had just been given was still offered to the next review and to consultations.
+    `date_prefix` is a date or a month ("2026-09-23" / "2026-09"); the review being
+    reassigned is left out so its own slot stays selectable.
+    """
+    query: dict = {
+        "status": {"$in": [SENT, COMPLETED]},
+        "head_physio_id": {"$nin": ["", None]},
+        "review_date": {"$regex": f"^{date_prefix}"},
+        "review_time": {"$nin": ["", None]},
+    }
+    if exclude_review_id:
+        query["id"] = {"$ne": exclude_review_id}
+    rows = await v3_col("reviews").find(
+        query,
+        {"_id": 0, "id": 1, "head_physio_id": 1, "review_date": 1, "review_time": 1,
+         "review_duration": 1, "lead_id": 1, "lead_name": 1},
+    ).to_list(5000)
+    return [
+        {
+            "doctor_id": r["head_physio_id"],
+            "slot_time": f"{r['review_date']}T{r['review_time']}",
+            "duration": r.get("review_duration"),
+            "lead_id": r.get("lead_id"),
+            "lead_name": r.get("lead_name"),
+            "review_id": r.get("id"),
+        }
+        for r in rows
+    ]
+
+
+def _clock(hhmm: str) -> Optional[int]:
+    try:
+        h, m = (hhmm or "").split(":")[:2]
+        return int(h) * 60 + int(m)
+    except (ValueError, AttributeError):
+        return None
+
+
+async def consultant_slot_clash(
+    doctor_id: str, slot_time: str, duration: Optional[int] = None,
+    exclude_review_id: Optional[str] = None, exclude_lead_id: Optional[str] = None,
+    reviews_only: bool = False,
+) -> Optional[dict]:
+    """Whatever already holds this Consultant across `slot_time` — a consultation or a
+    review — or None. Overlap rather than an exact start, so a 45-minute review at 10:15
+    also blocks a booking at 10:30. `reviews_only` is for the consultation bookings, which
+    already check appointments against each other their own way."""
+    day, _, hhmm = (slot_time or "").partition("T")
+    start = _clock(hhmm)
+    if not day or start is None:
+        return None
+    length = int(duration or 30)
+    appts = [] if reviews_only else await v3_col("appointments").find(
+        {"doctor_id": doctor_id, "status": "new_appointment", "slot_time": {"$regex": f"^{day}T"}},
+        {"_id": 0, "slot_time": 1, "duration": 1, "lead_id": 1, "lead_name": 1},
+    ).to_list(500)
+    held = [
+        *[a for a in appts if not (exclude_lead_id and a.get("lead_id") == exclude_lead_id)],
+        *[r for r in await review_bookings(day, exclude_review_id) if r["doctor_id"] == doctor_id],
+    ]
+    for row in held:
+        t = _clock((row.get("slot_time") or "").split("T")[-1])
+        if t is None:
+            continue
+        if start < t + int(row.get("duration") or 30) and t < start + length:
+            return row
+    return None
+
+
 @router.post("/branch-admin/reviews/{review_id}/send")
 async def branch_send_review(
     review_id: str,
@@ -610,6 +684,20 @@ async def branch_send_review(
         date.fromisoformat(payload.review_date)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="review_date must be YYYY-MM-DD") from exc
+
+    # One patient per Consultant hour: a slot another review or a consultation already
+    # holds is refused, not double-booked.
+    if payload.review_time:
+        clash = await consultant_slot_clash(
+            hp["id"], f"{payload.review_date}T{payload.review_time}", payload.review_duration,
+            exclude_review_id=review_id,
+        )
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{payload.review_time} is already booked with {hp['full_name']}"
+                       + (f" for {clash.get('lead_name')}" if clash.get("lead_name") else ""),
+            )
 
     now = now_iso()
     updates = {

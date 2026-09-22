@@ -118,11 +118,11 @@ export const BranchReviewPanel = ({ branchId }) => {
     if (!sendDraft || !branchId) return;
     const month = `${sendMonth.y}-${String(sendMonth.m + 1).padStart(2, "0")}`;
     let cancelled = false;
-    getAvailableDates(branchId, month)
+    getAvailableDates(branchId, month, undefined, sendDraft.review?.id)
       .then((res) => { if (!cancelled) setOpenDates(res?.dates || {}); })
       .catch(() => { if (!cancelled) setOpenDates({}); });
     return () => { cancelled = true; };
-  }, [sendDraft ? true : false, sendMonth.y, sendMonth.m, branchId]);
+  }, [sendDraft ? true : false, sendDraft?.review?.id, sendMonth.y, sendMonth.m, branchId]);
 
   // Head Physios free on the picked date, each carrying their own open times — so
   // choosing one reveals their slots without a second request.
@@ -130,15 +130,22 @@ export const BranchReviewPanel = ({ branchId }) => {
     if (!sendDraft?.review_date || !branchId) return;
     let cancelled = false;
     setHpAvail((p) => ({ ...p, loading: true }));
-    getAvailableExperts(branchId, sendDraft.review_date)
+    getAvailableExperts(branchId, sendDraft.review_date, undefined, undefined, sendDraft.review?.id)
       .then((res) => { if (!cancelled) setHpAvail({ experts: res?.experts || [], loading: false }); })
       .catch(() => { if (!cancelled) setHpAvail({ experts: [], loading: false }); });
     return () => { cancelled = true; };
-  }, [sendDraft?.review_date, branchId]);
+  }, [sendDraft?.review_date, sendDraft?.review?.id, branchId]);
 
+  // The Consultant's whole day: open times, and the ones a consultation or another review
+  // already holds, marked as booked so the Branch Admin sees why they cannot be picked.
   const sendSlots = useMemo(() => {
     if (!sendDraft?.head_physio_id) return [];
-    return (hpAvail.experts.find((d) => d.id === sendDraft.head_physio_id)?.free_slots) || [];
+    const doc = hpAvail.experts.find((d) => d.id === sendDraft.head_physio_id);
+    if (!doc) return [];
+    return [
+      ...(doc.free_slots || []),
+      ...(doc.booked_slots || []).map((s) => ({ ...s, booked: true })),
+    ].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }, [hpAvail.experts, sendDraft?.head_physio_id]);
 
   const submitSend = async () => {
@@ -564,6 +571,19 @@ export const BranchReviewPanel = ({ branchId }) => {
                 ) : (
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="branch-review-slots">
                     {sendSlots.map((s) => {
+                      if (s.booked) {
+                        return (
+                          <div
+                            key={`booked-${s.slot_time}`}
+                            className="cursor-not-allowed rounded-lg border-2 border-rose-200 bg-rose-50 px-2 py-2.5 text-center text-rose-700"
+                            title={s.lead_name ? `Booked for ${s.lead_name}` : "Booked"}
+                            data-testid={`branch-review-slot-booked-${s.time}`}
+                          >
+                            <span className="block text-base font-bold line-through decoration-rose-300">{to12h(s.time)}</span>
+                            <span className="block truncate text-[11px] font-semibold">Booked{s.lead_name ? ` · ${s.lead_name}` : ""}</span>
+                          </div>
+                        );
+                      }
                       const active = sendDraft.review_time === s.time;
                       return (
                         <button

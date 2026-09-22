@@ -4779,10 +4779,13 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                               <span className="min-w-0">
                                 <span className="block truncate text-base font-bold text-slate-400 line-through decoration-slate-400">{to12h(s.time)}</span>
                                 <span className="block truncate text-[11px] font-semibold text-slate-400">
-                                  Booked{s.lead_name ? ` · ${s.lead_name}` : ""}
+                                  {s.review_id ? "Review" : "Booked"}{s.lead_name ? ` · ${s.lead_name}` : ""}
                                 </span>
                               </span>
-                              <button
+                              {/* A review is moved from Review > Reassign, not from here: the
+                                  pencil reschedules a consultation, and this patient has none
+                                  in this hour. */}
+                              {!s.review_id && <button
                                 type="button"
                                 onClick={() => openSlotEdit(s)}
                                 className="shrink-0 rounded-md border border-slate-300 bg-white p-1.5 text-slate-500 transition hover:border-teal-400 hover:bg-teal-50 hover:text-teal-600"
@@ -4790,7 +4793,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                                 data-testid={`branch-appt-slot-edit-${s.time}`}
                               >
                                 <Pencil className="h-3.5 w-3.5" />
-                              </button>
+                              </button>}
                             </div>
                           );
                         }

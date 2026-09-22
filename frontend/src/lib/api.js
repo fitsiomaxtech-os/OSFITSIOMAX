@@ -275,8 +275,8 @@ export const getConsultantSlots = async (branchId, doctorId, date) => (await api
 export const createConsultAppointment = async (branchId, payload) => (await api.post(`/branch-admin/${branchId}/consult-appointments`, payload)).data;
 export const updateConsultAppointment = async (apptId, payload) => (await api.patch(`/branch-admin/consult-appointments/${apptId}`, payload)).data;
 export const cancelConsultAppointment = async (apptId) => (await api.post(`/branch-admin/consult-appointments/${apptId}/cancel`)).data;
-export const getAvailableExperts = async (branchId, date, time, leadId) => (await api.get(`/branch-admin/available-experts/${branchId}`, { params: { date, ...(time ? { time } : {}), ...(leadId ? { lead_id: leadId } : {}) } })).data;
-export const getAvailableDates = async (branchId, month, leadId) => (await api.get(`/branch-admin/available-dates/${branchId}`, { params: { month, ...(leadId ? { lead_id: leadId } : {}) } })).data;
+export const getAvailableExperts = async (branchId, date, time, leadId, reviewId) => (await api.get(`/branch-admin/available-experts/${branchId}`, { params: { date, ...(time ? { time } : {}), ...(leadId ? { lead_id: leadId } : {}), ...(reviewId ? { review_id: reviewId } : {}) } })).data;
+export const getAvailableDates = async (branchId, month, leadId, reviewId) => (await api.get(`/branch-admin/available-dates/${branchId}`, { params: { month, ...(leadId ? { lead_id: leadId } : {}), ...(reviewId ? { review_id: reviewId } : {}) } })).data;
 // The other patients at this branch holding a consultation, for the Reschedule dialog's
 // SWAP tab. `leadId` is the one being swapped out of, and is left out of the answer.
 export const getSwapCandidates = async (branchId, leadId) => (await api.get(`/branch-admin/swap-candidates/${branchId}`, { params: { lead_id: leadId } })).data;

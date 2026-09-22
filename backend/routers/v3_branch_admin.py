@@ -35,7 +35,7 @@ from routers.v3_lead_documents import leads_with_prescription
 # Whose Head Physio review is still owed. Imported rather than re-derived: the rule for
 # when a course is over lives with the reviews it is waiting on, and a second copy here
 # is how the boards came to disagree about Completed in the first place.
-from routers.v3_reviews import leads_awaiting_review
+from routers.v3_reviews import leads_awaiting_review, review_bookings, consultant_slot_clash
 # What this patient has actually paid, and to which branch. Imported rather than re-derived
 # for the same reason as the two above: parsing an amount out of an activity row and
 # deciding which branch owns it are finance's rules, and a second copy here is how the
@@ -766,6 +766,10 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             },
             {"_id": 0, "lead_name": 1},
         )
+        # A review sent to this Consultant for the hour holds it as well.
+        clash = clash or await consultant_slot_clash(
+            payload.physio_id, slot_time, await consultation_slot_minutes(), reviews_only=True,
+        )
         if clash:
             raise HTTPException(
                 status_code=409,
@@ -1254,6 +1258,8 @@ def _consultant_day(expert: dict, date_str: str, bookings: list, slot_minutes: O
                 "duration": t_end - t_start,
                 "lead_name": b.get("lead_name"),
                 "lead_id": b.get("lead_id"),
+                # Set when the hour is held by a review rather than a consultation.
+                "review_id": b.get("review_id"),
             }
             for t_start, t_end, b in sorted(taken, key=lambda x: x[0])
         ],
@@ -1267,6 +1273,7 @@ async def v3_available_experts(
     date: str,
     time: Optional[str] = None,
     lead_id: Optional[str] = None,
+    review_id: Optional[str] = None,
     _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Head Physios at this branch who can take a consultation on the given date
@@ -1311,6 +1318,10 @@ async def v3_available_experts(
     # pencil moves a taken slot with a POST against the lead holding it.
     bookings_by_doc: Dict[str, list] = {}
     own_by_doc: Dict[str, dict] = {}
+    # Reviews sent to a Consultant hold their hour too. The review being reassigned
+    # (review_id) is left out, so the slot it already sits in can be picked again.
+    for r in await review_bookings(date, review_id):
+        bookings_by_doc.setdefault(r["doctor_id"], []).append(r)
     for r in booked_rows:
         # A slot this same lead already holds isn't "taken" as far as they're concerned —
         # reopening their own booking has to keep offering the slot they're sitting in,
@@ -1372,6 +1383,7 @@ async def v3_available_dates(
     branch_id: str,
     month: str = Query(..., description="YYYY-MM"),
     lead_id: Optional[str] = None,
+    review_id: Optional[str] = None,
     _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev", "head_physio")),
 ):
     """Every date in `month` that still has a free published Head Physio slot, and how many.
@@ -1399,6 +1411,9 @@ async def v3_available_dates(
     # This lead's own bookings don't count against it — the day it already sits on has to
     # stay reachable so the appointment can be seen and moved.
     bookings: Dict[tuple, list] = {}
+    # Reviews sent to a Consultant take their hour as well — see available-experts.
+    for r in await review_bookings(month, review_id):
+        bookings.setdefault((r["doctor_id"], r["slot_time"].split("T")[0]), []).append(r)
     for r in booked_rows:
         if lead_id and r.get("lead_id") == lead_id:
             continue
@@ -1772,6 +1787,10 @@ async def _rebook_consultation_slot(
             "lead_id": {"$ne": lead_id},
         },
         {"_id": 0, "lead_name": 1},
+    )
+    # A review sent to this Consultant for the hour holds it as well.
+    clash = clash or await consultant_slot_clash(
+        physio["id"], slot_time, await consultation_slot_minutes(), reviews_only=True,
     )
     if clash:
         raise HTTPException(
