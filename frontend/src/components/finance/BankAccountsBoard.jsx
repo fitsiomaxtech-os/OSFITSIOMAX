@@ -66,6 +66,7 @@ const EMPTY_FORM = {
   bank_branch_name: "",
   qr_image_url: "",
   is_active: true,
+  branch_id: "",
 };
 
 // Every field the popup asks for, with the four that Save is refused without starred —
@@ -79,9 +80,16 @@ const FieldLabel = ({ icon: Icon, children, required }) => (
   </label>
 );
 
-const BankFormDialog = ({ account, branchId, branchName, onClose, onSaved }) => {
+const BankFormDialog = ({ account, branchId, branchName, branches, onClose, onSaved }) => {
   const editing = !!account;
-  const [form, setForm] = useState(() => (account ? { ...EMPTY_FORM, ...account } : { ...EMPTY_FORM }));
+  // Which branch's counter this account is for. Pre-picked from the card being edited,
+  // or from whichever branch the board was opened on — including the section's own Add
+  // Bank, which is the whole point of that button.
+  const [form, setForm] = useState(() =>
+    account
+      ? { ...EMPTY_FORM, ...account }
+      : { ...EMPTY_FORM, branch_id: branchId || "" },
+  );
   // A bank already saved under a name this list does not carry opens on "Other" with
   // that name still in the box, so editing such a card does not silently blank it.
   const [otherBank, setOtherBank] = useState(
@@ -120,11 +128,9 @@ const BankFormDialog = ({ account, branchId, branchName, onClose, onSaved }) => 
     if (missing) { toast.error(`${missing[1]} is required`); return; }
     setSaving(true);
     try {
-      const payload = { ...form };
-      // Scope travels only on the first save: the pill row picks which book a new
-      // account is added to, and re-reading it on an edit would move a card to
-      // whichever branch happened to be selected when someone fixed a typo.
-      if (!editing) payload.branch_id = branchId || null;
+      // The branch comes off the form's own field, never off the pill row: a card
+      // edited while some other branch is selected must not follow that selection.
+      const payload = { ...form, branch_id: form.branch_id || null };
       if (editing) await updateBankAccount(account.id, payload);
       else await createBankAccount(payload);
       toast.success(editing ? "Bank account updated" : "Bank account saved");
@@ -155,6 +161,24 @@ const BankFormDialog = ({ account, branchId, branchName, onClose, onSaved }) => 
         </div>
 
         <div className="grid gap-5 px-6 py-5 md:grid-cols-2">
+          {/* Which branch collects into it. A branch can bank with more than one, and the
+              same bank turns up at several branches, so this is what tells two otherwise
+              identical cards apart. Shown even with a branch already picked above the
+              board, so the card says whose it is rather than leaving it to be inferred
+              from which pill happened to be lit when it was saved. */}
+          <div className="md:col-span-2">
+            <FieldLabel icon={Building2}>Branch</FieldLabel>
+            <select
+              value={form.branch_id || ""}
+              onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value }))}
+              className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700"
+              data-testid="finance-bank-branch"
+            >
+              <option value="">All Branches (group account)</option>
+              {(branches || []).map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+            </select>
+          </div>
+
           <div>
             <FieldLabel icon={Landmark} required>Bank Name</FieldLabel>
             <select
@@ -423,18 +447,114 @@ const Row = ({ label, value }) => (
   </div>
 );
 
+// One saved account. Lifted out of the grid it used to be written inside because the
+// board now draws two layouts over the same card — one branch's accounts under a picked
+// branch, every branch's under its own heading otherwise — and a card written twice is
+// a card that gets fixed once.
+const BankCard = ({ account: acc, onView, onEdit, onDelete, onToggle }) => (
+  <div
+    className={`flex flex-col rounded-xl border p-4 shadow-sm transition ${
+      acc.is_active ? "border-slate-200 bg-white" : "border-rose-200 bg-rose-50/40"
+    }`}
+    data-testid={`finance-bank-card-${acc.id}`}
+  >
+    <div className="min-w-0">
+      <p className={`truncate text-sm font-bold ${acc.is_active ? "text-slate-900" : "text-rose-900"}`} title={acc.bank_name}>{acc.bank_name}</p>
+      <p className="truncate text-xs text-slate-500" title={acc.holder_name}>{acc.holder_name}</p>
+    </div>
+
+    <div className="mt-3 flex items-center justify-center rounded-lg bg-slate-50 p-2">
+      {acc.qr_image_url ? (
+        <img
+          src={acc.qr_image_url}
+          alt={`${acc.bank_name} QR`}
+          className={`h-28 w-28 object-contain transition ${acc.is_active ? "" : "opacity-40 grayscale"}`}
+        />
+      ) : (
+        <QrCode className="h-16 w-16 text-slate-200" />
+      )}
+    </div>
+
+    <div className="mt-3 space-y-1.5">
+      <Row label="UPI ID" value={acc.upi_id} />
+      <Row label="A/c No." value={acc.account_number} />
+      <Row label="IFSC" value={acc.ifsc_code} />
+      <Row label="Branch" value={acc.bank_branch_name} />
+    </div>
+
+    {/* On or off, right on the card: whether this account is being offered for payment
+        is the one thing about it that changes without anything else about it changing,
+        so it does not go behind Edit. */}
+    <div className={`mt-3 flex items-center justify-between gap-2 border-t pt-3 ${acc.is_active ? "border-slate-100" : "border-rose-100"}`}>
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+          acc.is_active ? "bg-emerald-50 text-emerald-700" : "bg-rose-100 text-rose-700"
+        }`}
+        data-testid={`finance-bank-status-${acc.id}`}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${acc.is_active ? "bg-emerald-500" : "bg-rose-500"}`} />
+        {acc.is_active ? "Active" : "Inactive"}
+      </span>
+      <Switch
+        checked={!!acc.is_active}
+        onCheckedChange={onToggle}
+        className="data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-rose-500"
+        aria-label={acc.is_active ? "Deactivate this account" : "Activate this account"}
+        data-testid={`finance-bank-toggle-${acc.id}`}
+      />
+    </div>
+
+    {/* The three things there are to do with a saved card. `mt-auto` holds this row to
+        the foot of every card in the row, so cards of different heights — one with a
+        bank branch typed in, one without — still line their buttons up. Delete last and
+        apart, in red, since it is the one that cannot be taken back. */}
+    <div className="mt-auto flex items-center gap-2 pt-3">
+      <button
+        type="button"
+        onClick={onView}
+        className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+        data-testid={`finance-bank-view-${acc.id}`}
+      >
+        <Eye className="h-3.5 w-3.5" /> View
+      </button>
+      <button
+        type="button"
+        onClick={onEdit}
+        className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+        data-testid={`finance-bank-edit-${acc.id}`}
+      >
+        <Pencil className="h-3.5 w-3.5" /> Edit
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+        data-testid={`finance-bank-delete-${acc.id}`}
+      >
+        <Trash2 className="h-3.5 w-3.5" /> Delete
+      </button>
+    </div>
+  </div>
+);
+
+const GRID = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+const GROUP_KEY = "__group__";
+
 /**
  * Finance > UPI: the bank accounts this group collects into, four to a row, each with
  * the QR a patient scans on it.
  *
- * Scoped by the branch pill row above the board, the same way Expense is: a branch
- * picked shows that branch's own accounts and adds to them, All Branches shows every
- * account there is and adds one that belongs to the group rather than to a counter.
+ * Branch by branch by default. A branch banks with more than one — Indian Bank and SBI
+ * at the same counter — and the same bank turns up again at the next branch, so one
+ * flat grid of look-alike cards stops being readable past the first few. With no branch
+ * picked the board lays a heading per branch over that branch's own cards, every branch
+ * named whether or not it has an account yet, each heading carrying the Add Bank that
+ * fills it in. Picking a branch above the board narrows to that one.
  */
-export const BankAccountsBoard = ({ branchId, branchName }) => {
+export const BankAccountsBoard = ({ branchId, branchName, branches }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [dialog, setDialog] = useState(null); // { account } — the Add/Edit popup
+  const [dialog, setDialog] = useState(null); // { account, branchId } — the Add/Edit popup
   const [viewing, setViewing] = useState(null); // the card being read, full size
   const [deleting, setDeleting] = useState(null); // the card awaiting its confirmation
   const [removing, setRemoving] = useState(false);
@@ -481,136 +601,119 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
     }
   };
 
+  const cardProps = (acc) => ({
+    account: acc,
+    onView: () => setViewing(acc),
+    onEdit: () => setDialog({ account: acc }),
+    onDelete: () => setDeleting(acc),
+    onToggle: () => toggleStatus(acc),
+  });
+
+  // One section per branch, in the order the pill row above the board names them, with
+  // the group's own accounts first where there are any. Every branch is listed even with
+  // nothing saved against it: which branches still have no account is what this board is
+  // read for as often as what the saved ones say, and a branch simply missing from the
+  // page cannot answer that.
+  const groupAccounts = rows.filter((r) => !r.branch_id);
+  const sections = branchId
+    ? []
+    : [
+        ...(groupAccounts.length
+          ? [{ key: GROUP_KEY, name: "All Branches (group account)", accounts: groupAccounts }]
+          : []),
+        ...(branches || []).map((b) => ({
+          key: b.id,
+          name: b.branch_name,
+          branchId: b.id,
+          accounts: rows.filter((r) => r.branch_id === b.id),
+        })),
+      ];
+
+  const addButton = (forBranchId, testId, small) => (
+    <button
+      type="button"
+      onClick={() => setDialog({ account: null, branchId: forBranchId })}
+      className={
+        small
+          ? "inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+          : "inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+      }
+      data-testid={testId}
+    >
+      <Plus className={small ? "h-3.5 w-3.5" : "h-4 w-4"} /> Add Bank
+    </button>
+  );
+
   return (
     <div className="space-y-4" data-testid="finance-bank-accounts-root">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
         <div>
           <h3 className="text-sm font-bold text-slate-800">Bank Accounts</h3>
           <p className="text-xs text-slate-500">
-            {branchId ? `Accounts saved for ${branchName || "this branch"}.` : "Every account saved, across the group."}
+            {branchId
+              ? `Accounts saved for ${branchName || "this branch"}.`
+              : "Every branch, and the accounts it collects into."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setDialog({ account: null })}
-          className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
-          data-testid="finance-bank-add"
-        >
-          <Plus className="h-4 w-4" /> Add Bank
-        </button>
+        {addButton(branchId || "", "finance-bank-add")}
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-16 text-sm text-slate-500">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading bank accounts…
         </div>
-      ) : rows.length === 0 ? (
-        <div
-          className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center"
-          data-testid="finance-bank-empty"
-        >
-          <QrCode className="h-8 w-8 text-slate-300" />
-          <p className="text-sm font-semibold text-slate-700">No bank account yet</p>
-          <p className="max-w-sm text-xs text-slate-500">Add the account this counter collects into, with the QR a patient scans to pay.</p>
-        </div>
+      ) : branchId ? (
+        // One branch, picked above the board: its cards alone, with no heading to repeat
+        // the name the pill row is already showing lit.
+        rows.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center"
+            data-testid="finance-bank-empty"
+          >
+            <QrCode className="h-8 w-8 text-slate-300" />
+            <p className="text-sm font-semibold text-slate-700">No bank account yet</p>
+            <p className="max-w-sm text-xs text-slate-500">Add the account this counter collects into, with the QR a patient scans to pay.</p>
+          </div>
+        ) : (
+          <div className={GRID} data-testid="finance-bank-grid">
+            {rows.map((acc) => <BankCard key={acc.id} {...cardProps(acc)} />)}
+          </div>
+        )
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid="finance-bank-grid">
-          {rows.map((acc) => (
+        <div className="space-y-4" data-testid="finance-bank-branch-sections">
+          {sections.map((section) => (
             <div
-              key={acc.id}
-              className={`flex flex-col rounded-xl border p-4 shadow-sm transition ${
-                acc.is_active ? "border-slate-200 bg-white" : "border-rose-200 bg-rose-50/40"
-              }`}
-              data-testid={`finance-bank-card-${acc.id}`}
+              key={section.key}
+              className="rounded-xl border border-slate-200 bg-white p-4"
+              data-testid={`finance-bank-section-${section.key}`}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className={`truncate text-sm font-bold ${acc.is_active ? "text-slate-900" : "text-rose-900"}`} title={acc.bank_name}>{acc.bank_name}</p>
-                  <p className="truncate text-xs text-slate-500" title={acc.holder_name}>{acc.holder_name}</p>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Building2 className="h-4 w-4 text-slate-400" />
+                  <h4 className="text-sm font-bold text-slate-800">{section.name}</h4>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                    {section.accounts.length} {section.accounts.length === 1 ? "bank" : "banks"}
+                  </span>
+                  {/* Said only where there is something to say: a heading that carries a
+                      zero on every branch is a number nobody reads. */}
+                  {section.accounts.some((a) => !a.is_active) && (
+                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                      {section.accounts.filter((a) => !a.is_active).length} inactive
+                    </span>
+                  )}
                 </div>
+                {section.key !== GROUP_KEY && addButton(section.branchId, `finance-bank-add-${section.key}`, true)}
               </div>
 
-              <div className="mt-3 flex items-center justify-center rounded-lg bg-slate-50 p-2">
-                {acc.qr_image_url ? (
-                  <img
-                    src={acc.qr_image_url}
-                    alt={`${acc.bank_name} QR`}
-                    className={`h-28 w-28 object-contain transition ${acc.is_active ? "" : "opacity-40 grayscale"}`}
-                  />
-                ) : (
-                  <QrCode className="h-16 w-16 text-slate-200" />
-                )}
-              </div>
-
-              <div className="mt-3 space-y-1.5">
-                <Row label="UPI ID" value={acc.upi_id} />
-                <Row label="A/c No." value={acc.account_number} />
-                <Row label="IFSC" value={acc.ifsc_code} />
-                <Row label="Branch" value={acc.bank_branch_name} />
-              </div>
-
-              {/* On or off, right on the card: whether this account is being offered for
-                  payment is the one thing about it that changes without anything else
-                  about it changing, so it does not go behind Edit. */}
-              <div className={`mt-3 flex items-center justify-between gap-2 border-t pt-3 ${acc.is_active ? "border-slate-100" : "border-rose-100"}`}>
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                    acc.is_active ? "bg-emerald-50 text-emerald-700" : "bg-rose-100 text-rose-700"
-                  }`}
-                  data-testid={`finance-bank-status-${acc.id}`}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${acc.is_active ? "bg-emerald-500" : "bg-rose-500"}`} />
-                  {acc.is_active ? "Active" : "Inactive"}
-                </span>
-                <Switch
-                  checked={!!acc.is_active}
-                  onCheckedChange={() => toggleStatus(acc)}
-                  className="data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-rose-500"
-                  aria-label={acc.is_active ? "Deactivate this account" : "Activate this account"}
-                  data-testid={`finance-bank-toggle-${acc.id}`}
-                />
-              </div>
-
-              {/* Which book this card belongs to. Only where the grid is showing more
-                  than one branch's — under a picked branch every card is that branch's
-                  and the chip would say the same thing on all of them. */}
-              {!branchId && (
-                <span className="mt-3 inline-flex w-fit items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                  <Building2 className="h-3 w-3" /> {acc.branch_name || "All Branches"}
-                </span>
+              {section.accounts.length === 0 ? (
+                <p className="py-4 text-center text-xs text-slate-400" data-testid={`finance-bank-section-empty-${section.key}`}>
+                  No bank account saved for this branch yet.
+                </p>
+              ) : (
+                <div className={GRID}>
+                  {section.accounts.map((acc) => <BankCard key={acc.id} {...cardProps(acc)} />)}
+                </div>
               )}
-
-              {/* The three things there are to do with a saved card. `mt-auto` holds this
-                  row to the foot of every card in the row, so cards of different heights
-                  — one with a bank branch typed in, one without — still line their
-                  buttons up. Delete last and apart, in red, since it is the one that
-                  cannot be taken back. */}
-              <div className="mt-auto flex items-center gap-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setViewing(acc)}
-                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                  data-testid={`finance-bank-view-${acc.id}`}
-                >
-                  <Eye className="h-3.5 w-3.5" /> View
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDialog({ account: acc })}
-                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                  data-testid={`finance-bank-edit-${acc.id}`}
-                >
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDeleting(acc)}
-                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                  data-testid={`finance-bank-delete-${acc.id}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </button>
-              </div>
             </div>
           ))}
         </div>
@@ -636,8 +739,9 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
       {dialog && (
         <BankFormDialog
           account={dialog.account}
-          branchId={branchId}
+          branchId={dialog.branchId ?? branchId}
           branchName={branchName}
+          branches={branches}
           onClose={() => setDialog(null)}
           onSaved={() => { setDialog(null); load(); }}
         />

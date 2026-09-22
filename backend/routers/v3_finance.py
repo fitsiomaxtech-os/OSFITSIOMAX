@@ -3809,9 +3809,10 @@ BANK_ACCOUNT_REQUIRED = {
 
 
 class BankAccountSave(BaseModel):
-    # Scope, not a field of the account itself: unset means the account belongs to the
-    # group rather than to one branch, the same thing an expense saved from All Branches
-    # means. Only read on create — an account does not move branch by being edited.
+    # Which branch's counter this account is collecting at. Unset means the group rather
+    # than one branch, the same thing an expense saved from All Branches means. Read on
+    # an edit as well as on create: a bank opened for one branch and then handed to
+    # another moves by being edited, rather than by being deleted and retyped.
     branch_id: Optional[str] = None
     bank_name: Optional[str] = ""
     account_number: Optional[str] = ""
@@ -3829,6 +3830,13 @@ class BankAccountSave(BaseModel):
 
 class BankAccountStatus(BaseModel):
     is_active: bool
+
+
+async def _resolve_branch_id(payload: BankAccountSave) -> Optional[str]:
+    branch_id = (payload.branch_id or "").strip() or None
+    if branch_id and not await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return branch_id
 
 
 def _clean_bank_payload(payload: BankAccountSave) -> dict:
@@ -3901,9 +3909,7 @@ async def create_bank_account(
     """Add a bank account the group collects into. More than one is the normal case —
     a branch can bank with two, and the group's own account is not a branch's."""
     fields = _clean_bank_payload(payload)
-    branch_id = (payload.branch_id or "").strip() or None
-    if branch_id and not await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1}):
-        raise HTTPException(status_code=404, detail="Branch not found")
+    branch_id = await _resolve_branch_id(payload)
     now = _now()
     row = {
         "id": str(uuid.uuid4()),
@@ -3930,7 +3936,12 @@ async def update_bank_account(
     if not existing:
         raise HTTPException(status_code=404, detail="Bank account not found")
     fields = _clean_bank_payload(payload)
-    update = {**fields, "updated_by": user.full_name, "updated_at": _now()}
+    update = {
+        **fields,
+        "branch_id": await _resolve_branch_id(payload),
+        "updated_by": user.full_name,
+        "updated_at": _now(),
+    }
     await v3_col("bank_accounts").update_one({"id": account_id}, {"$set": update})
     return {"message": "Bank account updated", "account": {**existing, **update}}
 

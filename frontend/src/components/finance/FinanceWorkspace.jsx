@@ -101,7 +101,12 @@ const TABS = [
     // Super Admin only: a branch's own UPI/bank details are administrative setup — who
     // is putting a QR up at a counter, not a figure either desk works day to day.
     superAdminOnly: true,
-    render: ({ branchId, branchName }) => <BankAccountsBoard branchId={branchId} branchName={branchName} />,
+    // Handed the whole list, not just the one picked: with no branch picked this board
+    // lays its cards out branch by branch, and a branch that has no bank saved yet has
+    // to be named there too — which cannot be read off the accounts themselves.
+    render: ({ branchId, branchName, branches }) => (
+      <BankAccountsBoard branchId={branchId} branchName={branchName} branches={branches} />
+    ),
   },
 ];
 
@@ -234,7 +239,7 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
           different components, already unmounted and remounted by React swapping which
           one renders. */}
       <div key={selectedId}>
-        {active.render({ branchId, branchName, scoped, pending, onChanged: refreshPending })}
+        {active.render({ branchId, branchName, branches: sortedBranches, scoped, pending, onChanged: refreshPending })}
       </div>
     </div>
   );
