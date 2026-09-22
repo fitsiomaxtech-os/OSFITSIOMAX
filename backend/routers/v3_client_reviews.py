@@ -13,10 +13,11 @@ Every review is its own row, with a `kind` (who is rated) and a `source` (what p
   * kind "physio", source "week" -- every 7 days of treatment (or rehab) the client rates
     their Physio: 1-5 stars and Treatment Feedback, one row per week. A week is due once
     every day in it is completed; the portal's Sessions tab then asks in a pop-up for each
-    due week finished since PHYSIO_REVIEW_START. Not mandatory: Skip stops the asking for
-    that week (SKIPS_COLLECTION) and, with it, stops holding the Physio's Send to Review
-    (see weeks_owed) -- the week's Review button still opens it whenever the client
-    chooses. The Physio reads the stars only -- never the words (see
+    due week finished since PHYSIO_REVIEW_START. Not mandatory, and it holds nothing:
+    Skip stops the asking for that week (SKIPS_COLLECTION), and the week's Review button
+    still opens it whenever the client chooses. The Physio's Send to Review does not wait
+    on any of it -- it did until 2026-09-22, and a review the client never gave stranded
+    the patient there. The Physio reads the stars only -- never the words (see
     physio_star_ratings). Weekly reviews briefly also rated the Consultant; those rows
     stay readable but are no longer asked for.
   * source "anytime" -- from the Feedback tab. The Physio whenever the client wants; the
@@ -173,18 +174,6 @@ async def skipped_weeks(lead_id: str) -> set:
     """The weeks whose review pop-up this client skipped, as (track, week_number)."""
     rows = await v3_col(SKIPS_COLLECTION).find({"lead_id": lead_id}, {"_id": 0}).to_list(500)
     return {(s.get("track"), s.get("week_number")) for s in rows}
-
-
-async def weeks_owed(lead_id: str) -> List[dict]:
-    """The completed weeks this client still has to rate and has not skipped. Send to
-    Review waits on these: the Physio's hand-off to the Consultant goes up with the
-    client's verdict on the week where they gave one. A skipped week is not owed -- the
-    client declined it, so it cannot hold the Physio's hand-off for ever."""
-    rows = await v3_col(COLLECTION).find(
-        {"lead_id": lead_id, "kind": KIND_PHYSIO, "source": SOURCE_WEEK, "skipped": {"$ne": True}},
-        {"_id": 0, "kind": 1, "source": 1, "track": 1, "week_number": 1},
-    ).to_list(500)
-    return pending_weeks(course_weeks(await _course_days(lead_id)), rows, await skipped_weeks(lead_id))
 
 
 def star_key(track: str, week_number) -> str:

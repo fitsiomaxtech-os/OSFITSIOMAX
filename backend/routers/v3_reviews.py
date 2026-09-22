@@ -411,17 +411,6 @@ def _review_eligibility(existing_for_lead: List[dict], treatment_days: int, cour
     return {"milestone": milestone, "review_number": review_number, "eligible": False, "review": latest_completed}
 
 
-async def _client_weeks_owed(lead_id: str) -> list:
-    """The completed weeks the client has not yet rated (star + Treatment Feedback) and has
-    not skipped. A week the client skipped in the portal is not owed, so it never holds the
-    Physio's hand-off for ever.
-
-    Imported here rather than at the top: v3_client_reviews imports the patient portal,
-    which imports this module, so a top-level import would close the loop."""
-    from routers.v3_client_reviews import weeks_owed
-    return await weeks_owed(lead_id)
-
-
 # ---------------------------------------------------------------- Physio: raise a review
 
 @router.get("/physio/reviews")
@@ -462,9 +451,6 @@ async def physio_reviews(
         days = day_counts.get(l["id"], 0)
         elig = _review_eligibility(by_lead.get(l["id"], []), days, l["id"] in finished)
         rev = elig["review"]
-        # Only asked of whoever is due: it is what holds the Send button, and nobody else
-        # has a button to hold.
-        owed = await _client_weeks_owed(l["id"]) if elig["eligible"] else []
         patients.append({
             "lead_id": l["id"],
             "lead_name": l.get("name", "Unknown"),
@@ -477,10 +463,6 @@ async def physio_reviews(
             "due_for_review": elig["eligible"],
             "review_status": rev.get("status") if rev else None,
             "review_id": rev.get("id") if rev else None,
-            # The weeks the client has yet to rate. Send to Review waits on these.
-            "client_weeks_owed": [
-                {"track": w["track"], "week_number": w["week_number"]} for w in owed
-            ],
         })
     patients.sort(key=lambda p: (-p["treatment_days"], p["lead_name"]))
     return {"patients": patients, "reviews": [_shape(r) for r in existing], "review_after_days": REVIEW_AFTER_DAYS}
@@ -509,18 +491,9 @@ async def physio_raise_review(
         if elig["review"] and elig["review"].get("status") in (SEND_TO_REVIEW, SENT):
             raise HTTPException(status_code=409, detail="This patient already has a review in progress")
         raise HTTPException(status_code=400, detail=f"This patient hasn't reached a new review milestone yet (every {REVIEW_AFTER_DAYS} treatment days)")
-    # The client's star + Treatment Feedback review comes first, where they gave one: the
-    # review goes up to the Consultant with the client's verdict on the week rather than
-    # ahead of it. Not for ever, though -- a week the client skipped is no longer owed.
-    owed = await _client_weeks_owed(lead_id)
-    if owed:
-        weeks = ", ".join(
-            f"{'Rehab ' if w['track'] == 'rehab' else ''}Week {w['week_number']}" for w in owed
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=f"Waiting for the client's review of {weeks}. Ask them to rate it in the Client Portal (Sessions tab), or to Skip it there.",
-        )
+    # The client's own star + Treatment Feedback review used to be required here. It no
+    # longer is: rating a week is the client's to give or skip in the portal, and a review
+    # they never gave held the Physio's hand-off to the Consultant indefinitely.
 
     doctor = await v3_col("doctors").find_one(
         {"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1, "full_name": 1}

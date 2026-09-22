@@ -1252,25 +1252,11 @@ const ordinal = (n) => {
 };
 
 /**
- * Send for Review, held until the client has rated every completed week (star + Treatment
- * Feedback, from the Client Portal's Sessions tab) or skipped it there. The server refuses
- * it too; this says why before the Physio has written their notes.
+ * Send for Review. Offered the moment the Physio is due one: the client's weekly review is
+ * theirs to give or skip, and it no longer holds this button (nor does the server refuse
+ * the raise over it) — a review the client never gave used to strand the patient here.
  */
-function SendForReviewButton({ patient, onClick, className = "", testid }) {
-  const owed = patient.client_weeks_owed || [];
-  if (owed.length) {
-    const weeks = owed.map((w) => `${w.track === "rehab" ? "Rehab " : ""}Week ${w.week_number}`).join(", ");
-    return (
-      <span
-        className={`inline-flex items-center justify-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-center text-[10px] font-semibold text-amber-700 ${className}`}
-        title={`The client has not rated ${weeks} yet. Ask them to review it in the Client Portal (Sessions tab), or to Skip it there.`}
-        data-testid={`${testid}-awaiting-client`}
-      >
-        <Star className="h-3 w-3 shrink-0" />
-        Awaiting client review · {weeks}
-      </span>
-    );
-  }
+function SendForReviewButton({ onClick, className = "", testid }) {
   return (
     <Button size="sm" className={`bg-amber-600 text-xs text-white hover:bg-amber-700 ${className}`} onClick={onClick} data-testid={testid}>
       Send for Review
@@ -1542,7 +1528,6 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                 <div className="mt-2 flex gap-2">
                   {p.due_for_review && (
                     <SendForReviewButton
-                      patient={p}
                       className="flex-1"
                       onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
                       testid={`physio-raise-review-${p.lead_id}`}
@@ -1623,7 +1608,6 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                         <div className="flex items-center justify-end gap-2">
                           {p.due_for_review && (
                             <SendForReviewButton
-                              patient={p}
                               onClick={(e) => { e.stopPropagation(); setDraft({ patient: p, reason: "", physio_notes: "" }); }}
                               testid={`physio-raise-review-row-${p.lead_id}`}
                             />
