@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw, ClipboardList, HeartPulse, Music2, GraduationCap, Home } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw, ClipboardList, HeartPulse, Music2, GraduationCap, Home, Truck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getPaymentHistory, getFollowUpHistory, getLoginHistory, getBranches } from "@/lib/api";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
+import { VendorPanel } from "@/components/branch/VendorPanel";
 import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
 import { PhysioTypesBoard } from "@/components/PhysioTypesBoard";
 
@@ -31,6 +32,10 @@ export const TABS = [
   { key: "supplementary", label: "Supplementary", icon: FlaskConical },
   { key: "equipment", label: "Equipment", icon: Dumbbell },
   { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
+  // Beside the three stock shelves because it is read with them: a vendor is who the
+  // tablets, supplements and equipment came from, and their supply list is built out of
+  // the deliveries booked against them on those shelves.
+  { key: "vendor", label: "Vendor", icon: Truck },
   // Moved in from its own top-level nav tab — the treatment catalogue belongs beside the
   // other things Super Admin catalogues here, not among Dashboard/HR/Branches.
   { key: "treatment", label: "Treatments", icon: ClipboardList },
@@ -1552,7 +1557,7 @@ const SESSION_LIKE_TABS = {
   home_visit: { category: "home_visit", noun: "home visit" },
 };
 
-const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "history", "treatment", "physio_type", ...INVENTORY_TABS]);
+const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "history", "treatment", "physio_type", "vendor", ...INVENTORY_TABS]);
 
 // TABS above stays a flat, unbroken export — BranchStoreBoard.jsx imports and filters it
 // for its own layout too, and reshaping it here would reshape that board's as well.
@@ -1561,7 +1566,8 @@ const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "work
 // below — the online/offline split of what a branch actually stocks. All is
 // unrestricted (the full catalogue, Vending Machine included, since it isn't yet sorted
 // into either mode); Offline drops Vending Machine; Online drops everything that only
-// makes sense at a physical location (Tablet, Supplementary, Equipment, Vending Machine).
+// makes sense at a physical location (Tablet, Supplementary, Equipment, Vending Machine,
+// and Vendor with them — there is nothing to buy in for a branch that holds no stock).
 // Catalogue tabs only Super Admin maintains. They ride in MODE_TAB_KEYS because that is
 // what decides which tabs a mode shows, but a branch has no business in them: the write
 // endpoints are super_admin-only, so a branch would get a list it cannot add to and a
@@ -1573,8 +1579,8 @@ const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "work
 export const SUPER_ADMIN_CATALOGUE_TABS = new Set(["physio_type"]);
 
 export const MODE_TAB_KEYS = {
-  all: new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment", "physio_type"]),
-  offline: new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "treatment", "physio_type"]),
+  all: new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "vending_machine", "vendor", "treatment", "physio_type"]),
+  offline: new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "tablet", "supplementary", "equipment", "vendor", "treatment", "physio_type"]),
   online: new Set(["consultations", "sessions", "rehab", "workshop", "diet", "treatment", "physio_type"]),
 };
 
@@ -1837,6 +1843,11 @@ export const PackagesBoard = () => {
       {view === "catalog" && tab === "treatment" && <TreatmentTypesBoard />}
       {view === "catalog" && tab === "physio_type" && <PhysioTypesBoard />}
       {view === "catalog" && INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
+      {/* No branch picker, unlike the three shelves above it: the vendor list is
+          org-wide and holds no counts, so there is nothing for a branch to name. Left
+          unscoped, the delivery totals on each row are every branch's — which is the
+          figure this desk is looking for. */}
+      {view === "catalog" && tab === "vendor" && <VendorPanel reloadToken={reloadTick} />}
       {/* Whatever has no panel yet. A tab graduates by being handled above rather than by
           another branch being added here. */}
       {view === "catalog" && !BUILT_TABS.has(tab) && visibleTabs.map((t) => tab === t.key && (

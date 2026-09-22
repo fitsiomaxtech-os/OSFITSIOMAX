@@ -289,6 +289,11 @@ async def list_items(
 class AddStockIn(BaseModel):
     qty: int
     cost_price: Optional[float] = None
+    # Who it came from, twice over: the vendor row it was booked against, and the free
+    # text that was here before vendors existed. The picker sets the first and the second
+    # is filled in from the vendor's name, so a movement written either way reads the same
+    # in the ledger — the old rows keep their text and nothing has to be migrated.
+    vendor_id: Optional[str] = None
     supplier: Optional[str] = ""
     note: Optional[str] = ""
 
@@ -301,7 +306,17 @@ async def add_stock(item_id: str, payload: AddStockIn, branch_id: Optional[str] 
     item = await _require_item(item_id)
     branch = await _scope_branch(user, branch_id)
 
+    # Imported here rather than at the top: v3_vendors imports this module for the shelf
+    # names and the roles, so a module-level import back would be a cycle.
+    vendor = None
+    if payload.vendor_id:
+        from routers.v3_vendors import link_vendor_to_item, vendor_for_stock
+        vendor = await vendor_for_stock(payload.vendor_id)
+
     qty_after = await _add_to_stock(item_id, branch, payload.qty)
+
+    if vendor:
+        await link_vendor_to_item(vendor["id"], item_id, item.get("category"))
 
     # A delivery at a new price is the price from now on; the old one was what the last
     # delivery cost, and nothing downstream wants a stale one.
@@ -320,7 +335,9 @@ async def add_stock(item_id: str, payload: AddStockIn, branch_id: Optional[str] 
         qty_after=qty_after,
         unit_price=payload.cost_price if payload.cost_price is not None else item.get("cost_price", 0),
         amount=(payload.cost_price if payload.cost_price is not None else item.get("cost_price", 0) or 0) * payload.qty,
-        supplier=(payload.supplier or "").strip(),
+        vendor_id=(vendor or {}).get("id") or None,
+        vendor_name=(vendor or {}).get("name") or "",
+        supplier=(payload.supplier or "").strip() or (vendor or {}).get("name", ""),
         note=(payload.note or "").strip(),
         by_user_id=user.id,
         by_user_name=user.full_name,

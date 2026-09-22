@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { listStoreItems, getBranches } from "@/lib/api";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
+import { VendorPanel } from "@/components/branch/VendorPanel";
 import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
 import {
   TABS,
@@ -274,7 +275,7 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 
 // Which tabs have a panel of their own. The rest fall through to the placeholder, and a
 // tab graduates by being added here rather than by another branch in the JSX below.
-const PANELS_BUILT = new Set(["consultations", "sessions", "diet", "treatment", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
+const PANELS_BUILT = new Set(["consultations", "sessions", "diet", "treatment", "vendor", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
 
 /**
  * A branch's own FITSIO STORE — scoped to its own vertical rather than offering every
@@ -374,6 +375,12 @@ export const FitsiomaxStorePanel = ({ branchId }) => {
         />
       )}
       {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
+      {/* Who the stock on those three shelves came from. Editable here, unlike the
+          catalogues above: a branch buys from its own suppliers and is the only desk
+          that knows them, and the write endpoints take branch_admin. The list itself is
+          org-wide, so a vendor added here is the one every branch sees; the delivery
+          totals on each row are this branch's, pinned server-side. */}
+      {tab === "vendor" && <VendorPanel reloadToken={reloadTick} />}
       {/* The same board Super Admin keeps this catalogue on, read-only. The tab has been
           in this row since it was built and had no panel behind it, so a branch clicking
           Treatments got "setup coming soon" for a list that has been populated all along.

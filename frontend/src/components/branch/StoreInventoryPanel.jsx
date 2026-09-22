@@ -11,7 +11,7 @@ import {
   listInventoryItems, inventorySummary, inventoryMovements,
   createInventoryItem, updateInventoryItem, deleteInventoryItem,
   addInventoryStock, sellInventoryItem, transferInventoryItem,
-  getBranches,
+  getBranches, listVendors,
 } from "@/lib/api";
 
 /**
@@ -60,8 +60,8 @@ const PAYMENT_MODES = [
   { value: "account_transfer", label: "Account Transfer" },
 ];
 
-const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-const errText = (e, fallback) => e?.response?.data?.detail || fallback;
+export const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+export const errText = (e, fallback) => e?.response?.data?.detail || fallback;
 
 const MOVEMENT_META = {
   add: { label: "Added", classes: "border-sky-200 bg-sky-50 text-sky-700", sign: "+" },
@@ -70,7 +70,7 @@ const MOVEMENT_META = {
   transfer_in: { label: "Moved in", classes: "border-violet-200 bg-violet-50 text-violet-700", sign: "+" },
 };
 
-const when = (iso) => {
+export const when = (iso) => {
   if (!iso) return "—";
   try {
     return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -78,7 +78,7 @@ const when = (iso) => {
 };
 
 /** One dialog shell for all four forms, so a fifth doesn't arrive with its own geometry. */
-const Modal = ({ title, subtitle, accent = "bg-violet-600", onClose, children, footer, testid }) => (
+export const Modal = ({ title, subtitle, accent = "bg-violet-600", onClose, children, footer, testid }) => (
   <div
     className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
     onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
@@ -100,7 +100,7 @@ const Modal = ({ title, subtitle, accent = "bg-violet-600", onClose, children, f
   </div>
 );
 
-const Field = ({ label, children, hint }) => (
+export const Field = ({ label, children, hint }) => (
   <div>
     <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">{label}</label>
     {children}
@@ -108,7 +108,7 @@ const Field = ({ label, children, hint }) => (
   </div>
 );
 
-const inputCls = "h-9 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400";
+export const inputCls = "h-9 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400";
 
 /** Stock reads as a state, not a number: out, nearly out, or fine. */
 const StockBadge = ({ qty, low }) => {
@@ -157,6 +157,9 @@ export const StoreInventoryPanel = ({ category = "tablet", branchId, reloadToken
   const [summary, setSummary] = useState(null);
   const [movements, setMovements] = useState([]);
   const [branches, setBranches] = useState([]);
+  // The Vendor tab's list, for the Add Stock picker. Switched-off vendors are left out
+  // — the server refuses stock booked against one, and offering it is offering an error.
+  const [vendors, setVendors] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -190,6 +193,11 @@ export const StoreInventoryPanel = ({ category = "tablet", branchId, reloadToken
   useEffect(() => { load(); }, [load, reloadToken]);
   // Only needed by the move form, but fetched once here rather than on each open.
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
+  useEffect(() => {
+    listVendors({ category, active_only: true, ...(branchId ? { branch_id: branchId } : {}) })
+      .then(setVendors)
+      .catch(() => setVendors([]));
+  }, [category, branchId]);
 
   // Filtered in the browser: the whole catalogue is already loaded, and a round trip per
   // keystroke would be slower than the list is long.
@@ -258,6 +266,7 @@ export const StoreInventoryPanel = ({ category = "tablet", branchId, reloadToken
     const ok = await run(() => addInventoryStock(addDraft.item.id, {
       qty,
       cost_price: addDraft.cost_price === "" ? null : Number(addDraft.cost_price),
+      vendor_id: addDraft.vendor_id || null,
       supplier: addDraft.supplier.trim(),
       note: addDraft.note.trim(),
     }, scope), "Stock added");
@@ -315,7 +324,7 @@ export const StoreInventoryPanel = ({ category = "tablet", branchId, reloadToken
     <>
       <Button
         size="sm" variant="outline" className="h-8 border-sky-200 text-sky-700 hover:bg-sky-50"
-        onClick={() => setAddDraft({ item, qty: "", cost_price: "", supplier: "", note: "" })}
+        onClick={() => setAddDraft({ item, qty: "", cost_price: "", vendor_id: "", supplier: "", note: "" })}
         data-testid={tid(`add-stock-${item.id}`)}
       >
         <PackagePlus className="mr-1 h-3.5 w-3.5" /> Add
@@ -588,9 +597,27 @@ export const StoreInventoryPanel = ({ category = "tablet", branchId, reloadToken
           <Field label="Cost Price" hint={`Leave blank to keep the price already on the ${CAT.noun.toLowerCase()}`}>
             <input type="number" min="0" className={inputCls} value={addDraft.cost_price} onChange={(e) => setAddDraft({ ...addDraft, cost_price: e.target.value })} placeholder={String(addDraft.item.cost_price ?? 0)} data-testid={tid("add-cost")} />
           </Field>
-          <Field label="Supplier">
-            <input className={inputCls} value={addDraft.supplier} onChange={(e) => setAddDraft({ ...addDraft, supplier: e.target.value })} placeholder="Who it came from" data-testid={tid("add-supplier")} />
+          {/* Who it came from, as a vendor if there is one and as free text otherwise.
+              Picking a vendor is what ties the delivery to the Vendor tab — its spend, its
+              supply list and its history all come off this one choice — so the typed box
+              is only offered while nothing is picked, rather than sitting beside it
+              collecting a second, unmatched spelling of the same supplier. */}
+          <Field label="Vendor" hint={vendors.length === 0 ? "None on this shelf yet — add them under Services and Products > Vendor" : "Adds this item to that vendor's supply list"}>
+            <select
+              className={inputCls}
+              value={addDraft.vendor_id}
+              onChange={(e) => setAddDraft({ ...addDraft, vendor_id: e.target.value, supplier: "" })}
+              data-testid={tid("add-vendor")}
+            >
+              <option value="">-- not from a listed vendor --</option>
+              {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
           </Field>
+          {!addDraft.vendor_id && (
+            <Field label="Supplier">
+              <input className={inputCls} value={addDraft.supplier} onChange={(e) => setAddDraft({ ...addDraft, supplier: e.target.value })} placeholder="Who it came from" data-testid={tid("add-supplier")} />
+            </Field>
+          )}
           <Field label="Note">
             <input className={inputCls} value={addDraft.note} onChange={(e) => setAddDraft({ ...addDraft, note: e.target.value })} placeholder="Invoice number, batch, anything" data-testid={tid("add-note")} />
           </Field>

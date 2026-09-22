@@ -927,6 +927,19 @@ export const addInventoryStock = async (id, payload, params = {}) => (await api.
 export const sellInventoryItem = async (id, payload, params = {}) => (await api.post(`/inventory/items/${id}/sell`, payload, { params })).data;
 export const transferInventoryItem = async (id, payload, params = {}) => (await api.post(`/inventory/items/${id}/transfer`, payload, { params })).data;
 
+// FITSIOMAX STORE > Vendor — who the stock comes from. The list is org-wide, like the
+// item catalogue it links to; branch_id only scopes the delivery totals on each row, and
+// a Branch Admin is pinned to their own branch server-side whatever they send.
+export const listVendors = async (params = {}) => (await api.get("/vendors", { params })).data;
+export const vendorSummary = async (params = {}) => (await api.get("/vendors/summary", { params })).data;
+export const vendorDeliveries = async (id, params = {}) => (await api.get(`/vendors/${id}/deliveries`, { params })).data;
+// The stock catalogue as a picker — org-wide and countless, so it answers for a Super
+// Admin too, who has no branch for /inventory/items to scope to.
+export const vendorCatalogue = async (params = {}) => (await api.get("/vendors/catalogue", { params })).data;
+export const createVendor = async (payload) => (await api.post("/vendors", payload)).data;
+export const updateVendor = async (id, payload, params = {}) => (await api.put(`/vendors/${id}`, payload, { params })).data;
+export const deleteVendor = async (id) => (await api.delete(`/vendors/${id}`)).data;
+
 
 export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/leads/${leadId}/diagnosis`, { diagnosis })).data;
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;
