@@ -430,9 +430,19 @@ async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = 
 
 
 @router.get("/physio/sessions/{lead_id}")
-async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev", "head_physio", "branch_admin"))):
+async def physio_lead_sessions(lead_id: str, physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin", "business_dev", "head_physio", "branch_admin"))):
+    # A physio covering an absent colleague's patient (v3_physio_absence) sees only the
+    # days handed to them. The whole course came back before, so a patient covered for one
+    # date read as the cover's own, every later day of the package open to be worked.
+    scope: dict = {}
+    if user.role == "physio" or physio_id:
+        doctor = await _resolve_doctor(user, physio_id)
+        if doctor:
+            ids = _ids_of(doctor)
+            if lead_id not in await physio_lead_ids(ids):
+                scope = {"physio_id": {"$in": ids}, "covered_for_physio_id": {"$exists": True}}
     sessions = await v3_col("sessions").find(
-        {"lead_id": lead_id}, {"_id": 0}
+        {"lead_id": lead_id, **scope}, {"_id": 0}
     ).sort("slot_time", 1).to_list(500)
     for row in sessions:
         row.setdefault("track", "treatment")
@@ -443,7 +453,7 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
     # second shape and a rehab day can still say what it is rather than passing as a day of
     # a treatment package the patient may not be on.
     rehab = await v3_col("rehab_sessions").find(
-        {"lead_id": lead_id}, {"_id": 0}
+        {"lead_id": lead_id, **scope}, {"_id": 0}
     ).sort("slot_time", 1).to_list(500)
     for row in rehab:
         row["track"] = "rehab"

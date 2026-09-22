@@ -556,7 +556,7 @@ export const physioToday = async (physioId) => (await api.get("/physio/today", {
 export const physioCalendar = async (month, year, physioId) => (await api.get("/physio/calendar", { params: { month, year, ...(physioId ? { physio_id: physioId } : {}) } })).data;
 export const physioPatients = async (physioId) => (await api.get("/physio/patients", { params: physioId ? { physio_id: physioId } : {} })).data;
 export const physioPatientDetail = async (leadId, physioId) => (await api.get(`/physio/patient/${leadId}`, { params: physioId ? { physio_id: physioId } : {} })).data;
-export const physioSessions = async (leadId) => (await api.get(`/physio/sessions/${leadId}`)).data;
+export const physioSessions = async (leadId, physioId) => (await api.get(`/physio/sessions/${leadId}`, { params: physioId ? { physio_id: physioId } : {} })).data;
 export const physioCompleteSession = async (sessionId, payload) => (await api.post(`/physio/sessions/${sessionId}/complete`, payload)).data;
 // The patient did not turn up: this day takes the next day's slot, and every day after it
 // steps down one. The last day comes off the end and goes to the Branch Admin for a date.

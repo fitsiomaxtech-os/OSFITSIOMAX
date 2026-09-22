@@ -1806,7 +1806,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
 
   const loadSessions = useCallback(async () => {
     try {
-      const data = await physioSessions(lead.id);
+      const data = await physioSessions(lead.id, physioId);
       setSessions(data.sessions || []);
       setAssessments(data.assessments || []);
       setReviews(data.reviews || []);
@@ -1820,7 +1820,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
       setPaymentHoldMessage(data.payment_hold_message || "");
       setDayDateLock(data.day_date_lock !== false);
     } catch { /* silent */ }
-  }, [lead.id]);
+  }, [lead.id, physioId]);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
@@ -3294,7 +3294,7 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
     setLoading(true);
     const [leadRes, sessRes] = await Promise.allSettled([
       physioPatientDetail(patient.lead_id, physioId),
-      physioSessions(patient.lead_id),
+      physioSessions(patient.lead_id, physioId),
     ]);
     if (leadRes.status === "fulfilled") setLead(leadRes.value);
     if (sessRes.status === "fulfilled") setSessions(sessRes.value?.sessions || []);
