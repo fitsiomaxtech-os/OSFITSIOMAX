@@ -69,7 +69,7 @@ const StaffTab = ({ isSuperAdmin, sub, onSubChange }) => {
       <SegmentedTabs tabs={tabs} value={sub} onChange={onSubChange} testid="hr-staff-subtab" size="sm" mobileCols={4} />
       {sub === "attendance" && <AttendanceTab />}
       {sub === "performance" && isSuperAdmin && <PerformancePanel />}
-      {sub === "client_reviews" && <ClientReviewsPanel physioOnly />}
+      {sub === "client_reviews" && <ClientReviewsPanel physioOnly staffView />}
       {sub === "eod_report" && isSuperAdmin && <EodReportsPanel />}
       {sub === "payroll" && <PayrollTab />}
       {sub === "approvals" && <ApprovalsTab />}

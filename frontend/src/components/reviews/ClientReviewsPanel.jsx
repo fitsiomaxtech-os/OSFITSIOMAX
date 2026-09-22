@@ -391,8 +391,110 @@ const inDates = (r, range) => {
   return !Number.isNaN(d.getTime()) && d >= range.from && d <= range.to;
 };
 
+/**
+ * The Physio's own standing, beside the one review being read: the average of every
+ * treatment review they hold under the bar's filters, and how many that is. Only the staff
+ * table shows it — see COLUMNS.
+ */
+const TreatmentAverage = ({ stat, compact = false }) => {
+  if (!stat?.average) return <span className="text-slate-400">—</span>;
+  const tone = stat.average <= 2 ? "text-red-500" : stat.average < 4 ? "text-amber-500" : "text-emerald-600";
+  if (compact) {
+    return (
+      <span className={`inline-flex items-center gap-1 text-[11px] font-bold ${tone}`}>
+        <Star className="h-3 w-3 fill-current" />{stat.average}
+      </span>
+    );
+  }
+  return (
+    <>
+      <span className={`inline-flex items-center gap-1 font-bold ${tone}`}>
+        <Star className="h-3.5 w-3.5 fill-current" />{stat.average}
+        <span className="text-[11px] font-semibold text-slate-400">/ 5</span>
+      </span>
+      <span className="block text-[11px] text-slate-400">{stat.count} treatment {stat.count === 1 ? "review" : "reviews"}</span>
+    </>
+  );
+};
+
+/**
+ * The row, column by column, so the two readers can take the same cells in the order each
+ * one needs (COLUMNS below). A branch board reads the client first — whose review is this.
+ * The staff desks (HR Admin, for Super Admin and BDE) read the Physio first, because the
+ * question there is how the Physio is doing, so the client's stars and words are labelled
+ * as the client's and the Physio's own running average closes the row.
+ */
+const CELLS = {
+  client: {
+    label: () => "Client",
+    cell: (r) => (
+      <>
+        <p className="font-medium text-slate-800">{r.patient_name || "Client"}</p>
+        <p className="text-[11px] text-slate-400">{r.patient_number || "—"}</p>
+      </>
+    ),
+  },
+  person: {
+    label: (meta) => meta.person,
+    className: "text-slate-600",
+    cell: (r) => (
+      <>
+        <span className="font-medium text-slate-800">{r.person_name || "—"}</span>
+        {r.branch_name ? <span className="block text-[11px] text-slate-400">{r.branch_name}</span> : null}
+      </>
+    ),
+  },
+  for: {
+    label: () => "For",
+    className: "text-slate-600",
+    cell: (r) => (
+      <>
+        {sessionLabel(r) || "—"}
+        {(r.session_date || r.review_date) ? <span className="block text-[11px] text-slate-400">{prettyDate(r.session_date || r.review_date)}</span> : null}
+      </>
+    ),
+  },
+  rating: {
+    label: (meta, staff) => (staff ? "Client Rating" : "Rating"),
+    cell: (r) => (
+      <>
+        <StarRow value={r.rating} size="h-3.5 w-3.5" />
+        <span className={`block text-[11px] font-bold ${(r.rating || 0) <= 2 ? "text-red-500" : r.rating === 3 ? "text-amber-500" : "text-slate-400"}`}>
+          {r.rating ? `${r.rating} / 5` : "Not rated"}
+        </span>
+      </>
+    ),
+  },
+  comment: {
+    label: (meta, staff) => (staff ? "Client Review" : "Review"),
+    className: "max-w-[260px] text-slate-600",
+    cell: (r) => <p className="truncate">{r.comment || <span className="text-slate-400">—</span>}</p>,
+  },
+  type: { label: () => "Type", cell: (r) => <TypePill review={r} /> },
+  date: {
+    label: () => "Date",
+    className: "text-slate-500",
+    cell: (r) => (
+      <>
+        <span className="whitespace-nowrap">{prettyDate(r.created_at || r.updated_at) || "—"}</span>
+        {r.updated_at ? <span className="block text-[11px] font-semibold text-sky-600">Edited</span> : null}
+      </>
+    ),
+  },
+  average: {
+    label: () => "Average Treatment Rating",
+    cell: (r, averages) => <TreatmentAverage stat={averages[r.person_name]} />,
+  },
+};
+
+const COLUMNS = {
+  client: ["client", "person", "for", "rating", "comment", "type", "date"],
+  staff: ["person", "for", "rating", "comment", "type", "date", "average"],
+};
+
 /** Table from desktop up, the same rows as cards below it — the shape of the HR candidate list. */
-const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
+const ReviewList = ({ rows, meta, loading, empty, onOpen, staff = false, averages = {} }) => {
+  const columns = COLUMNS[staff ? "staff" : "client"];
   if (!rows.length) {
     return (
       <p className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-14 text-center text-sm text-slate-400" data-testid="client-reviews-empty">
@@ -414,14 +516,21 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-slate-800">{r.patient_name || "Client"}</p>
-                <p className="truncate text-xs text-slate-500">{r.person_name || `${meta.person} not set`}</p>
+                <p className="truncate text-sm font-bold text-slate-800">
+                  {staff ? r.person_name || `${meta.person} not set` : r.patient_name || "Client"}
+                </p>
+                <p className="truncate text-xs text-slate-500">
+                  {staff ? r.branch_name || "—" : r.person_name || `${meta.person} not set`}
+                </p>
               </div>
               <TypePill review={r} />
             </div>
             <div className="mt-2 flex items-center justify-between gap-2">
               <StarRow value={r.rating} size="h-3.5 w-3.5" />
-              <span className="text-[11px] text-slate-400">{prettyDate(r.created_at || r.updated_at)}</span>
+              <span className="flex items-center gap-2">
+                {staff && <TreatmentAverage stat={averages[r.person_name]} compact />}
+                <span className="text-[11px] text-slate-400">{prettyDate(r.created_at || r.updated_at)}</span>
+              </span>
             </div>
             {r.comment && <p className="mt-1.5 line-clamp-2 text-xs text-slate-500">{r.comment}</p>}
           </button>
@@ -430,48 +539,21 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
 
       <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white lg:block" data-testid="client-reviews-list">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className={`w-full text-sm ${staff ? "min-w-[940px]" : "min-w-[860px]"}`}>
             <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Client</th>
-                <th className="px-4 py-2.5 font-semibold">{meta.person}</th>
-                <th className="px-4 py-2.5 font-semibold">For</th>
-                <th className="px-4 py-2.5 font-semibold">Rating</th>
-                <th className="px-4 py-2.5 font-semibold">Review</th>
-                <th className="px-4 py-2.5 font-semibold">Type</th>
-                <th className="px-4 py-2.5 font-semibold">Date</th>
+                {columns.map((key) => (
+                  <th key={key} className="px-4 py-2.5 font-semibold">{CELLS[key].label(meta, staff)}</th>
+                ))}
                 <th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((r) => (
                 <tr key={r.id} onClick={() => onOpen(r)} className="cursor-pointer hover:bg-slate-50" data-testid={`client-review-${r.id}`}>
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-slate-800">{r.patient_name || "Client"}</p>
-                    <p className="text-[11px] text-slate-400">{r.patient_number || "—"}</p>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {r.person_name || "—"}
-                    {r.branch_name ? <span className="block text-[11px] text-slate-400">{r.branch_name}</span> : null}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {sessionLabel(r) || "—"}
-                    {(r.session_date || r.review_date) ? <span className="block text-[11px] text-slate-400">{prettyDate(r.session_date || r.review_date)}</span> : null}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StarRow value={r.rating} size="h-3.5 w-3.5" />
-                    <span className={`block text-[11px] font-bold ${(r.rating || 0) <= 2 ? "text-red-500" : r.rating === 3 ? "text-amber-500" : "text-slate-400"}`}>
-                      {r.rating ? `${r.rating} / 5` : "Not rated"}
-                    </span>
-                  </td>
-                  <td className="max-w-[260px] px-4 py-3 text-slate-600">
-                    <p className="truncate">{r.comment || <span className="text-slate-400">—</span>}</p>
-                  </td>
-                  <td className="px-4 py-3"><TypePill review={r} /></td>
-                  <td className="px-4 py-3 text-slate-500">
-                    <span className="whitespace-nowrap">{prettyDate(r.created_at || r.updated_at) || "—"}</span>
-                    {r.updated_at ? <span className="block text-[11px] font-semibold text-sky-600">Edited</span> : null}
-                  </td>
+                  {columns.map((key) => (
+                    <td key={key} className={`px-4 py-3 ${CELLS[key].className || ""}`}>{CELLS[key].cell(r, averages)}</td>
+                  ))}
                   <td className="px-4 py-3 text-right"><ChevronRight className="ml-auto h-4 w-4 text-slate-300" /></td>
                 </tr>
               ))}
@@ -500,8 +582,13 @@ const ReviewList = ({ rows, meta, loading, empty, onOpen }) => {
  * it stopped holding a Branch Admin to their own branch on 2026-09-21 (see
  * backend/routers/v3_client_reviews.py) — so without that prop this panel is still pinned
  * by whatever branchId it was handed.
+ *
+ * `staffView` — the HR Admin mount, read by Super Admin and BDE. The same reviews in the
+ * order a staff desk reads them: the Physio first, the client's stars and words named as
+ * the client's, and the Physio's own average treatment rating closing the row. The branch
+ * boards keep the client-first table (COLUMNS above).
  */
-export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly = false, branchPicker = false }) => {
+export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly = false, branchPicker = false, staffView = false }) => {
   const [data, setData] = useState({ consultant: [], physio: [], summary: {} });
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState([]);
@@ -580,6 +667,24 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly =
     return Object.entries(by)
       .map(([name, rows]) => ({ name, count: rows.length, average: average(rows) }))
       .sort((a, b) => (b.average || 0) - (a.average || 0) || b.count - a.count || a.name.localeCompare(b.name));
+  }, [base]);
+
+  // The last column of the staff table: each person's average over their treatment reviews
+  // (the 7-day ones, and the older per-session and per-Review rows they took in), counted
+  // off `base` like the tiles and the person picker — so it answers under whichever branch,
+  // search and dates the bar is set to, and a tile press does not move it.
+  const treatmentAverages = useMemo(() => {
+    const by = {};
+    base.forEach((r) => {
+      if (!r.person_name || !r.rating || !WEEKLY_SOURCES.includes(r.source)) return;
+      if (!by[r.person_name]) by[r.person_name] = [];
+      by[r.person_name].push(r.rating);
+    });
+    const out = {};
+    Object.entries(by).forEach(([name, stars]) => {
+      out[name] = { count: stars.length, average: Math.round((stars.reduce((n, v) => n + v, 0) / stars.length) * 10) / 10 };
+    });
+    return out;
   }, [base]);
 
   // Consultants and physios are different people with different tiles, so neither carries across.
@@ -679,6 +784,8 @@ export const ClientReviewsPanel = ({ branchId = null, mine = false, physioOnly =
         loading={loading && !reviews.length}
         empty={reviews.length ? "No reviews match these filters." : `No ${meta.label.toLowerCase()}s yet.`}
         onOpen={setOpen}
+        staff={staffView}
+        averages={treatmentAverages}
       />
 
       <ReviewDetail review={open} meta={meta} onClose={() => setOpen(null)} />
