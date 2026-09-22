@@ -282,6 +282,163 @@ const BulkApproveModal = ({ count, total, saving, onClose, onConfirm }) => (
   </div>
 );
 
+// A payment's date and the clock time it was taken at, read off the one ISO stamp the row
+// carries. Two columns rather than one string: the date is what a batch is filtered by and
+// the time is what tells two of the same patient's payments apart, and squeezing both into
+// one cell made neither scannable down the list.
+const fmtDate = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? String(iso).slice(0, 10)
+    : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+const fmtTime = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+};
+
+/**
+ * How the money arrived, in as much detail as the payment actually recorded.
+ *
+ * The list used to say one word — "UPI" — for every payment that was not cash, which is
+ * the one case where a word is enough: cash is checked by counting the drawer, and a UPI
+ * collection is checked against the id the patient can quote and the company account it
+ * landed in. Neither of those was on the screen doing the checking, so signing a UPI
+ * payment off meant either opening the lead or taking it on trust.
+ *
+ * So Cash stays a single word, and every other mode shows what it is traced by: whose
+ * account took it, the reference the bank or the terminal printed, the number on the
+ * cheque. Nothing is invented — a field the payment never recorded is simply absent, and
+ * an older payment taken before the UPI picker existed shows its transaction id with no
+ * account under it.
+ */
+const PaymentMethodCell = ({ tx }) => {
+  const ref = tx.payment_ref || {};
+  const mode = tx.payment_mode;
+  const lines = [];
+
+  if (mode === "upi") {
+    // Whose account, named rather than left as a handle: "fitsio@okhdfc" says nothing to
+    // anybody who did not set that account up.
+    if (ref.receiver_name) {
+      lines.push(["To", [ref.receiver_name, ref.receiver_bank, ref.receiver_account].filter(Boolean).join(" · ")]);
+    }
+    if (ref.receiver_upi_id) lines.push(["UPI", ref.receiver_upi_id]);
+    if (ref.upi_transaction_id) lines.push(["Txn", ref.upi_transaction_id]);
+    if (ref.upi_utr) lines.push(["UTR", ref.upi_utr]);
+    // A registration's own field, which for UPI is the payer's ID rather than the
+    // company's — see _registration_reference on the backend.
+    if (ref.payer_upi_id) lines.push(["From", ref.payer_upi_id]);
+  } else if (mode === "account_transfer") {
+    if (ref.account_holder_name) {
+      lines.push(["To", [ref.account_holder_name, ref.bank_name, ref.account_number].filter(Boolean).join(" · ")]);
+    }
+    if (ref.ifsc_code) lines.push(["IFSC", ref.ifsc_code]);
+    if (ref.transfer_reference) lines.push(["Ref", ref.transfer_reference]);
+  } else if (mode === "cheque") {
+    if (ref.cheque_number) lines.push(["Cheque", `#${ref.cheque_number}`]);
+    if (ref.cheque_bank) lines.push(["Bank", ref.cheque_bank]);
+  } else if (mode === "card") {
+    if (ref.card_transaction_id) lines.push(["Txn", ref.card_transaction_id]);
+  } else if (ref.reference) {
+    lines.push(["Ref", ref.reference]);
+  }
+
+  // A fee handed over in two tenders at once. Named here because the mode alone reads
+  // "Split", which says a payment was divided without saying into what.
+  const split = Array.isArray(ref.split) ? ref.split : [];
+
+  return (
+    <div className="min-w-0 space-y-0.5" data-testid={`finance-approval-method-${tx.id}`}>
+      <p className="text-xs font-semibold text-slate-700">{modeLabel(mode)}</p>
+      {split.length > 0 && (
+        <p className="text-[11px] text-slate-500">
+          {split.map((t) => `${fmt(t.amount)} ${modeLabel(t.mode)}`).join(" + ")}
+        </p>
+      )}
+      {lines.map(([label, value]) => (
+        <p key={label} className="truncate text-[11px] leading-snug text-slate-500" title={value}>
+          <span className="text-slate-400">{label}</span> {value}
+        </p>
+      ))}
+    </div>
+  );
+};
+
+/**
+ * The pending queue, as a table.
+ *
+ * Same shape the approved ledger beside it has, so both sides of this desk are read the
+ * same way — a header naming the columns, a row per payment, the action at the end of it.
+ * It was a stack of two-line cards before, which held the patient, the branch, the
+ * category, the mode and the date in one grey run of text: five facts in one sentence,
+ * none of them lined up with the same fact on the row above, and the payment reference
+ * nowhere at all.
+ */
+const PendingTable = ({ rows, selected, onToggle, onApprove }) => (
+  <div className="overflow-x-auto">
+    <table className="w-full min-w-[980px] text-sm" data-testid="finance-pending-table">
+      <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+        <tr>
+          <th className="w-9 px-3 py-2.5" />
+          <th className="px-3 py-2.5 font-semibold">Client Name</th>
+          <th className="px-3 py-2.5 font-semibold">Branch</th>
+          <th className="px-3 py-2.5 font-semibold">Session</th>
+          <th className="px-3 py-2.5 font-semibold">Payment Method</th>
+          {/* Centred, because a clock time is a fixed-width thing and a column of them
+              reads as a column rather than as ragged text. */}
+          <th className="px-3 py-2.5 text-center font-semibold">Time</th>
+          <th className="px-3 py-2.5 font-semibold">Date</th>
+          <th className="px-3 py-2.5 text-right font-semibold">Amount</th>
+          <th className="px-3 py-2.5" />
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {rows.map((tx) => (
+          <tr
+            key={tx.id}
+            className={`align-top transition-colors ${selected.has(tx.id) ? "bg-emerald-50/50" : "hover:bg-slate-50/60"}`}
+            data-testid={`finance-approval-row-${tx.id}`}
+          >
+            <td className="px-3 py-3">
+              <TickBox
+                state={selected.has(tx.id) ? "on" : "off"}
+                onChange={() => onToggle(tx.id)}
+                label={`Select ${tx.patient_name}'s payment`}
+              />
+            </td>
+            <td className="px-3 py-3">
+              <p className="font-medium text-slate-800">{tx.patient_name}</p>
+              {tx.patient_phone && <p className="text-[11px] text-slate-400">{tx.patient_phone}</p>}
+            </td>
+            <td className="px-3 py-3 text-slate-600">{tx.branch_name || "—"}</td>
+            <td className="px-3 py-3 capitalize text-slate-600">{tx.category || "—"}</td>
+            <td className="px-3 py-3"><PaymentMethodCell tx={tx} /></td>
+            <td className="whitespace-nowrap px-3 py-3 text-center text-slate-500">{fmtTime(tx.collected_at)}</td>
+            <td className="whitespace-nowrap px-3 py-3 text-slate-500">{fmtDate(tx.collected_at)}</td>
+            <td className="whitespace-nowrap px-3 py-3 text-right font-bold text-emerald-600">{fmt(tx.amount)}</td>
+            <td className="px-3 py-3 text-right">
+              <Button
+                size="sm"
+                onClick={() => onApprove(tx)}
+                className="bg-emerald-600 hover:bg-emerald-700"
+                data-testid={`finance-approve-${tx.id}`}
+              >
+                <CheckCircle2 className="mr-1 h-3.5 w-3.5" />Approve
+              </Button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
 /**
  * The approved ledger, as a table — the same shape HR Admin's candidate list has, so a
  * list of records reads the same way on both desks: a header naming the columns, a row
@@ -730,36 +887,9 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
             </p>
           ) : view === "approved" ? (
             <ApprovedTable groups={groupByLead(rows)} busyId={busyId} onUndo={undo} />
-          ) : rows.map((tx) => (
-            <div
-              key={tx.id}
-              className={`flex items-center justify-between gap-3 px-4 py-3 transition-colors ${selected.has(tx.id) ? "bg-emerald-50/50" : ""}`}
-              data-testid={`finance-approval-row-${tx.id}`}
-            >
-              <TickBox
-                state={selected.has(tx.id) ? "on" : "off"}
-                onChange={() => toggleOne(tx.id)}
-                label={`Select ${tx.patient_name}'s payment`}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-800">{tx.patient_name}</p>
-                <p className="truncate text-xs text-slate-500">
-                  {tx.branch_name || "—"} · <span className="capitalize">{tx.category}</span> · {modeLabel(tx.payment_mode)} · {(tx.collected_at || "").slice(0, 10)}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <span className="text-sm font-bold text-emerald-600">{fmt(tx.amount)}</span>
-                <Button
-                  size="sm"
-                  onClick={() => setApproving(tx)}
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                  data-testid={`finance-approve-${tx.id}`}
-                >
-                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" />Approve
-                </Button>
-              </div>
-            </div>
-          ))}
+          ) : (
+            <PendingTable rows={rows} selected={selected} onToggle={toggleOne} onApprove={setApproving} />
+          )}
         </div>
       </div>
 

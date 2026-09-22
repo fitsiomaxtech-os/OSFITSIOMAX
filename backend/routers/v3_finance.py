@@ -573,6 +573,23 @@ async def finance_approvals(
 
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
     branch_map = {b["id"]: b for b in branch_docs}
+    # Whose account a UPI payment landed in, for the rows that recorded one. Read once for
+    # the whole list -- see _upi_account_map.
+    upi_accounts = await _upi_account_map()
+
+    def _reference_of(details: str) -> dict:
+        """The row's payment reference, with the company account named rather than left as
+        a handle. A desk checking a UPI collection is looking for "Kiruthika R · HDFC
+        ****4321", not for "fitsio@okhdfc" on its own."""
+        ref = _parse_payment_reference(details)
+        account = upi_accounts.get((ref.get("receiver_upi_id") or "").lower())
+        if account:
+            ref.update(account)
+        split = _parse_payment_split(details)
+        if split:
+            ref["split"] = split
+        return ref
+
     mode_branch_ids = None
     if mode in ("online", "offline"):
         mode_branch_ids = {bid for bid, b in branch_map.items() if _is_online_vertical(b.get("vertical")) == (mode == "online")}
@@ -627,6 +644,9 @@ async def finance_approvals(
                 "category": cat,
                 "amount": _parse_rs_amount(details),
                 "payment_mode": pm,
+                # What this payment can be checked against, beyond its mode. Cash carries
+                # none and says so by being empty -- see _parse_payment_reference.
+                "payment_ref": _reference_of(details),
                 "collected_by": act.get("created_by", ""),
                 "collected_at": act.get("created_at", ""),
                 "approved": is_approved,
@@ -659,6 +679,10 @@ async def finance_approvals(
                 "category": "store",
                 "amount": float(sale.get("amount") or 0),
                 "payment_mode": pm,
+                # A counter sale records the tender and nothing to trace it by -- the sell
+                # popup asks for no reference at all -- so this is empty rather than
+                # pretending the row has one.
+                "payment_ref": {},
                 "collected_by": sale.get("by_user_name", ""),
                 "collected_at": sale.get("created_at", ""),
                 "approved": is_approved,
@@ -705,6 +729,12 @@ async def finance_approvals(
                 "category": "zumba",
                 "amount": amount,
                 "payment_mode": pm,
+                # A registration keeps its reference as a field of its own rather than in
+                # an activity line, and what that field holds depends on the mode -- the
+                # payer's UPI ID for UPI, a transaction number for card and bank transfer
+                # (REFERENCE_LABELS in v3_zumba.py / v3_fitness.py). Handed over as typed,
+                # for the screen to label by the mode beside it.
+                "payment_ref": _registration_reference(reg, pm),
                 "collected_by": reg.get("created_by", ""),
                 "collected_at": reg.get("created_at", ""),
                 "approved": is_approved,
@@ -750,6 +780,12 @@ async def finance_approvals(
                 "category": "fitness",
                 "amount": amount,
                 "payment_mode": pm,
+                # A registration keeps its reference as a field of its own rather than in
+                # an activity line, and what that field holds depends on the mode -- the
+                # payer's UPI ID for UPI, a transaction number for card and bank transfer
+                # (REFERENCE_LABELS in v3_zumba.py / v3_fitness.py). Handed over as typed,
+                # for the screen to label by the mode beside it.
+                "payment_ref": _registration_reference(reg, pm),
                 "collected_by": reg.get("created_by", ""),
                 "collected_at": reg.get("created_at", ""),
                 "approved": is_approved,
@@ -1272,6 +1308,124 @@ def _lines_to_split(lines) -> list:
             out.append({"mode": mode, "amount": float((ln or {}).get("amount") or 0)})
         except (TypeError, ValueError):
             continue
+    return out
+
+
+# What one payment can be traced by, read back off the activity line it was written onto.
+#
+# The structured fields live on the lead's own payment_details document (build_payment_details
+# in v3_packages.py writes both), but this tab reads lead_activity, where the same facts are
+# only in the human line. Rather than fetching every lead's five fee documents to show one
+# list, the line is read back with the same shapes that wrote it -- each pattern below sits
+# directly under the f-string it undoes.
+
+# " · UPI txn ABC123, UTR XYZ to fitsio@upi"  (UTR and receiver both optional)
+_UPI_TXN_RE = re.compile(r"UPI txn\s+(.+?)(?=,\s*UTR\s|\s+to\s+\S+\s*(?:·|$)|\s*·|$)", re.IGNORECASE)
+_UPI_UTR_RE = re.compile(r"UTR\s+(.+?)(?=\s+to\s+\S+\s*(?:·|$)|\s*·|$)", re.IGNORECASE)
+_UPI_TO_RE = re.compile(r"UPI txn[^·]*?\sto\s+(\S+?)\s*(?:·|$)", re.IGNORECASE)
+# " · Card txn 4455"
+_CARD_TXN_RE = re.compile(r"Card txn\s+(.+?)(?=\s*·|$)", re.IGNORECASE)
+# " · Cheque #000123, HDFC"
+_CHEQUE_RE = re.compile(r"Cheque #(\S+?),\s*(.+?)(?=\s*·|$)", re.IGNORECASE)
+# " · A/C ****1234, R Kumar, HDFC (HDFC0000123) · Ref UTR99"
+_ACCOUNT_RE = re.compile(r"A/C \*+(\d+),\s*([^,]+),\s*([^(]+)\(([^)]+)\)")
+_ACCOUNT_REF_RE = re.compile(r"·\s*Ref\s+(.+?)(?=\s*·|$)")
+
+
+def _mask_account(number: str) -> str:
+    """An account number, shown the way a statement shows one. The full number is never
+    put on a screen anybody can read over a shoulder -- and for a fee collection it was
+    never stored in the first place (see build_payment_details)."""
+    digits = "".join(ch for ch in str(number or "") if ch.isdigit())
+    return f"****{digits[-4:]}" if len(digits) >= 4 else (digits or "")
+
+
+def _parse_payment_reference(details: str) -> dict:
+    """Everything the payment line says about HOW the money arrived, beyond its mode.
+
+    The Approvals desk is being asked to sign a payment off, and "Rs.11,200 · UPI" is not
+    something anybody can check: a UPI collection is checked against the transaction id the
+    patient quotes and the company account it landed in. So the reference travels with the
+    row, and the screen shows whichever of these the mode actually has -- Cash has none,
+    which is why it shows none rather than an empty box.
+    """
+    out = {}
+    if not details:
+        return out
+    m = _UPI_TXN_RE.search(details)
+    if m:
+        out["upi_transaction_id"] = m.group(1).strip()
+        # Only ever read as part of a UPI segment. On its own it would also match the
+        # "Ref UTR..." an Account Transfer ends with, and hand back that transfer's
+        # reference as though a UPI payment had carried it.
+        m = _UPI_UTR_RE.search(details)
+        if m:
+            out["upi_utr"] = m.group(1).strip()
+    m = _UPI_TO_RE.search(details)
+    if m:
+        out["receiver_upi_id"] = m.group(1).strip()
+    m = _CARD_TXN_RE.search(details)
+    if m:
+        out["card_transaction_id"] = m.group(1).strip()
+    m = _CHEQUE_RE.search(details)
+    if m:
+        out["cheque_number"] = m.group(1).strip()
+        out["cheque_bank"] = m.group(2).strip()
+    m = _ACCOUNT_RE.search(details)
+    if m:
+        out["account_number"] = f"****{m.group(1).strip()}"
+        out["account_holder_name"] = m.group(2).strip()
+        out["bank_name"] = m.group(3).strip()
+        out["ifsc_code"] = m.group(4).strip()
+        ref = _ACCOUNT_REF_RE.search(details)
+        if ref:
+            out["transfer_reference"] = ref.group(1).strip()
+    return {k: v for k, v in out.items() if v}
+
+
+def _registration_reference(reg: dict, mode: str) -> dict:
+    """The reference on a Zumba or Fitness registration, in the shape the activity-line
+    rows use. One typed field there rather than the several a fee collection writes, so a
+    UPI registration carries the payer's UPI ID and the other two a transaction number."""
+    ref = str(reg.get("payment_reference") or "").strip()
+    out = {}
+    if ref:
+        if mode == "upi":
+            out["payer_upi_id"] = ref
+        elif mode in ("card", "account_transfer"):
+            out["transfer_reference" if mode == "account_transfer" else "card_transaction_id"] = ref
+        else:
+            out["reference"] = ref
+    split = _lines_to_split(reg.get("payment_lines"))
+    if split:
+        out["split"] = split
+    return out
+
+
+async def _upi_account_map() -> dict:
+    """Company UPI IDs, keyed by the id itself, so a payment that names where it landed can
+    say whose account that is. Read once per request rather than per row -- there are a
+    handful of these accounts and thousands of payments into them.
+
+    Switched-off accounts are included on purpose, unlike the collect picker's list: this
+    reads payments already taken, and an account closed since is still the account that
+    money went into.
+    """
+    rows = await v3_col("bank_accounts").find(
+        {},
+        {"_id": 0, "upi_id": 1, "holder_name": 1, "bank_name": 1, "account_number": 1, "ifsc_code": 1, "bank_branch_name": 1},
+    ).to_list(500)
+    out = {}
+    for row in rows:
+        upi = (row.get("upi_id") or "").strip()
+        if not upi:
+            continue
+        out[upi.lower()] = {
+            "receiver_name": row.get("holder_name") or "",
+            "receiver_bank": row.get("bank_name") or "",
+            "receiver_account": _mask_account(row.get("account_number")),
+            "receiver_ifsc": (row.get("ifsc_code") or "").upper(),
+        }
     return out
 
 
