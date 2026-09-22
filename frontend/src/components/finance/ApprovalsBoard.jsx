@@ -326,25 +326,25 @@ const referenceColumns = (tx) => {
 
   if (mode === "upi") {
     return {
-      // Sender › receiver, as one movement rather than two facts. The sender is known
-      // only where the desk typed the payer's own handle (a Zumba or Fitness
-      // registration); a fee collection records the account it landed in, not the phone
-      // it left, so that side is blank rather than guessed.
-      route: [ref.payer_upi_id || "", [ref.receiver_bank, ref.receiver_name].filter(Boolean).join(" · ")],
+      // The bank the money landed in, and whose account it is underneath. The payer's own
+      // handle is not here: the column names the receiver, and a fee collection records
+      // the account it landed in rather than the phone it left, so where a registration
+      // did capture the sender it is shown against the client instead.
+      route: [ref.receiver_bank || "", ref.receiver_name || ""],
       account: [ref.receiver_upi_id || "", ref.receiver_account || ""],
       txn: [ref.upi_transaction_id || "", ref.upi_utr ? `UTR ${ref.upi_utr}` : ""],
     };
   }
   if (mode === "account_transfer") {
     return {
-      route: ["", [ref.bank_name, ref.account_holder_name].filter(Boolean).join(" · ")],
+      route: [ref.bank_name || "", ref.account_holder_name || ""],
       account: [ref.account_number || "", ref.ifsc_code || ""],
       txn: [ref.transfer_reference || "", ""],
     };
   }
   if (mode === "cheque") {
     return {
-      route: ["", ref.cheque_bank || ""],
+      route: [ref.cheque_bank || "", ""],
       account: ["", ""],
       txn: [ref.cheque_number ? `#${ref.cheque_number}` : "", ""],
     };
@@ -394,14 +394,14 @@ const RefCell = ({ lead, sub, testId }) => (
 const PendingTable = ({ rows, selected, onToggle, onApprove }) => (
   <div className="overflow-x-auto">
     <table className="w-full min-w-[1240px] text-sm" data-testid="finance-pending-table">
-      <thead className="border-b border-slate-200 bg-slate-100 text-left text-[11px] uppercase tracking-wider text-slate-700">
+      <thead className="bg-slate-500 text-left text-[10px] font-semibold uppercase tracking-wider text-white">
         <tr>
           <th className="w-9 px-3 py-2.5" />
           <th className="px-3 py-2.5 font-semibold">Client Name</th>
           <th className="px-3 py-2.5 font-semibold">Branch</th>
           <th className="px-3 py-2.5 font-semibold">Session</th>
           <th className="px-3 py-2.5 font-semibold">Payment Method</th>
-          <th className="px-3 py-2.5 font-semibold">Sender UPI › Receiver Bank</th>
+          <th className="px-3 py-2.5 font-semibold">Receiver Bank</th>
           <th className="px-3 py-2.5 font-semibold">Receiver UPI</th>
           <th className="px-3 py-2.5 font-semibold">Transaction UPI ID</th>
           {/* Centred, because a date and a clock time are fixed-width things and a column
@@ -431,6 +431,11 @@ const PendingTable = ({ rows, selected, onToggle, onApprove }) => (
               <td className="px-3 py-3">
                 <p className="font-medium text-slate-800">{tx.patient_name}</p>
                 {tx.patient_phone && <p className="text-[11px] text-slate-400">{tx.patient_phone}</p>}
+                {(tx.payment_ref || {}).payer_upi_id && (
+                  <p className="truncate text-[11px] text-slate-400" title={tx.payment_ref.payer_upi_id}>
+                    UPI {tx.payment_ref.payer_upi_id}
+                  </p>
+                )}
               </td>
               <td className="px-3 py-3 text-slate-600">{tx.branch_name || <Blank />}</td>
               <td className="px-3 py-3 capitalize text-slate-600">{tx.category || <Blank />}</td>
@@ -494,7 +499,7 @@ const ApprovedTable = ({ groups, busyId, onUndo }) => {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[820px] text-sm" data-testid="finance-approved-table">
-        <thead className="border-b border-slate-200 bg-slate-100 text-left text-[11px] uppercase tracking-wider text-slate-700">
+        <thead className="bg-slate-500 text-left text-[10px] font-semibold uppercase tracking-wider text-white">
           <tr>
             <th className="px-4 py-2.5 font-semibold">Patient</th>
             <th className="px-4 py-2.5 font-semibold">Branch</th>
