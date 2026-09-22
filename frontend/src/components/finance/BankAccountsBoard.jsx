@@ -205,21 +205,28 @@ const BankFormDialog = ({ account, branchId, branchName, onClose, onSaved }) => 
             </div>
             {/* The same switch the card carries, so an account can be added already
                 switched off -- one opened at the bank but not yet put up at a counter. */}
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <div
+              className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 transition ${
+                form.is_active ? "border-slate-200 bg-slate-50" : "border-rose-200 bg-rose-50"
+              }`}
+            >
               <div>
                 <p className="text-sm font-semibold text-slate-800">Status</p>
-                <p className="text-xs text-slate-500">
+                <p className={`text-xs ${form.is_active ? "text-slate-500" : "text-rose-600"}`}>
                   {form.is_active ? "Active — this account is collecting." : "Inactive — not offered for payment."}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold ${form.is_active ? "text-emerald-600" : "text-slate-400"}`}>
+                <span className={`text-xs font-bold ${form.is_active ? "text-emerald-600" : "text-rose-600"}`}>
                   {form.is_active ? "ON" : "OFF"}
                 </span>
+                {/* Off is red, not grey. Grey reads as "nothing set here yet"; an account
+                    switched off is a decision somebody made, and the card should say so
+                    as loudly as the one that is collecting does. */}
                 <Switch
                   checked={!!form.is_active}
                   onCheckedChange={(v) => setForm((f) => ({ ...f, is_active: v }))}
-                  className="data-[state=checked]:bg-emerald-500"
+                  className="data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-rose-500"
                   data-testid="finance-bank-status-switch"
                 />
               </div>
@@ -362,14 +369,14 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
           {rows.map((acc) => (
             <div
               key={acc.id}
-              className={`flex flex-col rounded-xl border bg-white p-4 shadow-sm transition ${
-                acc.is_active ? "border-slate-200" : "border-slate-200 bg-slate-50"
+              className={`flex flex-col rounded-xl border p-4 shadow-sm transition ${
+                acc.is_active ? "border-slate-200 bg-white" : "border-rose-200 bg-rose-50/40"
               }`}
               data-testid={`finance-bank-card-${acc.id}`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900" title={acc.bank_name}>{acc.bank_name}</p>
+                  <p className={`truncate text-sm font-bold ${acc.is_active ? "text-slate-900" : "text-rose-900"}`} title={acc.bank_name}>{acc.bank_name}</p>
                   <p className="truncate text-xs text-slate-500" title={acc.holder_name}>{acc.holder_name}</p>
                 </div>
                 <button
@@ -404,20 +411,20 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
               {/* On or off, right on the card: whether this account is being offered for
                   payment is the one thing about it that changes without anything else
                   about it changing, so it does not go behind Edit. */}
-              <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+              <div className={`mt-3 flex items-center justify-between gap-2 border-t pt-3 ${acc.is_active ? "border-slate-100" : "border-rose-100"}`}>
                 <span
                   className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                    acc.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-200 text-slate-500"
+                    acc.is_active ? "bg-emerald-50 text-emerald-700" : "bg-rose-100 text-rose-700"
                   }`}
                   data-testid={`finance-bank-status-${acc.id}`}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${acc.is_active ? "bg-emerald-500" : "bg-slate-400"}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full ${acc.is_active ? "bg-emerald-500" : "bg-rose-500"}`} />
                   {acc.is_active ? "Active" : "Inactive"}
                 </span>
                 <Switch
                   checked={!!acc.is_active}
                   onCheckedChange={() => toggleStatus(acc)}
-                  className="data-[state=checked]:bg-emerald-500"
+                  className="data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-rose-500"
                   aria-label={acc.is_active ? "Deactivate this account" : "Activate this account"}
                   data-testid={`finance-bank-toggle-${acc.id}`}
                 />
