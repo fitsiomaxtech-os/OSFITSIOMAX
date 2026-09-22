@@ -115,6 +115,13 @@ export const patientPortalReviewWeek = async (payload) => {
   return data;
 };
 
+/** Skip one week's review pop-up: it stops asking for that week, and stops holding the
+ *  Physio's Send to Review. The week's own Review button still opens it afterwards. */
+export const patientPortalSkipWeekReview = async (payload) => {
+  const { data } = await portalApi.post("/patient-portal/review/week/skip", payload, { headers: authHeaders() });
+  return data;
+};
+
 /** What this patient has sent, and where each piece has got to. */
 export const patientPortalMyFeedback = async () => {
   const { data } = await portalApi.get("/patient-portal/feedback", { headers: authHeaders() });

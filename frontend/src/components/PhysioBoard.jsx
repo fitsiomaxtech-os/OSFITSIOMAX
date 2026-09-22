@@ -1253,8 +1253,8 @@ const ordinal = (n) => {
 
 /**
  * Send for Review, held until the client has rated every completed week (star + Treatment
- * Feedback, from the Client Portal's Sessions tab). The server refuses it too; this says
- * why before the Physio has written their notes.
+ * Feedback, from the Client Portal's Sessions tab) or skipped it there. The server refuses
+ * it too; this says why before the Physio has written their notes.
  */
 function SendForReviewButton({ patient, onClick, className = "", testid }) {
   const owed = patient.client_weeks_owed || [];
@@ -1263,7 +1263,7 @@ function SendForReviewButton({ patient, onClick, className = "", testid }) {
     return (
       <span
         className={`inline-flex items-center justify-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-center text-[10px] font-semibold text-amber-700 ${className}`}
-        title={`The client has not rated ${weeks} yet. Ask them to review it in the Client Portal (Sessions tab).`}
+        title={`The client has not rated ${weeks} yet. Ask them to review it in the Client Portal (Sessions tab), or to Skip it there.`}
         data-testid={`${testid}-awaiting-client`}
       >
         <Star className="h-3 w-3 shrink-0" />

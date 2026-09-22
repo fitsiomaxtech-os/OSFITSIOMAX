@@ -13,10 +13,12 @@ Every review is its own row, with a `kind` (who is rated) and a `source` (what p
   * kind "physio", source "week" -- every 7 days of treatment (or rehab) the client rates
     their Physio: 1-5 stars and Treatment Feedback, one row per week. A week is due once
     every day in it is completed; the portal's Sessions tab then asks in a pop-up for each
-    due week finished since PHYSIO_REVIEW_START. Mandatory: there is no Skip, and the
-    Physio cannot Send to Review while one is owed (see weeks_owed). The Physio reads the
-    stars only -- never the words (see physio_star_ratings). Weekly reviews briefly also
-    rated the Consultant; those rows stay readable but are no longer asked for.
+    due week finished since PHYSIO_REVIEW_START. Not mandatory: Skip stops the asking for
+    that week (SKIPS_COLLECTION) and, with it, stops holding the Physio's Send to Review
+    (see weeks_owed) -- the week's Review button still opens it whenever the client
+    chooses. The Physio reads the stars only -- never the words (see
+    physio_star_ratings). Weekly reviews briefly also rated the Consultant; those rows
+    stay readable but are no longer asked for.
   * source "anytime" -- from the Feedback tab. The Physio whenever the client wants; the
     Consultant and the Branch Admin once only (ONCE_KINDS), and never changed after.
   * kind "branch_admin", source "anytime" -- the client's stars for their branch desk, from
@@ -56,6 +58,8 @@ from utils import clinic_day_of, now_iso
 router = APIRouter(prefix="/api/v3")
 
 COLLECTION = "client_reviews"
+# Weeks whose review pop-up the client skipped: {lead_id, track, week_number, skipped_at}.
+SKIPS_COLLECTION = "client_review_skips"
 MAX_TEXT = 2000
 
 KIND_PHYSIO = "physio"
@@ -148,29 +152,39 @@ def course_weeks(days: List[dict]) -> List[dict]:
     return out
 
 
-def pending_weeks(weeks: List[dict], rows: List[dict], since: str = PHYSIO_REVIEW_START) -> List[dict]:
-    """Completed weeks, finished since `since`, oldest first, with no Physio review yet."""
+def pending_weeks(weeks: List[dict], rows: List[dict],
+                  skipped: Optional[set] = None, since: str = PHYSIO_REVIEW_START) -> List[dict]:
+    """Completed weeks, finished since `since`, oldest first, with no Physio review yet and
+    not skipped. Pass `skipped` as None to get every unreviewed week, skips included."""
     given = {(r.get("track"), r.get("week_number"))
              for r in rows if r.get("source") == SOURCE_WEEK and r.get("kind") == KIND_PHYSIO}
+    skipped = skipped or set()
     out = []
     for w in weeks:
         key = (w["track"], w["week_number"])
-        if not w["complete"] or w["finished_at"][:10] < since or key in given:
+        if not w["complete"] or w["finished_at"][:10] < since or key in skipped or key in given:
             continue
         out.append(w)
     out.sort(key=lambda w: w["finished_at"])
     return out
 
 
+async def skipped_weeks(lead_id: str) -> set:
+    """The weeks whose review pop-up this client skipped, as (track, week_number)."""
+    rows = await v3_col(SKIPS_COLLECTION).find({"lead_id": lead_id}, {"_id": 0}).to_list(500)
+    return {(s.get("track"), s.get("week_number")) for s in rows}
+
+
 async def weeks_owed(lead_id: str) -> List[dict]:
-    """The completed weeks this client still has to rate. Send to Review waits on these:
-    the Physio's hand-off to the Consultant goes up with the client's verdict on the week,
-    not ahead of it."""
+    """The completed weeks this client still has to rate and has not skipped. Send to
+    Review waits on these: the Physio's hand-off to the Consultant goes up with the
+    client's verdict on the week where they gave one. A skipped week is not owed -- the
+    client declined it, so it cannot hold the Physio's hand-off for ever."""
     rows = await v3_col(COLLECTION).find(
         {"lead_id": lead_id, "kind": KIND_PHYSIO, "source": SOURCE_WEEK, "skipped": {"$ne": True}},
         {"_id": 0, "kind": 1, "source": 1, "track": 1, "week_number": 1},
     ).to_list(500)
-    return pending_weeks(course_weeks(await _course_days(lead_id)), rows)
+    return pending_weeks(course_weeks(await _course_days(lead_id)), rows, await skipped_weeks(lead_id))
 
 
 def star_key(track: str, week_number) -> str:
@@ -368,16 +382,34 @@ async def portal_my_review(lead_id: str = Depends(_current_patient_lead_id)):
     team = await care_team(lead)
     weeks = course_weeks(await _course_days(lead_id))
     week_rows = [r for r in rows if r.get("source") == SOURCE_WEEK]
-    pending = pending_weeks(weeks, week_rows)
     return {
         **team,
         "weeks": weeks,
-        "weeks_pending": pending,
-        # Same list under its older name, for a portal build from before Skip was retired.
-        "weeks_unreviewed": pending,
+        # What the pop-up asks for: unreviewed and not skipped.
+        "weeks_pending": pending_weeks(weeks, week_rows, await skipped_weeks(lead_id)),
+        # Skipped ones too: the week's own Review button keeps offering them afterwards.
+        "weeks_unreviewed": pending_weeks(weeks, week_rows),
         "week_reviews": week_rows,
         "anytime_reviews": [r for r in rows if r.get("source") == SOURCE_ANYTIME],
     }
+
+
+class WeekSkipIn(BaseModel):
+    track: str = "treatment"
+    week_number: int
+
+
+@router.post("/patient-portal/review/week/skip")
+async def portal_skip_week(payload: WeekSkipIn, lead_id: str = Depends(_current_patient_lead_id)):
+    """The client closed a week's review pop-up with Skip. It stops asking for that week and
+    releases the Physio's Send to Review; the week's Review button still opens it whenever
+    they choose, and reviewing it then saves as normal."""
+    if payload.track not in TRACKS:
+        raise HTTPException(status_code=400, detail="Unknown course")
+    await _lead_or_404(lead_id)
+    match = {"lead_id": lead_id, "track": payload.track, "week_number": payload.week_number}
+    await v3_col(SKIPS_COLLECTION).update_one({**match}, {"$set": {**match, "skipped_at": now_iso()}}, upsert=True)
+    return {"message": "Skipped. You can review this week any time from Sessions."}
 
 
 @router.post("/patient-portal/review/week")

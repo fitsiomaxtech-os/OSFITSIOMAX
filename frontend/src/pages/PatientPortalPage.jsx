@@ -15,6 +15,7 @@ import {
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
   patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback, patientPortalMyReview, patientPortalReviewWeek,
+  patientPortalSkipWeekReview,
   patientPortalRequestPaymentExtension,
 } from "@/lib/patientPortalApi";
 
@@ -2099,14 +2100,29 @@ const savedForWeek = (reviews, w) => (reviews?.week_reviews || []).find(
 );
 
 /** Every 7 days of treatment: the Physio's star rating and the client's Treatment Feedback,
-    each in its own box. Both are required. */
-function WeekReviewForm({ week, reviews, onDone, testid }) {
+    each in its own box. Both are required of a review that is sent — but sending one at all
+    is not: `onSkip` adds Skip beside Submit, which the pop-up that opens by itself offers. */
+function WeekReviewForm({ week, reviews, onDone, onSkip, testid }) {
   const saved = savedForWeek(reviews, week);
   const physioName = week.physio_name || reviews?.physio?.name || "";
   const [rating, setRating] = useState(saved?.rating || null);
   const [comment, setComment] = useState(saved?.comment || "");
   const [saving, setSaving] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const ready = !!rating && !!comment.trim();
+
+  const skip = async () => {
+    setSkipping(true);
+    try {
+      const res = await patientPortalSkipWeekReview({ track: week.track, week_number: week.week_number });
+      toast.success(res?.message || "Skipped. You can review this week any time from Sessions.");
+      onSkip?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not skip this review. Please try again.");
+    } finally {
+      setSkipping(false);
+    }
+  };
 
   const save = async () => {
     if (!rating) { toast.error("Tap the stars to rate your physio"); return; }
@@ -2148,9 +2164,20 @@ function WeekReviewForm({ week, reviews, onDone, testid }) {
           data-testid={`${testid}-comment`}
         />
       </div>
-      <Button className="w-full" disabled={saving || !ready} onClick={save} data-testid={`${testid}-submit`}>
+      <Button className="w-full" disabled={saving || skipping || !ready} onClick={save} data-testid={`${testid}-submit`}>
         {saving ? "Saving…" : saved ? "Update review" : "Submit review"}
       </Button>
+      {onSkip && (
+        <Button
+          variant="ghost"
+          className="w-full text-xs text-slate-500 hover:text-slate-700"
+          disabled={saving || skipping}
+          onClick={skip}
+          data-testid={`${testid}-skip`}
+        >
+          {skipping ? "Skipping…" : "Skip for now"}
+        </Button>
+      )}
     </div>
   );
 }
@@ -2194,27 +2221,35 @@ function WeekReviewButton({ track, number, reviews, onReviewed }) {
 }
 
 /** The Review pop-up that opens by itself on the Sessions tab once a week of treatment is
-    completed and not yet reviewed. Mandatory: no Skip and no close button — the Physio's
-    Send to Review waits on it. It sits under the bottom nav, so the client can still leave
-    for another tab; it is back the next time they open Sessions. */
+    completed and not yet reviewed. Not mandatory: Skip closes it for good on that week and
+    releases the Physio's Send to Review, and the week's own Review button on the Session
+    History row still opens it whenever the client changes their mind. Closing it with the X
+    dismisses it for this visit only — it is back the next time they open Sessions. It sits
+    under the bottom nav, so the client can always leave for another tab. */
 function WeekReviewGate({ reviews, onChanged }) {
   const pending = reviews?.weeks_pending || [];
-  if (!pending.length) return null;
+  // Keyed on the week, so dismissing one and finishing it still lets the next week ask.
+  const [dismissed, setDismissed] = useState(null);
   const week = pending[0];
+  if (!week) return null;
+  const key = `${week.track}-${week.week_number}`;
+  if (dismissed === key) return null;
 
   return (
     <ReviewDialog
       title={`Review ${weekTitle(week)}`}
       subtitle={`${weekRange(week) ? `${weekRange(week)} completed. ` : ""}How was your week? Rate your physio${pending.length > 1 ? ` — ${pending.length} weeks are waiting` : ""}.`}
+      onClose={() => setDismissed(key)}
       underNav
       testid="portal-week-review-gate"
     >
       <WeekReviewForm
-        key={`${week.track}-${week.week_number}`}
+        key={key}
         week={week}
         reviews={reviews}
         testid="portal-week-review-gate-form"
         onDone={onChanged}
+        onSkip={onChanged}
       />
     </ReviewDialog>
   );

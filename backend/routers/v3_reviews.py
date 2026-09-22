@@ -412,7 +412,9 @@ def _review_eligibility(existing_for_lead: List[dict], treatment_days: int, cour
 
 
 async def _client_weeks_owed(lead_id: str) -> list:
-    """The completed weeks the client has not yet rated (star + Treatment Feedback).
+    """The completed weeks the client has not yet rated (star + Treatment Feedback) and has
+    not skipped. A week the client skipped in the portal is not owed, so it never holds the
+    Physio's hand-off for ever.
 
     Imported here rather than at the top: v3_client_reviews imports the patient portal,
     which imports this module, so a top-level import would close the loop."""
@@ -507,8 +509,9 @@ async def physio_raise_review(
         if elig["review"] and elig["review"].get("status") in (SEND_TO_REVIEW, SENT):
             raise HTTPException(status_code=409, detail="This patient already has a review in progress")
         raise HTTPException(status_code=400, detail=f"This patient hasn't reached a new review milestone yet (every {REVIEW_AFTER_DAYS} treatment days)")
-    # The client's star + Treatment Feedback review comes first. Mandatory: the review
-    # goes up to the Consultant with the client's verdict on the week, not ahead of it.
+    # The client's star + Treatment Feedback review comes first, where they gave one: the
+    # review goes up to the Consultant with the client's verdict on the week rather than
+    # ahead of it. Not for ever, though -- a week the client skipped is no longer owed.
     owed = await _client_weeks_owed(lead_id)
     if owed:
         weeks = ", ".join(
@@ -516,7 +519,7 @@ async def physio_raise_review(
         )
         raise HTTPException(
             status_code=400,
-            detail=f"Waiting for the client's review of {weeks}. Ask them to rate it in the Client Portal (Sessions tab) first.",
+            detail=f"Waiting for the client's review of {weeks}. Ask them to rate it in the Client Portal (Sessions tab), or to Skip it there.",
         )
 
     doctor = await v3_col("doctors").find_one(
