@@ -5,7 +5,6 @@ import { ApprovalsBoard, PendingBadge } from "@/components/finance/ApprovalsBoar
 import { BranchCashBoard } from "@/components/finance/BranchCashBoard";
 import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
 import { ProfitBoard } from "@/components/finance/ProfitBoard";
-import { UpiAccountBoard } from "@/components/finance/UpiAccountBoard";
 import { getFinanceApprovals, getFinanceExpenses } from "@/lib/api";
 
 // How often the Approvals badge asks again. A branch sends a day up while this board sits
@@ -59,6 +58,23 @@ const SummaryTab = ({ branchId, scoped }) => (
  * the same figures out of the same source: a sign-off, an expense or a closed book
  * entered on either shows on the other the next time it loads.
  */
+// Holds Finance > UPI open while its board is redesigned. Deliberately says nothing about
+// a branch: the shape the new one takes — per branch, or one account for the group — is
+// exactly what is still being decided, and a placeholder that guessed would have to be
+// unsaid later.
+const UpiPlaceholder = () => (
+  <div
+    className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center"
+    data-testid="finance-upi-placeholder"
+  >
+    <QrCode className="h-8 w-8 text-slate-300" />
+    <p className="text-sm font-semibold text-slate-700">UPI is being rebuilt</p>
+    <p className="max-w-sm text-xs text-slate-500">
+      The old UPI account board has been removed. The new one will appear here.
+    </p>
+  </div>
+);
+
 const TABS = [
   {
     key: "summary",
@@ -99,13 +115,15 @@ const TABS = [
     label: "UPI",
     icon: QrCode,
     // Super Admin only: a branch's own UPI/bank details are administrative setup — who
-    // is putting a QR up at a counter, not a figure either desk works day to day — and
-    // the endpoints behind it are gated the same way (super_admin writes, branch_admin
-    // reads its own; the Accountant's own login has no route to them at all).
+    // is putting a QR up at a counter, not a figure either desk works day to day.
+    //
+    // The board that stood here — an All Branches card grid over a per-branch QR +
+    // bank-details editor with Lock/Unlock, and the five /branch-mgmt/*upi-account
+    // endpoints behind it — has been taken out whole, to be redesigned. The tab is
+    // kept so the place it goes back into is still here; nothing reads or writes a UPI
+    // account until the new one lands.
     superAdminOnly: true,
-    render: ({ branchId, branchName, onSelectBranch }) => (
-      <UpiAccountBoard branchId={branchId} branchName={branchName} onSelectBranch={onSelectBranch} />
-    ),
+    render: () => <UpiPlaceholder />,
   },
 ];
 
@@ -133,7 +151,6 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
     if (onlineDiff !== 0) return onlineDiff;
     return (a.branch_name || "").localeCompare(b.branch_name || "");
   });
-  const branchName = sortedBranches.find((b) => b.id === selectedId)?.branch_name;
 
   // What is waiting on this desk, per ledger, across every branch. Held here rather than
   // read off the Approvals page's own figures: those follow its filters, so a badge fed by
@@ -236,7 +253,7 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
           different components, already unmounted and remounted by React swapping which
           one renders. */}
       <div key={selectedId}>
-        {active.render({ branchId, branchName, scoped, pending, onChanged: refreshPending, onSelectBranch: setSelectedId })}
+        {active.render({ branchId, scoped, pending, onChanged: refreshPending })}
       </div>
     </div>
   );
