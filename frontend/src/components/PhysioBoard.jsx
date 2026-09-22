@@ -1802,6 +1802,9 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   // On: a day is worked only on its booked date. Off (Danger Zone): the open day can be
   // worked on any date. Days still go in order either way -- the server enforces that.
   const [dayDateLock, setDayDateLock] = useState(true);
+  // Set only when this physio is covering an absent colleague's patient: the day list is
+  // then just the covered days, and this is how far the whole course has actually gone.
+  const [coverCourse, setCoverCourse] = useState(null);
   const isComplete = lead.physio_stage === "Complete";
 
   const loadSessions = useCallback(async () => {
@@ -1819,6 +1822,9 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
       setPaymentHold(data.payment_hold || null);
       setPaymentHoldMessage(data.payment_hold_message || "");
       setDayDateLock(data.day_date_lock !== false);
+      setCoverCourse(data.covering
+        ? { daysDone: data.course_days_done || 0, finished: !!data.course_finished }
+        : null);
     } catch { /* silent */ }
   }, [lead.id, physioId]);
 
@@ -1857,7 +1863,11 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   //
   // Nothing booked is the exception. Those patients have no day list to finish, and
   // without this they could never be marked complete from the only screen that can do it.
-  const allDaysDone = sessions.length === 0 || completedSessions.length === sessions.length;
+  // A cover's list is only the days handed to them, so finishing those is not finishing the
+  // course — the final review and Mark Complete wait for the whole course to be over.
+  const allDaysDone = coverCourse
+    ? coverCourse.finished
+    : sessions.length === 0 || completedSessions.length === sessions.length;
   const upcomingSession = sessions.find((s) => s.status === "upcoming") || null;
   const lastCompleted = completedSessions[completedSessions.length - 1] || null;
 
@@ -1876,7 +1886,8 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
     // package at once is booked twice on the same morning, and counting rows made four
     // mornings read as eight — the week-one banner appeared on their fourth day. Mirrors
     // _completed_day_counts on the server, which is what actually lets a review be raised.
-    const done = new Set(
+    // A cover counts the whole course's days, not just the ones handed to them.
+    const done = coverCourse ? coverCourse.daysDone : new Set(
       sessions
         .filter((s) => s.status === "completed")
         .map((s) => (s.slot_time || "").slice(0, 10))
@@ -1926,7 +1937,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
       });
     }
     return rows;
-  }, [sessions, reviews, reviewEvery, allDaysDone]);
+  }, [sessions, reviews, reviewEvery, allDaysDone, coverCourse]);
 
   // The milestone the course currently stands at — the closing one once every day is done,
   // which is the row _review_eligibility puts one past the last whole week on the server.

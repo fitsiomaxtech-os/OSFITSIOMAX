@@ -16,7 +16,7 @@ from schemas.v3 import (
 # agrees they are.
 from routers.v3_reviews import (
     REVIEW_AFTER_DAYS, review_numbers_for_lead, leads_awaiting_review,
-    review_hold_for_lead, review_hold_message,
+    review_hold_for_lead, review_hold_message, _completed_day_counts, _finished_course_ids,
 )
 # Which leads belong to a physio. In its own module because both this board and the
 # reviews router need it, and this one already imports from that one — a helper living
@@ -530,6 +530,13 @@ async def physio_lead_sessions(lead_id: str, physio_id: Optional[str] = None, us
         "payment_hold_message": payment_hold_message(pay_hold) if pay_hold else "",
         # Whether a day may be worked only on its booked date. Switched from the Danger Zone.
         "day_date_lock": await _physio_day_lock_enabled(),
+        # A cover is shown only the days handed to them, so those days cannot say how far the
+        # course has gone: one covered day, done, read as a finished course and put a final
+        # review and Mark Complete on the cover's popup mid-course. The whole course's count
+        # and whether it is over are sent beside them for the popup to read instead.
+        "covering": bool(scope),
+        "course_days_done": (await _completed_day_counts([lead_id])).get(lead_id, 0) if scope else None,
+        "course_finished": (lead_id in await _finished_course_ids([lead_id])) if scope else None,
     }
 
 
