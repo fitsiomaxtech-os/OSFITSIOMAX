@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRightLeft, CalendarX, CheckCircle2, Clock, RefreshCw, Trash2, UserX, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
 import {
@@ -111,19 +113,26 @@ function DayRow({ absence, day, candidates, onChanged }) {
           {!releasing ? (
             <>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <select
-                  value={toId}
-                  onChange={(e) => { setToId(e.target.value); setConfirmed(false); }}
-                  className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm"
-                  data-testid={`absence-day-physio-${day.id}`}
-                >
-                  <option value="">{day.state === "reassigned" ? "Hand to someone else…" : "Hand to another physio…"}</option>
-                  {options.map((c) => (
-                    <option key={c.id} value={c.id} disabled={!c.available || c.id === day.physio_id}>
-                      {c.name} · {c.available ? `${c.taken}/${c.capacity} booked` : c.reason}
-                    </option>
-                  ))}
-                </select>
+                <Select value={toId} onValueChange={(v) => { setToId(v); setConfirmed(false); }}>
+                  <SelectTrigger
+                    className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-none hover:bg-slate-50 focus:ring-2 focus:ring-sky-200"
+                    data-testid={`absence-day-physio-${day.id}`}
+                  >
+                    <SelectValue placeholder={day.state === "reassigned" ? "Hand to someone else…" : "Hand to another physio…"} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 border-slate-200">
+                    {options.map((c) => (
+                      <SelectItem
+                        key={c.id}
+                        value={c.id}
+                        disabled={!c.available || c.id === day.physio_id}
+                        className="text-sm text-slate-700"
+                      >
+                        {c.name} <span className="text-slate-400">· {c.available ? `${c.taken}/${c.capacity} booked` : c.reason}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
@@ -354,25 +363,33 @@ export function PhysioAbsencePanel({ mode = "branch" }) {
           {!isPhysio && (
             <label className="flex min-w-0 flex-1 flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Physio
-              <select
+              <Select
                 value={form.physio_id}
-                onChange={(e) => setForm((f) => ({ ...f, physio_id: e.target.value }))}
-                className="h-10 rounded-md border border-slate-200 bg-white px-2 text-sm font-normal normal-case tracking-normal text-slate-800"
-                data-testid="physio-absence-physio"
+                onValueChange={(v) => setForm((f) => ({ ...f, physio_id: v }))}
               >
-                <option value="">Pick a physio…</option>
-                {(data.physios || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+                <SelectTrigger
+                  className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-normal normal-case tracking-normal text-slate-800 shadow-none hover:bg-slate-50 focus:ring-2 focus:ring-sky-200"
+                  data-testid="physio-absence-physio"
+                >
+                  <SelectValue placeholder="Pick a physio…" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72 border-slate-200">
+                  {(data.physios || []).map((p) => (
+                    <SelectItem key={p.id} value={p.id} className="text-sm text-slate-700">{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </label>
           )}
           <label className="flex flex-col gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
             Date
-            <Input
-              type="date"
+            <MilkDateInput
               min={localToday()}
               value={form.date}
               onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-              className="h-10 sm:w-44"
+              accent="sky"
+              iconLeft
+              className="h-10 border-slate-200 bg-white font-normal normal-case tracking-normal sm:w-44"
               data-testid="physio-absence-date"
             />
           </label>
