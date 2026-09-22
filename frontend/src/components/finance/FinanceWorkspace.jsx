@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BadgeIndianRupee, Building2, CheckSquare, Coins, Layers, QrCode, Receipt, Wallet } from "lucide-react";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { ApprovalsBoard, PendingBadge } from "@/components/finance/ApprovalsBoard";
+import { BankAccountsBoard } from "@/components/finance/BankAccountsBoard";
 import { BranchCashBoard } from "@/components/finance/BranchCashBoard";
 import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
 import { ProfitBoard } from "@/components/finance/ProfitBoard";
@@ -58,23 +59,6 @@ const SummaryTab = ({ branchId, scoped }) => (
  * the same figures out of the same source: a sign-off, an expense or a closed book
  * entered on either shows on the other the next time it loads.
  */
-// Holds Finance > UPI open while its board is redesigned. Deliberately says nothing about
-// a branch: the shape the new one takes — per branch, or one account for the group — is
-// exactly what is still being decided, and a placeholder that guessed would have to be
-// unsaid later.
-const UpiPlaceholder = () => (
-  <div
-    className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center"
-    data-testid="finance-upi-placeholder"
-  >
-    <QrCode className="h-8 w-8 text-slate-300" />
-    <p className="text-sm font-semibold text-slate-700">UPI is being rebuilt</p>
-    <p className="max-w-sm text-xs text-slate-500">
-      The old UPI account board has been removed. The new one will appear here.
-    </p>
-  </div>
-);
-
 const TABS = [
   {
     key: "summary",
@@ -116,14 +100,8 @@ const TABS = [
     icon: QrCode,
     // Super Admin only: a branch's own UPI/bank details are administrative setup — who
     // is putting a QR up at a counter, not a figure either desk works day to day.
-    //
-    // The board that stood here — an All Branches card grid over a per-branch QR +
-    // bank-details editor with Lock/Unlock, and the five /branch-mgmt/*upi-account
-    // endpoints behind it — has been taken out whole, to be redesigned. The tab is
-    // kept so the place it goes back into is still here; nothing reads or writes a UPI
-    // account until the new one lands.
     superAdminOnly: true,
-    render: () => <UpiPlaceholder />,
+    render: ({ branchId, branchName }) => <BankAccountsBoard branchId={branchId} branchName={branchName} />,
   },
 ];
 
@@ -145,6 +123,9 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
   const [tab, setTab] = useState(TABS[0].key);
   const [selectedId, setSelectedId] = useState(ALL_KEY);
   const branchId = scoped && selectedId !== ALL_KEY ? selectedId : undefined;
+  // Named, not just identified — UPI's board says whose accounts it is showing, and an
+  // id in that sentence tells the desk nothing.
+  const branchName = branchId ? (branches || []).find((b) => b.id === branchId)?.branch_name : undefined;
 
   const sortedBranches = [...(branches || [])].sort((a, b) => {
     const onlineDiff = Number(isOnlineVertical(a.vertical)) - Number(isOnlineVertical(b.vertical));
@@ -253,7 +234,7 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
           different components, already unmounted and remounted by React swapping which
           one renders. */}
       <div key={selectedId}>
-        {active.render({ branchId, scoped, pending, onChanged: refreshPending })}
+        {active.render({ branchId, branchName, scoped, pending, onChanged: refreshPending })}
       </div>
     </div>
   );

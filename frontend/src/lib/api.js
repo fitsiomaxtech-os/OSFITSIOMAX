@@ -509,6 +509,19 @@ export const listCashHandovers = async (params = {}) => (await api.get("/finance
 export const receiveCashHandover = async (id, payload = {}) => (await api.post(`/finance/cash-handover/${id}/receive`, payload)).data;
 export const cancelCashHandover = async (id) => (await api.post(`/finance/cash-handover/${id}/cancel`)).data;
 
+// Finance > UPI: the bank accounts the group collects into, and the QR each one is
+// scanned by. The image goes up on its own, ahead of Save, so the popup can show it
+// before anything is committed.
+export const listBankAccounts = async (params = {}) => (await api.get("/finance/bank-accounts", { params })).data;
+export const createBankAccount = async (payload) => (await api.post("/finance/bank-accounts", payload)).data;
+export const updateBankAccount = async (id, payload) => (await api.put(`/finance/bank-accounts/${id}`, payload)).data;
+export const uploadBankQrImage = async (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post("/finance/bank-accounts/upload-qr", form);
+  return data;
+};
+
 export const getRevenueOverview = async (params = {}) => (await api.get("/finance/revenue-overview", { params })).data;
 
 export const getClientTransactionHistory = async (leadId) => (await api.get(`/finance/client/${leadId}`)).data;

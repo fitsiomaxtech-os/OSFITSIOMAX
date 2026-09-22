@@ -1,7 +1,8 @@
+import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from typing import Optional
 
@@ -3783,3 +3784,139 @@ async def cancel_cash_handover(
         {"$set": {"status": "cancelled", "cancelled_by": user.full_name, "cancelled_at": _now()}},
     )
     return {"message": "Handover cancelled"}
+
+
+# ---------- UPI / Bank accounts (Super Admin, Finance > UPI) ----------
+
+# Where a QR lands. Public once served, the same as a store item's photo: a QR code is
+# meant to be held up to a patient at the counter, so serving it from behind the session
+# would mean the one screen it exists for could not show it.
+BANK_QR_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "bank_qr")
+os.makedirs(BANK_QR_UPLOAD_DIR, exist_ok=True)
+BANK_QR_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+BANK_QR_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+# The four a card cannot be saved without. IFSC and the bank's own branch name are left
+# out on purpose: an account collects money by UPI whether or not anyone has typed the
+# IFSC, and refusing the save over it would only get a placeholder typed in.
+BANK_ACCOUNT_REQUIRED = {
+    "bank_name": "Bank name",
+    "account_number": "Account number",
+    "upi_id": "UPI ID",
+    "holder_name": "Holder name",
+    "qr_image_url": "QR image",
+}
+
+
+class BankAccountSave(BaseModel):
+    # Scope, not a field of the account itself: unset means the account belongs to the
+    # group rather than to one branch, the same thing an expense saved from All Branches
+    # means. Only read on create — an account does not move branch by being edited.
+    branch_id: Optional[str] = None
+    bank_name: Optional[str] = ""
+    account_number: Optional[str] = ""
+    ifsc_code: Optional[str] = ""
+    upi_id: Optional[str] = ""
+    holder_name: Optional[str] = ""
+    bank_branch_name: Optional[str] = ""
+    qr_image_url: Optional[str] = ""
+
+
+def _clean_bank_payload(payload: BankAccountSave) -> dict:
+    fields = {
+        "bank_name": (payload.bank_name or "").strip(),
+        "account_number": (payload.account_number or "").strip(),
+        # Upper-cased because an IFSC is one: typed in lower case it still matches the
+        # bank's record, but two spellings of the same code read as two codes.
+        "ifsc_code": (payload.ifsc_code or "").strip().upper(),
+        "upi_id": (payload.upi_id or "").strip(),
+        "holder_name": (payload.holder_name or "").strip(),
+        "bank_branch_name": (payload.bank_branch_name or "").strip(),
+        "qr_image_url": (payload.qr_image_url or "").strip(),
+    }
+    missing = [label for key, label in BANK_ACCOUNT_REQUIRED.items() if not fields[key]]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"{', '.join(missing)} {'is' if len(missing) == 1 else 'are'} required")
+    return fields
+
+
+@router.post("/finance/bank-accounts/upload-qr")
+async def upload_bank_qr_image(
+    file: UploadFile = File(...),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    """The QR image alone, uploaded ahead of Save — so the popup can show what was picked
+    before anything is committed, and so a save that is then refused for a missing field
+    does not cost the upload a second time."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in BANK_QR_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only JPG, PNG, or WEBP images are allowed")
+    contents = await file.read()
+    if len(contents) > BANK_QR_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="Image must be under 5MB")
+    filename = f"{uuid.uuid4()}{ext}"
+    with open(os.path.join(BANK_QR_UPLOAD_DIR, filename), "wb") as f:
+        f.write(contents)
+    return {"url": f"/api/v3/uploads/bank_qr/{filename}"}
+
+
+@router.get("/finance/bank-accounts")
+async def list_bank_accounts(
+    branch_id: Optional[str] = None,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    """Every account this desk has saved, oldest first so the grid does not reshuffle
+    under an edit. Given a branch, only that branch's own — not that branch's plus the
+    group's: the pill row above this board names one book at a time, and a card that
+    appeared under every branch could not be told apart from one saved against this one."""
+    query = {"branch_id": branch_id} if branch_id else {}
+    rows = await v3_col("bank_accounts").find(query, {"_id": 0}).sort("created_at", 1).to_list(500)
+    # The branch each card belongs to, named rather than left as an id — the All Branches
+    # grid shows cards from every branch at once and has nothing else to tell them apart.
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    names = {b["id"]: b.get("branch_name", "") for b in branches}
+    for row in rows:
+        row["branch_name"] = names.get(row.get("branch_id") or "", "")
+    return rows
+
+
+@router.post("/finance/bank-accounts")
+async def create_bank_account(
+    payload: BankAccountSave,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    """Add a bank account the group collects into. More than one is the normal case —
+    a branch can bank with two, and the group's own account is not a branch's."""
+    fields = _clean_bank_payload(payload)
+    branch_id = (payload.branch_id or "").strip() or None
+    if branch_id and not await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=404, detail="Branch not found")
+    now = _now()
+    row = {
+        "id": str(uuid.uuid4()),
+        "branch_id": branch_id,
+        **fields,
+        "created_by": user.full_name,
+        "created_at": now,
+        "updated_by": user.full_name,
+        "updated_at": now,
+    }
+    await v3_col("bank_accounts").insert_one(dict(row))
+    return {"message": "Bank account saved", "account": row}
+
+
+@router.put("/finance/bank-accounts/{account_id}")
+async def update_bank_account(
+    account_id: str,
+    payload: BankAccountSave,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    """Correct a saved card. The same fields under the same rules as saving it — an
+    account edited down to no UPI ID is refused exactly as one entered that way is."""
+    existing = await v3_col("bank_accounts").find_one({"id": account_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    fields = _clean_bank_payload(payload)
+    update = {**fields, "updated_by": user.full_name, "updated_at": _now()}
+    await v3_col("bank_accounts").update_one({"id": account_id}, {"$set": update})
+    return {"message": "Bank account updated", "account": {**existing, **update}}
