@@ -972,18 +972,21 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   // cards and off the rows for the lists: the figure on a card and the rows it opens are
   // then the same pass over the same list, and cannot part company.
   //
-  // Request holds every row, whatever became of it — it is the log of what the branch
-  // asked to spend, not a third state beside waiting and signed off. A rejected row has
-  // nowhere else to be read, so it is read there, wearing its own chip.
+  // Request holds what is still only a request — once the accountant signs one off it is
+  // spending, and moves to Expense Approved rather than being counted in both. A rejected
+  // row has nowhere else to be read, so it stays here, wearing its own chip.
   const piles = useMemo(() => {
     const out = {
-      request: { rows, total: 0 },
+      request: { rows: [], total: 0 },
       pending: { rows: [], total: 0 },
       approved: { rows: [], total: 0 },
     };
     rows.forEach((r) => {
       const amount = Number(r.amount) || 0;
-      out.request.total += amount;
+      if (!r.approved) {
+        out.request.rows.push(r);
+        out.request.total += amount;
+      }
       if (r.rejected) return;
       const key = r.approved ? "approved" : "pending";
       out[key].rows.push(r);
@@ -1050,10 +1053,10 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
   // what it says when it holds nothing.
   const LISTS = {
     request: {
-      title: "Every expense request raised",
-      hint: "Waiting, signed off and sent back — the whole log, newest first",
+      title: "Expense requests not yet approved",
+      hint: "Waiting and sent back, newest first — approved ones move to Expense Approved",
       rows: piles.request.rows,
-      empty: "No expenses yet. Add Expense sends a request to the accountant.",
+      empty: "No open requests. Add Expense sends a request to the accountant.",
     },
     expense_approved: {
       title: "Expenses signed off by the accountant",
