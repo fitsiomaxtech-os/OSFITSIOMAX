@@ -143,16 +143,20 @@ const BankFormDialog = ({ account, branchId, branchName, branches, onClose, onSa
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/40 p-4" data-testid="finance-bank-dialog">
-      <div className="my-auto w-full max-w-3xl rounded-2xl bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-6 py-5">
-          <div className="flex items-start gap-4">
-            <div className="rounded-xl bg-indigo-50 p-3">
+    <div className="fixed inset-0 z-40 overflow-y-auto bg-black/40 p-3 sm:p-4" data-testid="finance-bank-dialog">
+      {/* The overlay is what scrolls, with the panel centred inside a full-height wrapper:
+          a panel centred on the viewport itself is taller than a phone screen here, and
+          clips its own Save button off the bottom with no way to reach it. */}
+      <div className="flex min-h-full items-center justify-center">
+      <div className="w-full max-w-3xl rounded-2xl bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5">
+          <div className="flex items-start gap-3 sm:gap-4">
+            <div className="hidden rounded-xl bg-indigo-50 p-3 sm:block">
               <Landmark className="h-6 w-6 text-indigo-600" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-slate-900">Bank Details</h3>
-              <p className="text-sm text-slate-500">Please enter your bank account details and QR code for payment.</p>
+              <h3 className="text-lg font-bold text-slate-900 sm:text-xl">Bank Details</h3>
+              <p className="text-xs text-slate-500 sm:text-sm">Please enter your bank account details and QR code for payment.</p>
             </div>
           </div>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="finance-bank-dialog-close">
@@ -160,7 +164,7 @@ const BankFormDialog = ({ account, branchId, branchName, branches, onClose, onSa
           </button>
         </div>
 
-        <div className="grid gap-5 px-6 py-5 md:grid-cols-2">
+        <div className="grid gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-5 md:grid-cols-2">
           {/* Which branch collects into it. A branch can bank with more than one, and the
               same bank turns up at several branches, so this is what tells two otherwise
               identical cards apart. Shown even with a branch already picked above the
@@ -286,7 +290,7 @@ const BankFormDialog = ({ account, branchId, branchName, branches, onClose, onSa
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+        <div className="flex flex-col-reverse gap-2 border-t border-slate-200 px-4 py-4 sm:flex-row sm:justify-end sm:gap-3 sm:px-6">
           <button
             type="button"
             onClick={onClose}
@@ -299,13 +303,14 @@ const BankFormDialog = ({ account, branchId, branchName, branches, onClose, onSa
             type="button"
             onClick={save}
             disabled={saving}
-            className="inline-flex h-11 items-center gap-2 rounded-lg bg-indigo-600 px-8 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-8 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60"
             data-testid="finance-bank-save"
           >
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
             Save
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -316,16 +321,17 @@ const BankFormDialog = ({ account, branchId, branchName, branches, onClose, onSa
 // is holding a phone up to the QR at a counter, and a page of greyed-out boxes around it
 // is in the way of that.
 const BankViewDialog = ({ account, onClose, onEdit }) => (
-  <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/40 p-4" data-testid="finance-bank-view-dialog">
-    <div className="my-auto w-full max-w-2xl rounded-2xl bg-white shadow-xl">
-      <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-6 py-5">
-        <div className="flex items-start gap-4">
-          <div className="rounded-xl bg-indigo-50 p-3">
+  <div className="fixed inset-0 z-40 overflow-y-auto bg-black/40 p-3 sm:p-4" data-testid="finance-bank-view-dialog">
+    <div className="flex min-h-full items-center justify-center">
+    <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5">
+        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+          <div className="hidden rounded-xl bg-indigo-50 p-3 sm:block">
             <Landmark className="h-6 w-6 text-indigo-600" />
           </div>
-          <div>
-            <h3 className="text-xl font-bold text-slate-900">{account.bank_name}</h3>
-            <p className="text-sm text-slate-500">{account.holder_name}</p>
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-bold text-slate-900 sm:text-xl">{account.bank_name}</h3>
+            <p className="truncate text-xs text-slate-500 sm:text-sm">{account.holder_name}</p>
           </div>
         </div>
         <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="finance-bank-view-close">
@@ -333,7 +339,7 @@ const BankViewDialog = ({ account, onClose, onEdit }) => (
         </button>
       </div>
 
-      <div className="grid gap-6 px-6 py-5 sm:grid-cols-2">
+      <div className="grid gap-5 px-4 py-4 sm:grid-cols-2 sm:gap-6 sm:px-6 sm:py-5">
         <div className="space-y-3">
           <ViewRow icon={Banknote} label="UPI ID" value={account.upi_id} />
           <ViewRow icon={CreditCard} label="Account Number" value={account.account_number} />
@@ -353,8 +359,8 @@ const BankViewDialog = ({ account, onClose, onEdit }) => (
           </div>
         </div>
 
-        <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-4 text-center">
-          <div className="mx-auto flex h-56 w-56 max-w-full items-center justify-center rounded-lg bg-white p-2">
+        <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-3 text-center sm:p-4">
+          <div className="mx-auto flex aspect-square w-full max-w-[14rem] items-center justify-center rounded-lg bg-white p-2 sm:h-56 sm:w-56">
             {account.qr_image_url ? (
               <img src={account.qr_image_url} alt={`${account.bank_name} QR`} className="h-full w-full object-contain" />
             ) : (
@@ -365,7 +371,7 @@ const BankViewDialog = ({ account, onClose, onEdit }) => (
         </div>
       </div>
 
-      <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+      <div className="flex flex-col-reverse gap-2 border-t border-slate-200 px-4 py-4 sm:flex-row sm:justify-end sm:gap-3 sm:px-6">
         <button
           type="button"
           onClick={onClose}
@@ -377,12 +383,13 @@ const BankViewDialog = ({ account, onClose, onEdit }) => (
         <button
           type="button"
           onClick={onEdit}
-          className="inline-flex h-11 items-center gap-2 rounded-lg bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
           data-testid="finance-bank-view-edit"
         >
           <Pencil className="h-4 w-4" /> Edit
         </button>
       </div>
+    </div>
     </div>
   </div>
 );
@@ -400,7 +407,7 @@ const ViewRow = ({ icon: Icon, label, value }) => (
 const DeleteBankDialog = ({ account, onCancel, onConfirm, busy }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="finance-bank-delete-dialog">
     <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
-      <div className="flex items-start gap-4 px-6 py-5">
+      <div className="flex items-start gap-3 px-4 py-4 sm:gap-4 sm:px-6 sm:py-5">
         <div className="rounded-xl bg-rose-50 p-3">
           <Trash2 className="h-6 w-6 text-rose-600" />
         </div>
@@ -416,7 +423,7 @@ const DeleteBankDialog = ({ account, onCancel, onConfirm, busy }) => (
           </p>
         </div>
       </div>
-      <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+      <div className="flex flex-col-reverse gap-2 border-t border-slate-200 px-4 py-4 sm:flex-row sm:justify-end sm:gap-3 sm:px-6">
         <button
           type="button"
           onClick={onCancel}
@@ -429,7 +436,7 @@ const DeleteBankDialog = ({ account, onCancel, onConfirm, busy }) => (
           type="button"
           onClick={onConfirm}
           disabled={busy}
-          className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
           data-testid="finance-bank-delete-confirm"
         >
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -537,6 +544,9 @@ const BankCard = ({ account: acc, onView, onEdit, onDelete, onToggle }) => (
   </div>
 );
 
+// Four to a row where there is room for four, one to a row on a phone. The same shape
+// twice over: the branch tiles themselves are laid out on it, and so are the cards under
+// a single picked branch.
 const GRID = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
 const GROUP_KEY = "__group__";
 
@@ -547,11 +557,16 @@ const GROUP_KEY = "__group__";
  * Branch by branch by default. A branch banks with more than one — Indian Bank and SBI
  * at the same counter — and the same bank turns up again at the next branch, so one
  * flat grid of look-alike cards stops being readable past the first few. With no branch
- * picked the board lays a heading per branch over that branch's own cards, every branch
- * named whether or not it has an account yet, each heading carrying the Add Bank that
- * fills it in. Picking a branch above the board narrows to that one.
+ * picked the board lays out a tile per branch, four tiles to a row, holding that
+ * branch's own cards; every branch gets a tile whether or not it has an account yet,
+ * each one carrying the Add that fills it in. Picking a branch above the board narrows
+ * to that one, and its cards take the four-to-a-row grid themselves.
+ *
+ * @param onRegisterAdd  Handed the board's own "add an account" opener on mount, so the
+ *              finance tab row can carry the Add Bank button instead of this board
+ *              spending a strip of screen on one. Called with null on the way out.
  */
-export const BankAccountsBoard = ({ branchId, branchName, branches }) => {
+export const BankAccountsBoard = ({ branchId, branchName, branches, onRegisterAdd }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState(null); // { account, branchId } — the Add/Edit popup
@@ -571,6 +586,18 @@ export const BankAccountsBoard = ({ branchId, branchName, branches }) => {
   }, [branchId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Add Bank lives up in the finance tab row, beside the tab that opens this board, so
+  // the board hands its opener up there on mount and takes it back on the way out. The
+  // popup's own state stays here, where the rest of the board's state is.
+  const openAdd = useCallback(
+    (forBranchId) => setDialog({ account: null, branchId: forBranchId ?? (branchId || "") }),
+    [branchId],
+  );
+  useEffect(() => {
+    onRegisterAdd?.(() => openAdd());
+    return () => onRegisterAdd?.(null);
+  }, [onRegisterAdd, openAdd]);
 
   // Flipped on the card first, then sent: the switch is the one control here that is a
   // whole action on its own, and a switch that waits on a round trip to move reads as a
@@ -629,34 +656,30 @@ export const BankAccountsBoard = ({ branchId, branchName, branches }) => {
         })),
       ];
 
-  const addButton = (forBranchId, testId, small) => (
+  // The per-branch Add, on a tile that is a quarter of a row wide: icon and a single
+  // word, with the branch it would file the account under said in its title rather than
+  // in a label the tile has no room for.
+  const addButton = (forBranchId, testId, label) => (
     <button
       type="button"
-      onClick={() => setDialog({ account: null, branchId: forBranchId })}
-      className={
-        small
-          ? "inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
-          : "inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
-      }
+      onClick={() => openAdd(forBranchId)}
+      title={`Add a bank account for ${label}`}
+      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-[11px] font-semibold text-indigo-700 transition hover:bg-indigo-100"
       data-testid={testId}
     >
-      <Plus className={small ? "h-3.5 w-3.5" : "h-4 w-4"} /> Add Bank
+      <Plus className="h-3.5 w-3.5" /> Add
     </button>
   );
 
   return (
     <div className="space-y-4" data-testid="finance-bank-accounts-root">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <div>
-          <h3 className="text-sm font-bold text-slate-800">Bank Accounts</h3>
-          <p className="text-xs text-slate-500">
-            {branchId
-              ? `Accounts saved for ${branchName || "this branch"}.`
-              : "Every branch, and the accounts it collects into."}
-          </p>
-        </div>
-        {addButton(branchId || "", "finance-bank-add")}
-      </div>
+      {/* A line, not a strip: Add Bank sits in the tab row now, and a bordered band whose
+          only job was to carry it is a band of screen a phone cannot spare. */}
+      <p className="text-xs text-slate-500" data-testid="finance-bank-caption">
+        {branchId
+          ? `Bank accounts saved for ${branchName || "this branch"}.`
+          : "Every branch, and the accounts it collects into."}
+      </p>
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-16 text-sm text-slate-500">
@@ -680,29 +703,38 @@ export const BankAccountsBoard = ({ branchId, branchName, branches }) => {
           </div>
         )
       ) : (
-        <div className="space-y-4" data-testid="finance-bank-branch-sections">
+        // Every branch at once, four tiles to a row rather than one branch per full-width
+        // band. Stacked, a group of a dozen branches — most of them with nothing saved yet
+        // — ran several screens deep to say so; tiled, which branches are still missing an
+        // account is one glance. `items-start` keeps each tile its own height: a branch
+        // with three banks must not stretch the empty one beside it to match.
+        <div className={`${GRID} items-start`} data-testid="finance-bank-branch-sections">
           {sections.map((section) => (
             <div
               key={section.key}
-              className="rounded-xl border border-slate-200 bg-white p-4"
+              className="flex flex-col rounded-xl border border-slate-200 bg-white p-3"
               data-testid={`finance-bank-section-${section.key}`}
             >
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Building2 className="h-4 w-4 text-slate-400" />
-                  <h4 className="text-sm font-bold text-slate-800">{section.name}</h4>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                    {section.accounts.length} {section.accounts.length === 1 ? "bank" : "banks"}
-                  </span>
-                  {/* Said only where there is something to say: a heading that carries a
-                      zero on every branch is a number nobody reads. */}
-                  {section.accounts.some((a) => !a.is_active) && (
-                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
-                      {section.accounts.filter((a) => !a.is_active).length} inactive
+              <div className="mb-3 flex items-start justify-between gap-2 border-b border-slate-100 pb-2.5">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+                    <h4 className="truncate text-sm font-bold text-slate-800" title={section.name}>{section.name}</h4>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                      {section.accounts.length} {section.accounts.length === 1 ? "bank" : "banks"}
                     </span>
-                  )}
+                    {/* Said only where there is something to say: a heading that carries a
+                        zero on every branch is a number nobody reads. */}
+                    {section.accounts.some((a) => !a.is_active) && (
+                      <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                        {section.accounts.filter((a) => !a.is_active).length} inactive
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {section.key !== GROUP_KEY && addButton(section.branchId, `finance-bank-add-${section.key}`, true)}
+                {section.key !== GROUP_KEY && addButton(section.branchId, `finance-bank-add-${section.key}`, section.name)}
               </div>
 
               {section.accounts.length === 0 ? (
@@ -710,7 +742,9 @@ export const BankAccountsBoard = ({ branchId, branchName, branches }) => {
                   No bank account saved for this branch yet.
                 </p>
               ) : (
-                <div className={GRID}>
+                // One under the other inside the tile: the tile is already a quarter of a
+                // row, so its cards get its full width rather than a quarter of a quarter.
+                <div className="space-y-3">
                   {section.accounts.map((acc) => <BankCard key={acc.id} {...cardProps(acc)} />)}
                 </div>
               )}

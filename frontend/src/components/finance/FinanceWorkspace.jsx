@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { BadgeIndianRupee, Building2, CheckSquare, Coins, Layers, QrCode, Receipt, Wallet } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BadgeIndianRupee, Building2, CheckSquare, Coins, Layers, Plus, QrCode, Receipt, Wallet } from "lucide-react";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { ApprovalsBoard, PendingBadge } from "@/components/finance/ApprovalsBoard";
 import { BankAccountsBoard } from "@/components/finance/BankAccountsBoard";
@@ -104,8 +104,13 @@ const TABS = [
     // Handed the whole list, not just the one picked: with no branch picked this board
     // lays its cards out branch by branch, and a branch that has no bank saved yet has
     // to be named there too — which cannot be read off the accounts themselves.
-    render: ({ branchId, branchName, branches }) => (
-      <BankAccountsBoard branchId={branchId} branchName={branchName} branches={branches} />
+    render: ({ branchId, branchName, branches, registerBankAdd }) => (
+      <BankAccountsBoard
+        branchId={branchId}
+        branchName={branchName}
+        branches={branches}
+        onRegisterAdd={registerBankAdd}
+      />
     ),
   },
 ];
@@ -165,6 +170,14 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
 
   const active = visibleTabs.find((t) => t.key === tab) || visibleTabs[0];
 
+  // The one page here whose main action belongs beside the tabs rather than inside the
+  // page: UPI opens on a board of branch tiles, and Add Bank sitting in a strip of its
+  // own above them cost a band of screen on every phone that opened it. The board hands
+  // its opener up through this ref on mount, and the tab row calls it — held in a ref
+  // rather than in state so registering it does not re-render the row that reads it.
+  const bankAddRef = useRef(null);
+  const registerBankAdd = useCallback((open) => { bankAddRef.current = open; }, []);
+
   return (
     <div className="space-y-4" data-testid={`${testId}-root`}>
       {/* Whose book. A dropdown on a phone, the pill row from sm up — same split Branch
@@ -212,23 +225,39 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
 
       {/* Which page of it. No heading over this row: "Finance" above a row that already
           names its pages costs a band of screen to say where you are. */}
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid={`${testId}-tabs`}>
-        {visibleTabs.map((t) => {
-          const Icon = t.icon;
-          const count = t.key === "approvals" ? pending.income + pending.expenses : 0;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`relative inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${tab === t.key ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
-              data-testid={`${testId}-tab-${t.key}`}
-            >
-              <Icon className="h-4 w-4" />{t.label}
-              <PendingBadge count={count} testId={`${testId}-tab-badge-${t.key}`} />
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid={`${testId}-tabs`}>
+        <div className="flex min-w-0 flex-1 flex-wrap gap-1 sm:gap-2">
+          {visibleTabs.map((t) => {
+            const Icon = t.icon;
+            const count = t.key === "approvals" ? pending.income + pending.expenses : 0;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={`relative inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-medium transition sm:gap-2 sm:px-3 sm:text-sm ${tab === t.key ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
+                data-testid={`${testId}-tab-${t.key}`}
+              >
+                <Icon className="h-4 w-4 shrink-0" />{t.label}
+                <PendingBadge count={count} testId={`${testId}-tab-badge-${t.key}`} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* The active page's own action, at the end of the row it belongs to. Full width
+            below sm, where the tabs have already wrapped and a button squeezed against
+            the last of them is the hardest thing on the row to hit. */}
+        {active.key === "upi" && (
+          <button
+            type="button"
+            onClick={() => bankAddRef.current?.()}
+            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 sm:w-auto"
+            data-testid="finance-bank-add"
+          >
+            <Plus className="h-4 w-4" /> Add Bank
+          </button>
+        )}
       </div>
 
       {/* Keyed on the branch selection so switching remounts the page below — a page's own
@@ -239,7 +268,7 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
           different components, already unmounted and remounted by React swapping which
           one renders. */}
       <div key={selectedId}>
-        {active.render({ branchId, branchName, branches: sortedBranches, scoped, pending, onChanged: refreshPending })}
+        {active.render({ branchId, branchName, branches: sortedBranches, scoped, pending, onChanged: refreshPending, registerBankAdd })}
       </div>
     </div>
   );
