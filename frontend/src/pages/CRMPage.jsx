@@ -1013,10 +1013,11 @@ export const CRMPage = ({ auth, onLogout }) => {
                     )}
                   </button>
                 )}
-                {/* The account menu, and the only place logout is reachable from this
-                    header. The label above the item is not decoration: it is what makes
-                    the menu an account menu rather than a bare button, so there is
-                    something naming the account you are about to sign out of. */}
+                {/* The account menu: the only place logout is reachable from this header,
+                    and the way to My Profile now that the title line is a name rather than
+                    a button. The label above the items is not decoration -- it is what
+                    makes this an account menu rather than a bare button, so there is
+                    something naming the account being opened or signed out of. */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -1035,6 +1036,16 @@ export const CRMPage = ({ auth, onLogout }) => {
                         {roleLabel}{myBranchName && ` · ${myBranchName}`}
                       </span>
                     </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {/* Monthly Calendar, Attendance, Time Off and Security, as a page with
+                        its own tab row -- the same MyProfilePage the desktop header opens,
+                        standing in place of the board rather than over it. A month of
+                        attendance eleven columns wide is not something a popup can hold,
+                        which is why it stopped being a dialog in the first place. */}
+                    <DropdownMenuItem onSelect={() => setShowProfile(true)} data-testid="branch-mobile-header-my-profile">
+                      <UserRound className="mr-2 h-4 w-4" />
+                      My Profile
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onSelect={logout} className="text-rose-600 focus:text-rose-700" data-testid="branch-mobile-header-logout">
                       <LogOut className="mr-2 h-4 w-4" />
