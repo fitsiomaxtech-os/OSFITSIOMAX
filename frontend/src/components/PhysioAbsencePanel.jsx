@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, CalendarX, CheckCircle2, Clock, RefreshCw, Trash2, UserX, Users, X } from "lucide-react";
+import { AlertCircle, ArrowRightLeft, CalendarX, CheckCircle2, Clock, Info, RefreshCw, Trash2, UserX, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
@@ -42,12 +42,17 @@ const longDate = (iso) => {
 const timeOf = (slot) => (slot && slot.includes("T") ? to12h(slot.split("T")[1].slice(0, 5)) : "—");
 const errText = (err, fallback) => err?.response?.data?.detail || fallback;
 
+// One tone per state, used for the row's dot, its pill and the progress strip, so a state
+// reads the same colour wherever it appears in the popup.
 const STATE_BADGE = {
-  waiting: { label: "Needs a plan", cls: "bg-amber-100 text-amber-700" },
-  reassigned: { label: "Handed over", cls: "bg-sky-100 text-sky-700" },
-  released: { label: "Waiting for new date", cls: "bg-slate-100 text-slate-600" },
-  done: { label: "Done", cls: "bg-emerald-100 text-emerald-700" },
+  waiting: { label: "Needs a plan", pill: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", bar: "bg-amber-400" },
+  reassigned: { label: "Handed over", pill: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", bar: "bg-sky-500" },
+  released: { label: "Waiting for new date", pill: "bg-slate-100 text-slate-600 ring-slate-200", dot: "bg-slate-400", bar: "bg-slate-400" },
+  done: { label: "Done", pill: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", bar: "bg-emerald-500" },
 };
+const STATE_ORDER = ["waiting", "reassigned", "released", "done"];
+
+const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase() || "?";
 
 /** One patient's day on the absent date, and the two ways to settle it. */
 function DayRow({ absence, day, candidates, onChanged }) {
@@ -57,11 +62,16 @@ function DayRow({ absence, day, candidates, onChanged }) {
   const [releasing, setReleasing] = useState(false);
   const [releaseReason, setReleaseReason] = useState("");
   const [saving, setSaving] = useState(false);
+  // A day still needing a plan opens with its form showing — that is the work. One already
+  // handed over is settled for now, so its form waits behind Change rather than sitting
+  // open on every row and reading as something still to do.
+  const [editing, setEditing] = useState(day.state === "waiting");
 
   const options = candidates || [];
   const picked = options.find((c) => c.id === toId);
   const settled = day.state === "done" || day.state === "released";
   const badge = STATE_BADGE[day.state] || STATE_BADGE.waiting;
+  const hasFree = options.some((c) => c.available && c.id !== day.physio_id);
 
   const assign = async () => {
     if (!toId) { toast.error("Pick the physio who will see this patient"); return; }
@@ -70,7 +80,7 @@ function DayRow({ absence, day, candidates, onChanged }) {
     try {
       await reassignAbsenceDay(absence.id, day.track, day.id, { to_physio_id: toId, patient_confirmed: true, note });
       toast.success(`${day.lead_name} will see ${picked?.name || "the new physio"} at ${timeOf(day.slot_time)}`);
-      setToId(""); setConfirmed(false); setNote("");
+      setToId(""); setConfirmed(false); setNote(""); setEditing(false);
       onChanged();
     } catch (err) {
       toast.error(errText(err, "Couldn't hand this day over"));
@@ -92,69 +102,121 @@ function DayRow({ absence, day, candidates, onChanged }) {
     setSaving(false);
   };
 
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid={`absence-day-${day.id}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-md bg-sky-50 px-2 py-1 text-[11px] font-bold text-sky-700">{timeOf(day.slot_time)}</span>
-        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">{day.lead_name}</p>
-        <span className="text-[11px] text-slate-500">
-          {day.track === "rehab" ? "Rehab day" : "Day"} {day.session_number} of {day.total_sessions}
-        </span>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.cls}`}>{badge.label}</span>
-      </div>
-      {day.state === "reassigned" && (
-        <p className="mt-1 text-[11px] text-sky-700">
-          With <span className="font-semibold">{day.physio_name}</span> for this day
-        </p>
-      )}
+  const cancelEdit = () => {
+    setEditing(day.state === "waiting");
+    setReleasing(false); setToId(""); setConfirmed(false); setNote(""); setReleaseReason("");
+  };
 
-      {!settled && (
-        <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+  return (
+    <li
+      className={`rounded-xl border bg-white transition-shadow ${
+        day.state === "waiting" ? "border-amber-200 shadow-sm" : "border-slate-200"
+      }`}
+      data-testid={`absence-day-${day.id}`}
+    >
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-600">
+          {initialOf(day.lead_name)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="truncate text-sm font-semibold text-slate-900">{day.lead_name}</p>
+            <span className="shrink-0 text-xs text-slate-400">
+              {day.track === "rehab" ? "Rehab day" : "Day"} {day.session_number} of {day.total_sessions}
+            </span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+            <span className="inline-flex items-center gap-1 font-medium tabular-nums text-slate-600">
+              <Clock className="h-3 w-3" /> {timeOf(day.slot_time)}
+            </span>
+            {day.state === "reassigned" && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  <ArrowRightLeft className="h-3 w-3 text-sky-500" />
+                  Covered by <span className="truncate font-semibold text-slate-700">{day.physio_name}</span>
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+        <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${badge.pill}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${badge.dot}`} />
+          {badge.label}
+        </span>
+        {!settled && !editing && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setEditing(true)}
+            className="h-8 shrink-0 text-xs"
+            data-testid={`absence-day-change-${day.id}`}
+          >
+            Change
+          </Button>
+        )}
+      </div>
+
+      {!settled && editing && (
+        <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 px-4 py-3">
           {!releasing ? (
             <>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Select value={toId} onValueChange={(v) => { setToId(v); setConfirmed(false); }}>
-                  <SelectTrigger
-                    className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-none hover:bg-slate-50 focus:ring-2 focus:ring-sky-200"
-                    data-testid={`absence-day-physio-${day.id}`}
-                  >
-                    <SelectValue placeholder={day.state === "reassigned" ? "Hand to someone else…" : "Hand to another physio…"} />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72 border-slate-200">
-                    {options.map((c) => (
-                      <SelectItem
-                        key={c.id}
-                        value={c.id}
-                        disabled={!c.available || c.id === day.physio_id}
-                        className="text-sm text-slate-700"
-                      >
-                        {c.name} <span className="text-slate-400">· {c.available ? `${c.taken}/${c.capacity} booked` : c.reason}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Note (optional)"
-                  className="h-9 sm:w-48"
-                />
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
+                <div className="min-w-0">
+                  <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    {day.state === "reassigned" ? "Hand to someone else" : "Covering physio"}
+                  </label>
+                  <Select value={toId} onValueChange={(v) => { setToId(v); setConfirmed(false); }}>
+                    <SelectTrigger
+                      className="h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm hover:bg-slate-50 focus:ring-2 focus:ring-sky-200"
+                      data-testid={`absence-day-physio-${day.id}`}
+                    >
+                      <SelectValue placeholder="Select a physio…" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72 border-slate-200">
+                      {options.map((c) => (
+                        <SelectItem
+                          key={c.id}
+                          value={c.id}
+                          disabled={!c.available || c.id === day.physio_id}
+                          className="text-sm text-slate-700"
+                        >
+                          {c.name} <span className="text-slate-400">· {c.available ? `${c.taken}/${c.capacity} booked` : c.reason}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">Note</label>
+                  <Input
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Optional"
+                    className="h-9 bg-white shadow-sm"
+                  />
+                </div>
               </div>
-              {options.length > 0 && !options.some((c) => c.available) && (
-                <p className="text-[11px] text-amber-700">
+
+              {options.length > 0 && !hasFree && (
+                <p className="flex items-start gap-1.5 rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   No other physio has {timeOf(day.slot_time)} open with a free seat. Open it in MANAGEMENT → PHYSIO CALENDAR, or let the patient wait for a new date.
                 </p>
               )}
               {options.length === 0 && (
-                <p className="text-[11px] text-amber-700">No other physio at this branch.</p>
+                <p className="flex items-start gap-1.5 rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> No other physio at this branch.
+                </p>
               )}
+
               {toId && (
-                <label className="flex items-start gap-2 text-xs text-slate-700">
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700">
                   <input
                     type="checkbox"
                     checked={confirmed}
                     onChange={(e) => setConfirmed(e.target.checked)}
-                    className="mt-0.5"
+                    className="mt-0.5 h-3.5 w-3.5 accent-sky-600"
                     data-testid={`absence-day-confirm-${day.id}`}
                   />
                   <span>
@@ -163,37 +225,50 @@ function DayRow({ absence, day, candidates, onChanged }) {
                   </span>
                 </label>
               )}
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button size="sm" variant="outline" onClick={() => setReleasing(true)} disabled={saving} data-testid={`absence-day-release-${day.id}`}>
-                  <Clock className="mr-1 h-3.5 w-3.5" /> Patient will wait
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={assign}
-                  disabled={saving || !toId || !confirmed}
-                  className="bg-sky-600 text-white hover:bg-sky-700"
-                  data-testid={`absence-day-assign-${day.id}`}
-                >
-                  <ArrowRightLeft className="mr-1 h-3.5 w-3.5" /> Hand over
-                </Button>
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  {day.state !== "waiting" && (
+                    <Button size="sm" variant="ghost" onClick={cancelEdit} disabled={saving} className="h-8 text-xs text-slate-500">
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setReleasing(true)} disabled={saving} className="h-8 bg-white text-xs" data-testid={`absence-day-release-${day.id}`}>
+                    <Clock className="mr-1.5 h-3.5 w-3.5" /> Patient will wait
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={assign}
+                    disabled={saving || !toId || !confirmed}
+                    className="h-8 bg-sky-600 text-xs text-white hover:bg-sky-700"
+                    data-testid={`absence-day-assign-${day.id}`}
+                  >
+                    <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" /> Hand over
+                  </Button>
+                </div>
               </div>
             </>
           ) : (
             <>
-              <Input
-                autoFocus
-                value={releaseReason}
-                onChange={(e) => setReleaseReason(e.target.value)}
-                placeholder="What did the patient ask for? e.g. wants to wait for their own physio"
-                className="h-9"
-                data-testid={`absence-day-release-reason-${day.id}`}
-              />
-              <p className="text-[11px] text-slate-500">
-                The day comes off {longDate(absence.date)} and goes to Missed Classes for a new date. It stays part of the package.
-              </p>
+              <div>
+                <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">What did the patient ask for?</label>
+                <Input
+                  autoFocus
+                  value={releaseReason}
+                  onChange={(e) => setReleaseReason(e.target.value)}
+                  placeholder="e.g. wants to wait for their own physio"
+                  className="h-9 bg-white shadow-sm"
+                  data-testid={`absence-day-release-reason-${day.id}`}
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                  The day comes off {longDate(absence.date)} and goes to Missed Classes for a new date. It stays part of the package.
+                </p>
+              </div>
               <div className="flex justify-end gap-2">
-                <Button size="sm" variant="outline" onClick={() => setReleasing(false)} disabled={saving}>Back</Button>
-                <Button size="sm" onClick={release} disabled={saving} className="bg-amber-600 text-white hover:bg-amber-700" data-testid={`absence-day-release-confirm-${day.id}`}>
+                <Button size="sm" variant="outline" onClick={() => setReleasing(false)} disabled={saving} className="h-8 bg-white text-xs">Back</Button>
+                <Button size="sm" onClick={release} disabled={saving} className="h-8 bg-amber-600 text-xs text-white hover:bg-amber-700" data-testid={`absence-day-release-confirm-${day.id}`}>
                   Release day
                 </Button>
               </div>
@@ -201,7 +276,7 @@ function DayRow({ absence, day, candidates, onChanged }) {
           )}
         </div>
       )}
-    </div>
+    </li>
   );
 }
 
@@ -224,57 +299,108 @@ function AbsenceDetail({ absenceId, onClose, onChanged }) {
 
   const changed = () => { load(); onChanged(); };
   const days = data?.days || [];
+  // Counted off the rows rather than the payload's counts, so the strip and the list under
+  // it are the same pass over the same days.
+  const counts = useMemo(() => {
+    const out = { waiting: 0, reassigned: 0, released: 0, done: 0 };
+    days.forEach((d) => { out[d.state in out ? d.state : "waiting"] += 1; });
+    return out;
+  }, [days]);
+  const settledCount = days.length - counts.waiting;
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-3 sm:p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-[2px] sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" data-testid="physio-absence-detail">
-        <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-700">
+      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/5" data-testid="physio-absence-detail">
+        {/* Header */}
+        <div className="flex items-start gap-3 px-5 pb-4 pt-5">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600 ring-1 ring-inset ring-rose-100">
             <UserX className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-base font-bold text-slate-800">
-              {data?.physio_name || "Physio"} <span className="font-medium text-slate-400">absent</span> {longDate(data?.date)}
-            </h3>
-            <p className="truncate text-[11px] text-slate-400">
-              {data?.reason ? `${data.reason} · ` : ""}marked by {data?.marked_by || "—"}
-            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Physio absence</p>
+            <h3 className="truncate text-lg font-semibold leading-tight text-slate-900">{data?.physio_name || "Physio"}</h3>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+              <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 font-medium text-rose-700 ring-1 ring-inset ring-rose-100">
+                <CalendarX className="h-3 w-3" /> {longDate(data?.date) || "—"}
+              </span>
+              {data?.reason && <span className="truncate">{data.reason}</span>}
+              <span className="truncate">Marked by <span className="font-medium text-slate-700">{data?.marked_by || "—"}</span></span>
+            </div>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close">
+          <button type="button" onClick={onClose} className="-mr-1 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" aria-label="Close">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-600">
-          Call each patient first. Hand the day to another physio only once they agree; if they'd rather wait for their own physio, release the day for a new date.
-        </div>
+        {/* Progress across the day's patients */}
+        {days.length > 0 && (
+          <div className="border-y border-slate-200 bg-slate-50 px-5 py-3" data-testid="physio-absence-progress">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-slate-700">
+                {settledCount} of {days.length} patient{days.length === 1 ? "" : "s"} settled
+              </span>
+              {counts.waiting > 0 ? (
+                <span className="font-semibold text-amber-700">{counts.waiting} need{counts.waiting === 1 ? "s" : ""} a plan</span>
+              ) : (
+                <span className="inline-flex items-center gap-1 font-semibold text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> All settled</span>
+              )}
+            </div>
+            <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-slate-200">
+              {STATE_ORDER.filter((s) => s !== "waiting").map((s) => (
+                counts[s] > 0 && (
+                  <div key={s} className={STATE_BADGE[s].bar} style={{ width: `${(counts[s] / days.length) * 100}%` }} />
+                )
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {STATE_ORDER.map((s) => (
+                <span key={s} className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <span className={`h-1.5 w-1.5 rounded-full ${STATE_BADGE[s].dot}`} />
+                  {STATE_BADGE[s].label} <span className="font-semibold tabular-nums text-slate-700">{counts[s]}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
-        <div className="flex-1 space-y-2 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-3 flex items-start gap-2 rounded-lg bg-sky-50 px-3 py-2.5 text-xs leading-relaxed text-sky-900 ring-1 ring-inset ring-sky-100">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-600" />
+            <span>
+              Call each patient first. Hand the day to another physio only once they agree; if they'd rather wait for their own physio, release the day for a new date.
+            </span>
+          </div>
+
           {loading && !data ? (
             <p className="py-10 text-center text-sm text-slate-400">Loading…</p>
           ) : days.length === 0 ? (
-            <div className="py-10 text-center">
+            <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center">
               <CheckCircle2 className="mx-auto mb-2 h-10 w-10 text-emerald-200" />
               <p className="text-sm text-slate-400">No patients were booked with this physio on this day.</p>
             </div>
           ) : (
-            days.map((d) => (
-              <DayRow
-                key={d.id}
-                absence={data}
-                day={d}
-                candidates={(data?.candidates || {})[d.slot_time]}
-                onChanged={changed}
-              />
-            ))
+            <ul className="space-y-2.5">
+              {days.map((d) => (
+                <DayRow
+                  key={`${d.id}-${d.state}`}
+                  absence={data}
+                  day={d}
+                  candidates={(data?.candidates || {})[d.slot_time]}
+                  onChanged={changed}
+                />
+              ))}
+            </ul>
           )}
         </div>
 
-        <div className="flex items-center justify-end border-t border-slate-200 px-4 py-3">
-          <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
+        <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/60 px-5 py-3">
+          <p className="text-xs text-slate-400">
+            {days.length > 0 && counts.waiting === 0 ? "Every patient has a plan for this day." : "Changes save as you make them."}
+          </p>
+          <Button variant="outline" size="sm" onClick={onClose} className="bg-white">Close</Button>
         </div>
       </div>
     </div>
