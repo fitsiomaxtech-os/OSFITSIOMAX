@@ -571,6 +571,15 @@ export const scheduleSession = async (sessionId, slotTime) => (await api.post(`/
 // patient; decline takes it off the hour it holds and always wants a reason.
 export const rescheduleCalendarBooking = async (course, bookingId, payload) => (await api.post(`/branch/calendar-bookings/${course}/${bookingId}/reschedule`, payload)).data;
 export const declineCalendarBooking = async (course, bookingId, reason) => (await api.post(`/branch/calendar-bookings/${course}/${bookingId}/decline`, { reason })).data;
+// A physio who will not be in on a date. Marked by the physio for themselves or by the
+// Branch Admin for any physio at the branch; each patient booked that day is then handed
+// to another physio (patient_confirmed required) or released to wait for a new date.
+export const listPhysioAbsences = async (params) => (await api.get("/physio-absences", { params })).data;
+export const markPhysioAbsent = async (payload) => (await api.post("/physio-absences", payload)).data;
+export const physioAbsenceDetail = async (absenceId) => (await api.get(`/physio-absences/${absenceId}`)).data;
+export const cancelPhysioAbsence = async (absenceId) => (await api.delete(`/physio-absences/${absenceId}`)).data;
+export const reassignAbsenceDay = async (absenceId, track, dayId, payload) => (await api.post(`/physio-absences/${absenceId}/days/${track}/${dayId}/reassign`, payload)).data;
+export const releaseAbsenceDay = async (absenceId, track, dayId, reason) => (await api.post(`/physio-absences/${absenceId}/days/${track}/${dayId}/release`, { reason })).data;
 
 export const patientView = async (token) => (await api.get(`/patient/view/${token}`)).data;
 

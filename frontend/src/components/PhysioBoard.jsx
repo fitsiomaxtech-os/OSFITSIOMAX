@@ -4,6 +4,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Calendar,
+  CalendarX,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -34,6 +35,7 @@ import { PhysioTreatmentChips } from "@/components/ui/physio-treatment-chips";
 import { DocumentPreview, useDocumentPreview } from "@/components/ui/document-preview";
 import { MyProfilePage } from "@/components/MyProfilePage";
 import { SESSION_PAYMENT_REFRESH_EVENT } from "@/components/SessionPaymentBell";
+import { PhysioAbsencePanel } from "@/components/PhysioAbsencePanel";
 import {
   physioConsultations,
   physioCompleteConsultation,
@@ -66,6 +68,8 @@ const VIEW_TABS = [
   { key: "treatment", label: "Treatment", icon: ClipboardList },
   { key: "review", label: "Send to Review", icon: ClipboardCheck },
   { key: "patients", label: "Patients", icon: Users },
+  // The physio's own days off, and handing the patients booked on them to a colleague.
+  { key: "absence", label: "Absence", icon: CalendarX },
 ];
 
 /**
@@ -86,6 +90,9 @@ const BOTTOM_TABS = [...VIEW_TABS, PROFILE_TAB];
 
 export const PhysioBoard = ({ physioId, user, roleLabel } = {}) => {
   const [activeTab, setActiveTab] = useState("treatment");
+  // Absence is marked by the physio for themselves. A desk driving somebody else's board
+  // from Operations marks it from Branch Admin > Management > Physio Absence instead.
+  const viewTabs = physioId ? VIEW_TABS.filter((t) => t.key !== "absence") : VIEW_TABS;
   // Counts shown on both switchers — every one of them is what's still
   // outstanding, so it counts down as the physio works through it rather than
   // holding at a fixed total: Treatment is today's pending sessions/appointments
@@ -120,7 +127,7 @@ export const PhysioBoard = ({ physioId, user, roleLabel } = {}) => {
           since a slate badge on a filled tab reads as disabled. */}
       <div className={`flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4 md:border-b md:border-slate-200 md:pb-2 ${activeTab === "profile" ? "hidden md:flex" : "flex"}`} data-testid="physio-view-bar">
       <div className="hidden flex-wrap items-center gap-2 overflow-x-auto md:flex" data-testid="physio-view-tabs">
-        {VIEW_TABS.map((tab) => {
+        {viewTabs.map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.key;
           const count = badgeFor[tab.key] || 0;
@@ -160,6 +167,7 @@ export const PhysioBoard = ({ physioId, user, roleLabel } = {}) => {
       <div style={{ display: activeTab === "patients" ? "block" : "none" }}>
         <PatientsTab physioId={physioId} onCountChange={setPatientsCount} toolbarSlot={slotFor("patients")} />
       </div>
+      {!physioId && activeTab === "absence" && <PhysioAbsencePanel mode="physio" />}
 
       {/* My Profile stands in the board's place rather than over it, so the bar below stays
           put and Treatment takes the physio straight back — the page is left the way every
@@ -174,7 +182,7 @@ export const PhysioBoard = ({ physioId, user, roleLabel } = {}) => {
           across the bottom of the window for a switcher that belongs at the top. */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500 pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="physio-bottom-nav">
         <div className="mx-auto flex max-w-lg items-stretch justify-around">
-          {BOTTOM_TABS.map((tab) => {
+          {(physioId ? BOTTOM_TABS.filter((t) => t.key !== "absence") : BOTTOM_TABS).map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
             const count = badgeFor[tab.key] || 0;
@@ -533,6 +541,8 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           totalSessions: s.total_sessions,
           week: s.week_number,
           done: s.status === "completed",
+          // Handed to this physio for the day while its own physio is absent.
+          coveringFor: s.covered_for_physio_name || "",
         });
       });
     return rows.sort((a, b) => (a.time || "").localeCompare(b.time || ""));
@@ -961,6 +971,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
+                    {r.coveringFor && <p className="truncate text-[10px] font-medium text-rose-600">Covering for {r.coveringFor}</p>}
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
                       {r.sessionNumber ? (
                         <>
@@ -1047,6 +1058,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                           {/* truncate, because table-fixed will not widen the column for a
                               long name — without it the name runs on under Day. */}
                           <p className="truncate font-medium text-slate-800">{l.name}</p>
+                          {r.coveringFor && <p className="truncate text-[10px] font-medium text-rose-600">Covering for {r.coveringFor}</p>}
                         </td>
                         <td className="px-4 py-3 text-center text-slate-600">
                           {r.sessionNumber

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadSession } from "@/lib/session";
 import {
   Calendar,
+  CalendarX,
   CheckCircle2,
   ArrowLeftRight,
   RefreshCw,
@@ -83,6 +84,7 @@ import { ZumbaMastersPanel } from "@/components/branch/ZumbaMastersPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { LeadBranchTransferDialog } from "@/components/branch/LeadBranchTransferDialog";
 import MissedClassPanel from "@/components/branch/MissedClassPanel";
+import { PhysioAbsencePanel } from "@/components/PhysioAbsencePanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { ClientReviewsPanel } from "@/components/reviews/ClientReviewsPanel";
@@ -1606,6 +1608,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // Sits next to PHYSIO CALENDAR because that is where its slots come from: a day an
     // absence left dateless is re-booked onto exactly the calendar published one tab over.
     { key: "missed", label: "Missed Classes", icon: UserX },
+    // A physio who is off: the patients booked with them that day are handed to another
+    // physio, or released to Missed Classes for a new date.
+    { key: "physio_absence", label: "Physio Absence", icon: CalendarX },
     { key: "manager", label: "Manager", icon: UserCog },
     { key: "calendar", label: "Calendar", icon: Calendar },
     // Sits after CALENDAR because it is the setting the three calendars above obey: the
@@ -1688,6 +1693,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" onlineArm={armScoped} />
           ) : consultationsSubTab === "missed" ? (
             <MissedClassPanel />
+          ) : consultationsSubTab === "physio_absence" ? (
+            <PhysioAbsencePanel mode="branch" />
           ) : consultationsSubTab === "manager" ? (
             <BranchDetailPage branchId={branchId} readOnly />
           ) : consultationsSubTab === "calendar" ? (

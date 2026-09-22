@@ -21,7 +21,9 @@ from routers.v3_reviews import (
 # Which leads belong to a physio. In its own module because both this board and the
 # reviews router need it, and this one already imports from that one — a helper living
 # in either would close the loop.
-from physio_scope import physio_lead_ids, physio_owns_lead, resolve_physio_doctor
+from physio_scope import (
+    physio_lead_ids, physio_owns_lead, resolve_physio_doctor, own_course_days, covering_lead_ids,
+)
 # The clients' weekly star ratings -- stars only; the Treatment Feedback is not for the
 # Physio's eyes (see physio_star_ratings).
 from routers.v3_client_reviews import physio_star_ratings, session_star_ratings
@@ -213,7 +215,7 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
         {"id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("updated_at", -1).to_list(500)
     sessions = await v3_col("sessions").find(
-        {"physio_id": {"$in": _ids_of(doctor)}, "lead_id": {"$in": lead_ids}}, {"_id": 0}
+        {**own_course_days(_ids_of(doctor)), "lead_id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(2000)
     for row in sessions:
         row.setdefault("track", "treatment")
@@ -223,7 +225,7 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
     # Mapped onto the field names the rest of this projection already uses; rehab runs in
     # days and carries no week, so that one stays empty rather than inventing a Week 1.
     rehab = await v3_col("rehab_sessions").find(
-        {"physio_id": {"$in": _ids_of(doctor)}, "lead_id": {"$in": lead_ids}}, {"_id": 0}
+        {**own_course_days(_ids_of(doctor)), "lead_id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(2000)
     for row in rehab:
         row["track"] = "rehab"
@@ -309,12 +311,15 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
     # a name-and-id stub with no phone — and the list decides a row is clickable by asking
     # whether the lead has one. It was the third place reading the stamp alone.
     lead_ids = await physio_lead_ids(_ids_of(doctor))
+    # Patients this physio is only covering a day for, while a colleague is absent. Sent so
+    # the Treatment list can open them, flagged so they stay out of this physio's caseload.
+    covering = [i for i in await covering_lead_ids(_ids_of(doctor)) if i not in lead_ids]
     leads = await v3_col("leads").find(
-        {"id": {"$in": lead_ids}},
+        {"id": {"$in": lead_ids + covering}},
         {"_id": 0},
     ).sort("appointment_datetime", -1).to_list(500)
     day_rows = await v3_col("sessions").find(
-        {"physio_id": {"$in": _ids_of(doctor)}, "lead_id": {"$in": lead_ids}},
+        {**own_course_days(_ids_of(doctor)), "lead_id": {"$in": lead_ids}},
         {"_id": 0, "lead_id": 1, "status": 1, "week_number": 1},
     ).to_list(5000)
     tallies: dict = {}
@@ -347,6 +352,7 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
         dumped["star_weeks"] = rated.get("weeks", {})
         dumped["star_average"] = rated.get("average")
         dumped["star_count"] = rated.get("count", 0)
+        dumped["covering"] = ld["id"] in covering
         out.append(dumped)
 
     return {

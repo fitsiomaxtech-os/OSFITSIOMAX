@@ -988,6 +988,11 @@ async def hp_assign_physio_with_sessions(
     # answered "a re-assignment must not clash with itself" by destroying the schedule
     # before anything had agreed to replace it: every refusal below returned 400 with the
     # patient's existing sessions already gone from the physio's calendar.
+    # A day on a date the physio has said they will not be in is booked straight into the
+    # problem v3_physio_absence exists to clear up.
+    from routers.v3_physio_absence import refuse_if_physio_absent
+    await refuse_if_physio_absent(payload.physio_id, sorted_slots)
+
     capacity = slot_capacity_of(physio)
     taken, lead_elsewhere = await physio_slot_load(
         payload.physio_id, sorted_slots, lead_id=lead_id, replacing="sessions",

@@ -6,6 +6,7 @@ from database import v3_col
 from utils import now_iso, normalize_slot_time, slot_capacity_of
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut, V3AssignSessionsInput
+from routers.v3_physio_absence import refuse_if_physio_absent
 
 router = APIRouter(prefix="/api/v3")
 
@@ -44,6 +45,8 @@ async def assign_sessions(
     physio = await v3_col("doctors").find_one({"id": payload.physio_id}, {"_id": 0})
     if not physio:
         raise HTTPException(status_code=404, detail="Jr. Physio not found")
+
+    await refuse_if_physio_absent(payload.physio_id, [normalize_slot_time(t) for t in payload.slot_times])
 
     rec = await v3_col("package_recommendations").find_one({"lead_id": payload.lead_id}, {"_id": 0})
 
@@ -288,6 +291,9 @@ async def schedule_session(
             detail="That time isn't published by this physio — open it in MANAGEMENT → PHYSIO CALENDAR first",
         )
 
+    # Not onto a day this physio has said they will not be in — see v3_physio_absence.
+    await refuse_if_physio_absent(session.get("physio_id"), [slot])
+
     # Where the number says the date has to sit. A slot earlier in the course is real, and
     # the physio is free on it, and the day still cannot be delivered when it comes round:
     # the board refuses a day whose predecessors are not signed off, so the patient is
@@ -467,6 +473,9 @@ async def reschedule_calendar_booking(
             status_code=400,
             detail="That time isn't published by this expert — open it in MANAGEMENT → PHYSIO CALENDAR first",
         )
+
+    if course in ("session", "rehab"):
+        await refuse_if_physio_absent(expert_id, [slot])
 
     # How full the destination already is, counted across every course the expert runs. One
     # expert, one room, one hour: a treatment day and a rehab day sitting in it take the

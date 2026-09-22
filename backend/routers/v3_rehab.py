@@ -132,6 +132,10 @@ async def assign_rehab(
     # below — a full slot, a clash — returned 400 with the patient's existing rehab days
     # already gone from the physio's calendar. Nothing is removed now until the whole
     # submission is known to be bookable.
+    # Not onto a date the physio is marked absent — see v3_physio_absence.
+    from routers.v3_physio_absence import refuse_if_physio_absent
+    await refuse_if_physio_absent(payload.physio_id, slots)
+
     capacity = slot_capacity_of(physio)
     taken, lead_elsewhere = await physio_slot_load(
         payload.physio_id, slots, lead_id=payload.lead_id, replacing="rehab_sessions",

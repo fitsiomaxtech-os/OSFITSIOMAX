@@ -156,7 +156,9 @@ async def physio_lead_ids(physio_id) -> list:
     if not ids:
         return []
     assigned = await v3_col("leads").distinct("id", {"assigned_physio_id": {"$in": ids}})
-    rehab = await v3_col("rehab_sessions").distinct("lead_id", {"physio_id": {"$in": ids}})
+    # own_course_days, so a rehab day covered for an absent colleague does not make their
+    # patient this physio's for good — and stays this patient's physio's while it is away.
+    rehab = await v3_col("rehab_sessions").distinct("lead_id", {**own_course_days(ids)})
     return list(dict.fromkeys([*assigned, *rehab]))
 
 async def physio_owns_lead(physio_id, lead_id: str) -> bool:
@@ -179,9 +181,39 @@ async def physio_owns_lead(physio_id, lead_id: str) -> bool:
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "assigned_physio_id": 1})
     if lead and lead.get("assigned_physio_id") in ids:
         return True
-    return bool(await v3_col("rehab_sessions").find_one(
+    if await v3_col("rehab_sessions").find_one(
         {"lead_id": lead_id, "physio_id": {"$in": ids}}, {"_id": 0, "id": 1}
+    ):
+        return True
+    # Covering for an absent colleague: the day was handed to this physio for one date
+    # (see v3_physio_absence), and they cannot treat a patient whose record they are refused.
+    return bool(await v3_col("sessions").find_one(
+        {"lead_id": lead_id, "physio_id": {"$in": ids}, "covered_for_physio_id": {"$exists": True}},
+        {"_id": 0, "id": 1},
     ))
+
+
+def own_course_days(ids: list) -> dict:
+    """The query for a physio's own days, including the ones handed to a cover.
+
+    A day given to another physio while this one was absent (v3_physio_absence) is still a
+    day of this physio's patient's course. Counted by physio_id alone it vanished from
+    their tally, and the patient read 11 of 12 on the board of the physio treating them.
+    """
+    return {"$or": [
+        {"physio_id": {"$in": ids}, "covered_for_physio_id": {"$exists": False}},
+        {"covered_for_physio_id": {"$in": ids}},
+    ]}
+
+
+async def covering_lead_ids(ids: list) -> list:
+    """Leads whose day this physio is only covering for an absent colleague."""
+    out = []
+    for collection in ("sessions", "rehab_sessions"):
+        out += await v3_col(collection).distinct(
+            "lead_id", {"physio_id": {"$in": ids}, "covered_for_physio_id": {"$exists": True}},
+        )
+    return list(dict.fromkeys(out))
 
 
 async def resolve_consultant_doctor(user_id: str, role: str = "") -> Optional[dict]:
