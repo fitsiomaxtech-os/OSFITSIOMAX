@@ -15,7 +15,14 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { createBankAccount, listBankAccounts, updateBankAccount, uploadBankQrImage } from "@/lib/api";
+import { Switch } from "@/components/ui/switch";
+import {
+  createBankAccount,
+  listBankAccounts,
+  setBankAccountStatus,
+  updateBankAccount,
+  uploadBankQrImage,
+} from "@/lib/api";
 
 // The banks a counter in this group actually collects into, plus the escape hatch. A
 // typed-in name would give the same bank three spellings across three cards, which is
@@ -55,6 +62,7 @@ const EMPTY_FORM = {
   holder_name: "",
   bank_branch_name: "",
   qr_image_url: "",
+  is_active: true,
 };
 
 // Every field the popup asks for, with the four that Save is refused without starred —
@@ -195,6 +203,27 @@ const BankFormDialog = ({ account, branchId, branchName, onClose, onSaved }) => 
               <FieldLabel icon={User} required>Holder Name</FieldLabel>
               <Input placeholder="Enter account holder name" value={form.holder_name} onChange={set("holder_name")} data-testid="finance-bank-holder" />
             </div>
+            {/* The same switch the card carries, so an account can be added already
+                switched off -- one opened at the bank but not yet put up at a counter. */}
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">Status</p>
+                <p className="text-xs text-slate-500">
+                  {form.is_active ? "Active — this account is collecting." : "Inactive — not offered for payment."}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold ${form.is_active ? "text-emerald-600" : "text-slate-400"}`}>
+                  {form.is_active ? "ON" : "OFF"}
+                </span>
+                <Switch
+                  checked={!!form.is_active}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, is_active: v }))}
+                  className="data-[state=checked]:bg-emerald-500"
+                  data-testid="finance-bank-status-switch"
+                />
+              </div>
+            </div>
           </div>
 
           <div>
@@ -281,6 +310,21 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
 
   useEffect(() => { load(); }, [load]);
 
+  // Flipped on the card first, then sent: the switch is the one control here that is a
+  // whole action on its own, and a switch that waits on a round trip to move reads as a
+  // switch that did not take. Put back if the server refuses it.
+  const toggleStatus = async (acc) => {
+    const next = !acc.is_active;
+    setRows((prev) => prev.map((r) => (r.id === acc.id ? { ...r, is_active: next } : r)));
+    try {
+      await setBankAccountStatus(acc.id, next);
+      toast.success(next ? `${acc.bank_name} is active` : `${acc.bank_name} is inactive`);
+    } catch (err) {
+      setRows((prev) => prev.map((r) => (r.id === acc.id ? { ...r, is_active: acc.is_active } : r)));
+      toast.error(err?.response?.data?.detail || "Could not change that account's status");
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="finance-bank-accounts-root">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
@@ -316,7 +360,13 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid="finance-bank-grid">
           {rows.map((acc) => (
-            <div key={acc.id} className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm" data-testid={`finance-bank-card-${acc.id}`}>
+            <div
+              key={acc.id}
+              className={`flex flex-col rounded-xl border bg-white p-4 shadow-sm transition ${
+                acc.is_active ? "border-slate-200" : "border-slate-200 bg-slate-50"
+              }`}
+              data-testid={`finance-bank-card-${acc.id}`}
+            >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900" title={acc.bank_name}>{acc.bank_name}</p>
@@ -334,7 +384,11 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
 
               <div className="mt-3 flex items-center justify-center rounded-lg bg-slate-50 p-2">
                 {acc.qr_image_url ? (
-                  <img src={acc.qr_image_url} alt={`${acc.bank_name} QR`} className="h-28 w-28 object-contain" />
+                  <img
+                    src={acc.qr_image_url}
+                    alt={`${acc.bank_name} QR`}
+                    className={`h-28 w-28 object-contain transition ${acc.is_active ? "" : "opacity-40 grayscale"}`}
+                  />
                 ) : (
                   <QrCode className="h-16 w-16 text-slate-200" />
                 )}
@@ -345,6 +399,28 @@ export const BankAccountsBoard = ({ branchId, branchName }) => {
                 <Row label="A/c No." value={acc.account_number} />
                 <Row label="IFSC" value={acc.ifsc_code} />
                 <Row label="Branch" value={acc.bank_branch_name} />
+              </div>
+
+              {/* On or off, right on the card: whether this account is being offered for
+                  payment is the one thing about it that changes without anything else
+                  about it changing, so it does not go behind Edit. */}
+              <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                    acc.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-200 text-slate-500"
+                  }`}
+                  data-testid={`finance-bank-status-${acc.id}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${acc.is_active ? "bg-emerald-500" : "bg-slate-400"}`} />
+                  {acc.is_active ? "Active" : "Inactive"}
+                </span>
+                <Switch
+                  checked={!!acc.is_active}
+                  onCheckedChange={() => toggleStatus(acc)}
+                  className="data-[state=checked]:bg-emerald-500"
+                  aria-label={acc.is_active ? "Deactivate this account" : "Activate this account"}
+                  data-testid={`finance-bank-toggle-${acc.id}`}
+                />
               </div>
 
               {/* Which book this card belongs to. Only where the grid is showing more

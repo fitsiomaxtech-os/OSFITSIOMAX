@@ -3820,6 +3820,15 @@ class BankAccountSave(BaseModel):
     holder_name: Optional[str] = ""
     bank_branch_name: Optional[str] = ""
     qr_image_url: Optional[str] = ""
+    # Whether this account is still collecting. An account closed at the bank, or a QR
+    # taken down off a counter, stops being offered without the card that records it
+    # having to be thrown away -- the payments already taken against it are still read
+    # back through it.
+    is_active: Optional[bool] = True
+
+
+class BankAccountStatus(BaseModel):
+    is_active: bool
 
 
 def _clean_bank_payload(payload: BankAccountSave) -> dict:
@@ -3833,6 +3842,7 @@ def _clean_bank_payload(payload: BankAccountSave) -> dict:
         "holder_name": (payload.holder_name or "").strip(),
         "bank_branch_name": (payload.bank_branch_name or "").strip(),
         "qr_image_url": (payload.qr_image_url or "").strip(),
+        "is_active": True if payload.is_active is None else bool(payload.is_active),
     }
     missing = [label for key, label in BANK_ACCOUNT_REQUIRED.items() if not fields[key]]
     if missing:
@@ -3877,6 +3887,9 @@ async def list_bank_accounts(
     names = {b["id"]: b.get("branch_name", "") for b in branches}
     for row in rows:
         row["branch_name"] = names.get(row.get("branch_id") or "", "")
+        # Cards saved before the switch existed were collecting, and read as such rather
+        # than arriving switched off on the first load after this went out.
+        row["is_active"] = row.get("is_active", True)
     return rows
 
 
@@ -3920,3 +3933,22 @@ async def update_bank_account(
     update = {**fields, "updated_by": user.full_name, "updated_at": _now()}
     await v3_col("bank_accounts").update_one({"id": account_id}, {"$set": update})
     return {"message": "Bank account updated", "account": {**existing, **update}}
+
+
+@router.post("/finance/bank-accounts/{account_id}/status")
+async def set_bank_account_status(
+    account_id: str,
+    payload: BankAccountStatus,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    """Switch one account on or off from the grid, without reopening the whole card —
+    the one thing about an account that changes on its own, a QR coming down off a
+    counter, should not need every other field confirmed to record it."""
+    existing = await v3_col("bank_accounts").find_one({"id": account_id}, {"_id": 0, "id": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    await v3_col("bank_accounts").update_one(
+        {"id": account_id},
+        {"$set": {"is_active": payload.is_active, "updated_by": user.full_name, "updated_at": _now()}},
+    )
+    return {"message": "Bank account activated" if payload.is_active else "Bank account deactivated", "is_active": payload.is_active}
