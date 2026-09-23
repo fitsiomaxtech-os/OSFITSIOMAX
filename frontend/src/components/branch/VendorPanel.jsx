@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Truck, Plus, Search, Pencil, Trash2, History, IndianRupee, Power, Wallet,
-  Building2, Phone, Mail, Boxes, X, UserRound, Package,
+  Building2, Phone, Mail, Boxes, X, UserRound, Package, ChevronRight,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
 import {
   listVendors, vendorSummary, vendorDeliveries, createVendor, updateVendor, deleteVendor,
-  vendorStock, createVendorStock, deleteVendorStock, getBranches,
+  vendorStock, createVendorStock, updateVendorStock, deleteVendorStock, getBranches,
 } from "@/lib/api";
 // The dialog shell, the labelled field and the input class the stock panel already uses.
 // Imported rather than copied: the two boards sit on the same tab row and a vendor form
@@ -312,31 +312,63 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   // ---------------------------------------------------------------- the stock form
 
-  const setRow = (key, patch) => setStockDraft((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  const addRow = () => setStockDraft((rows) => [...rows, blankRow()]);
-  const dropRow = (key) => setStockDraft((rows) => {
-    const left = rows.filter((r) => r.key !== key);
-    return left.length ? left : [blankRow()];
+  const setRow = (key, patch) => setStockDraft((d) => ({
+    ...d, rows: d.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)),
+  }));
+  const addRow = () => setStockDraft((d) => ({ ...d, rows: [...d.rows, blankRow()] }));
+  const dropRow = (key) => setStockDraft((d) => {
+    const left = d.rows.filter((r) => r.key !== key);
+    return { ...d, rows: left.length ? left : [blankRow()] };
+  });
+
+  const editStock = (row) => setStockDraft({
+    id: row.id,
+    rows: [{
+      key: `r${Date.now()}`,
+      name: row.name || "",
+      stock_type: row.stock_type || "",
+      count: row.count ? String(row.count) : "",
+      unit: row.unit || "",
+      unit_price: row.unit_price ? String(row.unit_price) : "",
+    }],
+  });
+
+  const asStockPayload = (r) => ({
+    name: r.name.trim(),
+    stock_type: r.stock_type.trim(),
+    count: Number(r.count) || 0,
+    unit: r.unit,
+    unit_price: Number(r.unit_price) || 0,
   });
 
   const saveStock = async () => {
     // An untouched row is not an entry — somebody hit Add Another Stock and changed their
     // mind, which shouldn't be an error message.
-    const filled = stockDraft.filter((r) => r.name.trim() || r.stock_type.trim() || r.count || r.unit_price);
+    const filled = stockDraft.rows.filter((r) => r.name.trim() || r.stock_type.trim() || r.count || r.unit_price);
     if (filled.length === 0) { toast.error("Type at least one stock name"); return; }
     if (filled.some((r) => !r.name.trim())) { toast.error("Every row needs a stock name"); return; }
     const ok = await run(
-      () => createVendorStock(filled.map((r) => ({
-        name: r.name.trim(),
-        stock_type: r.stock_type.trim(),
-        count: Number(r.count) || 0,
-        unit: r.unit,
-        unit_price: Number(r.unit_price) || 0,
-      }))),
-      "Stock added",
+      () => (stockDraft.id
+        ? updateVendorStock(stockDraft.id, asStockPayload(filled[0]))
+        : createVendorStock(filled.map(asStockPayload))),
+      stockDraft.id ? "Stock updated" : "Stock added",
     );
     if (ok) setStockDraft(null);
   };
+
+  /**
+   * Clicking a stock row asks who supplies it.
+   *
+   * This is the way round the tab is meant to be read: the stock is what a branch knows
+   * it buys, and a vendor is the answer to a question about one. The form opens with the
+   * row already ticked and the bill already showing what it comes to, so the only things
+   * left to type are the ones only a person knows.
+   */
+  const addVendorFor = (row) => setDraft({
+    ...emptyDraft,
+    stock_ids: [row.id],
+    amount: row.total ? String(row.total) : "",
+  });
 
   const removeStock = async (row) => {
     const msg = row.vendor_count
@@ -460,7 +492,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                   nothing to link, and this is the button that says so. */}
               <Button
                 variant="outline"
-                onClick={() => setStockDraft([blankRow()])}
+                onClick={() => setStockDraft({ id: null, rows: [blankRow()] })}
                 className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
                 data-testid="vendor-stock-new"
               >
@@ -470,6 +502,94 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                 <Plus className="mr-1.5 h-4 w-4" /> Add Vendor
               </Button>
             </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* The stock, first and on its own. A vendor is the answer to "who supplies
+          this", so the question has to be on screen before the answer is worth reading —
+          and a branch that has typed in ten things it buys should see ten things, not an
+          empty vendor table. */}
+      <Card className="overflow-hidden" data-testid="stock-card">
+        <CardContent className="p-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Stock{stock.length ? ` · ${stock.length}` : ""}
+            </p>
+            {stock.length > 0 && canEdit && (
+              <p className="text-[11px] text-slate-400">Click a stock to add the vendor who supplies it</p>
+            )}
+          </div>
+
+          {loading ? (
+            <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-loading">Loading stock...</p>
+          ) : stock.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-empty">
+              No stock yet — use <span className="font-semibold">Add Stock Detail</span> to type in what the branch buys.
+            </p>
+          ) : (
+            <div className="divide-y divide-slate-100" data-testid="stock-list">
+              {stock.map((r) => (
+                <div key={r.id} className="flex items-center gap-1 px-2 py-1" data-testid={`stock-item-${r.id}`}>
+                  <button
+                    type="button"
+                    onClick={() => canEdit && addVendorFor(r)}
+                    disabled={!canEdit}
+                    className={`min-w-0 flex-1 rounded-lg px-2 py-2 text-left ${canEdit ? "hover:bg-violet-50" : "cursor-default"}`}
+                    data-testid={`stock-pick-${r.id}`}
+                  >
+                    <p className="truncate text-sm font-semibold text-slate-800">{r.name}</p>
+                    <p className="truncate text-[11px] text-slate-500">
+                      {[
+                        r.stock_type,
+                        r.count ? `${r.count}${r.unit ? ` ${r.unit}` : ""}` : "",
+                        r.unit_price ? `${fmt(r.unit_price)} each` : "",
+                        r.total ? `${fmt(r.total)} total` : "",
+                      ].filter(Boolean).join(" · ") || "No quantity or rate yet"}
+                    </p>
+                  </button>
+
+                  {/* Who already supplies it. Two names and a count, not the whole list —
+                      the vendor table below is where the whole list lives. */}
+                  <div className="hidden min-w-0 shrink-0 items-center gap-1 sm:flex" data-testid={`stock-vendors-${r.id}`}>
+                    {(r.vendors || []).length === 0 ? (
+                      <span className="text-[11px] italic text-slate-400">No vendor yet</span>
+                    ) : (
+                      <>
+                        {r.vendors.slice(0, 2).map((vn) => (
+                          <span key={vn.id} className="max-w-[140px] truncate rounded-[5px] border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+                            {vn.name}
+                          </span>
+                        ))}
+                        {r.vendors.length > 2 && (
+                          <span className="text-[11px] font-semibold text-slate-400">+{r.vendors.length - 2}</span>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {canEdit && (
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <button
+                        onClick={() => editStock(r)}
+                        className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-emerald-600"
+                        title="Edit this stock" data-testid={`stock-edit-${r.id}`}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => removeStock(r)}
+                        className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                        title="Remove this stock" data-testid={`stock-drop-${r.id}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                      <ChevronRight className="ml-0.5 h-4 w-4 shrink-0 text-slate-300" />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -580,7 +700,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
       {stockDraft && (
         <Modal
-          title="Add Stock Detail"
+          title={stockDraft.id ? "Edit Stock Detail" : "Add Stock Detail"}
           onClose={() => setStockDraft(null)}
           testid="stock-modal"
           light
@@ -589,14 +709,14 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
           footer={<>
             <Button variant="outline" onClick={() => setStockDraft(null)} data-testid="stock-cancel">Cancel</Button>
             <Button className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={busy} onClick={saveStock} data-testid="stock-save">
-              Save Stock
+              {stockDraft.id ? "Save Changes" : "Save Stock"}
             </Button>
           </>}
         >
           <Panel title="Stock Details" icon={Package} tint="bg-emerald-50/70 text-emerald-700" testid="stock-entry">
-            {stockDraft.map((r, idx) => (
+            {stockDraft.rows.map((r, idx) => (
               <div key={r.key} className={idx > 0 ? "border-t border-slate-100 pt-3" : ""} data-testid={`stock-row-${idx}`}>
-                {stockDraft.length > 1 && (
+                {stockDraft.rows.length > 1 && (
                   <div className="mb-1.5 flex items-center justify-between">
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Stock {idx + 1}</span>
                     <button type="button" onClick={() => dropRow(r.key)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Remove this row" data-testid={`stock-row-drop-${idx}`}>
@@ -630,20 +750,22 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                 </div>
               </div>
             ))}
-            <button
-              type="button"
-              onClick={addRow}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-300 px-3 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
-              data-testid="stock-row-add"
-            >
-              <Plus className="h-4 w-4" /> Add Another Stock
-            </button>
+            {!stockDraft.id && (
+              <button
+                type="button"
+                onClick={addRow}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-300 px-3 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+                data-testid="stock-row-add"
+              >
+                <Plus className="h-4 w-4" /> Add Another Stock
+              </button>
+            )}
           </Panel>
 
           {/* What is already in the book, so the same thing isn't typed twice under two
               spellings — the server refuses a duplicate name, and seeing the list is
               kinder than being told. */}
-          {stock.length > 0 && (
+          {stock.length > 0 && !stockDraft.id && (
             <div data-testid="stock-existing">
               <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">Already in the list</p>
               <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-1.5">

@@ -334,17 +334,29 @@ async def list_vendor_stock(
     search: Optional[str] = None,
     _: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES)),
 ):
-    """The Stock Detail book, org-wide, with how many vendors quote for each row."""
+    """The Stock Detail book, org-wide, each row carrying who supplies it.
+
+    The vendors come back with the stock rather than being looked up per row, because the
+    tab leads with this list: a stock name whose row cannot say whether anyone supplies it
+    is a name with the one useful thing about it missing.
+    """
     q = {}
     if search and search.strip():
         q["name"] = {"$regex": _escape_regex(search.strip()), "$options": "i"}
     rows = await v3_col("vendor_stock").find(q, {"_id": 0}).sort("name", 1).to_list(500)
     used = await v3_col("vendors").aggregate([
         {"$unwind": "$stock_ids"},
-        {"$group": {"_id": "$stock_ids", "n": {"$sum": 1}}},
+        {"$sort": {"name": 1}},
+        {"$group": {
+            "_id": "$stock_ids",
+            "vendors": {"$push": {"id": "$id", "name": "$name", "active": "$active"}},
+        }},
     ]).to_list(1000)
-    counts = {r["_id"]: r["n"] for r in used}
-    return [{**r, "vendor_count": counts.get(r["id"], 0)} for r in rows]
+    by_stock = {r["_id"]: r["vendors"] for r in used}
+    return [
+        {**r, "vendors": by_stock.get(r["id"], []), "vendor_count": len(by_stock.get(r["id"], []))}
+        for r in rows
+    ]
 
 
 @router.post("/stock")
