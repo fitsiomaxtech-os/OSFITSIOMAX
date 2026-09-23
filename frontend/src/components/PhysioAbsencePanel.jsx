@@ -93,7 +93,7 @@ function HandOverDialog({ absence, day, candidates, onClose, onDone }) {
       className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 p-3 sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}
     >
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/5" data-testid={`absence-handover-${day.id}`}>
+      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/5" data-testid={`absence-handover-${day.id}`}>
         <div className="flex items-start gap-3 px-5 pb-3 pt-5">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 ring-1 ring-inset ring-sky-100">
             <ArrowRightLeft className="h-5 w-5" />
