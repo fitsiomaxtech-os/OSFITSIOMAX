@@ -434,6 +434,10 @@ export function PhysioAbsencePanel({ mode = "branch", branchId = null }) {
   const [form, setForm] = useState({ date: localToday(), physio_id: "", reason: "" });
   const [saving, setSaving] = useState(false);
   const [openId, setOpenId] = useState(null);
+  // Which tile narrows the list: null for every absence, or a state whose patients the
+  // absence must still have. Clicking the lit tile again clears it.
+  const [filter, setFilter] = useState(null);
+  const pickFilter = (f) => setFilter((cur) => (cur === f ? null : f));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -456,6 +460,10 @@ export function PhysioAbsencePanel({ mode = "branch", branchId = null }) {
     reassigned: t.reassigned + (a.counts?.reassigned || 0),
     released: t.released + (a.counts?.released || 0),
   }), { waiting: 0, reassigned: 0, released: 0 }), [absences]);
+  const shown = useMemo(
+    () => (filter ? absences.filter((a) => (a.counts?.[filter] || 0) > 0) : absences),
+    [absences, filter],
+  );
 
   const submit = async () => {
     if (!form.date) { toast.error("Pick the date"); return; }
@@ -497,10 +505,10 @@ export function PhysioAbsencePanel({ mode = "branch", branchId = null }) {
   return (
     <div className="space-y-4" data-testid={`physio-absence-panel-${mode}`}>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile label="Absences" value={absences.length} sub="today and ahead" icon={CalendarX} color="#e11d48" testid="physio-absence-tile-count" />
-        <StatTile label="Need a plan" value={totals.waiting} sub="patients still booked" icon={UserX} color="#d97706" testid="physio-absence-tile-waiting" />
-        <StatTile label="Handed over" value={totals.reassigned} sub="to another physio" icon={Users} color="#0284c7" testid="physio-absence-tile-reassigned" />
-        <StatTile label="Waiting" value={totals.released} sub="for a new date" icon={Clock} color="#64748b" testid="physio-absence-tile-released" />
+        <StatTile label="Absences" value={absences.length} sub="today and ahead" icon={CalendarX} color="#e11d48" active={filter === null} onClick={() => setFilter(null)} testid="physio-absence-tile-count" />
+        <StatTile label="Need a plan" value={totals.waiting} sub="patients still booked" icon={UserX} color="#d97706" active={filter === "waiting"} onClick={() => pickFilter("waiting")} testid="physio-absence-tile-waiting" />
+        <StatTile label="Handed over" value={totals.reassigned} sub="to another physio" icon={Users} color="#0284c7" active={filter === "reassigned"} onClick={() => pickFilter("reassigned")} testid="physio-absence-tile-reassigned" />
+        <StatTile label="Waiting" value={totals.released} sub="for a new date" icon={Clock} color="#64748b" active={filter === "released"} onClick={() => pickFilter("released")} testid="physio-absence-tile-released" />
       </div>
 
       {/* Mark absent */}
@@ -572,14 +580,21 @@ export function PhysioAbsencePanel({ mode = "branch", branchId = null }) {
         </Button>
       </div>
 
-      {absences.length === 0 ? (
+      {shown.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 px-3 py-14 text-center" data-testid="physio-absence-empty">
           <CheckCircle2 className="mx-auto mb-2 h-10 w-10 text-emerald-200" />
-          <p className="text-sm text-slate-400">{loading ? "Loading…" : "No absences marked from today on."}</p>
+          <p className="text-sm text-slate-400">
+            {loading ? "Loading…" : absences.length === 0 ? "No absences marked from today on." : "No absences match this card."}
+          </p>
+          {!loading && filter && absences.length > 0 && (
+            <button type="button" onClick={() => setFilter(null)} className="mt-2 text-xs font-medium text-sky-700 hover:underline">
+              Show all absences
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-2" data-testid="physio-absence-list">
-          {absences.map((a) => {
+          {shown.map((a) => {
             const waiting = a.counts?.waiting || 0;
             return (
               <div key={a.id} className={`flex flex-col gap-3 rounded-xl border bg-white p-3 sm:flex-row sm:items-center ${waiting ? "border-amber-200" : "border-slate-200"}`} data-testid={`physio-absence-row-${a.id}`}>
