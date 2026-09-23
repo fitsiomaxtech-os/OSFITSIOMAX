@@ -1773,25 +1773,23 @@ async def _rebook_consultation_slot(
         # simply no calendar to move them on.
         return fields
 
-    # Somebody else's booking on this consultant at this hour blocks it — the slot belongs
+    # Somebody else's booking on this consultant at this hour blocks it — the hour belongs
     # to whichever patient took it. Checked for the consultant being kept as well as one
     # being changed to: this writes a row onto their calendar either way, and a move that
     # only changed the time would otherwise be able to put two patients in one hour.
     #
     # This lead's own row is excluded, so moving the time while keeping the consultant (or
     # the other way round) is never read as a clash with itself.
-    clash = await v3_col("appointments").find_one(
-        {
-            "doctor_id": physio["id"],
-            "slot_time": slot_time,
-            "status": "new_appointment",
-            "lead_id": {"$ne": lead_id},
-        },
-        {"_id": 0, "lead_name": 1},
-    )
-    # A review sent to this Consultant for the hour holds it as well.
-    clash = clash or await consultant_slot_clash(
-        physio["id"], slot_time, await consultation_slot_minutes(), reviews_only=True,
+    #
+    # Overlap, not an exact start — the same reason v3_schedule_branch_appointment reads
+    # it this way. The new time is typed by hand on the Reschedule popup, so two
+    # consultations can collide without sharing a start, and an exact-match query calls
+    # a 45-minute 10:00 and a hand-entered 10:20 two free slots.
+    clash = await consultant_slot_clash(
+        physio["id"],
+        slot_time,
+        duration or await consultation_slot_minutes(),
+        exclude_lead_id=lead_id,
     )
     if clash:
         raise HTTPException(

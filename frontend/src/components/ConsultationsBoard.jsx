@@ -2039,14 +2039,20 @@ const SuperAdminTag = ({ className = "" }) => (
 );
 
 
-/** Pick a consultation slot the way the branch actually has to pick one: a date, then
- *  whoever is free on it, then one of that consultant's own open times.
+/** Pick a consultation slot the way the branch actually has to pick one: a date, then a
+ *  consultant available on it, then the hour agreed with the patient.
  *
- *  Rescheduling used to ask only for a new date and a new time, typed free-hand. That is
- *  half the act. The reason a consultation is being moved is usually that the consultant
- *  could not take it, so the new slot has to be chosen against who is actually free and
- *  the patient handed to whichever consultant that is. A date and time picked with nobody
- *  in mind lands the patient back on the same unavailable calendar.
+ *  Rescheduling once asked only for a new date and a new time with nobody in mind, which
+ *  is half the act: the reason a consultation is being moved is usually that the
+ *  consultant could not take it, so the new slot has to be chosen against who is actually
+ *  available and the patient handed to whichever consultant that is.
+ *
+ *  The hour itself is typed, not picked off a grid. The Consultant Calendar publishes the
+ *  DAY a consultant works and nothing finer — see HeadPhysioCalendar — because the minute
+ *  a patient is moved to is agreed on the phone, and a grid of cut tiles can only ever
+ *  offer the hours it happened to cut. What the consultant published is named beside the
+ *  field so the desk knows which hours are fair game, and a collision with somebody
+ *  else's appointment is refused here as well as by the endpoint.
  *
  *  Read off available-dates and available-experts, the same two endpoints the Branch
  *  Leads booking popup uses, so a day this offers is a day that booking screen would also
@@ -2056,7 +2062,14 @@ const SuperAdminTag = ({ className = "" }) => (
  */
 const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentConsultantName, testPrefix = "cons-slot" }) => {
   const [openDates, setOpenDates] = useState({});
-  const [experts, setExperts] = useState({ rows: [], loading: false });
+  const [experts, setExperts] = useState({ rows: [], slotMinutes: null, loading: false });
+  // The new hour, typed rather than picked, held as its three parts. See the Appointment
+  // popup on BranchAdminBoard for why the Consultant Calendar publishes only the day and
+  // the minute is agreed with the patient — this is the same act, one booking later.
+  //
+  // Three parts and not one "HH:MM" because a field that reparses between keystrokes
+  // cannot be typed into: "1" on its way to "11" is itself a valid hour.
+  const [clock, setClock] = useState({ h: "", m: "", ap: "AM" });
   const [month, setMonth] = useState(() => {
     const d = value?.date ? new Date(`${value.date}T00:00:00`) : new Date();
     return { y: d.getFullYear(), m: d.getMonth() };
@@ -2080,17 +2093,113 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
   useEffect(() => {
     if (!branchId || !value?.date) { setExperts({ rows: [], loading: false }); return; }
     let cancelled = false;
-    setExperts({ rows: [], loading: true });
+    setExperts({ rows: [], slotMinutes: null, loading: true });
     getAvailableExperts(branchId, value.date, undefined, leadId)
-      .then((res) => { if (!cancelled) setExperts({ rows: res?.experts || [], loading: false }); })
-      .catch(() => { if (!cancelled) setExperts({ rows: [], loading: false }); });
+      // slot_minutes rides along now: a hand-typed start has no tile to read a length off,
+      // so the booking runs the store's Consultation Duration from whatever was entered.
+      .then((res) => { if (!cancelled) setExperts({ rows: res?.experts || [], slotMinutes: res?.slot_minutes || null, loading: false }); })
+      .catch(() => { if (!cancelled) setExperts({ rows: [], slotMinutes: null, loading: false }); });
     return () => { cancelled = true; };
   }, [branchId, leadId, value?.date]);
 
-  const slots = useMemo(() => {
-    const doc = experts.rows.find((d) => d.id === value?.physio_id);
-    return [...((doc?.free_slots) || [])].sort((a, b) => (a.slot_time || "").localeCompare(b.slot_time || ""));
-  }, [experts.rows, value?.physio_id]);
+  // The picked consultant's whole published day — the open hours and the taken ones
+  // together. Both arrive with the expert list, so choosing somebody reveals the day
+  // without a second round trip.
+  const picked = experts.rows.find((d) => d.id === value?.physio_id) || null;
+  const daySlots = useMemo(() => {
+    if (!picked) return [];
+    return [
+      ...((picked.free_slots) || []).map((x) => ({ ...x, booked: false })),
+      ...((picked.booked_slots) || []).map((x) => ({ ...x, booked: true })),
+    ].sort((a, b) => (a.slot_time || "").localeCompare(b.slot_time || ""));
+  }, [picked]);
+
+  // How long the moved consultation runs. The store's Consultation Duration, because a
+  // typed start is not a tile and has no length of its own to read off.
+  const slotMinutes = experts.slotMinutes || 30;
+  // Whether this consultant is working the picked day at all — what the Consultant
+  // Calendar sets. Read off what they published rather than off what is still free, so
+  // this and the consultant list beside it can never disagree.
+  const dayPublished = (picked?.published_slot_count || 0) > 0;
+
+  /** "9:05" -> 545 minutes past midnight, or null if it isn't a clock reading. */
+  const minutesOf = (hhmm) => {
+    const [h, m] = String(hhmm || "").split(":").map(Number);
+    return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
+  };
+  const clockText = (mins) =>
+    `${String(Math.floor(mins / 60) % 24).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+
+  // The stretches of the day this consultant actually published, merged out of the slots
+  // that came back. Two and not one: a Morning + Evening consultant is not at the desk at
+  // 2 PM, and naming their day as 7 AM to 7 PM would invite a move into the gap they go
+  // home in.
+  const dayBlocks = useMemo(() => {
+    const rows = daySlots
+      .map((x) => [minutesOf(x.time), minutesOf(x.time) + (Number(x.duration) || 0)])
+      .filter(([a]) => a !== null)
+      .sort((a, b) => a[0] - b[0]);
+    const blocks = [];
+    rows.forEach(([a, b]) => {
+      const last = blocks[blocks.length - 1];
+      if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+      else blocks.push([a, b]);
+    });
+    return blocks;
+  }, [daySlots]);
+  const dayHours = dayBlocks.map(([a, b]) => `${to12h(clockText(a))} – ${to12h(clockText(b))}`).join(" · ");
+
+  // A typed time outside every published stretch. Said, not refused: the branch may have
+  // agreed something the calendar has not caught up with, and a reschedule popup is not
+  // the place to overrule a conversation.
+  const outsideHours = useMemo(() => {
+    const t = minutesOf(value?.time);
+    if (t === null || dayBlocks.length === 0) return false;
+    return !dayBlocks.some(([a, b]) => t >= a && t + slotMinutes <= b);
+  }, [value?.time, dayBlocks, slotMinutes]);
+
+  /** Whatever already holds this consultant across `hhmm`, or null. Overlap and not an
+   *  exact match, because a typed 10:20 collides with a 45-minute 10:00 without sharing
+   *  its start. The endpoint refuses it too; this is so the refusal is read beside the
+   *  field rather than after Reschedule is pressed. */
+  const clashAt = (hhmm) => {
+    const start = minutesOf(hhmm);
+    if (start === null) return null;
+    return daySlots.find((x) => {
+      if (!x.booked) return false;
+      const t = minutesOf(x.time);
+      return t !== null && start < t + (Number(x.duration) || 30) && t < start + slotMinutes;
+    }) || null;
+  };
+  const clash = clashAt(value?.time);
+
+  /** The three fields read as one 24-hour "HH:MM", or "" while any is unreadable. */
+  const clockOf = ({ h, m, ap }) => {
+    const hh = Number(h);
+    const mm = Number(m);
+    if (String(h).trim() === "" || !Number.isInteger(hh) || hh < 1 || hh > 12) return "";
+    if (String(m).trim() === "" || !Number.isInteger(mm) || mm < 0 || mm > 59) return "";
+    const h24 = ap === "PM" ? (hh === 12 ? 12 : hh + 12) : hh === 12 ? 0 : hh;
+    return `${String(h24).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  };
+
+  /** Type into one of the three fields. The draft's time follows them and goes empty the
+   *  moment they stop reading as a clock, so a half-typed hour can never be the one that
+   *  Reschedule is enabled on. */
+  const setClockPart = (patch) => {
+    const next = { ...clock, ...patch };
+    setClock(next);
+    const hhmm = clockOf(next);
+    onChange({
+      ...(value || {}),
+      time: hhmm,
+      duration: hhmm ? slotMinutes : null,
+      // Put on the draft rather than left inside this component, so the Reschedule button
+      // in the dialog around it can refuse a collision without re-deriving the day. It is
+      // not part of the payload — the caller builds that field by field.
+      timeClash: hhmm ? !!clashAt(hhmm) : false,
+    });
+  };
 
   const todayStr = localToday();
   const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -2137,7 +2246,10 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
                 disabled={isPast}
                 // A new date invalidates the consultant and the time chosen under the old
                 // one — availability is per-day, and both have to be asked again.
-                onClick={() => onChange({ ...(value || {}), date: dateStr, physio_id: "", time: "", duration: null })}
+                onClick={() => {
+                  onChange({ ...(value || {}), date: dateStr, physio_id: "", time: "", duration: null });
+                  setClock({ h: "", m: "", ap: "AM" });
+                }}
                 className={`h-9 rounded-lg text-sm font-semibold transition ${
                   isPicked
                     ? "bg-sky-500 text-white shadow-sm ring-2 ring-sky-300"
@@ -2149,7 +2261,7 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
                     ? "border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
                     : "text-slate-600 hover:bg-slate-100"
                 }`}
-                title={hasSlots ? `${open} slot${open === 1 ? "" : "s"} open` : undefined}
+                title={hasSlots ? "A consultant is available on this day" : undefined}
                 data-testid={`${testPrefix}-day-${day}`}
               >
                 {day}
@@ -2158,7 +2270,7 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
           })}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-2 text-[10px] font-semibold text-slate-400">
-          <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-sky-200" /> Slots open</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-sky-200" /> Available</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-sky-500" /> Picked</span>
         </div>
       </div>
@@ -2183,13 +2295,19 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
             <div className="max-h-44 space-y-1.5 overflow-y-auto pr-0.5">
               {experts.rows.map((doc) => {
                 const active = value?.physio_id === doc.id;
-                const open = (doc.free_slots || []).length;
+                // Available means this consultant is working the day, which is the one
+                // thing the Consultant Calendar sets. The tally that used to sit here
+                // counted a grid the calendar no longer shows anybody.
+                const open = doc.published_slot_count || 0;
                 const isCurrent = !!currentConsultantName && doc.full_name === currentConsultantName;
                 return (
                   <button
                     key={doc.id}
                     type="button"
-                    onClick={() => onChange({ ...(value || {}), physio_id: doc.id, time: "", duration: null })}
+                    onClick={() => {
+                      onChange({ ...(value || {}), physio_id: doc.id, time: "", duration: null });
+                      setClock({ h: "", m: "", ap: "AM" });
+                    }}
                     className={`flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition ${
                       active ? "border-sky-400 bg-sky-50 ring-1 ring-sky-300" : "border-slate-200 bg-white hover:bg-slate-50"
                     }`}
@@ -2212,8 +2330,11 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
                             read as though they had been taken off the case. */}
                         {isCurrent && <span className="ml-1 text-[10px] font-medium text-sky-600">· current</span>}
                       </span>
-                      <span className="block truncate text-[10px] text-slate-400">
-                        {open} slot{open === 1 ? "" : "s"} open{doc.specialization ? ` · ${doc.specialization}` : ""}
+                      <span className="block truncate text-[10px]">
+                        <span className={open > 0 ? "font-semibold text-emerald-600" : "font-semibold text-amber-600"}>
+                          {open > 0 ? "Available" : "Not available"}
+                        </span>
+                        <span className="text-slate-400">{doc.specialization ? ` · ${doc.specialization}` : ""}</span>
                       </span>
                     </span>
                   </button>
@@ -2223,33 +2344,103 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
           )}
         </div>
 
+        {/* 3 — The hour, typed. The Consultant Calendar publishes the DAY a consultant
+            works and nothing finer, because the minute a patient is moved to is agreed on
+            the phone and no grid of cut tiles can offer it. The hours they published are
+            named beside the field rather than enforced by it; a collision is refused. */}
         <div>
           <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">3 · New Time</p>
           {!value?.physio_id ? (
             <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">Pick a consultant first.</p>
-          ) : slots.length === 0 ? (
+          ) : !dayPublished ? (
             <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-6 text-center text-xs text-amber-700">
-              This consultant has no open time left on that date.
+              This consultant is not available on that date.
             </p>
           ) : (
-            <div className="grid max-h-36 grid-cols-3 gap-1.5 overflow-y-auto pr-0.5">
-              {slots.map((sl) => {
-                const active = value?.time === sl.time;
-                return (
-                  <button
-                    key={sl.slot_time}
-                    type="button"
-                    onClick={() => onChange({ ...(value || {}), time: sl.time, duration: sl.duration })}
-                    className={`rounded-md border px-2 py-1.5 text-[11px] font-semibold transition ${
-                      active ? "border-sky-500 bg-sky-100 text-sky-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
-                    data-testid={`${testPrefix}-time-${sl.time}`}
-                  >
-                    {to12h(sl.time)}
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              {dayHours && (
+                <p className="mb-2 text-[10px] text-slate-500" data-testid={`${testPrefix}-hours`}>
+                  Working <b className="font-semibold text-slate-600">{dayHours}</b>.
+                </p>
+              )}
+              <div className="flex items-center gap-1.5" data-testid={`${testPrefix}-time-entry`}>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={2}
+                  placeholder="7"
+                  value={clock.h}
+                  onChange={(e) => setClockPart({ h: e.target.value.replace(/\D/g, "").slice(0, 2) })}
+                  className="h-10 w-14 rounded-md border-2 border-slate-200 text-center text-base font-bold text-slate-800 outline-none focus:border-sky-400"
+                  data-testid={`${testPrefix}-hour`}
+                />
+                <span className="text-base font-bold text-slate-400">:</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={2}
+                  placeholder="15"
+                  value={clock.m}
+                  onChange={(e) => setClockPart({ m: e.target.value.replace(/\D/g, "").slice(0, 2) })}
+                  className="h-10 w-14 rounded-md border-2 border-slate-200 text-center text-base font-bold text-slate-800 outline-none focus:border-sky-400"
+                  data-testid={`${testPrefix}-minute`}
+                />
+                <div className="ml-1 flex overflow-hidden rounded-md border-2 border-slate-200">
+                  {["AM", "PM"].map((half) => (
+                    <button
+                      key={half}
+                      type="button"
+                      onClick={() => setClockPart({ ap: half })}
+                      className={`px-2.5 py-2 text-xs font-bold transition ${clock.ap === half ? "bg-sky-500 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+                      data-testid={`${testPrefix}-${half.toLowerCase()}`}
+                    >
+                      {half}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-400">
+                {value?.time
+                  ? <>Moving to <b className="font-semibold text-slate-600">{to12h(value.time)}</b>, {slotMinutes} minutes.</>
+                  : <>Type the hour agreed with the patient. {slotMinutes} minutes, per FITSIO STORE.</>}
+              </p>
+
+              {/* Two patients in one hour. Named here so the refusal is read beside the
+                  field that caused it rather than as a 409 after Reschedule is pressed. */}
+              {clash && (
+                <p className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700" data-testid={`${testPrefix}-clash`}>
+                  <b className="font-semibold">{to12h(value.time)} runs into {to12h(clash.time)}{clash.lead_name ? ` — ${clash.lead_name}` : ""}.</b>{" "}
+                  Pick a different time.
+                </p>
+              )}
+              {!clash && outsideHours && (
+                <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-700" data-testid={`${testPrefix}-outside-hours`}>
+                  <b className="font-semibold">{to12h(value.time)} is outside the hours published for this day.</b>{" "}
+                  It will still book — check the consultant is coming in for it.
+                </p>
+              )}
+
+              {/* The day as it already stands. "What else is around three" is the question
+                  the branch gets asked on the phone, and an hour with nothing against it
+                  is the answer. */}
+              {daySlots.some((x) => x.booked) && (
+                <div className="mt-3" data-testid={`${testPrefix}-booked-list`}>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Already booked this day</p>
+                  <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto pr-0.5">
+                    {daySlots.filter((x) => x.booked).map((x) => (
+                      <span
+                        key={x.slot_time}
+                        className="rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500"
+                        title={x.lead_name || (x.review_id ? "Review" : "Booked")}
+                        data-testid={`${testPrefix}-booked-${x.time}`}
+                      >
+                        {to12h(x.time)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -12782,7 +12973,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
               </div>
             )}
 
-            {/* Reschedule popup: a new date, a consultant free on it, one of their open times. */}
+            {/* Reschedule popup: a new date, a consultant available on it, and the hour
+                agreed with the patient, typed. */}
             {rescheduleDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4" data-testid="cons-reschedule-modal">
                 <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
@@ -12830,17 +13022,21 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     <p className="min-w-0 truncate text-xs text-slate-500" data-testid="cons-reschedule-summary">
                       {rescheduleDraft.date && rescheduleDraft.time && rescheduleDraft.physio_id
                         ? `Moving to ${rescheduleDraft.date} at ${to12h(rescheduleDraft.time)}`
-                        : "Pick a date, a consultant and a time."}
+                        : "Pick a date and a consultant, then type the time."}
                     </p>
                     <div className="flex shrink-0 items-center gap-2">
                       <Button variant="outline" onClick={() => setRescheduleDraft(null)} data-testid="cons-reschedule-cancel">Cancel</Button>
                       <Button
                         className="bg-amber-500 text-white hover:bg-amber-600"
-                        disabled={rescheduleBusy}
+                        // A collision is the one thing this button will not carry through.
+                        // The hour is typed now, so an overlap is a slip rather than a
+                        // choice, and the picker has already named whose appointment it
+                        // runs into.
+                        disabled={rescheduleBusy || !!rescheduleDraft.timeClash}
                         onClick={async () => {
                           if (!rescheduleDraft.date) { toast.error("Pick a new date"); return; }
                           if (!rescheduleDraft.physio_id) { toast.error("Pick the consultant who will take it"); return; }
-                          if (!rescheduleDraft.time) { toast.error("Pick a new time"); return; }
+                          if (!rescheduleDraft.time) { toast.error("Type the new time"); return; }
                           if (!rescheduleDraft.reason.trim()) { toast.error("A reason is required"); return; }
                           setRescheduleBusy(true);
                           try {
