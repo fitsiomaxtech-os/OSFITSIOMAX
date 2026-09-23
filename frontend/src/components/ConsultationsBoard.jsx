@@ -3988,16 +3988,29 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     () => consultationPackageItems.find((i) => i.id === collectFeeDraft?.consultation_item_id) || null,
     [consultationPackageItems, collectFeeDraft?.consultation_item_id],
   );
-  // Mirrors collect_package_payment: re-picking the package a collection was already
-  // taken for keeps the price it was taken at, so correcting a payment mode cannot
-  // re-price it at today's catalogue rate. Anything else costs what the shelf says.
-  const consultationChosenPrice = !consultationChosenItem
-    ? (collectFeeDraft?.consultation_item_id && collectFeeDraft.consultation_item_id === selectedLead?.package_id
-      ? selectedLead?.package_price ?? null
-      : null)
-    : consultationChosenItem.id === selectedLead?.package_id && selectedLead?.package_price != null
-    ? selectedLead.package_price
-    : consultationItemPrice(consultationChosenItem, selectedLead?.appointment_mode || "offline");
+
+  /**
+   * What one package on the dropdown costs this patient, or null for no package.
+   *
+   * One function because three things ask it -- the figure on screen, the fee the draft
+   * opens on when a package is picked, and the fallback entry for a package already on
+   * the patient. Three copies of this arithmetic is three chances for the screen to
+   * quote a price the collection is not actually for.
+   *
+   * Mirrors collect_package_payment: re-picking the package a collection was already
+   * taken for keeps the price it was taken at, so correcting a payment mode cannot
+   * re-price it at today's catalogue rate. Anything else costs what the shelf says.
+   */
+  const consultationPriceForId = useCallback((id) => {
+    if (!id) return null;
+    if (id === selectedLead?.package_id && selectedLead?.package_price != null) {
+      return selectedLead.package_price;
+    }
+    const item = consultationPackageItems.find((i) => i.id === id);
+    return item ? consultationItemPrice(item, selectedLead?.appointment_mode || "offline") : null;
+  }, [consultationPackageItems, selectedLead?.package_id, selectedLead?.package_price, selectedLead?.appointment_mode]);
+
+  const consultationChosenPrice = consultationPriceForId(collectFeeDraft?.consultation_item_id);
 
   // The Consultation Fee's own three figures, worked out the same way the Treatment
   // Fee's are below: a discount that was typed, the money being handed over now, and
@@ -9981,15 +9994,29 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Package</label>
                       <select
                         value={collectFeeDraft.consultation_item_id || ""}
-                        onChange={(e) => setCollectFeeDraft({
-                          ...collectFeeDraft,
-                          consultation_item_id: e.target.value,
-                          // The amount follows the package onto its own price. A discount
-                          // typed against the package being switched away from is dropped
-                          // with it -- it was agreed on a different figure.
-                          amount: "",
-                          discount: "",
-                        })}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          const price = consultationPriceForId(id);
+                          setCollectFeeDraft({
+                            ...collectFeeDraft,
+                            consultation_item_id: id,
+                            // The fee lands on the package's own price straight away, and
+                            // a discount is a thing somebody may then agree -- not
+                            // something the desk has to type before the popup will work.
+                            //
+                            // This used to clear the amount and wait for the discount box
+                            // to fill it back in, which left the whole popup half-dead
+                            // until a discount was typed: no fee to count cash against, so
+                            // no "Fill from amount"; a balance of the entire fee, so a due
+                            // date demanded for money nobody was short; and Confirm
+                            // greyed out. Typing a discount fixed all three at once, which
+                            // is how it read as "the discount is required".
+                            amount: price != null ? String(price) : "",
+                            // A discount agreed against the package being switched away
+                            // from goes with it -- it was a figure off a different price.
+                            discount: "",
+                          });
+                        }}
                         className="h-9 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
                         data-testid="cons-collect-fee-package"
                       >
