@@ -544,6 +544,79 @@ const BankCard = ({ account: acc, onView, onEdit, onDelete, onToggle }) => (
   </div>
 );
 
+// One saved account on a single line, for the branch tiles. A tile is a quarter of a
+// row wide, so a branch banking with three or four cannot spend a QR and four labelled
+// rows on each and still be read at a glance: the line says which bank and whose name,
+// and everything else — the QR at a scannable size, the UPI ID, the account number, the
+// IFSC — is one click away in the View popup that already draws all of it.
+const BankListRow = ({ account: acc, onView, onEdit, onDelete, onToggle }) => (
+  <div
+    className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 transition ${
+      acc.is_active ? "border-slate-200 bg-white hover:bg-slate-50" : "border-rose-200 bg-rose-50/40"
+    }`}
+    data-testid={`finance-bank-card-${acc.id}`}
+  >
+    {/* The name is the row: clicking it opens the same popup the eye does, since a line
+        of text about an account reads as the thing you open. */}
+    <button
+      type="button"
+      onClick={onView}
+      className="min-w-0 flex-1 text-left"
+      title={`${acc.bank_name} — ${acc.holder_name}`}
+      data-testid={`finance-bank-row-open-${acc.id}`}
+    >
+      <p className={`truncate text-xs font-bold ${acc.is_active ? "text-slate-900" : "text-rose-900"}`}>
+        {acc.bank_name}
+      </p>
+      <p className="truncate text-[11px] text-slate-500">{acc.holder_name || "—"}</p>
+    </button>
+
+    {/* Whether this account is being offered for payment changes without anything else
+        about it changing, so it stays on the line rather than going behind Edit. */}
+    <Switch
+      checked={!!acc.is_active}
+      onCheckedChange={onToggle}
+      className="shrink-0 data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-rose-500"
+      aria-label={acc.is_active ? "Deactivate this account" : "Activate this account"}
+      data-testid={`finance-bank-toggle-${acc.id}`}
+    />
+
+    {/* Icons only — there is no room on a quarter-row tile for three labelled buttons,
+        and each one carries its word in a tooltip and an aria-label so the icon is never
+        the only thing saying what it does. Delete last and apart, in red. */}
+    <div className="flex shrink-0 items-center gap-1">
+      <IconAction title="View" onClick={onView} testId={`finance-bank-view-${acc.id}`} tone="slate">
+        <Eye className="h-3.5 w-3.5" />
+      </IconAction>
+      <IconAction title="Edit" onClick={onEdit} testId={`finance-bank-edit-${acc.id}`} tone="indigo">
+        <Pencil className="h-3.5 w-3.5" />
+      </IconAction>
+      <IconAction title="Delete" onClick={onDelete} testId={`finance-bank-delete-${acc.id}`} tone="rose">
+        <Trash2 className="h-3.5 w-3.5" />
+      </IconAction>
+    </div>
+  </div>
+);
+
+const ICON_TONES = {
+  slate: "border-slate-200 bg-white text-slate-600 hover:bg-slate-100",
+  indigo: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  rose: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100",
+};
+
+const IconAction = ({ title, onClick, testId, tone, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={title}
+    aria-label={title}
+    className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition ${ICON_TONES[tone]}`}
+    data-testid={testId}
+  >
+    {children}
+  </button>
+);
+
 // Four to a row where there is room for four, one to a row on a phone. The same shape
 // twice over: the branch tiles themselves are laid out on it, and so are the cards under
 // a single picked branch.
@@ -742,10 +815,11 @@ export const BankAccountsBoard = ({ branchId, branchName, branches, onRegisterAd
                   No bank account saved for this branch yet.
                 </p>
               ) : (
-                // One under the other inside the tile: the tile is already a quarter of a
-                // row, so its cards get its full width rather than a quarter of a quarter.
-                <div className="space-y-3">
-                  {section.accounts.map((acc) => <BankCard key={acc.id} {...cardProps(acc)} />)}
+                // One line per account, one under the other. A branch with four banks
+                // is then four lines rather than four full cards deep, and the tiles in
+                // a row stay close enough in height to scan across.
+                <div className="space-y-1.5">
+                  {section.accounts.map((acc) => <BankListRow key={acc.id} {...cardProps(acc)} />)}
                 </div>
               )}
             </div>
