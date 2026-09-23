@@ -9,7 +9,7 @@ import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
 import {
   listVendors, vendorSummary, vendorDeliveries, createVendor, updateVendor, deleteVendor,
-  vendorStock, createVendorStock, updateVendorStock, deleteVendorStock, getBranches,
+  vendorStock, createVendorStock, updateVendorStock, deleteVendorStock,
 } from "@/lib/api";
 // The dialog shell, the labelled field and the input class the stock panel already uses.
 // Imported rather than copied: the two boards sit on the same tab row and a vendor form
@@ -52,9 +52,6 @@ const PAYMENT_MODES = [
   { key: "card", label: "Card" },
   { key: "account_transfer", label: "Account Transfer" },
 ];
-
-/** The typed-in city, kept out of the branch list by a value no branch can have. */
-const OTHER_CITY = "__other__";
 
 // Row keys, so a row being removed doesn't make React reuse the one below it and carry
 // the wrong text into it. Never saved — the server sees the fields and nothing else.
@@ -278,10 +275,6 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   // Both lists on the tab answer to it, which is why it sits in the bar over both of
   // them rather than in either card.
   const [dates, setDates] = useState({ from: "", to: "" });
-  // Where the City dropdown's options come from. Branches carry no city of their own, so
-  // this is their names — which is what the org calls the places it operates in — with
-  // the cities already on vendors folded in and a typed one always possible.
-  const [places, setPlaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -305,15 +298,6 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   useEffect(() => { load(); }, [load, reloadToken]);
 
-  // The branch list doesn't change while a vendor is being typed in, so it is fetched once
-  // rather than with every reload. A failure costs the dropdown its suggestions and
-  // nothing else — the city can still be typed.
-  useEffect(() => {
-    getBranches()
-      .then((rows) => setPlaces(rows.map((b) => (b.branch_name || "").trim()).filter(Boolean)))
-      .catch(() => {});
-  }, []);
-
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return vendors.filter((v) => {
@@ -328,12 +312,6 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     () => stock.filter((r) => inDates(r, dates.from, dates.to)),
     [stock, dates],
   );
-
-  /** Branch names and the cities already in use, deduplicated and sorted. */
-  const cityOptions = useMemo(() => {
-    const all = [...places, ...vendors.map((v) => (v.city || "").trim())].filter(Boolean);
-    return [...new Set(all)].sort((a, b) => a.localeCompare(b));
-  }, [places, vendors]);
 
   const stockById = useMemo(() => Object.fromEntries(stock.map((r) => [r.id, r])), [stock]);
 
@@ -353,10 +331,6 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   };
 
   // ---------------------------------------------------------------- the vendor form
-
-  // A city the dropdown doesn't offer can only have been typed, so the box stays open on
-  // it — including for a vendor saved before the dropdown existed.
-  const isTypedCity = !!draft && !!draft.city && !cityOptions.includes(draft.city);
 
   /**
    * What the stock this vendor is already down as supplying comes to.
@@ -915,34 +889,22 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
               <Field label={<Req>Phone Number</Req>}>
                 <input className={inputCls} value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} placeholder="Enter phone number" data-testid="vendor-phone" />
               </Field>
+              {/* Typed, not picked. The list here used to be the branch names, which is
+                  where the organisation is, not where a vendor is — a supplier in a town
+                  the org has no branch in could only be entered through Other, and the
+                  list read as though a vendor had to belong to a branch. */}
               <Field label={<Req>City</Req>}>
-                {/* The list is branch names and the cities already on vendors. Neither is
-                    a city master — the OS has none — so Other keeps the box typeable
-                    rather than making a vendor in a new town unsaveable. */}
-                <select
+                <input
                   className={inputCls}
-                  value={isTypedCity ? OTHER_CITY : draft.city}
-                  onChange={(e) => setDraft({ ...draft, city: e.target.value === OTHER_CITY ? " " : e.target.value })}
+                  value={draft.city}
+                  onChange={(e) => setDraft({ ...draft, city: e.target.value })}
+                  placeholder="Enter city"
                   data-testid="vendor-city"
-                >
-                  <option value="">Select city</option>
-                  {cityOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                  <option value={OTHER_CITY}>Other...</option>
-                </select>
-                {isTypedCity && (
-                  <input
-                    className={`${inputCls} mt-2`}
-                    value={draft.city.trim()}
-                    onChange={(e) => setDraft({ ...draft, city: e.target.value || " " })}
-                    placeholder="Type the city"
-                    data-testid="vendor-city-other"
-                  />
-                )}
+                />
               </Field>
-              {/* Where they actually are, typed and never picked: a door number is not a
-                  list, and the city above only says which town to look in. Optional —
-                  plenty of vendors are a phone number and a name, and one that is
-                  shouldn't be unsaveable for want of an address. */}
+              {/* The rest of where they are — the city above is only the town. Optional:
+                  plenty of vendors are a name and a phone number, and one that is
+                  shouldn't be unsaveable for want of a door number. */}
               <Field label="Address">
                 <textarea
                   rows={3}
