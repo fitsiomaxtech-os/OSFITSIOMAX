@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, Flag, GripVertical, AlertTriangle, Lock, Unlock, KeyRound } from "lucide-react";
+import { Plus, Pencil, Trash2, Flag, GripVertical, AlertTriangle, Lock, Unlock, KeyRound, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,16 +22,19 @@ const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e
 // each has its own stages under one `sales` type told apart by `arm`.
 const TYPES = [
   { key: "pre_sales", label: "Pre-Sales", kpi: "Pre-Sales Stages", title: "Pre-Sales", tone: "indigo", records: "Leads" },
-  // `title` drops the "Offline" the tab keeps. The card sits directly under the tab strip,
-  // which already says which arm is being edited, so the heading repeating it read as a
-  // second, narrower thing rather than as the same one.
-  { key: "sales", arm: "offline", label: "Offline Branch Lead", kpi: "Offline Branch Lead Stages", title: "Branch Lead", tone: "green", records: "Leads" },
+  // The offline arm is the unmarked one: it carries the plain name, and the online arm
+  // below is the one wearing a marker.
+  { key: "sales", arm: "offline", label: "Branch Leads", kpi: "Branch Leads Stages", title: "Branch Leads", tone: "green", records: "Leads" },
   // Its own list, not a view of the one above. Renaming a stage here renames it for the
   // online arm's boards and rewrites only the online arm's leads.
-  { key: "sales_online", type: "sales", arm: "online", label: "Online Branch Lead", kpi: "Online Branch Lead Stages", title: "Online Branch Lead", tone: "cyan", records: "Leads" },
+  //
+  // Both arms are called Branch Leads now, so `online` is what tells the two tabs apart: a
+  // green tick beside the label rather than a second, longer name. The card heading still
+  // spells the arm out, because there the tab strip is no longer next to the words.
+  { key: "sales_online", type: "sales", arm: "online", label: "Branch Leads", online: true, kpi: "Branch Leads (Online) Stages", title: "Branch Leads (Online)", tone: "cyan", records: "Leads" },
   { key: "consultation", label: "Branch Consultation", kpi: "Branch Consultation Stages", title: "Branch Consultation", tone: "orange", records: "Leads" },
-  { key: "head_consultation", label: "Head Consultation", kpi: "Head Consultation Stages", title: "Head Consultation", tone: "sky", records: "Leads" },
-  { key: "recruitment", label: "Recruitment", kpi: "Recruitment Stages", title: "Recruitment", tone: "violet", records: "Candidates" },
+  { key: "head_consultation", label: "Consultant", kpi: "Consultant Stages", title: "Consultant", tone: "sky", records: "Leads" },
+  { key: "recruitment", label: "HR Board", kpi: "HR Board Stages", title: "HR Board", tone: "violet", records: "Candidates" },
   // Registrations, not leads — a dancer is nobody's patient. Ships with no stages at
   // all: the pipelines above have the shape this clinic already ran, and a Zumba class
   // has no received one, so the branch names its own with Add Stage.
@@ -521,7 +524,7 @@ export const PipelineStageManagement = ({ leading = null }) => {
         className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:hidden"
         data-testid="stages-tab-select"
       >
-        {TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        {TYPES.map((t) => <option key={t.key} value={t.key}>{t.online ? `${t.label} ✓ Online` : t.label}</option>)}
       </select>
 
       {/* One column per pipeline, counted from TYPES rather than written as a number: at a
@@ -539,7 +542,13 @@ export const PipelineStageManagement = ({ leading = null }) => {
             className={`rounded-md py-2 text-sm font-semibold ${type === t.key ? `bg-white shadow ${TONE_CLASSES[t.tone].text}` : "text-slate-500"}`}
             data-testid={`stages-tab-${t.key}`}
           >
-            {t.label}
+            {/* Two tabs read "Branch Leads"; the tick is the only thing separating them, so
+                it stays green whether or not the tab is the selected one -- a marker that
+                changed colour with selection would stop being a marker. */}
+            <span className="inline-flex items-center justify-center gap-1">
+              {t.label}
+              {t.online && <Check className="h-4 w-4 text-green-600" data-testid="stages-tab-online-mark" />}
+            </span>
           </button>
         ))}
       </div>
