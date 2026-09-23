@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, Flag, GripVertical, AlertTriangle, Lock, Unlock, KeyRound } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,10 @@ const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e
 // each has its own stages under one `sales` type told apart by `arm`.
 const TYPES = [
   { key: "pre_sales", label: "Pre-Sales", kpi: "Pre-Sales Stages", title: "Pre-Sales", tone: "indigo", records: "Leads" },
-  { key: "sales", arm: "offline", label: "Offline Branch Lead", kpi: "Offline Branch Lead Stages", title: "Offline Branch Lead", tone: "green", records: "Leads" },
+  // `title` drops the "Offline" the tab keeps. The card sits directly under the tab strip,
+  // which already says which arm is being edited, so the heading repeating it read as a
+  // second, narrower thing rather than as the same one.
+  { key: "sales", arm: "offline", label: "Offline Branch Lead", kpi: "Offline Branch Lead Stages", title: "Branch Lead", tone: "green", records: "Leads" },
   // Its own list, not a view of the one above. Renaming a stage here renames it for the
   // online arm's boards and rewrites only the online arm's leads.
   { key: "sales_online", type: "sales", arm: "online", label: "Online Branch Lead", kpi: "Online Branch Lead Stages", title: "Online Branch Lead", tone: "cyan", records: "Leads" },
@@ -59,6 +62,38 @@ const TONE_CLASSES = {
   violet: { border: "border-violet-500", text: "text-violet-600" },
   pink: { border: "border-pink-500", text: "text-pink-600" },
 };
+
+// ------------------------------------------------- What the Branch Leads strip actually draws
+//
+// This table listed the Branch pipeline whole, which is seven rows -- and the board's strip
+// draws five of them. Reading one against the other, the two extra entry stages and the
+// final one looked like stages the branch had lost rather than stages the board reaches
+// another way, and there was nothing on this screen to say which was which.
+//
+// So the Branch tab is split in two: the rows the strip draws, in strip order, and the rows
+// it does not, under a divider. The rule below is the board's own -- see leadPillStages in
+// BranchAdminBoard.jsx -- and has to stay the board's own, or this table goes back to
+// describing something nobody can see. Three rows never reach the strip:
+//
+//   - the Pre-Sales-control entry stage ("New Appointment"), which a branch running its own
+//     leads does not have at all (`applies_to`);
+//   - the branch's own entry stage ("Branch Assign"), whose pill is the mirror row below;
+//   - the Portfolio stage and the final one ("Cancelled"), both reached from their own
+//     dialogs rather than from the strip.
+//
+// Listed rather than dropped, deliberately. They are real positions carrying real leads --
+// Branch Assign holds the branch's whole intake -- and this is the only screen in the
+// product that can rename, recolour or reorder them. Hiding them to match the strip would
+// have matched the strip by making three stages unmanageable.
+const STAGE_ROLE_PORTFOLIO = "portfolio";
+const BRANCH_ADMIN_CONTROL = "branch_admin";
+
+// The strip's first pill is not a pipeline_stages row: the backend builds it per board (see
+// _presales_mirror_stage) and it reads the lead's Pre-Sales stage rather than its
+// branch_stage, so a lead appears under it without anything being written to it. Rebuilt
+// here so the strip half of this table matches the strip one-for-one, and drawn read-only --
+// there is no document behind it to edit, delete or reorder.
+const MIRROR_ROW_ID = "presales-new-leads";
 
 export const PipelineStageManagement = ({ leading = null }) => {
   const [type, setType] = useState("pre_sales");
@@ -101,6 +136,51 @@ export const PipelineStageManagement = ({ leading = null }) => {
 
   useEffect(() => { load(); }, [load]);
 
+  // Only the offline Branch tab splits. The online arm is not a branch and has no branch to
+  // read a Lead Control off, so its board falls back to Pre-Sales control -- which has no
+  // mirror pill, and whose strip is therefore the whole list with nothing to separate out
+  // (see _board_payload). Every other pipeline lists straight through the same way.
+  const splitsByStrip = apiType === "sales" && arm === "offline";
+
+  const { stripRows, hiddenRows } = useMemo(() => {
+    if (!splitsByStrip) return { stripRows: stages, hiddenRows: [] };
+    // Modelled on a branch running its own leads, which is the mode that has a strip worth
+    // describing. `applies_to` drops the other mode's entry stage before anything else, the
+    // same way _branch_stages does before the board ever sees it.
+    const onBoard = stages.filter((st) => !st.applies_to || st.applies_to === BRANCH_ADMIN_CONTROL);
+    const entry = onBoard[0] || null;
+    const mirror = entry ? {
+      id: MIRROR_ROW_ID,
+      name: "Leads",
+      color: "#6366f1",
+      // Its count is the entry stage's, because that is the match the board makes: everyone
+      // still sitting at the branch's opening, let go of the moment they are moved on.
+      lead_count: entry.lead_count,
+      mirrors: entry.name,
+    } : null;
+    // `role` first, falling back to the name for a row that predates the stamping pass --
+    // the same trust order stageHasRole uses on the board.
+    const isPortfolio = (st) => (st.role ? st.role === STAGE_ROLE_PORTFOLIO : st.name === "Portfolio");
+    const onStrip = new Set(
+      onBoard
+        .filter((st) => st.id !== entry?.id && !isPortfolio(st) && !st.is_final)
+        .map((st) => st.id),
+    );
+    return {
+      stripRows: [...(mirror ? [mirror] : []), ...stages.filter((st) => onStrip.has(st.id))],
+      hiddenRows: stages.filter((st) => !onStrip.has(st.id)),
+    };
+  }, [stages, splitsByStrip]);
+
+  // Where a row sits in the pipeline itself, which is what the Order column has always
+  // meant. Read off the real list rather than off the half it is drawn in: the two halves
+  // interleave, so numbering each one 1..n would print two rows called 3 and leave the
+  // arrows moving a stage to a position no number on screen names.
+  const pipelinePosition = useCallback(
+    (st) => stages.findIndex((x) => x.id === st.id) + 1,
+    [stages],
+  );
+
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Stage name required"); return; }
     try {
@@ -124,10 +204,19 @@ export const PipelineStageManagement = ({ leading = null }) => {
     catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
   };
 
+  // Swaps with the neighbour in the half of the table the row is drawn in, not with whatever
+  // sits next to it in the pipeline. The two halves interleave -- Branch Assign is hidden
+  // and sits between two rows that are not -- so `idx + dir` would send a strip row past a
+  // hidden one and land it somewhere nobody pointed at. The write is still a full reorder of
+  // the real list, so the pipeline keeps one order rather than gaining a display one.
   const move = async (s, dir) => {
+    const group = hiddenRows.some((x) => x.id === s.id) ? hiddenRows : stripRows;
+    const within = group.filter((x) => x.id !== MIRROR_ROW_ID);
+    const neighbour = within[within.findIndex((x) => x.id === s.id) + dir];
+    if (!neighbour) return;
     const idx = stages.findIndex((x) => x.id === s.id);
-    const swapIdx = idx + dir;
-    if (swapIdx < 0 || swapIdx >= stages.length) return;
+    const swapIdx = stages.findIndex((x) => x.id === neighbour.id);
+    if (idx < 0 || swapIdx < 0) return;
     const items = stages.map((x, i) => ({ id: x.id, order: i }));
     [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
     items.forEach((x, i) => { x.order = i; });
@@ -135,12 +224,110 @@ export const PipelineStageManagement = ({ leading = null }) => {
     load();
   };
 
+  // Whether this row is already at the top or bottom of its own half, which is what the
+  // arrows are disabled on now that "next" is a question about the half rather than the list.
+  const atGroupEdge = useCallback((st, dir) => {
+    const group = hiddenRows.some((x) => x.id === st.id) ? hiddenRows : stripRows;
+    const within = group.filter((x) => x.id !== MIRROR_ROW_ID);
+    return !within[within.findIndex((x) => x.id === st.id) + dir];
+  }, [stripRows, hiddenRows]);
+
   // Read once the zone is open, with the password it was opened with.
   useEffect(() => {
     if (!devPassword) { setDayLock(null); setDeleteButton(null); return; }
     getPhysioDayLock(devPassword).then((r) => setDayLock(!!r.locked)).catch(() => setDayLock(null));
     getLeadDeleteButton(devPassword).then((r) => setDeleteButton(!!r.enabled)).catch(() => setDeleteButton(null));
   }, [devPassword]);
+
+  // One row, drawn for either half. `muted` is the only difference the half makes to a real
+  // stage: same badges, same count, same edit and delete, dimmed to say it is off the strip.
+  //
+  // The mirror row is the exception and is drawn without actions at all. It has no document
+  // behind it, so an edit would have nothing to write to and a delete nothing to remove --
+  // and offering either would suggest the strip's first pill is Super Admin's to rename,
+  // when what it is called is fixed in _presales_mirror_stage.
+  const renderRow = (s, muted = false) => {
+    const isMirror = s.id === MIRROR_ROW_ID;
+    return (
+      <tr
+        key={s.id}
+        className={`border-t border-slate-100${muted ? " opacity-60" : ""}`}
+        data-testid={`stages-row-${s.id}`}
+      >
+        <td className="py-3">
+          <div className="flex items-center gap-2">
+            <GripVertical className="h-4 w-4 text-slate-300" />
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold">
+              {/* The mirror sits ahead of the pipeline rather than in it (order -1 on the
+                  board), so it has no position to print. A dash rather than a 0, which
+                  would read as a stage nobody had ordered yet. */}
+              {isMirror ? "–" : pipelinePosition(s)}
+            </span>
+            {isMirror ? null : (
+              <>
+                <button onClick={() => move(s, -1)} disabled={atGroupEdge(s, -1)} className="text-xs text-slate-400 disabled:opacity-30" data-testid={`stages-up-${s.id}`}>▲</button>
+                <button onClick={() => move(s, 1)} disabled={atGroupEdge(s, 1)} className="text-xs text-slate-400 disabled:opacity-30" data-testid={`stages-down-${s.id}`}>▼</button>
+              </>
+            )}
+          </div>
+        </td>
+        <td><span className="inline-block h-3 w-3 rounded-full" style={{ background: s.color }} /></td>
+        <td className="font-medium" style={{ color: s.color }}>
+          {s.name}
+          {/* The Branch pipeline holds both Lead Control modes' opening stages at
+              once, so it lists two entry stages and an RNR that most branches
+              never see. Without this the pair reads as an accidental duplicate. */}
+          {s.applies_to ? (
+            <span className="ml-2 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-slate-500">
+              {s.applies_to === "branch_admin" ? "Branch Admin only" : "Pre Sales only"}
+            </span>
+          ) : null}
+          {/* A stage the boards act on rather than merely list. Renaming it is
+              safe -- the behaviour is pinned to the role, not to the name -- but
+              deleting it is not, and neither is assuming the branch will still
+              recognise the position under a name that means something else. Said
+              here because from this table one row looks much like another. */}
+          {ROLE_LABELS[s.role] ? (
+            <span
+              className="ml-2 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-amber-700"
+              title={`The branch boards act on this stage (${ROLE_LABELS[s.role]}). Renaming it is safe; deleting it is not.`}
+            >
+              {ROLE_LABELS[s.role]}
+            </span>
+          ) : null}
+          {/* Which real stage the first pill is a view of. Without it the row reads as a
+              sixth stage somebody forgot to give an order to, and the entry stage below
+              reads as one with no pill for no reason -- when they are the two halves of
+              one position. */}
+          {isMirror ? (
+            <span
+              className="ml-2 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-indigo-600"
+              title={`Not a stage of its own: the strip's first pill, counting every lead still sitting on ${s.mirrors}. The board builds it, so it cannot be renamed, reordered or deleted.`}
+            >
+              Mirrors {s.mirrors}
+            </span>
+          ) : null}
+          {/* The other half of that pair, said on the stage itself: its leads are on the
+              board, they are just counted under a pill with a different name on it. */}
+          {muted && stripRows.some((r) => r.id === MIRROR_ROW_ID && r.mirrors === s.name) ? (
+            <span className="ml-2 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-slate-500">
+              Counted under Leads
+            </span>
+          ) : null}
+        </td>
+        <td><span className="inline-flex h-7 min-w-[2rem] items-center justify-center rounded border border-slate-200 px-2 text-xs">{s.lead_count || 0}</span></td>
+        <td>{s.is_final ? <Flag className="h-4 w-4 text-green-500" /> : null}</td>
+        <td className="space-x-2">
+          {isMirror ? null : (
+            <>
+              <button onClick={() => startEdit(s)} className="text-blue-500 hover:text-blue-700" data-testid={`stages-edit-${s.id}`}><Pencil className="h-4 w-4" /></button>
+              <button onClick={() => remove(s)} className="text-red-500 hover:text-red-700" data-testid={`stages-delete-${s.id}`}><Trash2 className="h-4 w-4" /></button>
+            </>
+          )}
+        </td>
+      </tr>
+    );
+  };
 
   const lockDangerZone = () => {
     setDevPassword(null);
@@ -363,49 +550,27 @@ export const PipelineStageManagement = ({ leading = null }) => {
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-slate-500"><tr><th className="py-2">Order</th><th>Color</th><th>Stage Name</th><th>{active.records}</th><th>Final</th><th>Actions</th></tr></thead>
             <tbody>
-              {stages.map((s, i) => (
-                <tr key={s.id} className="border-t border-slate-100" data-testid={`stages-row-${s.id}`}>
-                  <td className="py-3">
-                    <div className="flex items-center gap-2">
-                      <GripVertical className="h-4 w-4 text-slate-300" />
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold">{i + 1}</span>
-                      <button onClick={() => move(s, -1)} disabled={i === 0} className="text-xs text-slate-400 disabled:opacity-30" data-testid={`stages-up-${s.id}`}>▲</button>
-                      <button onClick={() => move(s, 1)} disabled={i === stages.length - 1} className="text-xs text-slate-400 disabled:opacity-30" data-testid={`stages-down-${s.id}`}>▼</button>
-                    </div>
-                  </td>
-                  <td><span className="inline-block h-3 w-3 rounded-full" style={{ background: s.color }} /></td>
-                  <td className="font-medium" style={{ color: s.color }}>
-                    {s.name}
-                    {/* The Branch pipeline holds both Lead Control modes' opening stages at
-                        once, so it lists two entry stages and an RNR that most branches
-                        never see. Without this the pair reads as an accidental duplicate. */}
-                    {s.applies_to ? (
-                      <span className="ml-2 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-slate-500">
-                        {s.applies_to === "branch_admin" ? "Branch Admin only" : "Pre Sales only"}
-                      </span>
-                    ) : null}
-                    {/* A stage the boards act on rather than merely list. Renaming it is
-                        safe -- the behaviour is pinned to the role, not to the name -- but
-                        deleting it is not, and neither is assuming the branch will still
-                        recognise the position under a name that means something else. Said
-                        here because from this table one row looks much like another. */}
-                    {ROLE_LABELS[s.role] ? (
-                      <span
-                        className="ml-2 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-amber-700"
-                        title={`The branch boards act on this stage (${ROLE_LABELS[s.role]}). Renaming it is safe; deleting it is not.`}
-                      >
-                        {ROLE_LABELS[s.role]}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td><span className="inline-flex h-7 min-w-[2rem] items-center justify-center rounded border border-slate-200 px-2 text-xs">{s.lead_count || 0}</span></td>
-                  <td>{s.is_final ? <Flag className="h-4 w-4 text-green-500" /> : null}</td>
-                  <td className="space-x-2">
-                    <button onClick={() => startEdit(s)} className="text-blue-500 hover:text-blue-700" data-testid={`stages-edit-${s.id}`}><Pencil className="h-4 w-4" /></button>
-                    <button onClick={() => remove(s)} className="text-red-500 hover:text-red-700" data-testid={`stages-delete-${s.id}`}><Trash2 className="h-4 w-4" /></button>
+              {stripRows.map((s) => renderRow(s))}
+              {hiddenRows.length > 0 && (
+                <tr data-testid="stages-strip-divider">
+                  <td colSpan="6" className="border-t border-slate-200 pt-5 pb-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Not shown on the Branch Leads strip
+                    </p>
+                    {/* Said plainly, because the rows below look like stages the branch has
+                        lost and are nothing of the kind. Naming the mode matters too: the
+                        split above describes a branch running its own leads, and a
+                        Pre-Sales-fed one draws its own entry stage and Cancelled as well. */}
+                    <p className="mt-1 max-w-2xl text-[11px] font-normal normal-case tracking-normal text-slate-400">
+                      Real positions carrying real leads — the board reaches them another way, so the
+                      strip has no pill for them. Still renameable, recolourable and reorderable here.
+                      This split describes a branch running its own leads (Lead Control = Branch
+                      Admin); a Pre-Sales-fed branch draws its own entry stage and Cancelled too.
+                    </p>
                   </td>
                 </tr>
-              ))}
+              )}
+              {hiddenRows.map((s) => renderRow(s, true))}
               {stages.length === 0 && <tr><td colSpan="6" className="py-6 text-center text-slate-400">No stages yet.</td></tr>}
             </tbody>
           </table>
