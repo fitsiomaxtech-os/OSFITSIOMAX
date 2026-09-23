@@ -86,6 +86,16 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   const isPhysio = profileType === "physio";
   const isCoach = profileType === "nutrition_coach";
   const isRehab = profileType === "rehab";
+  // The Consultant's calendar answers one question per day — is this consultant working
+  // it — and nothing finer. The minute a patient is actually given is typed on Branch
+  // Leads → Appointment, against the day this screen opened, because a consulting desk
+  // does not run to a grid: the 7:00 a grid offers is rarely the 7:12 the consultant
+  // agreed to, and a tile nobody could type into was the only way to say either.
+  //
+  // The other three calendars keep their slot grids. A treatment session, a rehab day and
+  // a diet check-in are each one unit sold off a package, so there the slot IS the thing
+  // being published and a patient takes a tile off it.
+  const isConsultant = profileType === "head_physio";
   // Both the physio and the coach book repeat visits against a plan, so they share the
   // slot-type vocabulary and the per-slot capacity control; only the Head Physio's
   // one-per-lead consultation flow differs.
@@ -532,6 +542,32 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
 
   const dayTimes = displayTimeGrid();
 
+  // ── The day-level view, which is the whole of the Consultant's calendar ──
+  //
+  // A day is open for consultations when anything at all stands published on it. What
+  // is published underneath is still a grid — the booking popup reads it to know the
+  // hours this consultant works, and the other three calendars share the code that
+  // writes it — but on this screen it is never shown or picked at. Open or closed is
+  // the only state a consultant's day has here.
+  const publishedDays = new Set((calendarData?.slots || []).map((x) => (x || "").split("T")[0]));
+  const dayIsStaged = (d) => pendingSlots.some((x) => x.slot_time.startsWith(`${d}T`) && !x._remove);
+  /** Open or closed as the day will stand once Save Changes has run. Closing is not
+   *  staged — Mark not available goes straight to the server — so only opening is
+   *  pending here. */
+  const dayIsOpen = (d) => !!d && (publishedDays.has(d) || dayIsStaged(d));
+  /** The appointments already sitting on a day — what closing it would be closing over. */
+  const bookingsOnDay = (d) => Object.entries(calendarData?.booked || {})
+    .filter(([slot]) => slot.startsWith(`${d}T`))
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  const focusedDates = selectedDates.length > 0 ? selectedDates : selectedDate ? [selectedDate] : [];
+  const focusedOpenCount = focusedDates.filter(dayIsOpen).length;
+  const focusedBookings = focusedDates.flatMap(bookingsOnDay);
+  // Nothing left to add, so Mark available has nothing to do. Distinct from "it failed":
+  // every day on screen is already open.
+  const nothingToOpen = pendingSlots.filter((x) => !x._remove).length === 0;
+  const nothingToClose = focusedDates.every((d) => !publishedDays.has(d));
+
   const isSlotExisting = (time) => {
     if (!selectedDate || !calendarData) return false;
     const full = `${selectedDate}T${time}`;
@@ -585,18 +621,32 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
     const removable = published.filter((s) => !calendarData?.booked?.[s]);
 
     if (removable.length === 0) {
-      toast.info(bookedCount > 0 ? "Only booked slots remain — those can't be removed" : "Nothing published on these days yet");
+      toast.info(
+        bookedCount > 0
+          ? (isConsultant ? "Only booked appointments remain — those can't be closed over" : "Only booked slots remain — those can't be removed")
+          : (isConsultant ? "These days were not marked available" : "Nothing published on these days yet"),
+      );
       return;
     }
     const dayLabel = selectedDates.length === 1 ? "this day" : `these ${selectedDates.length} days`;
-    if (!window.confirm(`Remove ${removable.length} open slot${removable.length > 1 ? "s" : ""} from ${dayLabel}?`)) return;
+    // Said in whatever the screen deals in. The consultant's calendar never showed the
+    // slots being counted here, so counting them at it would name a thing the reader has
+    // not been shown.
+    if (!window.confirm(
+      isConsultant
+        ? `Mark ${selectedDoctor.full_name} not available on ${dayLabel}?`
+        : `Remove ${removable.length} open slot${removable.length > 1 ? "s" : ""} from ${dayLabel}?`,
+    )) return;
 
     setUnsaving(true);
     try {
       await removeCalendarSlots(selectedDoctor.id, { slot_times: removable });
       toast.success(
-        `Removed ${removable.length} slot${removable.length > 1 ? "s" : ""}`
-        + (bookedCount > 0 ? ` · ${bookedCount} booked slot${bookedCount > 1 ? "s" : ""} kept` : ""),
+        isConsultant
+          ? `Not available on ${selectedDates.length === 1 ? shortDate(selectedDates[0]) : `${selectedDates.length} days`}`
+            + (bookedCount > 0 ? ` · ${bookedCount} booked appointment${bookedCount > 1 ? "s" : ""} kept` : "")
+          : `Removed ${removable.length} slot${removable.length > 1 ? "s" : ""}`
+            + (bookedCount > 0 ? ` · ${bookedCount} booked slot${bookedCount > 1 ? "s" : ""} kept` : ""),
       );
       setPendingSlots([]);
       setSelectedDates([]);
@@ -622,7 +672,13 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
       if (toAdd.length > 0) {
         await addCalendarSlots(selectedDoctor.id, { slots: toAdd.map((s) => ({ slot_time: s.slot_time, duration: s.duration, consultation_type: s.consultation_type })) }, branchId);
       }
-      toast.success(`Saved ${toAdd.length} added, ${toRemove.length} removed`);
+      // The consultant's calendar counts days, because days are what it publishes.
+      const openedDays = new Set(toAdd.map((x) => x.slot_time.split("T")[0])).size;
+      toast.success(
+        isConsultant
+          ? `Available on ${openedDays} day${openedDays === 1 ? "" : "s"}`
+          : `Saved ${toAdd.length} added, ${toRemove.length} removed`,
+      );
       setPendingSlots([]);
       await loadCalendar();
       await loadDoctors();
@@ -667,6 +723,11 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
           {doctors.map((doc) => {
             const isActive = selectedDoctor?.id === doc.id;
             const slotCount = (doc.slots || []).length;
+            // Days, not slots, for a consultant: their calendar says which days they work
+            // and the hour is agreed at booking. "1895 slots" was the grid underneath
+            // being counted out loud — a number nobody could act on and nobody could
+            // recognise as "this consultant works most of September".
+            const dayCount = new Set((doc.slots || []).map((x) => String(x).split("T")[0])).size;
             return (
               <button
                 key={doc.id}
@@ -695,7 +756,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                 </div>
                 <div className="flex shrink-0 flex-col items-end">
                   <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-semibold ${slotCount > 0 ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"}`}>
-                    {slotCount} slots
+                    {isConsultant ? `${dayCount} day${dayCount === 1 ? "" : "s"}` : `${slotCount} slots`}
                   </span>
                 </div>
               </button>
@@ -833,7 +894,9 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                     )}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    {purpose} · {slotDuration} min · {(calendarData?.slots || []).length} slots open
+                    {isConsultant
+                      ? `${purpose} · ${publishedDays.size} day${publishedDays.size === 1 ? "" : "s"} available`
+                      : `${purpose} · ${slotDuration} min · ${(calendarData?.slots || []).length} slots open`}
                     {isPhysio && ` · ${calendarData?.slot_capacity ?? 3} per slot`}
                   </p>
                 </div>
@@ -884,13 +947,18 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                     {selectedDates.length} day{selectedDates.length > 1 ? "s" : ""} selected
                   </span>
                 )}
-                {pendingSlots.length > 0 && (
+                {/* Counted and committed in slots, so only on the calendars that have
+                    them. A consultant's day is marked available or not on the panel to
+                    the right, which is one decision with one pair of buttons — a second
+                    Save up here, counting the grid underneath in slots nobody picked,
+                    would be the old screen showing through the new one. */}
+                {!isConsultant && pendingSlots.length > 0 && (
                   <span className="text-xs text-amber-600 font-medium">{pendingSlots.length} unsaved</span>
                 )}
-                {pendingSlots.length > 0 && (
+                {!isConsultant && pendingSlots.length > 0 && (
                   <Button size="sm" variant="outline" onClick={() => setPendingSlots([])} className="text-xs" data-testid="discard-changes-btn">Discard</Button>
                 )}
-                {selectedDates.length > 0 && (
+                {!isConsultant && selectedDates.length > 0 && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -902,7 +970,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                     {unsaving ? "Removing..." : "Unsave"}
                   </Button>
                 )}
-                {pendingSlots.length > 0 && (
+                {!isConsultant && pendingSlots.length > 0 && (
                   <Button size="sm" onClick={saveChanges} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white text-xs" data-testid="save-slots-btn">
                     {saving ? "Saving..." : "Save Changes"}
                   </Button>
@@ -968,7 +1036,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                           leave ? `Branch leave day${leave.note ? ` — ${leave.note}` : ""}${slotCount > 0 ? ` · ${slotCount} booked slot${slotCount === 1 ? "" : "s"} kept` : ""}`
                             : dayShifts[d] ? `Works ${labelOf(dayShifts[d])} on this day`
                             : isPicked ? "Click again to deselect"
-                            : slotCount > 0 ? `${slotCount} slot${slotCount === 1 ? "" : "s"} open`
+                            : slotCount > 0 ? (isConsultant ? "Available" : `${slotCount} slot${slotCount === 1 ? "" : "s"} open`)
                             : undefined
                         }
                         data-testid={`cal-day-${day}`}
@@ -996,11 +1064,16 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
 
                 {selectedDate && (
                   <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400" data-testid="calendar-day-hint">
-                    {dayShiftLabel
-                      ? <>Opened across <b>{dayShiftLabel}</b>{isOverridden ? " — set for this day only" : ""} at {slotDuration}-minute slots, per FITSIO STORE. </>
-                      : <>Whole day opened at {slotDuration}-minute slots, per FITSIO STORE. Put them on a shift in <b>TIME MANAGEMENT</b> to cut the day to their working hours. </>}
-                    Pick more dates to open several at once, or click a date again to deselect it.
-                    {" "}<b>Save Changes</b> publishes them; <b>Unsave</b> closes the selected days back down.
+                    {isConsultant ? (
+                      dayShiftLabel
+                        ? <>Marked available across <b>{dayShiftLabel}</b>{isOverridden ? " — set for this day only" : ""}. The exact time is agreed with the patient and typed on BRANCH LEADS → APPOINTMENT. </>
+                        : <>Marked available for the whole day. Put them on a shift in <b>TIME MANAGEMENT</b> to say which hours they actually work. </>
+                    ) : (
+                      dayShiftLabel
+                        ? <>Opened across <b>{dayShiftLabel}</b>{isOverridden ? " — set for this day only" : ""} at {slotDuration}-minute slots, per FITSIO STORE. </>
+                        : <>Whole day opened at {slotDuration}-minute slots, per FITSIO STORE. Put them on a shift in <b>TIME MANAGEMENT</b> to cut the day to their working hours. </>
+                    )}
+                    Pick more dates to mark several at once, or click a date again to deselect it.
                   </p>
                 )}
               </div>
@@ -1025,12 +1098,14 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                           </span>
                         )}
                       </h4>
-                      <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
-                        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-400 inline-block" /> Available</span>
-                        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-violet-400 inline-block" /> Adding</span>
-                        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-red-300 inline-block" /> Removing</span>
-                        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400 inline-block" /> Booked</span>
-                      </div>
+                      {!isConsultant && (
+                        <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
+                          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-400 inline-block" /> Available</span>
+                          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-violet-400 inline-block" /> Adding</span>
+                          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-red-300 inline-block" /> Removing</span>
+                          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400 inline-block" /> Booked</span>
+                        </div>
+                      )}
                     </div>
                     {/* Working a different shift on this day only. The expert stays on their
                         usual one — this is where "she's on Morning but comes in full-time
@@ -1062,6 +1137,78 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         </span>
                       </div>
                     )}
+                    {/* ── The Consultant's whole answer: is this day worked, or not. ──
+
+                        No grid of hours, because the hour is not this screen's to give. A
+                        consultant's day is agreed with the patient on the phone — "come in
+                        around quarter past seven" — and the desk types that on BRANCH LEADS
+                        → APPOINTMENT. What this screen publishes is the day, and the shift
+                        it is worked across so the desk knows which hours are fair game.
+
+                        The two buttons are one decision said both ways round rather than a
+                        toggle: closing a day can strand appointments already on it, so it
+                        asks first and the affirming press must be the one that means it. */}
+                    {isConsultant && (
+                      <div className="space-y-3" data-testid="consultant-day-availability">
+                        <div
+                          className={`rounded-xl border-2 p-4 ${focusedOpenCount > 0 ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}
+                          data-testid="consultant-day-status"
+                        >
+                          <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold ring-1 ring-inset ${focusedOpenCount > 0 ? "bg-white text-emerald-700 ring-emerald-200" : "bg-white text-slate-500 ring-slate-200"}`}>
+                            <span className={`inline-block h-1.5 w-1.5 rounded-full ${focusedOpenCount > 0 ? "bg-emerald-500" : "bg-slate-400"}`} />
+                            {focusedDates.length > 1
+                              ? `${focusedOpenCount} of ${focusedDates.length} days available`
+                              : focusedOpenCount > 0 ? "Available" : "Not available"}
+                          </span>
+                          <p className="mt-2 text-xs text-slate-600">
+                            {focusedOpenCount > 0
+                              ? <>{selectedDoctor.full_name} takes consultations on {focusedDates.length > 1 ? "these days" : "this day"}{dayShiftLabel ? <>, working <b className="font-semibold">{dayShiftLabel}</b></> : ""}. The time itself is fixed with the patient on BRANCH LEADS → APPOINTMENT.</>
+                              : <>{selectedDoctor.full_name} is not offered on {focusedDates.length > 1 ? "these days" : "this day"} — the booking popup will not list them for it.</>}
+                          </p>
+                          {/* What closing the day would be closing over. Said before the
+                              button rather than in the error after it: the branch is about
+                              to be told these cannot be removed, and knowing that while
+                              deciding is the difference between a considered press and a
+                              refused one. */}
+                          {focusedBookings.length > 0 && (
+                            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid="consultant-day-bookings">
+                              <p className="text-[11px] font-semibold text-amber-800">
+                                {focusedBookings.length} appointment{focusedBookings.length === 1 ? "" : "s"} already booked — {focusedDates.length > 1 ? "these days" : "this day"} stays open for {focusedBookings.length === 1 ? "it" : "them"} whatever is set here.
+                              </p>
+                              <ul className="mt-1 space-y-0.5">
+                                {focusedBookings.map(([slot, b]) => (
+                                  <li key={slot} className="text-[11px] text-amber-700">
+                                    {shortDate(slot.split("T")[0])} · {to12h(slot.slice(11, 16))}{b?.lead_name ? ` — ${b.lead_name}` : ""}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            onClick={saveChanges}
+                            disabled={saving || nothingToOpen}
+                            className="bg-emerald-600 text-white hover:bg-emerald-700"
+                            data-testid="consultant-mark-available"
+                          >
+                            {saving ? "Saving..." : nothingToOpen && focusedOpenCount > 0 ? "Already available" : "Mark available"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={unsaveDays}
+                            disabled={unsaving || nothingToClose}
+                            className="border-rose-200 text-rose-600 hover:bg-rose-50"
+                            data-testid="consultant-mark-unavailable"
+                          >
+                            {unsaving ? "Removing..." : "Mark not available"}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     {/* A shift can be edited down to less than one slot — 7:00 to 7:20 with
                         45-minute consultations fits nothing. Said plainly, because an empty
                         grid on its own reads as the calendar being broken. */}
@@ -1075,6 +1222,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         </p>
                       </div>
                     )}
+                    {!isConsultant && (
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="time-slots-grid">
                       {dayTimes.map((time) => {
                         const state = getSlotState(time);
@@ -1132,6 +1280,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         );
                       })}
                     </div>
+                    )}
                   </>
                 )}
               </div>

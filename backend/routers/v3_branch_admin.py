@@ -753,22 +753,23 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         and prior_appt["slot_time"] != slot_time
     )
 
-    # Someone else already holding this exact slot blocks the booking — the slot belongs
-    # to whichever client took it. Re-picking the same slot for the SAME lead is fine
-    # (that's a reschedule onto itself / a notes edit), so this lead is excluded.
+    # Someone else already holding this hour blocks the booking — the hour belongs to
+    # whichever client took it. Re-picking it for the SAME lead is fine (that's a
+    # reschedule onto itself / a notes edit), so this lead is excluded.
+    #
+    # Overlap, not an exact start. The hour is typed by hand on Branch Leads →
+    # Appointment now — the Consultant Calendar publishes the day and the desk agrees the
+    # minute — so two consultations can collide without sharing a start: a 45-minute 10:00
+    # and a hand-entered 10:20 are the same stretch of the same consultant's day, and the
+    # exact-match query this replaced read them as two free slots. consultant_slot_clash
+    # compares the stretches, and reads consultations and reviews together, which is the
+    # question actually being asked.
     if booking:
-        clash = await v3_col("appointments").find_one(
-            {
-                "doctor_id": payload.physio_id,
-                "slot_time": slot_time,
-                "status": "new_appointment",
-                "lead_id": {"$ne": lead_id},
-            },
-            {"_id": 0, "lead_name": 1},
-        )
-        # A review sent to this Consultant for the hour holds it as well.
-        clash = clash or await consultant_slot_clash(
-            payload.physio_id, slot_time, await consultation_slot_minutes(), reviews_only=True,
+        clash = await consultant_slot_clash(
+            payload.physio_id,
+            slot_time,
+            payload.duration or await consultation_slot_minutes(),
+            exclude_lead_id=lead_id,
         )
         if clash:
             raise HTTPException(

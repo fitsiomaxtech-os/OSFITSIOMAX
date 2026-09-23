@@ -2890,7 +2890,16 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   //
   // null | { leadId, date, time, duration, currentId, currentName, options, loading, saving }
   const [handover, setHandover] = useState(null);
-  const [apptExperts, setApptExperts] = useState({ experts: [], available_count: 0, busy_count: 0, loading: false });
+  const [apptExperts, setApptExperts] = useState({ experts: [], available_count: 0, busy_count: 0, slot_minutes: null, loading: false });
+  // The hour of the appointment, typed rather than picked. The Consultant Calendar says
+  // which days a consultant works; the minute inside one is agreed with the patient on
+  // the phone and entered here, because a grid of published tiles could only ever offer
+  // the hours the grid happened to cut.
+  //
+  // Held as its three parts and not as one "HH:MM", because a field that reparses between
+  // keystrokes cannot be typed into: "1" on its way to "11" is itself a valid hour, and
+  // formatting it eagerly rewrites it to 01 under the cursor.
+  const [apptTime, setApptTime] = useState({ h: "", m: "", ap: "AM" });
   // Month shown by the popup's own calendar. Held apart from the picked date so paging
   // through months doesn't disturb the booking being built.
   const [apptMonth, setApptMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
@@ -3037,6 +3046,10 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
         experts: res.experts || [],
         available_count: res.available_count || 0,
         busy_count: res.busy_count || 0,
+        // The Consultation Duration from FITSIO STORE. A hand-typed start has no tile to
+        // take a length off, so the booking is the store's length from whatever minute
+        // was entered.
+        slot_minutes: res.slot_minutes || null,
         loading: false,
       });
       setApptDraft((curr) => {
@@ -3045,7 +3058,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
         return stillAvail ? curr : { ...curr, physio_id: "" };
       });
     } catch {
-      setApptExperts({ experts: [], available_count: 0, busy_count: 0, loading: false });
+      setApptExperts({ experts: [], available_count: 0, busy_count: 0, slot_minutes: null, loading: false });
     }
   }, []);
 
@@ -3070,14 +3083,6 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
     return [...free, ...taken].sort((a, b) => (a.slot_time || "").localeCompare(b.slot_time || ""));
   }, [apptExperts.experts, apptDraft?.physio_id]);
 
-  // How many of that day are still takeable. The grid is worth drawing whenever the
-  // consultant published anything at all, but with nothing free there is no tile to
-  // click and the branch needs telling why rather than being left to try each one.
-  const apptFreeCount = useMemo(
-    () => apptSlotsForExpert.filter((s) => !s.booked).length,
-    [apptSlotsForExpert],
-  );
-
   // The chosen CONSULTANT's own record, and the room on it. available-experts answers with
   // the whole expert row, so the link arrives with the list and choosing somebody reveals
   // it without a second request.
@@ -3086,6 +3091,101 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
     [apptExperts.experts, apptDraft?.physio_id],
   );
   const apptMeetLink = (apptSelectedExpert?.meet_link || "").trim();
+
+  // ── The hand-typed hour ──
+  //
+  // How long the appointment runs. The store's Consultation Duration, because a typed
+  // start is not a tile and has no length of its own to read off.
+  const apptSlotMinutes = apptExperts.slot_minutes || 30;
+  // Whether this consultant is working the picked day at all. Read off what they
+  // published rather than off what is still free: the day is the thing the Consultant
+  // Calendar sets, and one with every published hour spoken for is a day they are on —
+  // busy, but on it.
+  const apptDayPublished = (apptSelectedExpert?.published_slot_count || 0) > 0;
+
+  /** "9:05" -> 545. Minutes past midnight, or null if it isn't a clock reading. */
+  const apptMinutesOf = (hhmm) => {
+    const [h, m] = String(hhmm || "").split(":").map(Number);
+    return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
+  };
+  const apptClockText = (mins) =>
+    `${String(Math.floor(mins / 60) % 24).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+
+  // The stretches of the day this consultant actually published, merged out of the slots
+  // that came back. Two halves and not one: a Morning + Evening consultant is not at the
+  // desk at 2 PM, and naming their day as 7 AM to 7 PM would invite a booking into the
+  // gap they go home in.
+  const apptDayBlocks = useMemo(() => {
+    const rows = apptSlotsForExpert
+      .map((x) => [apptMinutesOf(x.time), apptMinutesOf(x.time) + (Number(x.duration) || 0)])
+      .filter(([a]) => a !== null)
+      .sort((a, b) => a[0] - b[0]);
+    const blocks = [];
+    rows.forEach(([a, b]) => {
+      const last = blocks[blocks.length - 1];
+      if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+      else blocks.push([a, b]);
+    });
+    return blocks;
+  }, [apptSlotsForExpert]);
+
+  const apptDayHours = apptDayBlocks.map(([a, b]) => `${to12h(apptClockText(a))} – ${to12h(apptClockText(b))}`).join(" · ");
+
+  // A typed time outside every published stretch. Said, not refused: the branch may have
+  // agreed something with the consultant that the calendar has not caught up with, and
+  // this screen is not the place to overrule a conversation. What it must not do is let
+  // that happen silently.
+  const apptOutsideHours = useMemo(() => {
+    const t = apptMinutesOf(apptDraft?.appointment_time);
+    if (t === null || apptDayBlocks.length === 0) return false;
+    return !apptDayBlocks.some(([a, b]) => t >= a && t + apptSlotMinutes <= b);
+  }, [apptDraft?.appointment_time, apptDayBlocks, apptSlotMinutes]);
+
+  // Whatever already holds the consultant across the typed hour. Overlap and not an exact
+  // match, because a typed 10:20 collides with a 45-minute 10:00 without sharing its
+  // start — which is the one thing a free-typed field makes easy to do by accident. The
+  // endpoint refuses it too; this is so the refusal is read before Confirm, not after.
+  const apptClash = useMemo(() => {
+    const start = apptMinutesOf(apptDraft?.appointment_time);
+    if (start === null) return null;
+    return apptSlotsForExpert.find((x) => {
+      if (!x.booked) return false;
+      const t = apptMinutesOf(x.time);
+      return t !== null && start < t + (Number(x.duration) || 30) && t < start + apptSlotMinutes;
+    }) || null;
+  }, [apptDraft?.appointment_time, apptSlotsForExpert, apptSlotMinutes]);
+
+  /** The three fields read as one 24-hour "HH:MM", or "" while any of them is unreadable. */
+  const apptClockOf = ({ h, m, ap }) => {
+    const hh = Number(h);
+    const mm = Number(m);
+    if (String(h).trim() === "" || !Number.isInteger(hh) || hh < 1 || hh > 12) return "";
+    if (String(m).trim() === "" || !Number.isInteger(mm) || mm < 0 || mm > 59) return "";
+    const h24 = ap === "PM" ? (hh === 12 ? 12 : hh + 12) : hh === 12 ? 0 : hh;
+    return `${String(h24).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  };
+
+  /** Type into one of the three fields. The draft's time follows them, and goes empty
+   *  again the moment they stop reading as a clock — Confirm is gated on it, so a
+   *  half-typed hour can never be the one that books. */
+  const setApptClock = (patch) => {
+    const next = { ...apptTime, ...patch };
+    setApptTime(next);
+    const hhmm = apptClockOf(next);
+    setApptDraft((d) => (d ? { ...d, appointment_time: hhmm, duration: hhmm ? apptSlotMinutes : null } : d));
+  };
+
+  /** "14:30" -> the three fields. For reopening a booking onto the hour it already holds. */
+  const apptClockFrom = (hhmm) => {
+    const mins = apptMinutesOf(hhmm);
+    if (mins === null) return { h: "", m: "", ap: "AM" };
+    const h24 = Math.floor(mins / 60);
+    return {
+      h: String(h24 % 12 === 0 ? 12 : h24 % 12),
+      m: String(mins % 60).padStart(2, "0"),
+      ap: h24 >= 12 ? "PM" : "AM",
+    };
+  };
 
   /** Open the pencil on a taken slot. Asks who else is free at that exact time up front,
    *  because CONSULTANT is the tab that opens and an empty list is itself the answer. */
@@ -3912,15 +4012,19 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                       if (stage === appointmentStageName) {
                         setApptDraft({
                           appointment_date: lead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-                          // Left blank on purpose — the time has to be picked from the
-                          // expert's published slots, so pre-filling a guess like 10:00
-                          // would show a time that may not actually be bookable.
+                          // Left blank unless this lead already holds one. Nothing is
+                          // guessed: an hour typed into the field by the screen rather
+                          // than by the desk is an hour nobody agreed with the patient.
                           appointment_time: lead.appointment_time || "",
                           physio_id: lead.assigned_physio_id || "",
                           notes: "",
                           duration: null,
                           final_stage: appointmentStageName,
                         });
+                        // The three time fields, opened on whatever the lead is already
+                        // sitting on — reopening a booking has to show its own hour rather
+                        // than an empty box that reads as no appointment.
+                        setApptTime(apptClockFrom(lead.appointment_time || ""));
                         return;
                       }
                       if (stage === "Follow Up") {
@@ -4614,28 +4718,31 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                               disabled={isPast}
                               // A new date invalidates the expert and slot chosen under the
                               // old one — availability is per-day, so both are cleared.
-                              onClick={() => setApptDraft({ ...apptDraft, appointment_date: dateStr, physio_id: "", appointment_time: "", duration: null })}
+                              onClick={() => {
+                                setApptDraft({ ...apptDraft, appointment_date: dateStr, physio_id: "", appointment_time: "", duration: null });
+                                setApptTime({ h: "", m: "", ap: "AM" });
+                              }}
                               className={`h-14 rounded-lg text-lg font-semibold transition ${
                                 isPicked
                                   // Brand blue -- colors.palette.primary, #0EA5E9. The halo
                                   // is sky-300 rather than sky-200 on purpose: sky-200 is
-                                  // what the legend teaches as "slots open", and a picked
+                                  // what the legend teaches as "available", and a picked
                                   // day ringed in it would read as saying both.
                                   ? "bg-sky-500 text-white shadow-sm ring-2 ring-sky-300"
                                   : isPast
                                   ? "cursor-not-allowed text-slate-300"
                                   : hasSlots
-                                  // Light blue marks a day that actually has a slot free, so
-                                  // the days worth clicking are visible without opening each
-                                  // one. The number goes dark with the fill -- this carried
-                                  // white text while it was violet-300, which a light blue
-                                  // cannot hold.
+                                  // Light blue marks a day some consultant is actually
+                                  // available on, so the days worth clicking are visible
+                                  // without opening each one. The number goes dark with the
+                                  // fill -- this carried white text while it was
+                                  // violet-300, which a light blue cannot hold.
                                   ? "bg-sky-200 text-sky-900 shadow-sm hover:bg-sky-300"
                                   : isToday
                                   ? "border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
                                   : "text-slate-600 hover:bg-slate-100"
                               }`}
-                              title={hasSlots ? `${openSlots} slot${openSlots === 1 ? "" : "s"} open` : undefined}
+                              title={hasSlots ? "A CONSULTANT is available on this day" : undefined}
                               data-testid={`branch-appt-day-${day}`}
                             >
                               {day}
@@ -4644,7 +4751,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                         })}
                       </div>
                       <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3 text-xs font-semibold text-slate-400">
-                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-sky-200" /> Slots open</span>
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-sky-200" /> Available</span>
                         <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-sky-500" /> Picked</span>
                       </div>
                     </>
@@ -4665,12 +4772,22 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   <div className="space-y-2">
                     {apptExperts.experts.map((doc) => {
                       const active = apptDraft.physio_id === doc.id;
-                      const open = (doc.free_slots || []).length;
+                      // Available means this consultant is working the day, which is the
+                      // one thing the Consultant Calendar sets. Read off what they
+                      // published, not off what is still free, so this column and the Time
+                      // column beside it can never disagree about the same consultant —
+                      // free slots would call a consultant who is in all day but fully
+                      // booked "not available", when the branch's next move is to look at
+                      // their bookings and move one.
+                      const open = doc.published_slot_count || 0;
                       return (
                         <button
                           key={doc.id}
                           type="button"
-                          onClick={() => setApptDraft({ ...apptDraft, physio_id: doc.id, appointment_time: "", duration: null })}
+                          onClick={() => {
+                            setApptDraft({ ...apptDraft, physio_id: doc.id, appointment_time: "", duration: null });
+                            setApptTime({ h: "", m: "", ap: "AM" });
+                          }}
                           className={`flex w-full items-center gap-3 rounded-lg border-2 p-3.5 text-left transition ${active ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"}`}
                           data-testid={`branch-appt-expert-${doc.id}`}
                         >
@@ -4757,102 +4874,171 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                 )}
               </div>
 
-              {/* STEP 3 — Time slot. Times come only from what the expert has actually
-                  confirmed on HEAD PHYSIO CALENDAR — no free typing, so nothing gets booked
-                  into a slot the Head Physio never agreed to. */}
+              {/* STEP 3 — The hour, typed. The Consultant Calendar publishes the DAY a
+                  consultant works and nothing finer, because the minute a patient is given
+                  is agreed on the phone — "come in around quarter past seven" — and no grid
+                  of cut tiles can offer that. So this column asks whether the consultant is
+                  on the day at all, and then takes the time the desk agreed.
+
+                  The hours they published are named beside the field rather than enforced
+                  by it, and a time outside them is warned about rather than refused: the
+                  branch may have arranged something the calendar has not caught up with,
+                  and a booking screen is not the place to overrule a conversation. A time
+                  that collides with somebody else's appointment IS refused — that one is
+                  not a judgement call, it is two patients in one room. */}
               {/* overflow and flex-1 are gated to lg on purpose. Below that the three
                   steps are one stacked column that scrolls as a whole, and an inner
-                  scroller here would trap Time Slot in a short box of its own inside
-                  that scroll — two scrollbars, and the slots unreachable. */}
+                  scroller here would trap this step in a short box of its own inside that
+                  scroll — two scrollbars, and the field unreachable. */}
               <div className="w-full flex-shrink-0 p-4 sm:p-5 lg:flex-1 lg:overflow-y-auto" data-testid="branch-appt-slot-panel">
-                <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
+                <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time</p>
                 {!apptDraft.physio_id ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a CONSULTANT to see their times.</p>
-                ) : apptSlotsForExpert.length === 0 ? (
-                  // Nothing published at all — not a day that filled up, which still draws
-                  // its grid below. The Consultant Calendar is the only thing that fixes it.
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a CONSULTANT to fix the time.</p>
+                ) : !apptDayPublished ? (
+                  // Not on this day at all. The Consultant Calendar is the only thing that
+                  // fixes it, so it is named rather than left to be found.
                   <div className="rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-no-slots">
-                    <p className="text-sm font-semibold text-amber-800">No availability published for this date.</p>
+                    <p className="text-sm font-semibold text-amber-800">Not available on this date.</p>
                     <p className="mt-0.5 text-xs text-amber-700">
-                      Confirm with the expert, then open MANAGEMENT → CONSULTANT CALENDAR and mark them available.
+                      Confirm with the consultant, then open MANAGEMENT → CONSULTANT CALENDAR and mark the day available.
                     </p>
                   </div>
                 ) : (
                   <>
-                    {/* The day is drawn either way; this only says why none of it can be
-                        clicked, which a grid of uniformly grey tiles cannot say itself. */}
-                    {apptFreeCount === 0 && (
-                      <div className="mb-3 rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-fully-booked">
-                        <p className="text-sm font-semibold text-amber-800">Every published slot on this date is already booked.</p>
-                        <p className="mt-0.5 text-xs text-amber-700">Pick another date, or publish more availability in MANAGEMENT → CONSULTANT CALENDAR.</p>
+                    {/* Available, and the hours they said they would be here. The whole of
+                        what the calendar has to say about this day, said once. */}
+                    <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-3" data-testid="branch-appt-available">
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        Available
+                      </span>
+                      <p className="mt-2 text-xs text-emerald-800">
+                        {apptSelectedExpert?.full_name} takes consultations on this date
+                        {apptDayHours ? <>, working <b className="font-semibold">{apptDayHours}</b></> : ""}.
+                      </p>
+                    </div>
+
+                    {/* The hour itself. Three fields and not one text box, because a
+                        patient is told "quarter past seven in the evening" and that is
+                        three answers — an hour, a minute and which half of the day — and a
+                        single box makes the desk assemble them into a format first. */}
+                    <div className="mt-4">
+                      <label className="mb-1.5 block text-xs font-semibold text-slate-600" htmlFor="branch-appt-hour">
+                        Appointment time
+                      </label>
+                      <div className="flex items-center gap-2" data-testid="branch-appt-time-entry">
+                        <input
+                          id="branch-appt-hour"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={2}
+                          placeholder="7"
+                          value={apptTime.h}
+                          onChange={(e) => setApptClock({ h: e.target.value.replace(/\D/g, "").slice(0, 2) })}
+                          className="h-12 w-16 rounded-lg border-2 border-slate-200 text-center text-xl font-bold text-slate-800 outline-none focus:border-teal-400"
+                          data-testid="branch-appt-hour"
+                        />
+                        <span className="text-xl font-bold text-slate-400">:</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={2}
+                          placeholder="15"
+                          value={apptTime.m}
+                          onChange={(e) => setApptClock({ m: e.target.value.replace(/\D/g, "").slice(0, 2) })}
+                          className="h-12 w-16 rounded-lg border-2 border-slate-200 text-center text-xl font-bold text-slate-800 outline-none focus:border-teal-400"
+                          data-testid="branch-appt-minute"
+                        />
+                        <div className="ml-1 flex overflow-hidden rounded-lg border-2 border-slate-200">
+                          {["AM", "PM"].map((half) => (
+                            <button
+                              key={half}
+                              type="button"
+                              onClick={() => setApptClock({ ap: half })}
+                              className={`px-3 py-2.5 text-sm font-bold transition ${apptTime.ap === half ? "bg-teal-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+                              data-testid={`branch-appt-${half.toLowerCase()}`}
+                            >
+                              {half}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="mt-1.5 text-[11px] text-slate-400">
+                        {apptDraft.appointment_time
+                          ? <>Booking <b className="font-semibold text-slate-600">{to12h(apptDraft.appointment_time)}</b> for {apptSlotMinutes} minutes.</>
+                          : <>Type the hour and minute agreed with the patient. {apptSlotMinutes} minutes, per FITSIO STORE.</>}
+                      </p>
+                    </div>
+
+                    {/* Two patients in one room. Refused here so the branch reads it beside
+                        the field that caused it rather than as a 409 over a dialog that has
+                        already been confirmed. */}
+                    {apptClash && (
+                      <div className="mt-3 rounded-lg border-2 border-rose-200 bg-rose-50 px-4 py-3" data-testid="branch-appt-clash">
+                        <p className="text-sm font-semibold text-rose-800">
+                          {to12h(apptDraft.appointment_time)} runs into {to12h(apptClash.time)}
+                          {apptClash.lead_name ? ` — ${apptClash.lead_name}` : ""}.
+                        </p>
+                        <p className="mt-0.5 text-xs text-rose-700">
+                          {apptSelectedExpert?.full_name} is with {apptClash.review_id ? "a review" : "another patient"} then. Pick a different time, or move that booking with the pencil below.
+                        </p>
                       </div>
                     )}
-                    {/* Three across, not four. The tiles carry a time, a duration and —
-                        where the slot is spoken for — a name and a button, which is more
-                        than a quarter-column can hold without wrapping every label. */}
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="branch-appt-slots">
-                      {apptSlotsForExpert.map((s) => {
-                        const active = !s.booked && apptDraft.appointment_time === s.time;
-                        // A taken time is not a tile to pick, it is a booking to manage, so
-                        // it renders as a row with its own button rather than as a disabled
-                        // one: a button inside a button is not something a browser parses.
-                        // The pencil is the only thing on this grid that touches somebody
-                        // else's appointment, which is why it is a separate press and not
-                        // the tile itself.
-                        if (s.booked) {
-                          return (
+
+                    {/* Outside the published hours: said, never blocked. See the note at
+                        the head of this step. */}
+                    {!apptClash && apptOutsideHours && (
+                      <div className="mt-3 rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-outside-hours">
+                        <p className="text-sm font-semibold text-amber-800">{to12h(apptDraft.appointment_time)} is outside the hours published for this day.</p>
+                        <p className="mt-0.5 text-xs text-amber-700">
+                          {apptDayHours ? `${apptSelectedExpert?.full_name} is down for ${apptDayHours}. ` : ""}
+                          It will still book — check the consultant is coming in for it.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* The day as it already stands. Not a grid to pick from any more, but
+                        the branch on the phone still gets asked "what else is around
+                        three", and an hour with nothing against it is the answer. The
+                        pencil is the only thing here that touches somebody else's
+                        appointment, which is why it is its own press. */}
+                    {apptSlotsForExpert.some((x) => x.booked) && (
+                      <div className="mt-4" data-testid="branch-appt-booked-list">
+                        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Already booked this day</p>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {apptSlotsForExpert.filter((x) => x.booked).map((x) => (
                             <div
-                              key={s.slot_time}
-                              className="flex min-h-[3.5rem] items-center justify-between gap-2 rounded-lg border-2 border-slate-200 bg-slate-100 px-3 py-2"
-                              data-testid={`branch-appt-slot-${s.time}`}
+                              key={x.slot_time}
+                              className="flex items-center justify-between gap-2 rounded-lg border-2 border-slate-200 bg-slate-100 px-3 py-2"
+                              data-testid={`branch-appt-slot-${x.time}`}
                             >
                               <span className="min-w-0">
-                                <span className="block truncate text-base font-bold text-slate-400 line-through decoration-slate-400">{to12h(s.time)}</span>
+                                <span className="block truncate text-sm font-bold text-slate-500">{to12h(x.time)}</span>
                                 <span className="block truncate text-[11px] font-semibold text-slate-400">
-                                  {s.review_id ? "Review" : "Booked"}{s.lead_name ? ` · ${s.lead_name}` : ""}
+                                  {x.review_id ? "Review" : "Booked"}{x.lead_name ? ` · ${x.lead_name}` : ""}
                                 </span>
                               </span>
-                              {/* A review is moved from Review > Reassign, not from here: the
-                                  pencil reschedules a consultation, and this patient has none
-                                  in this hour. */}
-                              {!s.review_id && <button
-                                type="button"
-                                onClick={() => openSlotEdit(s)}
-                                className="shrink-0 rounded-md border border-slate-300 bg-white p-1.5 text-slate-500 transition hover:border-teal-400 hover:bg-teal-50 hover:text-teal-600"
-                                title={`Reschedule the ${to12h(s.time)} booking${s.lead_name ? ` — ${s.lead_name}` : ""}`}
-                                data-testid={`branch-appt-slot-edit-${s.time}`}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>}
+                              {/* A review is moved from Review > Reassign, not from here:
+                                  the pencil reschedules a consultation, and this patient
+                                  has none in this hour. */}
+                              {!x.review_id && (
+                                <button
+                                  type="button"
+                                  onClick={() => openSlotEdit(x)}
+                                  className="shrink-0 rounded-md border border-slate-300 bg-white p-1.5 text-slate-500 transition hover:border-teal-400 hover:bg-teal-50 hover:text-teal-600"
+                                  title={`Reschedule the ${to12h(x.time)} booking${x.lead_name ? ` — ${x.lead_name}` : ""}`}
+                                  data-testid={`branch-appt-slot-edit-${x.time}`}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </div>
-                          );
-                        }
-                        return (
-                          <button
-                            key={s.slot_time}
-                            type="button"
-                            onClick={() => setApptDraft({ ...apptDraft, appointment_time: s.time, duration: s.duration })}
-                            className={`flex min-h-[3.5rem] items-center justify-between gap-2 rounded-lg border-2 px-3 py-2 text-left transition ${
-                              active
-                                ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100"
-                                : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"
-                            }`}
-                            data-testid={`branch-appt-slot-${s.time}`}
-                          >
-                            <span className="truncate text-base font-bold">{to12h(s.time)}</span>
-                            <span className="shrink-0 text-[11px] text-slate-400">{s.duration} min</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
-                {/* Nothing under the grid. The picked time is the one tile wearing the
-                    teal ring, so a line restating it told the eye what it had just been
-                    told, and the notes box below it was optional, near-always left empty,
-                    and cost the panel a scroll on the step that most needs the room.
-                    `notes` stays on the draft and still posts as "" — the payload the
-                    booking endpoint receives is unchanged. */}
               </div>
             </div>
 
@@ -4864,10 +5050,14 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               <Button
                 size="sm"
                 className="bg-teal-600 text-white hover:bg-teal-700"
+                // A clash is the one thing this button will not carry through. The hour is
+                // typed now, so an overlap is a slip rather than a choice, and the panel
+                // above has already named whose appointment it runs into.
+                disabled={!!apptClash}
                 onClick={async () => {
                   if (!apptDraft.appointment_date) { toast.error("Pick a date"); return; }
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
-                  if (!apptDraft.appointment_time) { toast.error("Pick a time slot"); return; }
+                  if (!apptDraft.appointment_time) { toast.error("Type the time agreed with the patient"); return; }
                   try {
                     await bookLeadInto(apptDraft);
                   } catch (e) {
