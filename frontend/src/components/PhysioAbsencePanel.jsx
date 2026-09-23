@@ -173,7 +173,9 @@ function DayRow({ absence, day, candidates, onChanged }) {
                     >
                       <SelectValue placeholder="Select a physio…" />
                     </SelectTrigger>
-                    <SelectContent className="max-h-72 border-slate-200">
+                    {/* Above the popup's z-[60]: the list is portalled to <body>, and at the
+                        default z-50 it opened behind the popup, so the picker looked empty. */}
+                    <SelectContent className="z-[70] max-h-72 border-slate-200">
                       {options.map((c) => (
                         <SelectItem
                           key={c.id}
