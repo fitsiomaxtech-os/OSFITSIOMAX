@@ -48,10 +48,20 @@ export const PRINTABLE_STYLES = `
   .meta-line b{color:#0f172a;font-weight:600;margin-left:6px}
   /* The right padding is a letter-spacing short of the left on every tracked pill below:
      that trailing gap is inside the box, so matched padding leaves the words looking
-     shifted left. This is what centres them. */
-  .pill{display:inline-flex;align-items:center;gap:6px;margin-top:9px;padding:4px 10.1px 4px 11px;border-radius:999px;
+     shifted left. This is what centres them.
+
+     There was a 6px status dot before the word, drawn by .pill::before with a 6px gap
+     after it. It never reached the PDF: html2canvas (lib/pdf.js) does not resolve
+     currentColor on a pseudo-element, so it drew nothing -- but the dot's 6px box and
+     the 6px gap were still laid out, pushing the word 12px right of centre inside a
+     pill whose padding is tuned to the tenth of a pixel. Pseudo-elements themselves are
+     fine -- .steps li::before below draws its checkmarks on the same sheet -- but that
+     one names var(--accent) outright, which is the difference. It did render in the tab the
+     Print button opens, so the file and the paper disagreed on a sheet that exists to
+     be the same either way. Gone rather than recoloured: the pill's own tint already
+     carries the status, and a dot that two renderers draw differently is a liability. */
+  .pill{display:inline-flex;align-items:center;margin-top:9px;padding:4px 10.1px 4px 11px;border-radius:999px;
         font-size:10.5px;font-weight:700;letter-spacing:.9px;background:var(--soft);color:var(--accent);border:1px solid var(--edge)}
-  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
 
   .body{padding:24px 34px 8px}
   .label{font-size:10.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#64748b;margin:0 0 8px}
