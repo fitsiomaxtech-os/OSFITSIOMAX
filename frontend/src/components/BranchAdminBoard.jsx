@@ -4648,12 +4648,22 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
 
       {apptDraft && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
-          {/* A card, like every other popup here, but a tall one — three booking steps
-              need the height, so it takes what's left after the backdrop rather than a
-              fixed fraction. Heights in dvh: 100vh on mobile measures the viewport as if
-              the browser's URL bar were hidden, which pushed Confirm below the fold. The
-              vh values stay as the fallback for anything without dvh. */}
-          <div className="flex h-[calc(100vh-1rem)] max-h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          {/* A card the size of what is in it, capped at the viewport. It used to be given
+              the whole screen height because step 3 was a grid of every slot a consultant
+              published and needed all of it; step 3 is now three small fields, and a
+              full-height card around them is most of a screen of white space with Confirm
+              stranded at the bottom of it.
+
+              The cap is in dvh with a vh class behind it: 100vh on mobile measures the
+              viewport as if the browser's URL bar were hidden, which is what pushed
+              Confirm below the fold. Inline rather than a second max-h class, because two
+              Tailwind classes setting one property are resolved by stylesheet order and
+              not by the order they are written here — inline wins wherever dvh is
+              understood, and is dropped as invalid wherever it is not, leaving the class. */}
+          <div
+            className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            style={{ maxHeight: "calc(100dvh - 2rem)" }}
+          >
             {/* One line, and only the word for what this is. The three steps below are
                 numbered and titled already, so a subtitle spelling their order out again
                 was a second row of chrome on the one dialog that needs its height for
@@ -4673,7 +4683,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                 one before it has an answer. */}
             <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
               {/* STEP 1 — Date */}
-              <div className="w-full flex-shrink-0 border-b border-slate-200 p-4 sm:p-6 lg:w-[28rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-date-panel">
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-4 sm:p-5 lg:w-[24rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-date-panel">
                 <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">1 · Date</p>
                 {(() => {
                   const todayStr = new Date().toISOString().slice(0, 10);
@@ -4702,7 +4712,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                         ))}
                       </div>
                       <div className="grid grid-cols-7 gap-1">
-                        {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className="h-14" />)}
+                        {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className="h-11" />)}
                         {Array.from({ length: daysInMonth }, (_, i) => {
                           const day = i + 1;
                           const dateStr = `${apptMonth.y}-${pad(apptMonth.m + 1)}-${pad(day)}`;
@@ -4722,7 +4732,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                                 setApptDraft({ ...apptDraft, appointment_date: dateStr, physio_id: "", appointment_time: "", duration: null });
                                 setApptTime({ h: "", m: "", ap: "AM" });
                               }}
-                              className={`h-14 rounded-lg text-lg font-semibold transition ${
+                              className={`h-11 rounded-lg text-base font-semibold transition ${
                                 isPicked
                                   // Brand blue -- colors.palette.primary, #0EA5E9. The halo
                                   // is sky-300 rather than sky-200 on purpose: sky-200 is
@@ -4760,7 +4770,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               </div>
 
               {/* STEP 2 — Head Physio */}
-              <div className="w-full flex-shrink-0 border-b border-slate-200 p-4 sm:p-5 lg:w-[22rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-expert-panel">
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-4 sm:p-5 lg:w-[18rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-expert-panel">
                 <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">2 · CONSULTANT</p>
                 {!apptDraft.appointment_date ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Pick a date first.</p>
