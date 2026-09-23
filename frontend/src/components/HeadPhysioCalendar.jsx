@@ -1,19 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Calendar as CalendarIcon,
-  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
-  Hourglass,
-  Pencil,
-  Plus,
   Stethoscope,
   Trash2,
   Users,
   Video,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
@@ -32,7 +27,7 @@ import {
   setDoctorService,
   setDoctorMeetLink,
 } from "@/lib/api";
-import { endTime12h, slotRange12h, to12h } from "@/lib/time";
+import { to12h } from "@/lib/time";
 import { gridTimesFor, hoursLabel, shiftIdsOf } from "@/lib/shifts";
 import { ShiftPickerModal } from "@/components/ui/shift-picker";
 
@@ -50,22 +45,6 @@ const SESSION_TYPES = [
 // item for the Head Physio calendar, and on the session item for the Physio calendar.
 // Only used if the store hasn't been configured yet.
 const FALLBACK_SLOT_MINUTES = 30;
-
-/**
- * A typed time read back as the "HH:MM" the API is sent, or null if it isn't one.
- *
- * Hand-entered hours are the point of this screen now — 7:12 is a real time a desk opens
- * at — so nothing is snapped to the grid or to a five-minute step. Only what could not be
- * a time at all is refused.
- */
-const hhmm = (value) => {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || "").trim());
-  if (!m) return null;
-  const h = Number(m[1]);
-  const min = Number(m[2]);
-  if (h > 23 || min > 59) return null;
-  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
-};
 
 /** "2026-08-18" -> "18 Aug", for naming a day in a toast without the year taking the line. */
 const shortDate = (iso) => {
@@ -155,15 +134,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   const [selectedDate, setSelectedDate] = useState(null);
 
   const [slotDuration, setSlotDuration] = useState(FALLBACK_SLOT_MINUTES);
-  // The break left after each slot — and only the break. How long a slot runs is the
-  // package's answer and comes from FITSIO STORE; this is the air after it, so a desk that
-  // needs twenty minutes to write the consultation up gets 7:00 – 7:45 and then 8:05,
-  // with the 45 untouched. Remembered in the browser per calendar because it is a standing
-  // habit of the desk rather than a decision taken again every day.
-  const GAP_KEY = `fitsio.slot-gap.${profileType}`;
-  const [slotGap, setSlotGap] = useState(() => {
-    try { return Number(localStorage.getItem(GAP_KEY)) || 0; } catch { return 0; }
-  });
   const slotType = SLOT_TYPES[0].value;
   const [pendingSlots, setPendingSlots] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -333,35 +303,21 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   // Naming only the outer ends would read as a day this expert does not work.
   const labelOf = (w) => (w?.shift_name ? `${w.shift_name} · ${hoursLabel(w)}` : "");
 
-  const gridTimes = (w, gap = slotGap) => gridTimesFor(w, slotDuration || 30, undefined, gap);
+  const gridTimes = (w) => gridTimesFor(w, slotDuration || 30);
 
   // Every free slot of a day, staged as an addition. Anything already published for that
   // date, and anything booked, is skipped so this never duplicates or disturbs a booking.
   // `windowOverride` is for the moment a day's shift is changed: the new window is known
   // from the response before calendarData has been reloaded, so the day re-cuts straight
   // away instead of one render behind.
-  const stagedSlotsForDay = (d, windowOverride, gapOverride) => {
+  const stagedSlotsForDay = (d, windowOverride) => {
     const alreadyOpen = new Set((calendarData?.slots || []).filter((s) => s.startsWith(`${d}T`)));
-    return gridTimes(windowOverride || windowFor(d), gapOverride ?? slotGap)
+    return gridTimes(windowOverride || windowFor(d))
       .filter((time) => {
         const full = `${d}T${time}`;
         return !alreadyOpen.has(full) && !calendarData?.booked?.[full];
       })
       .map((time) => ({ slot_time: `${d}T${time}`, duration: slotDuration, consultation_type: slotType }));
-  };
-
-  // Changing the spacing re-cuts every day currently picked: half a morning filled
-  // back-to-back and half of it filled with a gap is not a day anybody meant to publish.
-  // Removals already staged survive — those are decisions about slots that exist, and the
-  // spacing has nothing to say about them. Hand-entered times are re-cut with the rest;
-  // the grid is what the gap governs, so they are added again after it is set.
-  const changeGap = (g) => {
-    setSlotGap(g);
-    try { localStorage.setItem(GAP_KEY, String(g)); } catch { /* a preference, not a save */ }
-    setPendingSlots((prev) => [
-      ...prev.filter((slot) => slot._remove),
-      ...selectedDates.flatMap((d) => stagedSlotsForDay(d, undefined, g)),
-    ]);
   };
 
   // Staged days are dropped with it: they were filled in across the old window, and half a
@@ -562,11 +518,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   // booked outside it. A shift narrowed after slots were published would otherwise hide
   // them — still on the calendar, still bookable, but with no way left to see or remove
   // them. Shown means Unsave can reach them.
-  // A shift narrowed after slots were published would otherwise hide them — still on the
-  // calendar, still bookable, but with no way left to see or remove them. Shown means
-  // Unsave can reach them. Staged slots are here for the same reason: a time entered by
-  // hand, or a slot moved off the grid to 7:12, is by definition not one of the grid's and
-  // would otherwise be saved without ever appearing on the day it belongs to.
   const displayTimeGrid = () => {
     const grid = generateTimeGrid(selectedDate);
     if (!selectedDate) return grid;
@@ -576,7 +527,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
     };
     (calendarData?.slots || []).forEach(collect);
     Object.keys(calendarData?.booked || {}).forEach(collect);
-    pendingSlots.forEach((slot) => collect(slot.slot_time));
     return [...new Set([...grid, ...outside])].sort();
   };
 
@@ -604,80 +554,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
     } else {
       setPendingSlots((prev) => [...prev, { slot_time: full, duration: slotDuration, consultation_type: slotType }]);
     }
-  };
-
-  // ---- Hours entered by hand -------------------------------------------------------
-  //
-  // The grid a shift cuts is regular by design, and a real day is not: a consultant who
-  // starts at 7:12 needs that exact hour published, not the 7:00 the grid offers. Both
-  // controls below move or add a *start*; the length a slot runs for stays the package's
-  // and is never asked about here.
-  const [manualTime, setManualTime] = useState("");
-  // Which tile is being retimed, and what has been typed into it so far. One at a time:
-  // an open editor on every tile is a form, not a calendar.
-  const [editingTime, setEditingTime] = useState(null);
-  const [editDraft, setEditDraft] = useState("");
-
-  const cancelEdit = () => { setEditingTime(null); setEditDraft(""); };
-
-  // Nothing typed into one day should follow the reader to the next.
-  useEffect(() => { setManualTime(""); cancelEdit(); }, [selectedDate, selectedDoctor?.id]);
-
-  /** Why this exact minute cannot be opened, or "" if it can. */
-  const timeTaken = (time) => {
-    const full = `${selectedDate}T${time}`;
-    if (isBooked(full)) return `${to12h(time)} already has a booking`;
-    const openNow = (calendarData?.slots || []).includes(full)
-      && !pendingSlots.some((slot) => slot.slot_time === full && slot._remove);
-    if (openNow) return `${to12h(time)} is already open`;
-    if (pendingSlots.some((slot) => slot.slot_time === full && !slot._remove)) return `${to12h(time)} is already staged`;
-    return "";
-  };
-
-  /** Stage one hand-typed start on the focused day. The other picked days are left alone:
-   *  fine-tuning one day is what this is for, and 7:12 on five Saturdays is not implied. */
-  const addManualTime = () => {
-    if (!selectedDate) { toast.error("Pick a date first"); return; }
-    const time = hhmm(manualTime);
-    if (!time) { toast.error("Enter a time like 07:12"); return; }
-    const taken = timeTaken(time);
-    if (taken) { toast.error(taken); return; }
-    setPendingSlots((prev) => [
-      ...prev.filter((slot) => slot.slot_time !== `${selectedDate}T${time}`),
-      { slot_time: `${selectedDate}T${time}`, duration: slotDuration, consultation_type: slotType },
-    ]);
-    setManualTime("");
-    toast.success(`${slotRange12h(time, slotDuration)} added — Save Changes publishes it`);
-  };
-
-  const startEdit = (time) => { setEditingTime(time); setEditDraft(time); };
-
-  /**
-   * Move one slot to a different start. A published slot cannot simply be re-labelled —
-   * the calendar holds the old time and a patient could book it — so the old one is staged
-   * for removal and the new one for addition, which Save Changes then applies in that
-   * order. A staged slot just moves, and a grid hour nobody has touched yet is opened at
-   * the new time and left closed at the old.
-   */
-  const commitEdit = (oldTime) => {
-    const time = hhmm(editDraft);
-    if (!time) { toast.error("Enter a time like 07:12"); return; }
-    if (time === oldTime) { cancelEdit(); return; }
-    const oldFull = `${selectedDate}T${oldTime}`;
-    if (isBooked(oldFull)) { toast.error("This slot has a booked appointment"); return; }
-    const taken = timeTaken(time);
-    if (taken) { toast.error(taken); return; }
-    setPendingSlots((prev) => {
-      const without = prev.filter((slot) => slot.slot_time !== oldFull);
-      const published = (calendarData?.slots || []).includes(oldFull);
-      return [
-        ...without,
-        ...(published ? [{ slot_time: oldFull, duration: slotDuration, consultation_type: slotType, _remove: true }] : []),
-        { slot_time: `${selectedDate}T${time}`, duration: slotDuration, consultation_type: slotType },
-      ];
-    });
-    cancelEdit();
-    toast.success(`${to12h(oldTime)} moved to ${slotRange12h(time, slotDuration)}`);
   };
 
   const getSlotState = (time) => {
@@ -958,7 +834,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                   </h3>
                   <p className="text-[11px] text-slate-400">
                     {purpose} · {slotDuration} min · {(calendarData?.slots || []).length} slots open
-                    {slotGap > 0 && ` · ${slotGap} min gap`}
                     {isPhysio && ` · ${calendarData?.slot_capacity ?? 3} per slot`}
                   </p>
                 </div>
@@ -985,29 +860,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                     <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                   </button>
                 )}
-                {/* The break between one slot and the next. Beside the shift because it is
-                    the same kind of fact — how the day is cut — and like the shift it
-                    changes what the grid below contains. It does NOT touch the duration:
-                    45-minute consultations stay 45 minutes and a 20-minute gap only moves
-                    the next one from 7:45 to 8:05. The length is the package's and is set
-                    in FITSIO STORE. */}
-                <label
-                  className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1"
-                  title={`Break after each ${slotDuration}-minute slot — the duration itself stays as FITSIO STORE set it`}
-                >
-                  <Hourglass className="h-3.5 w-3.5 text-slate-400" />
-                  <span className="text-[11px] font-medium text-slate-500">Gap</span>
-                  <select
-                    value={slotGap}
-                    onChange={(e) => changeGap(Number(e.target.value))}
-                    className="rounded border border-slate-200 bg-white px-1 py-0.5 text-xs font-semibold text-slate-700"
-                    data-testid="slot-gap-select"
-                  >
-                    {[0, 5, 10, 15, 20, 30, 45, 60].map((n) => (
-                      <option key={n} value={n}>{n === 0 ? "None" : `${n} min`}</option>
-                    ))}
-                  </select>
-                </label>
                 {/* A physio runs a floor — two or three patients in the same hour. Set
                     here rather than assumed, because it varies by physio and by room.
                     Head Physio has no control: a consultation is one-to-one and the
@@ -1145,8 +997,8 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                 {selectedDate && (
                   <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400" data-testid="calendar-day-hint">
                     {dayShiftLabel
-                      ? <>Opened across <b>{dayShiftLabel}</b>{isOverridden ? " — set for this day only" : ""} at {slotDuration}-minute slots{slotGap > 0 ? <>, <b>{slotGap} minutes apart</b></> : ""}, per FITSIO STORE. </>
-                      : <>Whole day opened at {slotDuration}-minute slots{slotGap > 0 ? <>, <b>{slotGap} minutes apart</b></> : ""}, per FITSIO STORE. Put them on a shift in <b>TIME MANAGEMENT</b> to cut the day to their working hours. </>}
+                      ? <>Opened across <b>{dayShiftLabel}</b>{isOverridden ? " — set for this day only" : ""} at {slotDuration}-minute slots, per FITSIO STORE. </>
+                      : <>Whole day opened at {slotDuration}-minute slots, per FITSIO STORE. Put them on a shift in <b>TIME MANAGEMENT</b> to cut the day to their working hours. </>}
                     Pick more dates to open several at once, or click a date again to deselect it.
                     {" "}<b>Save Changes</b> publishes them; <b>Unsave</b> closes the selected days back down.
                   </p>
@@ -1210,38 +1062,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         </span>
                       </div>
                     )}
-                    {/* An hour the grid does not offer. The rhythm a shift cuts is regular
-                        by design and a real desk is not — a consultant who starts at 7:12
-                        needs that minute published, not the 7:00 the grid would give them.
-                        Only the start is asked for: the slot still runs for the length the
-                        package sells, and that number is not editable here on purpose. */}
-                    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/60 p-2.5" data-testid="manual-slot-row">
-                      <Plus className="h-3.5 w-3.5 shrink-0 text-violet-400" />
-                      <span className="text-[11px] font-medium text-violet-700">Add a time by hand</span>
-                      <input
-                        type="time"
-                        value={manualTime}
-                        onChange={(e) => setManualTime(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManualTime(); } }}
-                        className="rounded border border-violet-200 bg-white px-1.5 py-1 text-xs font-semibold text-slate-700 outline-none focus:border-violet-400"
-                        data-testid="manual-slot-input"
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={addManualTime}
-                        disabled={!hhmm(manualTime)}
-                        className="h-7 border-violet-200 px-2 text-[11px] font-semibold text-violet-700 hover:bg-violet-100"
-                        data-testid="manual-slot-add"
-                      >
-                        Add
-                      </Button>
-                      <span className="text-[10px] text-slate-500">
-                        {hhmm(manualTime)
-                          ? <>Runs <b>{slotRange12h(hhmm(manualTime), slotDuration)}</b> — {slotDuration} min, from the package.</>
-                          : <>It runs the package's {slotDuration} minutes from whatever you type. The duration is not editable here.</>}
-                      </span>
-                    </div>
                     {/* A shift can be edited down to less than one slot — 7:00 to 7:20 with
                         45-minute consultations fits nothing. Said plainly, because an empty
                         grid on its own reads as the calendar being broken. */}
@@ -1289,98 +1109,26 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                           badge = <span className="text-[9px] bg-red-100 text-red-500 rounded px-1.5 py-0.5">Removing</span>;
                         }
 
-                        // Retiming this one. An open editor replaces the tile rather than
-                        // sitting under it, so the grid keeps its shape while one hour is
-                        // being moved.
-                        if (editingTime === time) {
-                          const draft = hhmm(editDraft);
-                          return (
-                            <div key={time} className="rounded-lg border border-violet-300 bg-violet-50 p-3" data-testid={`slot-edit-${time}`}>
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="time"
-                                  autoFocus
-                                  value={editDraft}
-                                  onChange={(e) => setEditDraft(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") { e.preventDefault(); commitEdit(time); }
-                                    if (e.key === "Escape") cancelEdit();
-                                  }}
-                                  className="min-w-0 flex-1 rounded border border-violet-200 bg-white px-1 py-0.5 text-xs font-semibold text-slate-700 outline-none focus:border-violet-400"
-                                  data-testid={`slot-edit-input-${time}`}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => commitEdit(time)}
-                                  className="rounded p-1 text-emerald-600 transition-colors hover:bg-emerald-100"
-                                  title="Move this slot"
-                                  data-testid={`slot-edit-save-${time}`}
-                                >
-                                  <Check className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={cancelEdit}
-                                  className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100"
-                                  title="Leave it where it is"
-                                  data-testid={`slot-edit-cancel-${time}`}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                              {/* The length is stated, never asked for: it is what the
-                                  package sells and it does not move with the start. */}
-                              <p className="mt-1 text-[10px] font-medium text-violet-500">
-                                Ends {endTime12h(draft || time, slotDuration)} · {slotDuration} min, fixed
-                              </p>
-                            </div>
-                          );
-                        }
-
-                        // The tile stays one button so a click anywhere on it still opens
-                        // or closes the hour; the pencil floats over its corner as a
-                        // sibling rather than nesting inside it, which is not something a
-                        // button may contain.
                         return (
-                          <div key={time} className="relative">
-                            <button
-                              type="button"
-                              onClick={() => !booked && toggleSlot(time)}
-                              disabled={!!booked}
-                              className={`w-full rounded-lg border ${borderColor} ${bgColor} p-3 text-left transition-all ${booked ? "cursor-not-allowed opacity-70" : "hover:shadow-sm cursor-pointer"}`}
-                              data-testid={`slot-${time}`}
-                            >
-                              <div className="mb-1 flex items-center justify-between gap-1">
-                                {/* Both ends of the hour. A tile that named only where the
-                                    slot starts left the reader doing the arithmetic off a
-                                    duration written elsewhere on the screen — and a day
-                                    that can now be retimed by hand is exactly where that
-                                    arithmetic goes wrong. */}
-                                <span className={`min-w-0 truncate pr-6 text-[12px] font-semibold ${textColor}`}>
-                                  {slotRange12h(time, slotDuration)}
-                                </span>
-                                {state === "existing" && !booked && (
-                                  <Trash2 className="h-3 w-3 shrink-0 text-slate-300 transition-colors hover:text-red-400" />
-                                )}
-                              </div>
-                              {badge}
-                              {booked && (
-                                <p className="text-[10px] text-amber-600 mt-0.5">{booked.lead_name}</p>
+                          <button
+                            key={time}
+                            type="button"
+                            onClick={() => !booked && toggleSlot(time)}
+                            disabled={!!booked}
+                            className={`rounded-lg border ${borderColor} ${bgColor} p-3 text-left transition-all ${booked ? "cursor-not-allowed opacity-70" : "hover:shadow-sm cursor-pointer"}`}
+                            data-testid={`slot-${time}`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className={`text-sm font-semibold ${textColor}`}>{to12h(time)}</span>
+                              {state === "existing" && !booked && (
+                                <Trash2 className="h-3 w-3 text-slate-300 hover:text-red-400 transition-colors" />
                               )}
-                            </button>
-                            {!booked && (
-                              <button
-                                type="button"
-                                onClick={() => startEdit(time)}
-                                className="absolute right-1 top-1 rounded p-1 text-slate-300 transition-colors hover:bg-white hover:text-violet-600"
-                                title={`Move ${to12h(time)} — it still runs ${slotDuration} minutes`}
-                                aria-label={`Change the start time of ${to12h(time)}`}
-                                data-testid={`slot-edit-btn-${time}`}
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </button>
+                            </div>
+                            {badge}
+                            {booked && (
+                              <p className="text-[10px] text-amber-600 mt-0.5">{booked.lead_name}</p>
                             )}
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
