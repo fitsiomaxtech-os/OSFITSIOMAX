@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, ArrowRightLeft, CalendarX, CheckCircle2, Clock, Info, RefreshCw, Trash2, UserX, Users, X } from "lucide-react";
+import { AlertCircle, ArrowRightLeft, CalendarX, CheckCircle2, Clock, RefreshCw, Trash2, UserX, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
@@ -394,13 +394,6 @@ function AbsenceDetail({ absenceId, onClose, onChanged }) {
         </div>
 
         <div className="flex-1 overflow-y-auto border-t border-slate-200 px-5 py-4">
-          <div className="mb-3 flex items-start gap-2 rounded-lg bg-sky-50 px-3 py-2.5 text-xs leading-relaxed text-sky-900 ring-1 ring-inset ring-sky-100">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-600" />
-            <span>
-              Call each patient first. Hand the day to another physio only once they agree; if they'd rather wait for their own physio, release the day for a new date.
-            </span>
-          </div>
-
           {loading && !data ? (
             <p className="py-10 text-center text-sm text-slate-400">Loading…</p>
           ) : days.length === 0 ? (
