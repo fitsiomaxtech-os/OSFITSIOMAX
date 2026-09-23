@@ -212,33 +212,3 @@ BRANCH_BLOCKED_EXPENSE_CATEGORIES = {
     "electricity", "eb", "electricity board", "electricity bill", "current bill",
 }
 
-# What a vendor supplies — the suggestions the Vendor form offers, not a closed list.
-# A vendor is anyone the branch pays for something that arrives: the water can supplier,
-# the broadband provider, the AC man, the housekeeping agency, the tablet distributor.
-#
-# The names deliberately match BRANCH_EXPENSE_CATEGORIES above wherever the two mean the
-# same thing, so the category on a vendor is the category the payment to them is filed
-# under and the two screens read as one system. Unlike the expense list this one is only a
-# set of suggestions: a branch that buys something none of these describe types its own
-# (see _clean_services in routers/v3_vendors.py), because refusing a vendor for having an
-# unusual trade would just push it in under "Other" and lose the word that mattered.
-# Mirrored on the client in frontend/src/lib/vendorServices.js.
-VENDOR_SERVICE_CATEGORIES = [
-    "Medicines & Supplements",
-    "Equipment",
-    "Water",
-    "Internet & Phone",
-    "Maintenance",
-    "Housekeeping",
-    "Consumables",
-    "Marketing",
-    "Travel",
-    "Staff Welfare",
-    "Other",
-]
-
-# The longest a typed-in category may be, and how many one vendor may carry. Both are
-# there to keep a category a category: a sentence in the box, or twelve of them on one
-# vendor, stops the chip row on the tab being something anyone can read at a glance.
-VENDOR_SERVICE_MAX_LEN = 40
-VENDOR_SERVICE_MAX_COUNT = 8

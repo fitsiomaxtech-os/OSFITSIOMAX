@@ -22,15 +22,11 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from constants import (
-    VENDOR_SERVICE_CATEGORIES,
-    VENDOR_SERVICE_MAX_COUNT,
-    VENDOR_SERVICE_MAX_LEN,
-)
 from database import v3_col
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_inventory import (
     VALID_CATEGORIES,
+    VALID_UNITS,
     _escape_regex,
 )
 from schemas.v3 import V3UserOut
@@ -122,9 +118,29 @@ async def _item_names(item_ids: List[str]) -> dict:
     if not ids:
         return {}
     rows = await v3_col("inventory_items").find(
-        {"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "category": 1}
+        {"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "category": 1, "unit": 1}
     ).to_list(1000)
     return {r["id"]: r for r in rows}
+
+
+class SupplyIn(BaseModel):
+    """One line of the Stock Details column: this vendor supplies this catalogue row.
+
+    A rate, not a delivery. Nothing here touches a branch's shelf or the stock ledger —
+    stock arrives through Add Stock on the shelf itself, which is the only place that
+    knows which branch it arrived at. This is the agreed price and pack, kept so that
+    booking that delivery later is a confirmation rather than a fresh question.
+    """
+    item_id: str
+    # Typed rather than picked. There is no list of stock types in the OS and inventing a
+    # closed one here would mean a branch's own word for how something arrives — loose,
+    # per box, individual — being refused by a dropdown.
+    stock_type: Optional[str] = ""
+    count: int = 0
+    # Blank means "as the catalogue row says" — the item already carries a unit, and
+    # repeating it on every supply line is a second copy that can disagree with the first.
+    unit: Optional[str] = ""
+    unit_price: float = 0
 
 
 class VendorIn(BaseModel):
@@ -137,66 +153,20 @@ class VendorIn(BaseModel):
     city: Optional[str] = ""
     payment_terms: Optional[str] = ""
     notes: Optional[str] = ""
-    # What this vendor is — water, internet, maintenance, housekeeping, the tablet
-    # distributor. Suggestions come from VENDOR_SERVICE_CATEGORIES, but anything typed is
-    # kept: see _clean_services.
-    services: List[str] = []
-    # Which shelves this vendor supplies — the Store tabs in VALID_CATEGORIES. Empty means
-    # "not said yet", not "none": a vendor added from the tab before anything is bought
-    # from them still has to be saveable.
-    categories: List[str] = []
-    # The catalogue rows they supply. Validated against inventory_items so a typo can't
-    # create a link to nothing.
-    item_ids: List[str] = []
+    # What is owed to or agreed with them, as the form's one money box. Not a computed
+    # total of the rows below: those are per-item rates, and the figure a branch wants
+    # against a vendor is the one on the bill in front of them.
+    amount: float = 0
+    # What they supply and at what rate — the Stock Details column of the form.
+    supplies: List[SupplyIn] = []
     # Kept rather than deleted once there is history against them — see delete_vendor.
     active: bool = True
-
-
-# The suggestions indexed by their lowercased form, so a branch typing "water" or
-# "WATER" lands on the one stored spelling rather than creating a third category that
-# filters and totals separately from it.
-_SERVICE_BY_LOWER = {c.lower(): c for c in VENDOR_SERVICE_CATEGORIES}
-
-
-def _clean_services(values: List[str]) -> List[str]:
-    """The vendor's categories, in the order they were picked.
-
-    Open rather than closed, unlike the shelf list below it: the suggestions cover what a
-    branch pays for most months, and the one that isn't there — a lift contract, a laundry
-    — is exactly the one worth naming. What is enforced is only what keeps the chip row
-    readable: a trimmed string, a sane length, no duplicates and a ceiling on how many.
-
-    Order is kept rather than sorted because the first one a branch picks is the one it
-    thinks of the vendor as, and that is the chip the table has room to show.
-    """
-    out: List[str] = []
-    seen = set()
-    for raw in values or []:
-        name = " ".join(str(raw or "").split())
-        if not name:
-            continue
-        # A typed one that matches a suggestion becomes that suggestion, whatever case it
-        # arrived in.
-        name = _SERVICE_BY_LOWER.get(name.lower(), name)
-        if len(name) > VENDOR_SERVICE_MAX_LEN:
-            raise _err(400, f"\"{name[:20]}...\" is too long for a category — keep it under {VENDOR_SERVICE_MAX_LEN} characters")
-        key = name.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(name)
-    if len(out) > VENDOR_SERVICE_MAX_COUNT:
-        raise _err(400, f"A vendor can carry {VENDOR_SERVICE_MAX_COUNT} categories at most")
-    return out
 
 
 def _clean(payload: VendorIn) -> dict:
     name = (payload.name or "").strip()
     if not name:
         raise _err(400, "Vendor name is required")
-    bad = [c for c in payload.categories if c not in VALID_CATEGORIES]
-    if bad:
-        raise _err(400, f"Unknown shelf: {', '.join(bad)}")
     gst = (payload.gst_number or "").strip().upper()
     if gst and len(gst) != 15:
         raise _err(400, "A GST number is 15 characters")
@@ -213,32 +183,70 @@ def _clean(payload: VendorIn) -> dict:
         "city": (payload.city or "").strip(),
         "payment_terms": (payload.payment_terms or "").strip(),
         "notes": (payload.notes or "").strip(),
-        "services": _clean_services(payload.services),
-        "categories": sorted(set(payload.categories) & VALID_CATEGORIES),
-        "item_ids": list(dict.fromkeys([i for i in payload.item_ids if i])),
+        "amount": round(max(float(payload.amount or 0), 0), 2),
         "active": bool(payload.active),
     }
 
 
-async def _validate_items(item_ids: List[str]) -> List[str]:
-    if not item_ids:
-        return []
-    known = await _item_names(item_ids)
-    missing = [i for i in item_ids if i not in known]
+async def _supply_rows(supplies: List[SupplyIn]) -> tuple:
+    """The Stock Details rows, cleaned — and with them the two fields derived from them.
+
+    `item_ids` and `categories` are no longer sent by the form and are not asked for: an
+    item is linked because there is a row for it, and the shelf is the shelf that item
+    already sits on. Deriving both is what stops a vendor claiming to supply Equipment
+    while every row on it is a tablet, which is what a tick-box for each could say.
+
+    Returns (rows, item_ids, categories).
+    """
+    ids = list(dict.fromkeys([(sp.item_id or "").strip() for sp in supplies if (sp.item_id or "").strip()]))
+    if not ids:
+        return [], [], []
+    known = await _item_names(ids)
+    missing = [i for i in ids if i not in known]
     if missing:
-        raise _err(400, "One of the picked items is no longer in the catalogue")
-    return item_ids
+        raise _err(400, "One of the picked stock rows is no longer in the catalogue")
+
+    rows = []
+    seen = set()
+    for sp in supplies:
+        item_id = (sp.item_id or "").strip()
+        if not item_id or item_id in seen:
+            continue
+        seen.add(item_id)
+        unit = (sp.unit or "").strip()
+        if unit and unit not in VALID_UNITS:
+            raise _err(400, f"unit must be one of {', '.join(sorted(VALID_UNITS))}")
+        count = int(sp.count or 0)
+        price = float(sp.unit_price or 0)
+        if count < 0 or price < 0:
+            raise _err(400, "A count and a price cannot be negative")
+        stock_type = " ".join((sp.stock_type or "").split())[:40]
+        rows.append({
+            "item_id": item_id,
+            "stock_type": stock_type,
+            "count": count,
+            "unit": unit or known[item_id].get("unit", ""),
+            "unit_price": round(price, 2),
+            # Stored rather than left to the client: the form shows this figure and the
+            # row is what the figure was agreed at, so the two should not be able to part
+            # company in a list read months later.
+            "total": round(count * price, 2),
+        })
+    cats = sorted({known[r["item_id"]].get("category", "") for r in rows} & VALID_CATEGORIES)
+    return rows, [r["item_id"] for r in rows], cats
 
 
 def _decorate(doc: dict, stats: dict, items: dict) -> dict:
     supplied = [items[i] for i in doc.get("item_ids", []) if i in items]
     s = stats.get(doc["id"], {})
     return {
-        # Vendors added before categories existed carry none; the tab reads an absent list
-        # and an empty one the same way, and neither is worth a migration.
-        "services": [],
+        # Vendors added before the Stock Details column existed carry neither field; the
+        # tab reads an absent list and an empty one the same way, so neither is worth a
+        # migration.
+        "amount": 0,
+        "supplies": [],
         **doc,
-        "items": [{"id": i["id"], "name": i["name"], "category": i.get("category", "")} for i in supplied],
+        "items": [{"id": i["id"], "name": i["name"], "category": i.get("category", ""), "unit": i.get("unit", "")} for i in supplied],
         "items_count": len(supplied),
         "deliveries": s.get("deliveries", 0),
         "units_supplied": s.get("units", 0),
@@ -250,7 +258,6 @@ def _decorate(doc: dict, stats: dict, items: dict) -> dict:
 @router.get("")
 async def list_vendors(
     category: Optional[str] = None,
-    service: Optional[str] = None,
     item_id: Optional[str] = None,
     search: Optional[str] = None,
     active_only: bool = False,
@@ -271,10 +278,6 @@ async def list_vendors(
         # Stock picker unable to show a vendor added five minutes ago, which is the only
         # way the shelves ever get marked in the first place.
         q["$and"] = [{"$or": [{"categories": category}, {"categories": {"$in": [None, []]}}]}]
-    if service and service.strip():
-        # Matched exactly and case-insensitively rather than as a substring: "Water" is a
-        # category, not a search term, and the search box above already does searching.
-        q["services"] = {"$regex": f"^{_escape_regex(service.strip())}$", "$options": "i"}
     if item_id:
         q["item_ids"] = item_id
     if active_only:
@@ -353,7 +356,7 @@ async def create_vendor(payload: VendorIn, user: V3UserOut = Depends(v3_require_
     )
     if clash:
         raise _err(409, f"{doc['name']} is already a vendor")
-    await _validate_items(doc["item_ids"])
+    doc["supplies"], doc["item_ids"], doc["categories"] = await _supply_rows(payload.supplies)
 
     doc.update({
         "id": str(uuid.uuid4()),
@@ -377,7 +380,7 @@ async def update_vendor(vendor_id: str, payload: VendorIn, branch_id: Optional[s
     )
     if clash:
         raise _err(409, f"{doc['name']} is already a vendor")
-    await _validate_items(doc["item_ids"])
+    doc["supplies"], doc["item_ids"], doc["categories"] = await _supply_rows(payload.supplies)
 
     doc["updated_at"] = now_iso()
     await v3_col("vendors").update_one({"id": vendor_id}, {"$set": doc})

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Truck, Plus, Search, Pencil, Trash2, History, IndianRupee, PackageCheck, Power,
-  Building2, Phone, Mail, Boxes, Link2, X,
+  Building2, Phone, Mail, Boxes, X, UserRound, Package,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,15 +9,12 @@ import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
 import {
   listVendors, vendorSummary, vendorDeliveries, createVendor, updateVendor, deleteVendor,
-  vendorCatalogue,
+  vendorCatalogue, getBranches,
 } from "@/lib/api";
 // The dialog shell, the labelled field and the input class the stock panel already uses.
 // Imported rather than copied: the two boards sit on the same tab row and a vendor form
 // with its own geometry would read as a different product.
 import { Modal, Field, inputCls, fmt, when, errText } from "@/components/branch/StoreInventoryPanel";
-import {
-  VENDOR_SERVICE_CATEGORIES, VENDOR_SERVICE_MAX_COUNT, VENDOR_SERVICE_MAX_LEN,
-} from "@/lib/vendorServices";
 
 /**
  * The three stock shelves a vendor can supply — the same keys the inventory catalogue and
@@ -34,42 +31,77 @@ const SHELVES = [
 const SHELF_LABEL = Object.fromEntries(SHELVES.map((s) => [s.key, s.label]));
 
 /**
- * What a vendor is, as the chips on its row.
+ * How a unit of stock is counted — VALID_UNITS in backend/routers/v3_inventory.py, whole
+ * rather than the per-shelf subsets the stock form offers.
  *
- * Its own categories when it has them. When it hasn't — every vendor added before the
- * Category field existed — the shelves it supplies, which is the only thing that was ever
- * recorded about those rows and is still true of them. That fallback is what stops the
- * column reading as a column of dashes on an existing list, and it costs nothing: the
- * moment somebody opens one of those vendors and picks a category, its own wins.
+ * A supply row is about how this vendor sends the thing, which is not always how the
+ * branch counts it on the shelf: the same supplement is stocked by the bottle and bought
+ * by the box. The row opens on the catalogue's own unit, so the subset is the default
+ * rather than the limit.
  */
-const vendorTags = (v) => {
-  const own = v.services || [];
-  if (own.length) return own;
-  return (v.categories || []).map((c) => SHELF_LABEL[c] || c);
-};
+const UNITS = ["Strip", "Bottle", "Tube", "Sachet", "Pack", "Piece", "Box", "Set", "Pair"];
 
+/** The typed-in city, kept out of the branch list by a value no branch can have. */
+const OTHER_CITY = "__other__";
+
+// Row keys, so a row being removed doesn't make React reuse the one below it and carry
+// the wrong text into it. Never saved — the server sees item_id and nothing else.
+let rowKey = 0;
+const blankRow = () => ({ key: `r${++rowKey}`, item_id: "", stock_type: "", count: "", unit: "", unit_price: "" });
+
+/**
+ * The draft carries more than the form shows.
+ *
+ * Email, GST, address, payment terms and notes came off the form in the redesign, but a
+ * vendor saved before that still holds them and a save sends the whole record — so they
+ * ride along untouched rather than being blanked by a form that no longer asks. The same
+ * goes for `active`, which the row's own power button owns now.
+ */
 const emptyDraft = {
   id: null, name: "", contact_person: "", phone: "", email: "", gst_number: "",
-  city: "", address: "", payment_terms: "", notes: "", services: [], categories: [],
-  item_ids: [], active: true,
+  city: "", address: "", payment_terms: "", notes: "", amount: "",
+  rows: [blankRow()], active: true,
 };
 
-const toDraft = (v) => ({
-  id: v.id,
-  name: v.name || "",
-  contact_person: v.contact_person || "",
-  phone: v.phone || "",
-  email: v.email || "",
-  gst_number: v.gst_number || "",
-  city: v.city || "",
-  address: v.address || "",
-  payment_terms: v.payment_terms || "",
-  notes: v.notes || "",
-  services: v.services || [],
-  categories: v.categories || [],
-  item_ids: v.item_ids || [],
-  active: v.active !== false,
-});
+/**
+ * A saved vendor as the form's draft.
+ *
+ * The rows are its supply lines, plus one for every item linked without a line — booking
+ * a delivery against a vendor links the item on its own, so those exist and the form has
+ * to show them. It has to, because a save now writes back exactly the rows on screen: an
+ * item the form didn't show would be dropped by the next edit that touched anything else.
+ */
+const toDraft = (v) => {
+  const supplies = v.supplies || [];
+  const covered = new Set(supplies.map((sp) => sp.item_id));
+  const extra = (v.items || []).filter((i) => !covered.has(i.id));
+  const rows = [
+    ...supplies.map((sp) => ({
+      key: `r${++rowKey}`,
+      item_id: sp.item_id || "",
+      stock_type: sp.stock_type || "",
+      count: sp.count ? String(sp.count) : "",
+      unit: sp.unit || "",
+      unit_price: sp.unit_price ? String(sp.unit_price) : "",
+    })),
+    ...extra.map((i) => ({ key: `r${++rowKey}`, item_id: i.id, stock_type: "", count: "", unit: i.unit || "", unit_price: "" })),
+  ];
+  return {
+    id: v.id,
+    name: v.name || "",
+    contact_person: v.contact_person || "",
+    phone: v.phone || "",
+    email: v.email || "",
+    gst_number: v.gst_number || "",
+    city: v.city || "",
+    address: v.address || "",
+    payment_terms: v.payment_terms || "",
+    notes: v.notes || "",
+    amount: v.amount ? String(v.amount) : "",
+    rows: rows.length ? rows : [blankRow()],
+    active: v.active !== false,
+  };
+};
 
 /** A shelf chip, on a vendor row and again as the picker in the form. */
 const ShelfChip = ({ label, on = true, onClick, testid }) => {
@@ -85,17 +117,24 @@ const ShelfChip = ({ label, on = true, onClick, testid }) => {
   );
 };
 
-/** A category the branch typed itself — the only chip that can be taken off again. */
-const CustomChip = ({ label, onRemove, testid }) => (
-  <span
-    className="inline-flex items-center gap-1 rounded-[5px] border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700"
-    data-testid={testid}
-  >
-    {label}
-    <button type="button" onClick={onRemove} className="text-violet-400 hover:text-violet-700" title={`Remove ${label}`}>
-      <X className="h-3 w-3" />
-    </button>
-  </span>
+/** A required field's label — the red star the reference marks four of them with. */
+const Req = ({ children }) => <>{children} <span className="text-rose-500">*</span></>;
+
+/**
+ * One titled half of the form. A tinted strip with an icon and a name, then the fields.
+ *
+ * The strip is doing real work, not decoration: the form asks for two unrelated things at
+ * once — who the vendor is, and what they charge for what — and without a line between
+ * them it reads as one list of eleven boxes.
+ */
+const Panel = ({ title, icon: Icon, tint, children, className = "", testid }) => (
+  <section className={`overflow-hidden rounded-xl border border-slate-200 ${className}`} data-testid={`vendor-panel-${testid}`}>
+    <div className={`flex items-center gap-2 px-4 py-2.5 ${tint}`}>
+      <Icon className="h-4 w-4" />
+      <p className="text-sm font-bold">{title}</p>
+    </div>
+    <div className="space-y-3 p-4">{children}</div>
+  </section>
 );
 
 /**
@@ -119,9 +158,11 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const [summary, setSummary] = useState(null);
   const [catalogue, setCatalogue] = useState([]);
   const [search, setSearch] = useState("");
-  const [catFilter, setCatFilter] = useState("");
-  // The typed-in category, held until it is added — a half-typed word is not a category.
-  const [typed, setTyped] = useState("");
+  const [shelfFilter, setShelfFilter] = useState("");
+  // Where the City dropdown's options come from. Branches carry no city of their own, so
+  // this is their names — which is what the org calls the places it operates in — with
+  // the cities already on vendors folded in and a typed one always possible.
+  const [places, setPlaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -146,46 +187,32 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   // than with every vendor reload. It is org-wide and carries no counts, which is why it
   // has an endpoint of its own — /inventory/items would need a branch to answer.
   useEffect(() => { vendorCatalogue().then(setCatalogue).catch(() => {}); }, []);
+  // Same reasoning: the branch list doesn't change while a vendor is being typed in, and
+  // a failure here only costs the dropdown its suggestions — the city can still be typed.
+  useEffect(() => {
+    getBranches()
+      .then((rows) => setPlaces(rows.map((b) => (b.branch_name || "").trim()).filter(Boolean)))
+      .catch(() => {});
+  }, []);
+
+  /** Branch names and the cities already in use, deduplicated and sorted. */
+  const cityOptions = useMemo(() => {
+    const all = [...places, ...vendors.map((v) => (v.city || "").trim())].filter(Boolean);
+    return [...new Set(all)].sort((a, b) => a.localeCompare(b));
+  }, [places, vendors]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return vendors.filter((v) => {
-      if (catFilter && !vendorTags(v).includes(catFilter)) return false;
+      if (shelfFilter && !(v.categories || []).includes(shelfFilter)) return false;
       if (!q) return true;
       return `${v.name} ${v.contact_person || ""} ${v.phone || ""} ${v.city || ""}`.toLowerCase().includes(q);
     });
-  }, [vendors, search, catFilter]);
-
-  /**
-   * The categories to offer as filters: the ones the list actually carries, in the order
-   * the form offers them and with anything typed in after.
-   *
-   * Deliberately not the whole suggestion list — a chip for Travel on a list where nobody
-   * supplies travel filters to an empty table, and eleven of those is a row of dead
-   * buttons above the thing you were trying to read.
-   */
-  const filterCats = useMemo(() => {
-    const used = new Set(vendors.flatMap(vendorTags));
-    const known = VENDOR_SERVICE_CATEGORIES.filter((c) => used.has(c));
-    const own = [...used].filter((c) => !VENDOR_SERVICE_CATEGORIES.includes(c)).sort();
-    return [...known, ...own];
-  }, [vendors]);
-
-  // A filter on a category that was the last vendor's, or was just renamed away, would
-  // otherwise leave the table empty with no chip lit to explain why.
-  useEffect(() => {
-    if (catFilter && !filterCats.includes(catFilter)) setCatFilter("");
-  }, [filterCats, catFilter]);
+  }, [vendors, search, shelfFilter]);
 
   // What the form offers to link. Narrowed to the shelves the vendor is marked as
   // supplying, because a list of every tablet, supplement and piece of equipment is not a
   // picker; with no shelf picked yet it shows everything rather than nothing.
-  const pickableItems = useMemo(() => {
-    const cats = draft?.categories || [];
-    if (cats.length === 0) return catalogue;
-    return catalogue.filter((i) => cats.includes(i.category));
-  }, [catalogue, draft]);
-
   const run = async (fn, successMsg) => {
     setBusy(true);
     try {
@@ -201,29 +228,57 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     }
   };
 
-  // The form is opened and closed through these rather than setDraft, so the typed-in
-  // category box never survives from one vendor to the next.
-  const openDraft = (d) => { setTyped(""); setDraft(d); };
-  const closeDraft = () => { setTyped(""); setDraft(null); };
+  // A city the dropdown doesn't offer can only have been typed, so the box stays open on
+  // it — including for a vendor saved before the dropdown existed.
+  const isTypedCity = !!draft && !!draft.city.trim() && !cityOptions.includes(draft.city);
+
+  const openDraft = (d) => setDraft(d);
+  const closeDraft = () => setDraft(null);
+
+  /** The rows worth sending: an untouched blank one is not a supply line. */
+  const filledRows = (rows) => rows.filter((r) => r.item_id || r.stock_type.trim() || r.count || r.unit_price);
 
   const payloadOf = (d) => ({
     name: d.name.trim(),
     contact_person: d.contact_person.trim(),
     phone: d.phone.trim(),
+    city: d.city.trim(),
+    amount: Number(d.amount) || 0,
+    supplies: filledRows(d.rows).map((r) => ({
+      item_id: r.item_id,
+      stock_type: r.stock_type.trim(),
+      count: Number(r.count) || 0,
+      unit: r.unit,
+      unit_price: Number(r.unit_price) || 0,
+    })),
+    // Carried through untouched — the form stopped asking for these, it didn't delete
+    // them. See emptyDraft.
     email: d.email.trim(),
     gst_number: d.gst_number.trim(),
-    city: d.city.trim(),
     address: d.address.trim(),
     payment_terms: d.payment_terms.trim(),
     notes: d.notes.trim(),
-    services: d.services,
-    categories: d.categories,
-    item_ids: d.item_ids,
     active: d.active,
   });
 
   const saveVendor = async () => {
-    if (!draft.name.trim()) { toast.error("Vendor name is required"); return; }
+    // The four stars on the form, in the order they are read. Checked here rather than on
+    // the server, which still asks only for a name: an existing vendor saved before these
+    // were required would otherwise be unsavable, and the row's power button sends the
+    // whole record through this same endpoint just to switch one off.
+    const missing = [
+      [!draft.name.trim(), "Vendor name is required"],
+      [!draft.contact_person.trim(), "Person name is required"],
+      [!draft.phone.trim(), "Phone number is required"],
+      [!draft.city.trim(), "City is required"],
+    ].find(([bad]) => bad);
+    if (missing) { toast.error(missing[1]); return; }
+    // A row with a count or a price but no stock picked is a half-filled line, not an
+    // empty one — saving it would quietly drop what was typed.
+    if (filledRows(draft.rows).some((r) => !r.item_id)) {
+      toast.error("Pick the stock for every row you've filled in");
+      return;
+    }
     const ok = await run(
       () => (draft.id ? updateVendor(draft.id, payloadOf(draft), scope) : createVendor(payloadOf(draft))),
       draft.id ? "Vendor updated" : "Vendor added",
@@ -253,45 +308,24 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     }
   };
 
-  const toggleIn = (list, key) => (list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
+  const setRow = (key, patch) => setDraft((d) => ({
+    ...d, rows: d.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)),
+  }));
 
-  const toggleShelf = (key) => setDraft((d) => {
-    const categories = toggleIn(d.categories, key);
-    // Items belonging to a shelf that has just been un-picked are dropped with it —
-    // otherwise the vendor keeps a link the form no longer shows, and the next save would
-    // look like it lost it.
-    const allowed = new Set(catalogue.filter((i) => categories.length === 0 || categories.includes(i.category)).map((i) => i.id));
-    return { ...d, categories, item_ids: d.item_ids.filter((id) => allowed.has(id)) };
-  });
-
-  /** A suggestion chip. Off puts it on the vendor, on takes it back off. */
-  const toggleService = (name) => setDraft((d) => ({ ...d, services: toggleIn(d.services, name) }));
-
-  /**
-   * A category the branch typed. Matched against the suggestions case-insensitively
-   * first, so typing "water" lights the Water chip rather than sitting beside it as a
-   * second category that filters and totals on its own.
-   */
-  const addTyped = () => {
-    const name = typed.trim().replace(/\s+/g, " ");
-    if (!name) return;
-    const known = VENDOR_SERVICE_CATEGORIES.find((c) => c.toLowerCase() === name.toLowerCase());
-    const final = known || name;
-    if (final.length > VENDOR_SERVICE_MAX_LEN) {
-      toast.error(`Keep a category under ${VENDOR_SERVICE_MAX_LEN} characters`);
-      return;
-    }
-    if (draft.services.some((c) => c.toLowerCase() === final.toLowerCase())) {
-      setTyped("");
-      return;
-    }
-    if (draft.services.length >= VENDOR_SERVICE_MAX_COUNT) {
-      toast.error(`A vendor can carry ${VENDOR_SERVICE_MAX_COUNT} categories at most`);
-      return;
-    }
-    setDraft({ ...draft, services: [...draft.services, final] });
-    setTyped("");
+  // Picking the stock fills the unit in from the catalogue row, but only while the unit
+  // is still the one that came from there — a unit chosen by hand is a deliberate answer
+  // and switching the item shouldn't overwrite it silently.
+  const pickItem = (row, itemId) => {
+    const item = catalogue.find((i) => i.id === itemId);
+    const untouched = !row.unit || row.unit === (catalogue.find((i) => i.id === row.item_id)?.unit || "");
+    setRow(row.key, { item_id: itemId, unit: untouched ? (item?.unit || "") : row.unit });
   };
+
+  const addRow = () => setDraft((d) => ({ ...d, rows: [...d.rows, blankRow()] }));
+  const dropRow = (key) => setDraft((d) => {
+    const rows = d.rows.filter((r) => r.key !== key);
+    return { ...d, rows: rows.length ? rows : [blankRow()] };
+  });
 
   const empty = loading || visible.length === 0;
 
@@ -371,20 +405,18 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
               data-testid="vendor-search"
             />
           </div>
-          {filterCats.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="vendor-cat-filter">
-              <ShelfChip label="All" on={catFilter === ""} onClick={() => setCatFilter("")} testid="vendor-cat-filter-all" />
-              {filterCats.map((c) => (
-                <ShelfChip
-                  key={c}
-                  label={c}
-                  on={catFilter === c}
-                  onClick={() => setCatFilter(catFilter === c ? "" : c)}
-                  testid={`vendor-cat-filter-${c}`}
-                />
-              ))}
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="vendor-shelf-filter">
+            <ShelfChip label="All shelves" on={shelfFilter === ""} onClick={() => setShelfFilter("")} testid="vendor-shelf-filter-all" />
+            {SHELVES.map((sh) => (
+              <ShelfChip
+                key={sh.key}
+                label={sh.label}
+                on={shelfFilter === sh.key}
+                onClick={() => setShelfFilter(shelfFilter === sh.key ? "" : sh.key)}
+                testid={`vendor-shelf-filter-${sh.key}`}
+              />
+            ))}
+          </div>
           {canEdit && (
             <Button onClick={() => openDraft({ ...emptyDraft })} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="vendor-new">
               <Plus className="mr-1.5 h-4 w-4" /> New Vendor
@@ -424,7 +456,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                       )}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {vendorTags(v).map((c) => <ShelfChip key={c} label={c} />)}
+                      {(v.categories || []).map((c) => <ShelfChip key={c} label={SHELF_LABEL[c] || c} />)}
                     </div>
                     <p className="mt-1.5 text-[11px] text-slate-500">
                       {v.items_count} item{v.items_count === 1 ? "" : "s"} · {v.deliveries} deliver{v.deliveries === 1 ? "y" : "ies"} · {fmt(v.spend)}
@@ -443,8 +475,8 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                       <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
                       <th className="px-4 py-2.5 font-semibold">Vendor</th>
                       <th className="px-4 py-2.5 font-semibold">Contact</th>
-                      <th className="px-4 py-2.5 font-semibold">Category</th>
-                      <th className="px-4 py-2.5 font-semibold">Stock Linked</th>
+                      <th className="px-4 py-2.5 font-semibold">Shelves</th>
+                      <th className="px-4 py-2.5 font-semibold">Supplies</th>
                       <th className="px-4 py-2.5 font-semibold">Deliveries</th>
                       <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
                     </tr>
@@ -468,9 +500,9 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-1">
-                            {vendorTags(v).length === 0
+                            {(v.categories || []).length === 0
                               ? <span className="text-[11px] text-slate-400">—</span>
-                              : vendorTags(v).map((c) => <ShelfChip key={c} label={c} />)}
+                              : v.categories.map((c) => <ShelfChip key={c} label={SHELF_LABEL[c] || c} />)}
                           </div>
                         </td>
                         <td className="px-4 py-3"><Supplies vendor={v} /></td>
@@ -495,166 +527,129 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
       {draft && (
         <Modal
-          title={draft.id ? "Edit Vendor" : "New Vendor"}
-          subtitle="Shared across branches — each branch books its own deliveries"
+          title={draft.id ? "Edit Vendor" : "Add Vendor"}
           onClose={closeDraft}
           testid="vendor-modal"
+          light
+          width="max-w-4xl"
+          bodyCls="p-4"
           footer={<>
             <Button variant="outline" onClick={closeDraft} data-testid="vendor-cancel">Cancel</Button>
             <Button className="bg-violet-600 text-white hover:bg-violet-700" disabled={busy} onClick={saveVendor} data-testid="vendor-save">
-              {draft.id ? "Save Changes" : "Add Vendor"}
+              {draft.id ? "Save Changes" : "Save Vendor"}
             </Button>
           </>}
         >
-          {/* What the form is for, said once at the top rather than inferred from eight
-              labels. Only on a new vendor: by the time somebody is editing one they know
-              what a vendor is, and a note that never goes away stops being read. */}
-          {!draft.id && (
-            <div className="rounded-lg border border-violet-100 bg-violet-50/70 px-3 py-2.5 text-[12px] leading-relaxed" data-testid="vendor-explainer">
-              <p className="font-semibold text-violet-900">A vendor is anyone the branch pays for something that arrives.</p>
-              <p className="mt-0.5 text-violet-700">
-                The water can supplier, the broadband and phone line, the AC man, the housekeeping agency, the tablet
-                distributor. Add them once — every branch shares the list. For a vendor that supplies stock, pick them under{" "}
-                <span className="font-semibold">Add</span> on a Tablet, Supplement or Equipment row and their deliveries,
-                spend and supply list fill in on their own.
-              </p>
-            </div>
-          )}
+          {/* Two panels, not two halves: who they are is five short answers and what they
+              supply is a list that grows, so the second gets twice the width and the
+              first stops where it stops. They stack on a phone, vendor first. */}
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Panel title="Vendor Details" icon={UserRound} tint="bg-violet-50/70 text-violet-700" testid="vendor-details">
+              <Field label={<Req>Vendor Name</Req>}>
+                <input className={inputCls} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Enter vendor name" data-testid="vendor-name" />
+              </Field>
+              <Field label={<Req>Person Name</Req>}>
+                <input className={inputCls} value={draft.contact_person} onChange={(e) => setDraft({ ...draft, contact_person: e.target.value })} placeholder="Enter person name" data-testid="vendor-contact" />
+              </Field>
+              <Field label={<Req>Phone Number</Req>}>
+                <input className={inputCls} value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} placeholder="Enter phone number" data-testid="vendor-phone" />
+              </Field>
+              <Field label="Amount">
+                <input type="number" min="0" className={inputCls} value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} placeholder="Enter amount" data-testid="vendor-amount" />
+              </Field>
+              <Field label={<Req>City</Req>}>
+                {/* The list is branch names and the cities already on vendors. Neither is
+                    a city master — the OS has none — so Other keeps the box typeable
+                    rather than making a vendor in a new town unsaveable. */}
+                <select
+                  className={inputCls}
+                  value={isTypedCity ? OTHER_CITY : draft.city}
+                  onChange={(e) => setDraft({ ...draft, city: e.target.value === OTHER_CITY ? " " : e.target.value })}
+                  data-testid="vendor-city"
+                >
+                  <option value="">Select city</option>
+                  {cityOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                  <option value={OTHER_CITY}>Other...</option>
+                </select>
+                {isTypedCity && (
+                  <input
+                    className={`${inputCls} mt-2`}
+                    value={draft.city.trim()}
+                    onChange={(e) => setDraft({ ...draft, city: e.target.value || " " })}
+                    placeholder="Type the city"
+                    data-testid="vendor-city-other"
+                  />
+                )}
+              </Field>
+            </Panel>
 
-          <Field label="Vendor Name *">
-            <input className={inputCls} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Sri Medicals Distributors" data-testid="vendor-name" />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Contact Person">
-              <input className={inputCls} value={draft.contact_person} onChange={(e) => setDraft({ ...draft, contact_person: e.target.value })} placeholder="Who to call" data-testid="vendor-contact" />
-            </Field>
-            <Field label="Phone">
-              <input className={inputCls} value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} placeholder="10 digits" data-testid="vendor-phone" />
-            </Field>
+            <Panel title="Stock Details" icon={Package} tint="bg-emerald-50/70 text-emerald-700" testid="stock-details" className="lg:col-span-2">
+              {catalogue.length === 0 ? (
+                <p className="rounded-md border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400" data-testid="vendor-items-empty">
+                  No stock in the catalogue yet — add tablets, supplements or equipment first, then come back and price them here.
+                </p>
+              ) : (
+                <>
+                  {draft.rows.map((r, idx) => {
+                    const total = (Number(r.count) || 0) * (Number(r.unit_price) || 0);
+                    return (
+                      <div key={r.key} className={idx > 0 ? "border-t border-slate-100 pt-3" : ""} data-testid={`vendor-row-block-${idx}`}>
+                        {draft.rows.length > 1 && (
+                          <div className="mb-1.5 flex items-center justify-between">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Stock {idx + 1}</span>
+                            <button type="button" onClick={() => dropRow(r.key)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Remove this stock" data-testid={`vendor-row-drop-${idx}`}>
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <Field label={<Req>Stock Name</Req>}>
+                            <select className={inputCls} value={r.item_id} onChange={(e) => pickItem(r, e.target.value)} data-testid={`vendor-row-item-${idx}`}>
+                              <option value="">Select stock name</option>
+                              {catalogue.map((i) => (
+                                <option key={i.id} value={i.id}>{i.name}{i.brand ? ` - ${i.brand}` : ""}</option>
+                              ))}
+                            </select>
+                          </Field>
+                          <Field label="Stock Type">
+                            <input className={inputCls} value={r.stock_type} onChange={(e) => setRow(r.key, { stock_type: e.target.value })} placeholder="e.g. Individual" data-testid={`vendor-row-type-${idx}`} />
+                          </Field>
+                          <Field label="Stock Count">
+                            <input type="number" min="0" className={inputCls} value={r.count} onChange={(e) => setRow(r.key, { count: e.target.value })} placeholder="Enter count" data-testid={`vendor-row-count-${idx}`} />
+                          </Field>
+                          <Field label="Unit">
+                            <select className={inputCls} value={r.unit} onChange={(e) => setRow(r.key, { unit: e.target.value })} data-testid={`vendor-row-unit-${idx}`}>
+                              <option value="">Select unit</option>
+                              {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                            </select>
+                          </Field>
+                          <Field label="Unit Price">
+                            <input type="number" min="0" className={inputCls} value={r.unit_price} onChange={(e) => setRow(r.key, { unit_price: e.target.value })} placeholder="Enter unit price" data-testid={`vendor-row-price-${idx}`} />
+                          </Field>
+                          <Field label="Total Price">
+                            {/* Read-only because it is the count times the price and
+                                nothing else. A box you could type a different number into
+                                would be a third figure disagreeing with the two above. */}
+                            <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600" data-testid={`vendor-row-total-${idx}`}>
+                              {fmt(total)}
+                            </div>
+                          </Field>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={addRow}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-violet-300 px-3 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-50"
+                    data-testid="vendor-row-add"
+                  >
+                    <Plus className="h-4 w-4" /> Add Another Stock
+                  </button>
+                </>
+              )}
+            </Panel>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Email">
-              <input className={inputCls} value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="orders@vendor.com" data-testid="vendor-email" />
-            </Field>
-            <Field label="GST Number" hint="15 characters, if they bill with one">
-              <input className={inputCls} value={draft.gst_number} onChange={(e) => setDraft({ ...draft, gst_number: e.target.value.toUpperCase() })} placeholder="33ABCDE1234F1Z5" data-testid="vendor-gst" />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="City">
-              <input className={inputCls} value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} placeholder="Chennai" data-testid="vendor-city" />
-            </Field>
-            <Field label="Payment Terms">
-              <input className={inputCls} value={draft.payment_terms} onChange={(e) => setDraft({ ...draft, payment_terms: e.target.value })} placeholder="e.g. 30 days credit" data-testid="vendor-terms" />
-            </Field>
-          </div>
-          <Field label="Address">
-            <textarea rows={2} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400" value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} placeholder="Where the invoices come from" data-testid="vendor-address" />
-          </Field>
-
-          {/* What the vendor is. The suggestions are the categories a payment to them is
-              filed under on the Finance side, so the two screens say the same word about
-              the same supplier — and the box underneath is for the ones that list has no
-              word for, which is every branch's most interesting vendor. */}
-          <Field
-            label="Category"
-            hint={draft.services.length
-              ? `${draft.services.length} of ${VENDOR_SERVICE_MAX_COUNT} · first one shows on the list`
-              : "What they supply — tap the ones that fit, or type your own"}
-          >
-            <div className="flex flex-wrap gap-1.5" data-testid="vendor-services">
-              {VENDOR_SERVICE_CATEGORIES.map((c) => (
-                <ShelfChip
-                  key={c}
-                  label={c}
-                  on={draft.services.includes(c)}
-                  onClick={() => toggleService(c)}
-                  testid={`vendor-service-${c}`}
-                />
-              ))}
-              {draft.services.filter((c) => !VENDOR_SERVICE_CATEGORIES.includes(c)).map((c) => (
-                <CustomChip key={c} label={c} onRemove={() => toggleService(c)} testid={`vendor-service-own-${c}`} />
-              ))}
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                className={inputCls}
-                value={typed}
-                maxLength={VENDOR_SERVICE_MAX_LEN}
-                onChange={(e) => setTyped(e.target.value)}
-                // Enter inside a form field would otherwise submit nothing and close
-                // nothing — here it is the obvious way to finish typing a category.
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTyped(); } }}
-                placeholder="Something else — e.g. Laundry, Lift AMC, Pest Control"
-                data-testid="vendor-service-input"
-              />
-              <Button
-                type="button" variant="outline" className="shrink-0 border-violet-200 text-violet-700 hover:bg-violet-50"
-                onClick={addTyped} disabled={!typed.trim()} data-testid="vendor-service-add"
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" /> Add
-              </Button>
-            </div>
-          </Field>
-
-          <Field label="Supplies These Shelves" hint="Only for stock vendors — picks which stock can be linked below">
-            <div className="flex flex-wrap gap-1.5" data-testid="vendor-shelves">
-              {SHELVES.map((s) => (
-                <ShelfChip
-                  key={s.key}
-                  label={s.label}
-                  on={draft.categories.includes(s.key)}
-                  onClick={() => toggleShelf(s.key)}
-                  testid={`vendor-shelf-${s.key}`}
-                />
-              ))}
-            </div>
-          </Field>
-
-          {/* The link to stock. Booking a delivery against this vendor in Add Stock ticks
-              an item here on its own, so this is for saying so up front — before anything
-              has been bought — and for correcting it afterwards. */}
-          <Field
-            label={<span className="inline-flex items-center gap-1.5"><Link2 className="h-3.5 w-3.5" />Stock They Supply</span>}
-            hint={`${draft.item_ids.length} linked · ticked automatically when stock is booked in against them`}
-          >
-            {pickableItems.length === 0 ? (
-              <p className="rounded-md border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400" data-testid="vendor-items-empty">
-                {catalogue.length === 0
-                  ? "No stock in the catalogue yet — add tablets, supplements or equipment first."
-                  : "Nothing on the picked shelves yet."}
-              </p>
-            ) : (
-              <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-1.5" data-testid="vendor-items">
-                {pickableItems.map((i) => {
-                  const on = draft.item_ids.includes(i.id);
-                  return (
-                    <button
-                      key={i.id}
-                      type="button"
-                      onClick={() => setDraft({ ...draft, item_ids: toggleIn(draft.item_ids, i.id) })}
-                      className={`flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs ${
-                        on ? "border-violet-200 bg-violet-50 font-semibold text-violet-700" : "border-transparent text-slate-600 hover:bg-slate-50"
-                      }`}
-                      data-testid={`vendor-item-${i.id}`}
-                    >
-                      <span className="truncate">{i.name}{i.brand ? ` · ${i.brand}` : ""}</span>
-                      <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-400">{SHELF_LABEL[i.category] || i.category}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </Field>
-
-          <Field label="Notes">
-            <textarea rows={2} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} placeholder="Delivery days, minimum order, anything worth remembering" data-testid="vendor-notes" />
-          </Field>
-
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} data-testid="vendor-active" />
-            Available in Add Stock
-          </label>
         </Modal>
       )}
 

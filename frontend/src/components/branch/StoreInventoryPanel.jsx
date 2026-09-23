@@ -78,23 +78,46 @@ export const when = (iso) => {
 };
 
 /** One dialog shell for all four forms, so a fifth doesn't arrive with its own geometry. */
-export const Modal = ({ title, subtitle, accent = "bg-violet-600", onClose, children, footer, testid }) => (
+/**
+ * The store's dialog shell.
+ *
+ * `width` and `light` are both opt-in and both default to what every form here already
+ * looked like — a narrow column under a coloured bar. The Vendor form is the one that
+ * asks for something else: it is two columns side by side, and a deep header over a form
+ * that wide reads as a banner rather than a title, so it takes a plain one.
+ *
+ * `bodyCls` is there for the same reason. The stacked forms want the shell to space their
+ * fields out; a form that lays out its own columns wants the shell to keep out of it.
+ */
+export const Modal = ({
+  title, subtitle, accent = "bg-violet-600", onClose, children, footer, testid,
+  width = "max-w-md", light = false, bodyCls = "space-y-3 p-5",
+}) => (
   <div
     className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
     onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     data-testid={testid}
   >
-    <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-      <div className={`flex items-start justify-between gap-3 px-5 py-4 text-white ${accent}`}>
-        <div className="min-w-0">
-          <p className="text-base font-semibold">{title}</p>
-          {subtitle && <p className="truncate text-xs text-white/80">{subtitle}</p>}
+    <div className={`flex max-h-[92vh] w-full ${width} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}>
+      {light ? (
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+          <p className="min-w-0 truncate text-[15px] font-bold text-slate-800">{title}</p>
+          <button onClick={onClose} className="shrink-0 rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" data-testid={`${testid}-close`}>
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <button onClick={onClose} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid={`${testid}-close`}>
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-      <div className="flex-1 space-y-3 overflow-y-auto p-5">{children}</div>
+      ) : (
+        <div className={`flex items-start justify-between gap-3 px-5 py-4 text-white ${accent}`}>
+          <div className="min-w-0">
+            <p className="text-base font-semibold">{title}</p>
+            {subtitle && <p className="truncate text-xs text-white/80">{subtitle}</p>}
+          </div>
+          <button onClick={onClose} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid={`${testid}-close`}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+      <div className={`flex-1 overflow-y-auto ${bodyCls}`}>{children}</div>
       <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-5 py-3">{footer}</div>
     </div>
   </div>
