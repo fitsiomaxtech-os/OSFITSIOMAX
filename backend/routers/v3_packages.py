@@ -916,8 +916,58 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.get("consultation_stage") not in ("Consultation Visit", "Fee Collected"):
         raise HTTPException(status_code=400, detail="Consultation Fee can only be collected once the CONSULTANT has completed the consultation")
+    # Which package is being sold. Picked at the desk now: the consultation used to have
+    # one price and nothing to choose, and the package was assigned silently when the
+    # consultant filed their decision -- picking whichever consultation item the database
+    # happened to return first, which was harmless while there was only one and arbitrary
+    # the moment there were three. That auto-assign is gone (see v3_head_physio_board), so
+    # the choice arrives here.
+    #
+    # The price is read off the item, never taken from the client: the amount the desk
+    # sends is what was handed over, and what it was owed is not the same question.
+    package_updates: dict = {}
+    if payload.consultation_item_id:
+        item = await v3_col("store_items").find_one(
+            {"id": payload.consultation_item_id}, {"_id": 0}
+        )
+        if not item:
+            raise HTTPException(status_code=404, detail="Consultation package not found")
+        if item.get("item_type") != "consultation":
+            raise HTTPException(
+                status_code=400,
+                detail="Only a Consultation package can be sold as the Consultation Fee",
+            )
+        # Online and offline are priced separately, and which one applies is a fact about
+        # the appointment rather than anything the desk chooses while taking the money.
+        mode = lead.get("appointment_mode") or "offline"
+        price = item.get("price_online") if mode == "online" else item.get("price_offline")
+
+        # Correcting a collection already taken for this same package keeps the price it
+        # was taken at. This endpoint does first collections and corrections both, and the
+        # screen re-sends the package either way -- so without this, reopening a months-old
+        # payment to fix its payment mode would quietly re-price it at today's catalogue
+        # rate, and the patient's receipt would stop matching what they actually paid.
+        # Switching to a different package is a different sale and does re-price.
+        if item["id"] == lead.get("package_id") and lead.get("package_price") is not None:
+            price = lead["package_price"]
+
+        if price is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{item.get('name')}' has no {mode} price set. Add one in Services & Products.",
+            )
+        package_updates = {
+            "package_id": item["id"],
+            "package_name": item["name"],
+            "package_price": price,
+            "package_duration_minutes": item.get("duration_minutes"),
+            "package_mode": mode,
+            "consultation_package": item.get("consultation_package"),
+        }
+        lead = {**lead, **package_updates}
+
     if not lead.get("package_id") or lead.get("package_price") is None:
-        raise HTTPException(status_code=400, detail="No consultation package assigned yet")
+        raise HTTPException(status_code=400, detail="Select the consultation package being collected for")
     # Paperwork before money, enforced here and not only on the screen that asks for it.
     # The Consultation Visit panel locks its Collect tab until the prescription is filed,
     # but that lock is one screen's manners: the Collect button at the end of a row on the
@@ -949,6 +999,10 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     is_update = lead.get("package_paid") is not None
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        # The package goes on the lead in the same write as the money taken for it, so a
+        # collection can never be filed against a package the lead is not recorded as
+        # having been sold.
+        **package_updates,
         "package_paid": amount,
         "package_payment_mode": taken["mode"],
         "package_payment_details": taken["details"],

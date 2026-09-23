@@ -579,21 +579,25 @@ async def hp_consultation_decision(
     if long_term_notes:
         detail += f" · Long Term: {', '.join(k.title() for k in long_term_notes)}"
 
-    # Consultation Fee has a single fixed price (FITSIO STORE > Consultation) — there's
-    # nothing for the Head Physio to pick, so it's auto-assigned the first time a lead
-    # reaches this decision, the same way it always has been, just without a manual step.
-    if not lead.get("package_id"):
-        consultation_item = await v3_col("store_items").find_one({"item_type": "consultation"}, {"_id": 0})
-        if consultation_item:
-            mode = lead.get("appointment_mode") or "offline"
-            price = consultation_item.get("price_online") if mode == "online" else consultation_item.get("price_offline")
-            updates.update({
-                "package_id": consultation_item["id"],
-                "package_name": consultation_item["name"],
-                "package_price": price,
-                "package_duration_minutes": consultation_item.get("duration_minutes"),
-                "package_mode": mode,
-            })
+    # No consultation package is assigned here any more.
+    #
+    # This used to auto-assign one, on the premise that "Consultation Fee has a single
+    # fixed price — there's nothing for the Head Physio to pick". That premise is gone:
+    # the shelf now holds three packages at three prices (Only Consultation, Consultation
+    # + 20 mins Physio, Consultation + 1 Session). What the code actually did was
+    # find_one({"item_type": "consultation"}) with no sort and no category — whichever row
+    # the database handed back first — which was harmless while every row was the same
+    # price and became an arbitrary pick worth hundreds of rupees the moment it wasn't.
+    #
+    # The package is chosen at the desk instead, as the fee is collected, by the person
+    # who knows what the patient agreed to buy. See collect_package_payment in
+    # v3_packages.py, which now takes the choice and reads the price off the item.
+    #
+    # So a lead sits between the consultation and the collection with no package and no
+    # package_price, where it previously carried a guess. Anything reading an expected
+    # consultation fee before it is collected reads nothing rather than the wrong number,
+    # which is the honest answer to "what does this patient owe" before anyone has said
+    # what they are buying.
 
     if payload.decision == "consultation_treatment":
         if not payload.item_id:

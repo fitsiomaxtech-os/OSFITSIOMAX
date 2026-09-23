@@ -1,0 +1,64 @@
+/**
+ * The three packages a Physiotherapy consultation is sold as.
+ *
+ * Read in two places that must agree: Services & Products, where a package is created and
+ * its length previewed, and the Consultation Fee desk, where one is picked and its price
+ * collected. Kept here rather than in either screen so neither imports the other — and so
+ * there is one list to change when a fourth package appears.
+ *
+ * Mirrors PACKAGES in backend/consultation_packages.py, which is the authority: it derives
+ * an item's duration_minutes from `key` on the way in and ignores whatever the form sent,
+ * and it reads the price off the stored item rather than taking it from the desk. The
+ * `minutes` here are a preview only. A test (backend/tests/test_consultation_packages.py)
+ * reads this file back and fails if the two lists disagree, because a preview promising 65
+ * minutes while the server stores 45 would surface as a physio's afternoon running over
+ * rather than as anything on screen.
+ */
+export const CONSULTATION_PACKAGES = [
+  {
+    key: "only_consultation",
+    label: "Only Consultation",
+    minutes: 45,
+    breakdown: "45 mins",
+    durationLabel: "45 mins",
+  },
+  {
+    key: "consultation_plus_physio",
+    label: "Consultation + 20 mins Physio",
+    minutes: 65,
+    // One booking end to end: the physio follows the consultation in the same slot.
+    breakdown: "45 mins + 20 mins = 65 mins",
+    durationLabel: "65 mins",
+  },
+  {
+    key: "consultation_plus_session",
+    label: "Consultation + 1 Session",
+    minutes: 45,
+    breakdown: "45 mins + 1 Session",
+    // Not "45 mins". A row promising a session that reads as 45 minutes looks like the
+    // session was forgotten, wherever it is listed.
+    durationLabel: "45 mins + 1 Session",
+    // Said out loud in the create form, because "45 mins" against a package whose name
+    // promises a session reads like a mistake otherwise. A session has no length in this
+    // system to add -- a session package carries a count, not a duration -- and it is
+    // booked whenever the patient is next free, so holding time for it here would block
+    // out a physio's calendar for an appointment nobody has made.
+    note: "The session is booked separately. Only the 45-minute consultation is held in the calendar.",
+  },
+];
+
+/** The package keys in the order they are read on the shelf, and escalate in. */
+export const CONSULTATION_PACKAGE_ORDER = CONSULTATION_PACKAGES.map((p) => p.key);
+
+export const consultationPackageByKey = (key) =>
+  CONSULTATION_PACKAGES.find((p) => p.key === key) || null;
+
+/**
+ * What one consultation item costs, for the mode the appointment is actually in.
+ *
+ * Online and offline are priced separately on every catalogue row. The server reads this
+ * off the stored item itself when the money is taken — this is the same sum, for showing
+ * the figure before anyone presses Collect.
+ */
+export const consultationItemPrice = (item, mode) =>
+  (mode === "online" ? item?.price_online : item?.price_offline) ?? null;

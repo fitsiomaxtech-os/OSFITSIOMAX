@@ -640,6 +640,16 @@ class V3PartialInstallment(BaseModel):
 
 
 class V3CollectPackagePaymentInput(BaseModel):
+    # Which of the three consultation packages is being sold, chosen at the desk as the
+    # fee is collected. The consultation used to have one price and nothing to pick, so
+    # the package was assigned silently the moment the consultant filed their decision;
+    # with three of them that pick is a decision somebody has to make, and this is where
+    # it is made. The server reads the price off the item rather than taking it from the
+    # client -- see collect_package_payment.
+    #
+    # Optional, because a lead that already carries a package (assigned before this
+    # existed, or being corrected after the fact) is still collectable without re-picking.
+    consultation_item_id: Optional[str] = None
     payment_mode: str = "cash"
     # Set when the fee arrived in more than one tender. Present, it settles both the
     # amount (their sum) and the mode ("split"), and payment_mode above is ignored.

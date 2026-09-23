@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getPaymentHistory, getFollowUpHistory, getLoginHistory, getBranches } from "@/lib/api";
+import { CONSULTATION_PACKAGES, consultationPackageByKey } from "@/lib/consultationPackages";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
 import { VendorPanel } from "@/components/branch/VendorPanel";
 import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
@@ -90,48 +91,13 @@ export const DURATION_OPTIONS = [
 // freely, and each one's length follows from what is in it — so the package is picked and
 // the duration is read off it, not chosen.
 //
-// Mirrors CONSULTATION_PACKAGES in backend/routers/v3_store.py, which is the authority:
-// it derives duration_minutes from `key` on the way in and ignores whatever this form
-// sends for it. So `minutes` here only decides what the preview below the dropdown says.
-// The keys have to stay identical to the backend's — a key it does not know is refused
-// rather than saved with a guessed length.
+// The table lives in lib/consultationPackages so this screen and the Consultation Fee desk
+// — which picks one of these when the money is taken — read the same list without either
+// importing the other. See that file for how it relates to the server's copy.
 //
 // Only Physiotherapy. Fitness and Diet Consultations name themselves and pick their own
 // duration, as they always have.
-export const CONSULTATION_PACKAGES = [
-  {
-    key: "only_consultation",
-    label: "Only Consultation",
-    minutes: 45,
-    breakdown: "45 mins",
-    durationLabel: "45 mins",
-  },
-  {
-    key: "consultation_plus_physio",
-    label: "Consultation + 20 mins Physio",
-    minutes: 65,
-    // One booking end to end: the physio follows the consultation in the same slot.
-    breakdown: "45 mins + 20 mins = 65 mins",
-    durationLabel: "65 mins",
-  },
-  {
-    key: "consultation_plus_session",
-    label: "Consultation + 1 Session",
-    minutes: 45,
-    breakdown: "45 mins + 1 Session",
-    // Not "45 mins". A row promising a session that reads as 45 minutes looks like the
-    // session was forgotten, wherever it is listed.
-    durationLabel: "45 mins + 1 Session",
-    // Said out loud in the form, because "45 mins" against a package whose name promises a
-    // session reads like a mistake otherwise. A session has no length in this system to add
-    // -- a session package carries a count, not a duration -- and it is booked whenever the
-    // patient is next free, so holding time for it here would block out a physio's calendar
-    // for an appointment nobody has made.
-    note: "The session is booked separately. Only the 45-minute consultation is held in the calendar.",
-  },
-];
-
-const packageByKey = (key) => CONSULTATION_PACKAGES.find((p) => p.key === key) || null;
+const packageByKey = consultationPackageByKey;
 
 /**
  * What one item's length should read as, anywhere it is listed.

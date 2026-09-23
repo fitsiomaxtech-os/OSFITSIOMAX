@@ -38,6 +38,7 @@ import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { PortalLoginCreatedDialog } from "@/components/branch/PortalLoginCreatedDialog";
 import { AppointmentConfirmCard } from "@/components/AppointmentConfirmCard";
 import { isCourseComplete } from "@/lib/leadStage";
+import { CONSULTATION_PACKAGE_ORDER, consultationItemPrice } from "@/lib/consultationPackages";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { SeatDots } from "@/components/ui/seat-dots";
 
@@ -3473,6 +3474,22 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // like a rehab course, so the same rate-times-count arithmetic returns the plan price.
   const zumbaPackageItems = useMemo(() => storeItems.filter((i) => i.item_type === "session" && i.category === "zumba").sort(byDuration), [storeItems]);
 
+  // The consultation shelf, offered at the desk as the fee is collected.
+  //
+  // Only the three fixed packages — a row carrying one of the package keys. The
+  // consultation used to have one price and nothing to choose, and the package was
+  // assigned silently the moment the consultant filed their decision; it is picked here
+  // now, by the person who knows what the patient agreed to buy.
+  //
+  // In catalogue order rather than by price or name, because that is the order they are
+  // read in on Services & Products and the order they escalate in.
+  const consultationPackageItems = useMemo(() => {
+    const rank = (i) => CONSULTATION_PACKAGE_ORDER.indexOf(i.consultation_package);
+    return storeItems
+      .filter((i) => i.item_type === "consultation" && CONSULTATION_PACKAGE_ORDER.includes(i.consultation_package))
+      .sort((a, b) => rank(a) - rank(b));
+  }, [storeItems]);
+
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
     try {
@@ -3787,6 +3804,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     const lead = leadArg?.id ? leadArg : selectedLead;
     const existing = lead.package_payment_details?.installments;
     setCollectFeeDraft({
+      // Which of the three packages is being sold. Blank on a patient who has not been
+      // sold one yet -- and that is now every patient arriving here, since nothing assigns
+      // a package before this desk does. The fee stays hidden until this is answered,
+      // because until somebody says what was bought there is no fee to show.
+      //
+      // A collection being corrected reopens on the package it was taken for, so fixing a
+      // payment mode does not make anyone re-pick what the patient already bought.
+      consultation_item_id: lead.package_id || "",
       payment_mode: lead.package_payment_mode || "cash",
       amount: lead.package_paid ?? lead.package_price ?? "",
       // Typed by hand or not at all -- see FeeAmountEntry. Reloaded from what was
@@ -3951,10 +3976,33 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   const treatmentComputedAmount = treatmentFeeTotalSessions ? Math.round(treatmentSessionsNow * perSessionRate * 100) / 100 : treatmentFeeTotal;
   const treatmentRemainingSessions = treatmentFeeTotalSessions - treatmentSessionsNow;
 
+  // The package picked on the popup, and what it costs in the mode this appointment is
+  // in. The desk chooses it as the fee is taken, so the price follows the dropdown rather
+  // than the lead — a patient reaching this screen has not been sold anything yet, and
+  // package_price is only written once this collection goes through.
+  //
+  // The lead's own figures are the fallback for a collection being corrected after the
+  // fact, where the package is already on the record and the catalogue row behind it may
+  // since have been repriced or deleted: what was charged then is what is being fixed.
+  const consultationChosenItem = useMemo(
+    () => consultationPackageItems.find((i) => i.id === collectFeeDraft?.consultation_item_id) || null,
+    [consultationPackageItems, collectFeeDraft?.consultation_item_id],
+  );
+  // Mirrors collect_package_payment: re-picking the package a collection was already
+  // taken for keeps the price it was taken at, so correcting a payment mode cannot
+  // re-price it at today's catalogue rate. Anything else costs what the shelf says.
+  const consultationChosenPrice = !consultationChosenItem
+    ? (collectFeeDraft?.consultation_item_id && collectFeeDraft.consultation_item_id === selectedLead?.package_id
+      ? selectedLead?.package_price ?? null
+      : null)
+    : consultationChosenItem.id === selectedLead?.package_id && selectedLead?.package_price != null
+    ? selectedLead.package_price
+    : consultationItemPrice(consultationChosenItem, selectedLead?.appointment_mode || "offline");
+
   // The Consultation Fee's own three figures, worked out the same way the Treatment
   // Fee's are below: a discount that was typed, the money being handed over now, and
   // whatever of the price that leaves still owed.
-  const consultationPrice = selectedLead?.package_price || 0;
+  const consultationPrice = consultationChosenPrice ?? selectedLead?.package_price ?? 0;
   const consultationDiscountRs = Math.max(0, parseFloat(collectFeeDraft?.discount) || 0);
   const consultationAmountNow = parseFloat(collectFeeDraft?.amount) || 0;
   const consultationBalanceDue = round2(consultationPrice - consultationDiscountRs - consultationAmountNow);
@@ -4220,6 +4268,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // Actually calls the API. Leaves the Treatment Fee section (if present)
   // untouched and open for its own button.
   async function submitConsultationFee(payload) {
+    // Which package this money is for, attached here rather than in each of the five
+    // branches above -- this is the one place that calls the API, so it is the one place
+    // that cannot forget. The server reads the price off the item itself; what it takes
+    // from here is only which item.
+    if (collectFeeDraft?.consultation_item_id) {
+      payload = { ...payload, consultation_item_id: collectFeeDraft.consultation_item_id };
+    }
     setCollectingFee(true);
     // Only the call is guarded. Anything below runs after the money is already taken,
     // and a failure there must never be reported as a failure to collect — that reads
@@ -4257,8 +4312,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       prefix: scheduleOnly ? "CS" : "CF",
       kind: scheduleOnly ? "schedule" : "paid",
       paidFor: "Consultation Fee",
-      packageName: selectedLead.package_name || "",
-      assignedPrice: scheduleOnly ? null : selectedLead.package_price,
+      // Off the lead the server handed back, not the one on screen before the call. The
+      // package is chosen as the fee is collected now, so on a first collection the lead
+      // in hand still has no package on it — the receipt would print no package name and
+      // no assigned price, on every consultation sold.
+      packageName: res.lead?.package_name || selectedLead.package_name || "",
+      assignedPrice: scheduleOnly ? null : (res.lead?.package_price ?? selectedLead.package_price),
       discount: payload.discount_amount || 0,
       balanceDue: balanceDueLabel(savedInst),
       installments: scheduleOnly ? savedInst : [],
@@ -9893,7 +9952,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                 settle at the desk, a cheque's bank and number, or the schedule a Partial
                 Payment is spread over. Layered above the main popup. */}
             {packageConfirmDraft && collectFeeDraft && (() => {
-              const expected = selectedLead.package_price;
+              // What the patient is buying decides what they owe, so nothing about the
+              // money is shown until the package is picked -- see the dropdown below.
+              const chosenPackage = consultationChosenItem;
+              const expected = consultationChosenPrice ?? selectedLead.package_price;
+              const packageChosen = expected != null;
               const mode = collectFeeDraft.payment_mode;
               // Cheque and Partial Payment are promises of money rather than money, so
               // neither has an amount to move, a discount to agree, a balance to date, a
@@ -9910,12 +9973,69 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       <button onClick={() => setPackageConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
+                    {/* What the patient bought, above what they owe for it, because the
+                        second follows from the first. The consultation used to have one
+                        price and nothing to choose; three packages at three prices is a
+                        decision, and this is the desk that makes it. */}
+                    <div data-testid="cons-collect-fee-package-block">
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Package</label>
+                      <select
+                        value={collectFeeDraft.consultation_item_id || ""}
+                        onChange={(e) => setCollectFeeDraft({
+                          ...collectFeeDraft,
+                          consultation_item_id: e.target.value,
+                          // The amount follows the package onto its own price. A discount
+                          // typed against the package being switched away from is dropped
+                          // with it -- it was agreed on a different figure.
+                          amount: "",
+                          discount: "",
+                        })}
+                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                        data-testid="cons-collect-fee-package"
+                      >
+                        <option value="">Select a package…</option>
+                        {consultationPackageItems.map((i) => {
+                          const price = consultationItemPrice(i, selectedLead.appointment_mode || "offline");
+                          return (
+                            <option key={i.id} value={i.id}>
+                              {i.name}{price != null ? ` — Rs.${price}` : " — no price set"}
+                            </option>
+                          );
+                        })}
+                        {/* A package already collected for whose catalogue row has since
+                            been changed or removed. Offered so a correction can be saved
+                            without re-picking something the patient never bought. */}
+                        {collectFeeDraft.consultation_item_id
+                          && !consultationPackageItems.some((i) => i.id === collectFeeDraft.consultation_item_id) && (
+                          <option value={collectFeeDraft.consultation_item_id}>
+                            {selectedLead.package_name || "Package already on this patient"}
+                            {selectedLead.package_price != null ? ` — Rs.${selectedLead.package_price}` : ""}
+                          </option>
+                        )}
+                      </select>
+                      {!packageChosen && (
+                        <p className="mt-1 text-[11px] text-amber-700" data-testid="cons-collect-fee-package-hint">
+                          Pick the package the patient agreed to. The fee follows from it.
+                        </p>
+                      )}
+                      {chosenPackage?.duration_minutes != null && (
+                        <p className="mt-1 text-[11px] text-slate-400" data-testid="cons-collect-fee-package-duration">
+                          {chosenPackage.duration_minutes} min appointment.
+                        </p>
+                      )}
+                      {consultationPackageItems.length === 0 && (
+                        <p className="mt-1 text-[11px] text-rose-700" data-testid="cons-collect-fee-package-empty">
+                          No consultation packages are set up yet — add them under Services &amp; Products &gt; Consultations.
+                        </p>
+                      )}
+                    </div>
+
                     {/* Replaces the old bare amount box and its "differs from" warning:
                         a discount is typed into its own boxes, and nothing else moves the
                         fee. `lockAmount` is why the fee itself is shown rather than typed
                         — it is the assigned price less that discount, which is not Branch
                         Admin's to overtype, so there is no box to overtype it in. */}
-                    {settlesNow && (
+                    {packageChosen && settlesNow && (
                       <FeeAmountEntry
                         assignedPrice={expected}
                         discount={collectFeeDraft.discount}
@@ -9927,7 +10047,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       />
                     )}
 
-                    {settlesNow && (
+                    {packageChosen && settlesNow && (
                       <BalanceDueBlock
                         balance={consultationBalanceDue}
                         dueDate={collectFeeDraft.balance_due_date}
@@ -9938,7 +10058,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       />
                     )}
 
-                    {mode === "cheque" && (
+                    {packageChosen && mode === "cheque" && (
                       <>
                         <LockedFeeRow
                           label="Consultation Fee"
@@ -9954,7 +10074,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       </>
                     )}
 
-                    {mode === "partial" && (
+                    {packageChosen && mode === "partial" && (
                       <>
                         <LockedFeeRow
                           label="Consultation Fee"
@@ -9976,7 +10096,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         settled above, and this is where it gets counted out. Sits under
                         the amount because the amount is what it is counted against, and
                         it moves while the discount is still being agreed. */}
-                    {!packageConfirmDraft.payment_lines && mode === "cash" && (
+                    {packageChosen && !packageConfirmDraft.payment_lines && mode === "cash" && (
                       <CashDenominations
                         amount={collectFeeDraft.amount}
                         notes={packageConfirmDraft.cash_notes}
@@ -9985,7 +10105,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       />
                     )}
 
-                    {packageConfirmDraft.payment_lines && (
+                    {packageChosen && packageConfirmDraft.payment_lines && (
                       <>
                         <SplitPaymentLines
                           lines={packageConfirmDraft.payment_lines}
@@ -10135,6 +10255,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         onClick={confirmCollectConsultationFee}
                         disabled={
                           collectingFee ||
+                          // Nothing is collectable until somebody has said what is being
+                          // sold: the fee, the discount it comes off and the balance it
+                          // leaves are all measured against the package's price.
+                          !packageChosen ||
                           // A cheque needs the two things it is traced by, and nothing else.
                           (mode === "cheque"
                             ? (!(collectFeeDraft.bank_name || "").trim() || !(collectFeeDraft.cheque_number || "").trim())

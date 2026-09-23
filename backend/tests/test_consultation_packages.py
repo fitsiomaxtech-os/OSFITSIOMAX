@@ -111,17 +111,17 @@ def test_includes_session_is_false_for_anything_unknown():
 # form would promise 65 minutes and store 45, and nobody would find out until a physio's
 # afternoon ran over.
 #
-# Read out of the JSX rather than trusted, because nothing else makes the two lists one
+# Read out of the source rather than trusted, because nothing else makes the two lists one
 # list. A regex is enough: the table is a literal by design, so that the person editing it
 # can see every package at once.
 _JSX = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "frontend", "src", "components", "PackagesBoard.jsx",
+    "frontend", "src", "lib", "consultationPackages.js",
 )
 
 
 def _packages_from_jsx():
-    """{key: (label, minutes)} as the popup has them."""
+    """{key: (label, minutes)} as the front end has them."""
     import re
 
     with open(_JSX, encoding="utf-8") as fh:
@@ -141,7 +141,7 @@ def _packages_from_jsx():
 @pytest.mark.skipif(not os.path.exists(_JSX), reason="frontend not checked out beside the backend")
 def test_the_popups_package_list_matches_this_one():
     from_jsx = _packages_from_jsx()
-    assert from_jsx, "could not read CONSULTATION_PACKAGES out of PackagesBoard.jsx"
+    assert from_jsx, "could not read CONSULTATION_PACKAGES out of lib/consultationPackages.js"
     assert sorted(from_jsx) == sorted(cp.keys()), "the popup and the server offer different packages"
     for key, (label, minutes) in from_jsx.items():
         assert label == cp.label_of(key), f"{key}: popup says {label!r}"
