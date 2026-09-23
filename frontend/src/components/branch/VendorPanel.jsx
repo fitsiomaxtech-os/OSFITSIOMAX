@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Truck, Plus, Search, Pencil, Trash2, History, IndianRupee, Power, Wallet,
-  Building2, Phone, Mail, Boxes, X, UserRound, Package, ChevronRight, CalendarDays,
+  Building2, Phone, Mail, Boxes, X, UserRound, Package, ChevronRight, RefreshCw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
+// The date controls every other board on the OS is narrowed by, rather than a third
+// spelling of "this month" that only this tab understands. The strip is the five one-tap
+// ranges; the calendar beside it is everything else — Yesterday, Last Month, an exact
+// day, a typed range — and the board narrows by the two of them intersected.
+import { QuickDateFilterBar, intersectDateFilters } from "@/components/QuickDateFilterBar";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   listVendors, vendorSummary, vendorDeliveries, createVendor, updateVendor, deleteVendor,
   vendorStock, createVendorStock, updateVendorStock, deleteVendorStock,
@@ -119,16 +125,22 @@ const toDraft = (v) => ({
 const newDraft = (over = {}) => ({ ...emptyDraft, rows: [blankRow()], ...over });
 
 /**
- * Whether a row was written down inside the dates asked for.
+ * Whether a row was written down inside the range asked for.
  *
- * `created_at` is an ISO string and the boxes hand back YYYY-MM-DD, so the first ten
- * characters compare as text with no parsing and no timezone to get wrong. A row from
- * before the field existed carries no date at all: it shows while nothing is being asked
- * and hides the moment a date is, because it cannot answer the question.
+ * `created_at` is stored UTC and the filter's ends are the reader's own midnights, which
+ * is what makes this a Date comparison rather than a string one: for this company those
+ * two are five and a half hours apart, and a purchase typed after 5.30am IST is already
+ * "yesterday" in the text of its own timestamp.
+ *
+ * A row with no date at all drops out of any range asked for — it cannot be shown to be
+ * inside one — and shows whenever nothing is being asked.
  */
-const inDates = (row, from, to) => {
-  const on = (row.created_at || "").slice(0, 10);
-  if (!on) return !from && !to;
+const inRange = (row, range) => {
+  const from = range?.from || null;
+  const to = range?.to || null;
+  if (!from && !to) return true;
+  const on = row.created_at ? new Date(row.created_at) : null;
+  if (!on || Number.isNaN(on.getTime())) return false;
   if (from && on < from) return false;
   if (to && on > to) return false;
   return true;
@@ -272,9 +284,10 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const [summary, setSummary] = useState(null);
   const [stock, setStock] = useState([]);
   const [search, setSearch] = useState("");
-  // Both lists on the tab answer to it, which is why it sits in the bar over both of
-  // them rather than in either card.
-  const [dates, setDates] = useState({ from: "", to: "" });
+  // Two controls, one narrowing. Both lists on the tab answer to it, which is why it
+  // sits in the bar over both of them rather than in either card.
+  const [quickDate, setQuickDate] = useState(null);
+  const [dateFilter, setDateFilter] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -298,20 +311,21 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   useEffect(() => { load(); }, [load, reloadToken]);
 
+  /** The strip and the calendar, narrowed together. Either alone is the other's null. */
+  const range = useMemo(() => intersectDateFilters(quickDate, dateFilter), [quickDate, dateFilter]);
+  const dated = !!(range?.from || range?.to);
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return vendors.filter((v) => {
-      if (!inDates(v, dates.from, dates.to)) return false;
+      if (!inRange(v, range)) return false;
       if (!q) return true;
       return `${v.name} ${v.contact_person || ""} ${v.phone || ""} ${v.city || ""}`.toLowerCase().includes(q);
     });
-  }, [vendors, search, dates]);
+  }, [vendors, search, range]);
 
   /** The stock list under the same dates. The search box is about vendors, so it isn't. */
-  const visibleStock = useMemo(
-    () => stock.filter((r) => inDates(r, dates.from, dates.to)),
-    [stock, dates],
-  );
+  const visibleStock = useMemo(() => stock.filter((r) => inRange(r, range)), [stock, range]);
 
   const stockById = useMemo(() => Object.fromEntries(stock.map((r) => [r.id, r])), [stock]);
 
@@ -582,63 +596,70 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
         <StatTile label="Purchase Spend" value={fmt(summary?.spend)} sub="stock booked in, at cost" icon={IndianRupee} color="#059669" />
       </div>
 
+      {/* The toolbar every list on the OS is read through: search, the five one-tap
+          ranges, the calendar for everything else, a refresh, and the one button that
+          adds. Same order and same controls as the patient list and the leads board, so
+          a desk that moves between them is not learning a third arrangement.
+
+          The row wraps rather than scrolls. On a phone the search takes the first line
+          and the ranges and actions the second, which is where five buttons and four
+          icons honestly sit at 390px. */}
       <Card>
-        <CardContent className="flex flex-wrap items-center gap-3 p-3">
+        <CardContent className="flex flex-wrap items-center gap-2 p-3">
           <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search vendor, contact or city..."
-              className={`${inputCls} pl-9`}
+              className={`${inputCls} h-10 pl-9`}
               data-testid="vendor-search"
             />
           </div>
+
           {/* Dates, where the shelf chips were. The chips filtered by where a vendor's
               stock had landed, which is a fact about the ledger rather than about the
-              vendor; when it was written down is the question this tab is actually asked.
-              Both lists below answer to it. The Shelves column still reads the same. */}
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="vendor-date-filter">
-            <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
-            <input
-              type="date"
-              value={dates.from}
-              max={dates.to || undefined}
-              onChange={(e) => setDates({ ...dates, from: e.target.value })}
-              className="h-9 rounded-md border border-slate-200 px-2 text-xs text-slate-600 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400"
-              title="Added on or after"
-              data-testid="vendor-date-from"
-            />
-            <span className="text-xs text-slate-400">to</span>
-            <input
-              type="date"
-              value={dates.to}
-              min={dates.from || undefined}
-              onChange={(e) => setDates({ ...dates, to: e.target.value })}
-              className="h-9 rounded-md border border-slate-200 px-2 text-xs text-slate-600 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400"
-              title="Added on or before"
-              data-testid="vendor-date-to"
-            />
-            {/* Only there when there is something to clear — an X beside two empty
-                boxes is a button that does nothing. */}
-            {(dates.from || dates.to) && (
-              <button
-                type="button"
-                onClick={() => setDates({ from: "", to: "" })}
-                className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                title="Clear the dates"
-                data-testid="vendor-date-clear"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-          {/* One button, because there is one dialog. Stock used to be added from a
-              second one of its own, which meant a branch writing down a single purchase
-              opened two forms and had to know to open them in the right order. */}
+              vendor; when it was written down is the question a purchase book is asked.
+              Both lists below answer to it. The Shelves column still reads the same.
+
+              No Custom trigger on the strip: the calendar beside it is that same popover,
+              and two doors onto one control is what the leads toolbar already took out. */}
+          <QuickDateFilterBar
+            value={quickDate}
+            onChange={setQuickDate}
+            testid="vendor-quick-date"
+            inline
+            showCustom={false}
+          />
+          <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="vendor-date-filter" centered iconOnly />
+
+          {/* Both lists are a snapshot. Stock typed at another desk, or a delivery booked
+              in on a shelf, appears here only on a reload, and there was no way to ask
+              for one short of leaving the tab and coming back. */}
+          <Button
+            onClick={load}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+            data-testid="vendor-refresh"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+
+          {/* One button, because there is one dialog — stock is typed inside it. An icon
+              like the rest of the actions, with the words on title and aria-label: the
+              row is read by position here and on every other board, and a lone worded
+              button on the end of four glyphs reads as belonging to something else. */}
           {canEdit && (
-            <Button onClick={() => setDraft(newDraft())} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="vendor-new">
-              <Plus className="mr-1.5 h-4 w-4" /> Add Vendor
+            <Button
+              onClick={() => setDraft(newDraft())}
+              title="Add Vendor"
+              aria-label="Add Vendor"
+              className="h-10 w-10 shrink-0 bg-violet-600 p-0 text-white hover:bg-violet-700"
+              data-testid="vendor-new"
+            >
+              <Plus className="h-4 w-4" />
             </Button>
           )}
         </CardContent>
@@ -665,7 +686,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-empty">
               {stock.length === 0
                 ? <>No stock yet — use <span className="font-semibold">Add Vendor</span> to type in what the branch buys and who supplies it.</>
-                : "No stock was added between those dates."}
+                : "No stock was added in the range chosen."}
             </p>
           ) : (
             <div className="divide-y divide-slate-100" data-testid="stock-list">
@@ -745,7 +766,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             <p className="px-4 py-14 text-center text-sm text-slate-400" data-testid="vendor-empty">
               {loading ? "Loading vendors..."
                 : vendors.length === 0 ? "No vendors yet — add one, and type what it supplies while you are there."
-                  : (dates.from || dates.to) ? "No vendors match that search or those dates."
+                  : dated ? "No vendors match that search in the range chosen."
                     : "Nothing matches that search."}
             </p>
           ) : (

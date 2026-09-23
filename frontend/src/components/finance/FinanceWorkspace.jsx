@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BadgeIndianRupee, Building2, CheckSquare, Coins, Layers, Plus, QrCode, Receipt, Wallet } from "lucide-react";
+import { BadgeIndianRupee, Building2, CheckSquare, Coins, Layers, Plus, QrCode, Receipt, Truck, Wallet } from "lucide-react";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { ApprovalsBoard, PendingBadge } from "@/components/finance/ApprovalsBoard";
 import { BankAccountsBoard } from "@/components/finance/BankAccountsBoard";
 import { BranchCashBoard } from "@/components/finance/BranchCashBoard";
 import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
 import { ProfitBoard } from "@/components/finance/ProfitBoard";
+import { VendorPanel } from "@/components/branch/VendorPanel";
 import { getFinanceApprovals, getFinanceExpenses } from "@/lib/api";
 
 // How often the Approvals badge asks again. A branch sends a day up while this board sits
@@ -113,6 +114,23 @@ const TABS = [
       />
     ),
   },
+  {
+    key: "vendor",
+    label: "Vendor",
+    icon: Truck,
+    // The other side of the money on this board: Expense is what a branch spent, this is
+    // who it was spent with and what is still owed them. The same tab FITSIOMAX STORE
+    // carries, against the same org-wide book — a vendor added at a branch is the one
+    // read here, and a bill settled here is settled there.
+    //
+    // Accountant's own board only. Super Admin reaches this exact panel from Services and
+    // Products, and a second copy inside Finance would be one screen on two routes, each
+    // able to show the other's edits only after a reload.
+    accountantOnly: true,
+    // No branch is handed down: the vendor book is org-wide, and the totals it narrows by
+    // branch are the delivery figures, which this desk reads across every branch.
+    render: () => <VendorPanel />,
+  },
 ];
 
 /**
@@ -129,7 +147,8 @@ export const FinanceWorkspace = ({ branches, testId = "finance-workspace" }) => 
   // Tabs gated to super_admin drop out entirely on the Accountant's own board rather than
   // sitting there to 404 on a click — the same reason each one's own endpoints refuse an
   // accountant, said once here instead of inside every such page.
-  const visibleTabs = TABS.filter((t) => !t.superAdminOnly || scoped);
+  // ...and the Vendor tab the other way round, for the reason on the tab itself.
+  const visibleTabs = TABS.filter((t) => (!t.superAdminOnly || scoped) && (!t.accountantOnly || !scoped));
   const [tab, setTab] = useState(TABS[0].key);
   const [selectedId, setSelectedId] = useState(ALL_KEY);
   const branchId = scoped && selectedId !== ALL_KEY ? selectedId : undefined;

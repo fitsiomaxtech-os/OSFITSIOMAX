@@ -41,16 +41,21 @@ from utils import now_iso
 router = APIRouter(prefix="/api/v3/vendors", tags=["vendors"])
 
 # Who the Vendor tab is for: the branch that buys the stock and knows its suppliers, Super
-# Admin who oversees every branch's, and Business Development beside them. All three reach
-# it in the UI — Branch Admin through FITSIOMAX STORE on their own board, the other two
-# through Services and Products.
+# Admin who oversees every branch's, Business Development beside them, and the Accountant
+# who pays the bills. All four reach it in the UI — Branch Admin through FITSIOMAX STORE
+# on their own board, Super Admin and Business Development through Services and Products,
+# the Accountant through a Vendor tab on their own finance board.
 #
-# Spelled out here rather than reusing v3_inventory's READ_ROLES, which is the same three
-# plus head_physio. A head physio reads stock counts because running the floor means
-# knowing what is on the shelf; who the branch buys from, on what terms and for how much is
-# a purchasing question and no screen of theirs asks it. Writing is the same three — there
-# is no desk that may add a vendor but not read one.
-VENDOR_ROLES = ("super_admin", "business_dev", "branch_admin")
+# The accountant is the newest of them and the most obviously owed it: what a vendor has
+# billed and what is still outstanding is the other side of the expense ledger that desk
+# already keeps, and until now the only way to read it was to ask a branch.
+#
+# Spelled out here rather than reusing v3_inventory's READ_ROLES, which is a different
+# list — it carries head_physio and not the accountant. A head physio reads stock counts
+# because running the floor means knowing what is on the shelf; who the branch buys from,
+# on what terms and for how much is a purchasing question and no screen of theirs asks it.
+# Writing is the same four — there is no desk that may add a vendor but not read one.
+VENDOR_ROLES = ("super_admin", "business_dev", "branch_admin", "accountant")
 
 
 def _err(status: int, msg: str):
