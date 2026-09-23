@@ -49,9 +49,16 @@ export const windowLabel = (window) => {
  * Each segment is filled on its own so the gap between a morning and an evening is never
  * offered, and every slot finishes inside the half it started in — a 45-minute slot is not
  * published at 12:30 on a morning that ends at 1:00.
+ *
+ * `gap` is the break left after each slot, and it is not part of the slot: a 45-minute
+ * consultation with a 20-minute gap runs 7:00 – 7:45 and the next one opens at 8:05. The
+ * length a slot runs for is the package's and is never touched here — only the spacing is.
+ * A slot still has to finish inside its half, so the trailing gap may hang over the end of
+ * the window; what would be published in it is nothing either way.
  */
-export const gridTimesFor = (window, step, fallback = { start_time: "08:00", end_time: "22:00" }) => {
+export const gridTimesFor = (window, step, fallback = { start_time: "08:00", end_time: "22:00" }, gap = 0) => {
   const size = step || 30;
+  const stride = size + Math.max(0, Number(gap) || 0);
   const segs = segmentsOf(window);
   const use = segs.length > 0 ? segs : segmentsOf(fallback);
   const times = [];
@@ -59,7 +66,7 @@ export const gridTimesFor = (window, step, fallback = { start_time: "08:00", end
     const from = minutesOfTime(seg.start_time);
     const to = minutesOfTime(seg.end_time);
     if (from === null || to === null) return;
-    for (let m = from; m + size <= to; m += size) {
+    for (let m = from; m + size <= to; m += stride) {
       times.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
     }
   });
