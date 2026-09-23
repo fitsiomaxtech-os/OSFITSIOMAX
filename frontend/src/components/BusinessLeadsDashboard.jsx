@@ -155,7 +155,7 @@ const TABS = [
 const SETTINGS_SUB_VIEWS = ["marketing", "stages"];
 const SETTINGS_SUB_TABS = [
   { key: "marketing", label: "Marketing Source", icon: Megaphone },
-  { key: "stages", label: "CI/CD ROOTS", icon: Activity },
+  { key: "stages", label: "Workflow Roots", icon: Activity },
 ];
 const isTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.includes(view) : view === key);
 
