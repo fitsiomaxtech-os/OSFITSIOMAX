@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Truck, Plus, Search, Pencil, Trash2, History, IndianRupee, PackageCheck, Power,
+  Truck, Plus, Search, Pencil, Trash2, History, IndianRupee, Power, Wallet,
   Building2, Phone, Mail, Boxes, X, UserRound, Package,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,7 +9,7 @@ import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
 import {
   listVendors, vendorSummary, vendorDeliveries, createVendor, updateVendor, deleteVendor,
-  vendorCatalogue, getBranches,
+  vendorStock, createVendorStock, deleteVendorStock, getBranches,
 } from "@/lib/api";
 // The dialog shell, the labelled field and the input class the stock panel already uses.
 // Imported rather than copied: the two boards sit on the same tab row and a vendor form
@@ -17,10 +17,12 @@ import {
 import { Modal, Field, inputCls, fmt, when, errText } from "@/components/branch/StoreInventoryPanel";
 
 /**
- * The three stock shelves a vendor can supply — the same keys the inventory catalogue and
- * the backend's VALID_CATEGORIES use, so a shelf added there is added here and nowhere
- * else. A vendor may supply any number of them, including none while nothing has been
- * bought yet.
+ * The three stock shelves a vendor can turn out to supply — the same keys the inventory
+ * catalogue and the backend's VALID_CATEGORIES use.
+ *
+ * Nothing on this tab sets them. They are written by booking a delivery against a vendor
+ * in Add Stock, so a vendor's shelves are where their stock actually landed rather than
+ * where somebody said it would.
  */
 const SHELVES = [
   { key: "tablet", label: "Tablet" },
@@ -32,25 +34,33 @@ const SHELF_LABEL = Object.fromEntries(SHELVES.map((s) => [s.key, s.label]));
 
 /**
  * How a unit of stock is counted — VALID_UNITS in backend/routers/v3_inventory.py, whole
- * rather than the per-shelf subsets the stock form offers.
+ * rather than the per-shelf subsets the sales catalogue offers.
  *
- * A supply row is about how this vendor sends the thing, which is not always how the
- * branch counts it on the shelf: the same supplement is stocked by the bottle and bought
- * by the box. The row opens on the catalogue's own unit, so the subset is the default
- * rather than the limit.
+ * The Stock Detail book is what gets bought, which is wider than what gets sold: the same
+ * supplement is sold by the bottle and bought by the box, and a water can is neither.
  */
 const UNITS = ["Strip", "Bottle", "Tube", "Sachet", "Pack", "Piece", "Box", "Set", "Pair"];
+
+/** Matches VALID_PAYMENT_MODES in backend/routers/v3_inventory.py. */
+const PAYMENT_MODES = [
+  { key: "cash", label: "Cash" },
+  { key: "upi", label: "UPI" },
+  { key: "card", label: "Card" },
+  { key: "account_transfer", label: "Account Transfer" },
+];
 
 /** The typed-in city, kept out of the branch list by a value no branch can have. */
 const OTHER_CITY = "__other__";
 
 // Row keys, so a row being removed doesn't make React reuse the one below it and carry
-// the wrong text into it. Never saved — the server sees item_id and nothing else.
+// the wrong text into it. Never saved — the server sees the fields and nothing else.
 let rowKey = 0;
-const blankRow = () => ({ key: `r${++rowKey}`, item_id: "", stock_type: "", count: "", unit: "", unit_price: "" });
+const blankRow = () => ({ key: `r${++rowKey}`, name: "", stock_type: "", count: "", unit: "", unit_price: "" });
+
+const rowTotal = (r) => (Number(r.count) || 0) * (Number(r.unit_price) || 0);
 
 /**
- * The draft carries more than the form shows.
+ * The vendor draft carries more than the form shows.
  *
  * Email, GST, address, payment terms and notes came off the form in the redesign, but a
  * vendor saved before that still holds them and a save sends the whole record — so they
@@ -59,51 +69,31 @@ const blankRow = () => ({ key: `r${++rowKey}`, item_id: "", stock_type: "", coun
  */
 const emptyDraft = {
   id: null, name: "", contact_person: "", phone: "", email: "", gst_number: "",
-  city: "", address: "", payment_terms: "", notes: "", amount: "",
-  rows: [blankRow()], active: true,
+  city: "", address: "", payment_terms: "", notes: "",
+  stock_ids: [], amount: "", paid_amount: "", payment_mode: "", payment_date: "",
+  active: true,
 };
 
-/**
- * A saved vendor as the form's draft.
- *
- * The rows are its supply lines, plus one for every item linked without a line — booking
- * a delivery against a vendor links the item on its own, so those exist and the form has
- * to show them. It has to, because a save now writes back exactly the rows on screen: an
- * item the form didn't show would be dropped by the next edit that touched anything else.
- */
-const toDraft = (v) => {
-  const supplies = v.supplies || [];
-  const covered = new Set(supplies.map((sp) => sp.item_id));
-  const extra = (v.items || []).filter((i) => !covered.has(i.id));
-  const rows = [
-    ...supplies.map((sp) => ({
-      key: `r${++rowKey}`,
-      item_id: sp.item_id || "",
-      stock_type: sp.stock_type || "",
-      count: sp.count ? String(sp.count) : "",
-      unit: sp.unit || "",
-      unit_price: sp.unit_price ? String(sp.unit_price) : "",
-    })),
-    ...extra.map((i) => ({ key: `r${++rowKey}`, item_id: i.id, stock_type: "", count: "", unit: i.unit || "", unit_price: "" })),
-  ];
-  return {
-    id: v.id,
-    name: v.name || "",
-    contact_person: v.contact_person || "",
-    phone: v.phone || "",
-    email: v.email || "",
-    gst_number: v.gst_number || "",
-    city: v.city || "",
-    address: v.address || "",
-    payment_terms: v.payment_terms || "",
-    notes: v.notes || "",
-    amount: v.amount ? String(v.amount) : "",
-    rows: rows.length ? rows : [blankRow()],
-    active: v.active !== false,
-  };
-};
+const toDraft = (v) => ({
+  id: v.id,
+  name: v.name || "",
+  contact_person: v.contact_person || "",
+  phone: v.phone || "",
+  email: v.email || "",
+  gst_number: v.gst_number || "",
+  city: v.city || "",
+  address: v.address || "",
+  payment_terms: v.payment_terms || "",
+  notes: v.notes || "",
+  stock_ids: v.stock_ids || [],
+  amount: v.amount ? String(v.amount) : "",
+  paid_amount: v.paid_amount ? String(v.paid_amount) : "",
+  payment_mode: v.payment_mode || "",
+  payment_date: v.payment_date || "",
+  active: v.active !== false,
+});
 
-/** A shelf chip, on a vendor row and again as the picker in the form. */
+/** A shelf chip, and the filter row above the table. */
 const ShelfChip = ({ label, on = true, onClick, testid }) => {
   const cls = on
     ? "border-violet-200 bg-violet-50 text-violet-700"
@@ -121,11 +111,11 @@ const ShelfChip = ({ label, on = true, onClick, testid }) => {
 const Req = ({ children }) => <>{children} <span className="text-rose-500">*</span></>;
 
 /**
- * One titled half of the form. A tinted strip with an icon and a name, then the fields.
+ * One titled section of a form. A tinted strip with an icon and a name, then the fields.
  *
- * The strip is doing real work, not decoration: the form asks for two unrelated things at
- * once — who the vendor is, and what they charge for what — and without a line between
- * them it reads as one list of eleven boxes.
+ * The strip is doing real work, not decoration: the vendor form asks for three unrelated
+ * things at once — who they are, what they supply, what has been paid — and without a
+ * line between them it reads as one list of eleven boxes.
  */
 const Panel = ({ title, icon: Icon, tint, children, className = "", testid }) => (
   <section className={`overflow-hidden rounded-xl border border-slate-200 ${className}`} data-testid={`vendor-panel-${testid}`}>
@@ -137,26 +127,38 @@ const Panel = ({ title, icon: Icon, tint, children, className = "", testid }) =>
   </section>
 );
 
+/** A money figure with its name over it, read-only. */
+const Readout = ({ label, value, tone = "text-slate-600" }) => (
+  <div>
+    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">{label}</label>
+    <div className={`flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold ${tone}`}>{value}</div>
+  </div>
+);
+
 /**
- * FITSIOMAX STORE > Vendor — who supplies the stock, and which of it they supply.
+ * FITSIOMAX STORE > Vendor — who the organisation buys from, what it buys, what it owes.
  *
- * The list is org-wide, exactly as the item catalogue is: one vendor across the whole
+ * Two books, added from the two buttons above the table. Stock Detail is what gets bought
+ * and at what rate, typed by hand because a purchase is known long before anybody decides
+ * whether the thing is ever sold over a counter. Vendor is who supplies it, which of it
+ * they supply, and what has been paid against the bill.
+ *
+ * Both are org-wide, exactly as the sales catalogue is: one vendor across the whole
  * organisation is what makes a spend figure add up and what lets two branches recognise
  * the same supplier. `branchId` only narrows the delivery totals on each row — a Branch
  * Admin is pinned to their own branch by the server whatever this sends, and a Super
- * Admin with none sees every branch's, which is the org-wide view that desk wants.
+ * Admin with none sees every branch's.
  *
- * The supply link is the point of the tab. A vendor carries the catalogue rows they
- * supply, and booking a delivery against them in Add Stock adds the item to that list on
- * its own — so the list describes what has actually been bought rather than what somebody
- * remembered to tick.
+ * The delivery totals, the Shelves column and the Supplies list come from somewhere else
+ * entirely: the stock ledger, written by Add Stock on the shelf itself. Nothing on this
+ * tab moves stock, which is why nothing on it needs to know which branch you are.
  */
 export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const scope = branchId ? { branch_id: branchId } : {};
 
   const [vendors, setVendors] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [catalogue, setCatalogue] = useState([]);
+  const [stock, setStock] = useState([]);
   const [search, setSearch] = useState("");
   const [shelfFilter, setShelfFilter] = useState("");
   // Where the City dropdown's options come from. Branches carry no city of their own, so
@@ -166,16 +168,18 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const [draft, setDraft] = useState(null);            // create / edit
+  const [draft, setDraft] = useState(null);            // the vendor form
+  const [stockDraft, setStockDraft] = useState(null);  // the stock detail form
   const [ledger, setLedger] = useState(null);          // { vendor, rows }
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const s = branchId ? { branch_id: branchId } : {};
-      const [rows, totals] = await Promise.all([listVendors(s), vendorSummary(s)]);
+      const [rows, totals, book] = await Promise.all([listVendors(s), vendorSummary(s), vendorStock()]);
       setVendors(rows);
       setSummary(totals);
+      setStock(book);
     } catch (e) {
       toast.error(errText(e, "Couldn't load the vendors"));
     }
@@ -183,23 +187,15 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   }, [branchId]);
 
   useEffect(() => { load(); }, [load, reloadToken]);
-  // The catalogue only changes when stock items are added, so it is fetched once rather
-  // than with every vendor reload. It is org-wide and carries no counts, which is why it
-  // has an endpoint of its own — /inventory/items would need a branch to answer.
-  useEffect(() => { vendorCatalogue().then(setCatalogue).catch(() => {}); }, []);
-  // Same reasoning: the branch list doesn't change while a vendor is being typed in, and
-  // a failure here only costs the dropdown its suggestions — the city can still be typed.
+
+  // The branch list doesn't change while a vendor is being typed in, so it is fetched once
+  // rather than with every reload. A failure costs the dropdown its suggestions and
+  // nothing else — the city can still be typed.
   useEffect(() => {
     getBranches()
       .then((rows) => setPlaces(rows.map((b) => (b.branch_name || "").trim()).filter(Boolean)))
       .catch(() => {});
   }, []);
-
-  /** Branch names and the cities already in use, deduplicated and sorted. */
-  const cityOptions = useMemo(() => {
-    const all = [...places, ...vendors.map((v) => (v.city || "").trim())].filter(Boolean);
-    return [...new Set(all)].sort((a, b) => a.localeCompare(b));
-  }, [places, vendors]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -210,9 +206,14 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     });
   }, [vendors, search, shelfFilter]);
 
-  // What the form offers to link. Narrowed to the shelves the vendor is marked as
-  // supplying, because a list of every tablet, supplement and piece of equipment is not a
-  // picker; with no shelf picked yet it shows everything rather than nothing.
+  /** Branch names and the cities already in use, deduplicated and sorted. */
+  const cityOptions = useMemo(() => {
+    const all = [...places, ...vendors.map((v) => (v.city || "").trim())].filter(Boolean);
+    return [...new Set(all)].sort((a, b) => a.localeCompare(b));
+  }, [places, vendors]);
+
+  const stockById = useMemo(() => Object.fromEntries(stock.map((r) => [r.id, r])), [stock]);
+
   const run = async (fn, successMsg) => {
     setBusy(true);
     try {
@@ -228,29 +229,36 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     }
   };
 
+  // ---------------------------------------------------------------- the vendor form
+
   // A city the dropdown doesn't offer can only have been typed, so the box stays open on
   // it — including for a vendor saved before the dropdown existed.
   const isTypedCity = !!draft && !!draft.city.trim() && !cityOptions.includes(draft.city);
 
-  const openDraft = (d) => setDraft(d);
-  const closeDraft = () => setDraft(null);
+  const linkedTotal = (ids) => ids.reduce((sum, id) => sum + Number(stockById[id]?.total || 0), 0);
 
-  /** The rows worth sending: an untouched blank one is not a supply line. */
-  const filledRows = (rows) => rows.filter((r) => r.item_id || r.stock_type.trim() || r.count || r.unit_price);
+  /**
+   * Ticking a stock row also refills the bill.
+   *
+   * The amount stays typeable afterwards, because a bill carries delivery, discount and
+   * tax that no rate on a line knows about — but it opens on what the lines add up to,
+   * which is right far more often than nought is.
+   */
+  const toggleStock = (id) => setDraft((d) => {
+    const stock_ids = d.stock_ids.includes(id) ? d.stock_ids.filter((x) => x !== id) : [...d.stock_ids, id];
+    return { ...d, stock_ids, amount: stock_ids.length ? String(linkedTotal(stock_ids)) : "" };
+  });
 
   const payloadOf = (d) => ({
     name: d.name.trim(),
     contact_person: d.contact_person.trim(),
     phone: d.phone.trim(),
     city: d.city.trim(),
+    stock_ids: d.stock_ids,
     amount: Number(d.amount) || 0,
-    supplies: filledRows(d.rows).map((r) => ({
-      item_id: r.item_id,
-      stock_type: r.stock_type.trim(),
-      count: Number(r.count) || 0,
-      unit: r.unit,
-      unit_price: Number(r.unit_price) || 0,
-    })),
+    paid_amount: Number(d.paid_amount) || 0,
+    payment_mode: d.payment_mode,
+    payment_date: d.payment_date,
     // Carried through untouched — the form stopped asking for these, it didn't delete
     // them. See emptyDraft.
     email: d.email.trim(),
@@ -273,17 +281,11 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
       [!draft.city.trim(), "City is required"],
     ].find(([bad]) => bad);
     if (missing) { toast.error(missing[1]); return; }
-    // A row with a count or a price but no stock picked is a half-filled line, not an
-    // empty one — saving it would quietly drop what was typed.
-    if (filledRows(draft.rows).some((r) => !r.item_id)) {
-      toast.error("Pick the stock for every row you've filled in");
-      return;
-    }
     const ok = await run(
       () => (draft.id ? updateVendor(draft.id, payloadOf(draft), scope) : createVendor(payloadOf(draft))),
       draft.id ? "Vendor updated" : "Vendor added",
     );
-    if (ok) closeDraft();
+    if (ok) setDraft(null);
   };
 
   // Switching a vendor off is the ordinary end of one — they stop appearing in Add Stock
@@ -308,24 +310,43 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     }
   };
 
-  const setRow = (key, patch) => setDraft((d) => ({
-    ...d, rows: d.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)),
-  }));
+  // ---------------------------------------------------------------- the stock form
 
-  // Picking the stock fills the unit in from the catalogue row, but only while the unit
-  // is still the one that came from there — a unit chosen by hand is a deliberate answer
-  // and switching the item shouldn't overwrite it silently.
-  const pickItem = (row, itemId) => {
-    const item = catalogue.find((i) => i.id === itemId);
-    const untouched = !row.unit || row.unit === (catalogue.find((i) => i.id === row.item_id)?.unit || "");
-    setRow(row.key, { item_id: itemId, unit: untouched ? (item?.unit || "") : row.unit });
+  const setRow = (key, patch) => setStockDraft((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const addRow = () => setStockDraft((rows) => [...rows, blankRow()]);
+  const dropRow = (key) => setStockDraft((rows) => {
+    const left = rows.filter((r) => r.key !== key);
+    return left.length ? left : [blankRow()];
+  });
+
+  const saveStock = async () => {
+    // An untouched row is not an entry — somebody hit Add Another Stock and changed their
+    // mind, which shouldn't be an error message.
+    const filled = stockDraft.filter((r) => r.name.trim() || r.stock_type.trim() || r.count || r.unit_price);
+    if (filled.length === 0) { toast.error("Type at least one stock name"); return; }
+    if (filled.some((r) => !r.name.trim())) { toast.error("Every row needs a stock name"); return; }
+    const ok = await run(
+      () => createVendorStock(filled.map((r) => ({
+        name: r.name.trim(),
+        stock_type: r.stock_type.trim(),
+        count: Number(r.count) || 0,
+        unit: r.unit,
+        unit_price: Number(r.unit_price) || 0,
+      }))),
+      "Stock added",
+    );
+    if (ok) setStockDraft(null);
   };
 
-  const addRow = () => setDraft((d) => ({ ...d, rows: [...d.rows, blankRow()] }));
-  const dropRow = (key) => setDraft((d) => {
-    const rows = d.rows.filter((r) => r.key !== key);
-    return { ...d, rows: rows.length ? rows : [blankRow()] };
-  });
+  const removeStock = async (row) => {
+    const msg = row.vendor_count
+      ? `${row.name} is on ${row.vendor_count} vendor${row.vendor_count === 1 ? "" : "s"}. Remove it from the stock list and unlink it from them?`
+      : `Remove ${row.name} from the stock list?`;
+    if (!window.confirm(msg)) return;
+    await run(() => deleteVendorStock(row.id), "Stock removed");
+  };
+
+  // ---------------------------------------------------------------- the table
 
   const empty = loading || visible.length === 0;
 
@@ -349,7 +370,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             <Power className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => openDraft(toDraft(vendor))}
+            onClick={() => setDraft(toDraft(vendor))}
             className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-violet-600"
             title="Edit" data-testid={`vendor-edit-${vendor.id}`}
           >
@@ -369,28 +390,43 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   const Supplies = ({ vendor }) => (
     <div className="flex flex-wrap items-center gap-1">
-      {(vendor.items || []).length === 0 ? (
+      {(vendor.stock || []).length === 0 ? (
         <span className="text-[11px] text-slate-400">Nothing linked yet</span>
       ) : (
         <>
-          {vendor.items.slice(0, 3).map((i) => (
-            <span key={i.id} className="rounded-[5px] border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">{i.name}</span>
+          {vendor.stock.slice(0, 3).map((r) => (
+            <span key={r.id} className="rounded-[5px] border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">{r.name}</span>
           ))}
-          {vendor.items.length > 3 && (
-            <span className="text-[11px] font-semibold text-slate-400">+{vendor.items.length - 3} more</span>
+          {vendor.stock.length > 3 && (
+            <span className="text-[11px] font-semibold text-slate-400">+{vendor.stock.length - 3} more</span>
           )}
         </>
       )}
     </div>
   );
 
+  /** What is on the bill and what is left of it. */
+  const Payment = ({ vendor }) => {
+    if (!vendor.amount) return <span className="text-[11px] text-slate-400">—</span>;
+    const owed = Number(vendor.balance || 0);
+    return (
+      <>
+        <p className="font-medium text-slate-700">{fmt(vendor.amount)}</p>
+        <p className={`text-[11px] ${owed > 0 ? "font-semibold text-amber-600" : "text-emerald-600"}`}>
+          {owed > 0 ? `${fmt(owed)} due` : "Settled"}
+          {vendor.payment_date ? ` · ${vendor.payment_date}` : ""}
+        </p>
+      </>
+    );
+  };
+
   return (
     <div className="space-y-4" data-testid="vendor-panel">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Vendors" value={summary?.vendors ?? "—"} sub={`${summary?.active ?? 0} switched on`} icon={Truck} color="#7c3aed" />
-        <StatTile label="Linked Stock" value={summary?.linked_items ?? "—"} sub="items with a vendor" icon={Boxes} color="#0284c7" />
-        <StatTile label="Deliveries" value={summary?.deliveries ?? "—"} sub="stock booked in" icon={PackageCheck} color="#d97706" />
-        <StatTile label="Purchase Spend" value={fmt(summary?.spend)} sub="at cost price" icon={IndianRupee} color="#059669" />
+        <StatTile label="Stock Items" value={stock.length || "—"} sub="in the stock list" icon={Boxes} color="#0284c7" />
+        <StatTile label="Outstanding" value={fmt(summary?.outstanding)} sub="still to pay vendors" icon={Wallet} color="#d97706" />
+        <StatTile label="Purchase Spend" value={fmt(summary?.spend)} sub="stock booked in, at cost" icon={IndianRupee} color="#059669" />
       </div>
 
       <Card>
@@ -418,9 +454,22 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             ))}
           </div>
           {canEdit && (
-            <Button onClick={() => openDraft({ ...emptyDraft })} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="vendor-new">
-              <Plus className="mr-1.5 h-4 w-4" /> New Vendor
-            </Button>
+            <>
+              {/* Stock first, and in its own colour: it is the one that has to happen
+                  first. A vendor form opened before anything is in the stock list has
+                  nothing to link, and this is the button that says so. */}
+              <Button
+                variant="outline"
+                onClick={() => setStockDraft([blankRow()])}
+                className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                data-testid="vendor-stock-new"
+              >
+                <Plus className="mr-1.5 h-4 w-4" /> Add Stock Detail
+              </Button>
+              <Button onClick={() => setDraft({ ...emptyDraft })} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="vendor-new">
+                <Plus className="mr-1.5 h-4 w-4" /> Add Vendor
+              </Button>
+            </>
           )}
         </CardContent>
       </Card>
@@ -434,7 +483,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
           {empty ? (
             <p className="px-4 py-14 text-center text-sm text-slate-400" data-testid="vendor-empty">
               {loading ? "Loading vendors..."
-                : vendors.length === 0 ? "No vendors yet — add the ones the branch buys stock from."
+                : vendors.length === 0 ? "No vendors yet — add the stock first, then the vendor who supplies it."
                   : "Nothing matches that search."}
             </p>
           ) : (
@@ -459,7 +508,9 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                       {(v.categories || []).map((c) => <ShelfChip key={c} label={SHELF_LABEL[c] || c} />)}
                     </div>
                     <p className="mt-1.5 text-[11px] text-slate-500">
-                      {v.items_count} item{v.items_count === 1 ? "" : "s"} · {v.deliveries} deliver{v.deliveries === 1 ? "y" : "ies"} · {fmt(v.spend)}
+                      {v.stock_count} stock · {v.deliveries} deliver{v.deliveries === 1 ? "y" : "ies"}
+                      {v.amount ? ` · ${fmt(v.amount)} billed` : ""}
+                      {v.balance > 0 ? ` · ${fmt(v.balance)} due` : ""}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       <RowActions vendor={v} />
@@ -469,14 +520,15 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
               </div>
 
               <div className="hidden overflow-x-auto sm:block" data-testid="vendor-list-desktop">
-                <table className="w-full min-w-[900px] text-sm">
+                <table className="w-full min-w-[980px] text-sm">
                   <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
                     <tr>
                       <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
                       <th className="px-4 py-2.5 font-semibold">Vendor</th>
                       <th className="px-4 py-2.5 font-semibold">Contact</th>
                       <th className="px-4 py-2.5 font-semibold">Shelves</th>
-                      <th className="px-4 py-2.5 font-semibold">Supplies</th>
+                      <th className="px-4 py-2.5 font-semibold">Stock</th>
+                      <th className="px-4 py-2.5 font-semibold">Payment</th>
                       <th className="px-4 py-2.5 font-semibold">Deliveries</th>
                       <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
                     </tr>
@@ -506,6 +558,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                           </div>
                         </td>
                         <td className="px-4 py-3"><Supplies vendor={v} /></td>
+                        <td className="px-4 py-3"><Payment vendor={v} /></td>
                         <td className="px-4 py-3 text-slate-600">
                           {v.deliveries}
                           <span className="block text-[11px] text-slate-400">{fmt(v.spend)} · {v.last_supplied_at ? when(v.last_supplied_at) : "never"}</span>
@@ -525,24 +578,116 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
         </CardContent>
       </Card>
 
+      {stockDraft && (
+        <Modal
+          title="Add Stock Detail"
+          onClose={() => setStockDraft(null)}
+          testid="stock-modal"
+          light
+          width="max-w-3xl"
+          bodyCls="p-4 space-y-4"
+          footer={<>
+            <Button variant="outline" onClick={() => setStockDraft(null)} data-testid="stock-cancel">Cancel</Button>
+            <Button className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={busy} onClick={saveStock} data-testid="stock-save">
+              Save Stock
+            </Button>
+          </>}
+        >
+          <Panel title="Stock Details" icon={Package} tint="bg-emerald-50/70 text-emerald-700" testid="stock-entry">
+            {stockDraft.map((r, idx) => (
+              <div key={r.key} className={idx > 0 ? "border-t border-slate-100 pt-3" : ""} data-testid={`stock-row-${idx}`}>
+                {stockDraft.length > 1 && (
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Stock {idx + 1}</span>
+                    <button type="button" onClick={() => dropRow(r.key)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Remove this row" data-testid={`stock-row-drop-${idx}`}>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label={<Req>Stock Name</Req>}>
+                    <input className={inputCls} value={r.name} onChange={(e) => setRow(r.key, { name: e.target.value })} placeholder="Enter stock name" data-testid={`stock-row-name-${idx}`} />
+                  </Field>
+                  <Field label="Stock Type">
+                    <input className={inputCls} value={r.stock_type} onChange={(e) => setRow(r.key, { stock_type: e.target.value })} placeholder="e.g. Individual" data-testid={`stock-row-type-${idx}`} />
+                  </Field>
+                  <Field label="Stock Count">
+                    <input type="number" min="0" className={inputCls} value={r.count} onChange={(e) => setRow(r.key, { count: e.target.value })} placeholder="Enter count" data-testid={`stock-row-count-${idx}`} />
+                  </Field>
+                  <Field label="Unit">
+                    <select className={inputCls} value={r.unit} onChange={(e) => setRow(r.key, { unit: e.target.value })} data-testid={`stock-row-unit-${idx}`}>
+                      <option value="">Select unit</option>
+                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Unit Price">
+                    <input type="number" min="0" className={inputCls} value={r.unit_price} onChange={(e) => setRow(r.key, { unit_price: e.target.value })} placeholder="Enter unit price" data-testid={`stock-row-price-${idx}`} />
+                  </Field>
+                  {/* Read-only because it is the count times the price and nothing else. A
+                      box you could type a different number into would be a third figure
+                      disagreeing with the two above it. */}
+                  <Readout label="Total Price" value={fmt(rowTotal(r))} />
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={addRow}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-300 px-3 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+              data-testid="stock-row-add"
+            >
+              <Plus className="h-4 w-4" /> Add Another Stock
+            </button>
+          </Panel>
+
+          {/* What is already in the book, so the same thing isn't typed twice under two
+              spellings — the server refuses a duplicate name, and seeing the list is
+              kinder than being told. */}
+          {stock.length > 0 && (
+            <div data-testid="stock-existing">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">Already in the list</p>
+              <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-1.5">
+                {stock.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs hover:bg-slate-50" data-testid={`stock-existing-${r.id}`}>
+                    <span className="min-w-0 truncate text-slate-700">
+                      <span className="font-semibold">{r.name}</span>
+                      {r.stock_type ? ` · ${r.stock_type}` : ""}
+                      {r.count ? ` · ${r.count}${r.unit ? ` ${r.unit}` : ""}` : ""}
+                      {r.unit_price ? ` · ${fmt(r.unit_price)} each` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeStock(r)}
+                      className="shrink-0 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                      title="Remove" data-testid={`stock-existing-drop-${r.id}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+
       {draft && (
         <Modal
           title={draft.id ? "Edit Vendor" : "Add Vendor"}
-          onClose={closeDraft}
+          onClose={() => setDraft(null)}
           testid="vendor-modal"
           light
           width="max-w-4xl"
           bodyCls="p-4"
           footer={<>
-            <Button variant="outline" onClick={closeDraft} data-testid="vendor-cancel">Cancel</Button>
+            <Button variant="outline" onClick={() => setDraft(null)} data-testid="vendor-cancel">Cancel</Button>
             <Button className="bg-violet-600 text-white hover:bg-violet-700" disabled={busy} onClick={saveVendor} data-testid="vendor-save">
               {draft.id ? "Save Changes" : "Save Vendor"}
             </Button>
           </>}
         >
-          {/* Two panels, not two halves: who they are is five short answers and what they
-              supply is a list that grows, so the second gets twice the width and the
-              first stops where it stops. They stack on a phone, vendor first. */}
+          {/* Who they are is four short answers; what they supply and what has been paid
+              are the other two thirds. They stack on a phone, vendor first. */}
           <div className="grid gap-4 lg:grid-cols-3">
             <Panel title="Vendor Details" icon={UserRound} tint="bg-violet-50/70 text-violet-700" testid="vendor-details">
               <Field label={<Req>Vendor Name</Req>}>
@@ -553,9 +698,6 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
               </Field>
               <Field label={<Req>Phone Number</Req>}>
                 <input className={inputCls} value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} placeholder="Enter phone number" data-testid="vendor-phone" />
-              </Field>
-              <Field label="Amount">
-                <input type="number" min="0" className={inputCls} value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} placeholder="Enter amount" data-testid="vendor-amount" />
               </Field>
               <Field label={<Req>City</Req>}>
                 {/* The list is branch names and the cities already on vendors. Neither is
@@ -583,72 +725,69 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
               </Field>
             </Panel>
 
-            <Panel title="Stock Details" icon={Package} tint="bg-emerald-50/70 text-emerald-700" testid="stock-details" className="lg:col-span-2">
-              {catalogue.length === 0 ? (
-                <p className="rounded-md border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400" data-testid="vendor-items-empty">
-                  No stock in the catalogue yet — add tablets, supplements or equipment first, then come back and price them here.
-                </p>
-              ) : (
-                <>
-                  {draft.rows.map((r, idx) => {
-                    const total = (Number(r.count) || 0) * (Number(r.unit_price) || 0);
-                    return (
-                      <div key={r.key} className={idx > 0 ? "border-t border-slate-100 pt-3" : ""} data-testid={`vendor-row-block-${idx}`}>
-                        {draft.rows.length > 1 && (
-                          <div className="mb-1.5 flex items-center justify-between">
-                            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Stock {idx + 1}</span>
-                            <button type="button" onClick={() => dropRow(r.key)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Remove this stock" data-testid={`vendor-row-drop-${idx}`}>
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        )}
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <Field label={<Req>Stock Name</Req>}>
-                            <select className={inputCls} value={r.item_id} onChange={(e) => pickItem(r, e.target.value)} data-testid={`vendor-row-item-${idx}`}>
-                              <option value="">Select stock name</option>
-                              {catalogue.map((i) => (
-                                <option key={i.id} value={i.id}>{i.name}{i.brand ? ` - ${i.brand}` : ""}</option>
-                              ))}
-                            </select>
-                          </Field>
-                          <Field label="Stock Type">
-                            <input className={inputCls} value={r.stock_type} onChange={(e) => setRow(r.key, { stock_type: e.target.value })} placeholder="e.g. Individual" data-testid={`vendor-row-type-${idx}`} />
-                          </Field>
-                          <Field label="Stock Count">
-                            <input type="number" min="0" className={inputCls} value={r.count} onChange={(e) => setRow(r.key, { count: e.target.value })} placeholder="Enter count" data-testid={`vendor-row-count-${idx}`} />
-                          </Field>
-                          <Field label="Unit">
-                            <select className={inputCls} value={r.unit} onChange={(e) => setRow(r.key, { unit: e.target.value })} data-testid={`vendor-row-unit-${idx}`}>
-                              <option value="">Select unit</option>
-                              {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                            </select>
-                          </Field>
-                          <Field label="Unit Price">
-                            <input type="number" min="0" className={inputCls} value={r.unit_price} onChange={(e) => setRow(r.key, { unit_price: e.target.value })} placeholder="Enter unit price" data-testid={`vendor-row-price-${idx}`} />
-                          </Field>
-                          <Field label="Total Price">
-                            {/* Read-only because it is the count times the price and
-                                nothing else. A box you could type a different number into
-                                would be a third figure disagreeing with the two above. */}
-                            <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600" data-testid={`vendor-row-total-${idx}`}>
-                              {fmt(total)}
-                            </div>
-                          </Field>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    onClick={addRow}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-violet-300 px-3 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-50"
-                    data-testid="vendor-row-add"
-                  >
-                    <Plus className="h-4 w-4" /> Add Another Stock
-                  </button>
-                </>
-              )}
-            </Panel>
+            <div className="space-y-4 lg:col-span-2">
+              <Panel title="Linked Stock" icon={Package} tint="bg-emerald-50/70 text-emerald-700" testid="vendor-stock">
+                {stock.length === 0 ? (
+                  <p className="rounded-md border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400" data-testid="vendor-stock-empty">
+                    Nothing in the stock list yet. Close this and use <span className="font-semibold">Add Stock Detail</span> first.
+                  </p>
+                ) : (
+                  <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-1.5" data-testid="vendor-stock-list">
+                    {stock.map((r) => {
+                      const on = draft.stock_ids.includes(r.id);
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => toggleStock(r.id)}
+                          className={`flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs ${
+                            on ? "border-emerald-200 bg-emerald-50 font-semibold text-emerald-800" : "border-transparent text-slate-600 hover:bg-slate-50"
+                          }`}
+                          data-testid={`vendor-stock-${r.id}`}
+                        >
+                          <span className="min-w-0 truncate">
+                            {r.name}
+                            <span className="ml-1 font-normal text-slate-400">
+                              {r.stock_type ? `· ${r.stock_type} ` : ""}
+                              {r.count ? `· ${r.count}${r.unit ? ` ${r.unit}` : ""} ` : ""}
+                              {r.unit_price ? `· ${fmt(r.unit_price)} each` : ""}
+                            </span>
+                          </span>
+                          <span className="shrink-0 font-semibold">{fmt(r.total)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </Panel>
+
+              <Panel title="Payment to Vendor" icon={Wallet} tint="bg-amber-50/70 text-amber-700" testid="vendor-payment">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Field label="Total Amount">
+                    {/* Filled in from the ticked stock and left typeable: a bill carries
+                        delivery, discount and tax that no rate on a line knows about. */}
+                    <input type="number" min="0" className={inputCls} value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} placeholder="Enter amount" data-testid="vendor-amount" />
+                  </Field>
+                  <Field label="Paid Amount">
+                    <input type="number" min="0" className={inputCls} value={draft.paid_amount} onChange={(e) => setDraft({ ...draft, paid_amount: e.target.value })} placeholder="Enter paid" data-testid="vendor-paid" />
+                  </Field>
+                  <Readout
+                    label="Balance"
+                    value={fmt((Number(draft.amount) || 0) - (Number(draft.paid_amount) || 0))}
+                    tone={(Number(draft.amount) || 0) - (Number(draft.paid_amount) || 0) > 0 ? "text-amber-700" : "text-emerald-700"}
+                  />
+                  <Field label="Payment Mode">
+                    <select className={inputCls} value={draft.payment_mode} onChange={(e) => setDraft({ ...draft, payment_mode: e.target.value })} data-testid="vendor-mode">
+                      <option value="">Not paid yet</option>
+                      {PAYMENT_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Payment Date">
+                    <input type="date" className={inputCls} value={draft.payment_date} onChange={(e) => setDraft({ ...draft, payment_date: e.target.value })} data-testid="vendor-paid-on" />
+                  </Field>
+                </div>
+              </Panel>
+            </div>
           </div>
         </Modal>
       )}

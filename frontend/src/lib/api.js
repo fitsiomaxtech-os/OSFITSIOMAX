@@ -935,7 +935,10 @@ export const vendorSummary = async (params = {}) => (await api.get("/vendors/sum
 export const vendorDeliveries = async (id, params = {}) => (await api.get(`/vendors/${id}/deliveries`, { params })).data;
 // The stock catalogue as a picker — org-wide and countless, so it answers for a Super
 // Admin too, who has no branch for /inventory/items to scope to.
-export const vendorCatalogue = async (params = {}) => (await api.get("/vendors/catalogue", { params })).data;
+export const vendorStock = async (params = {}) => (await api.get("/vendors/stock", { params })).data;
+export const createVendorStock = async (rows) => (await api.post("/vendors/stock", rows)).data;
+export const updateVendorStock = async (id, payload) => (await api.put(`/vendors/stock/${id}`, payload)).data;
+export const deleteVendorStock = async (id) => (await api.delete(`/vendors/stock/${id}`)).data;
 export const createVendor = async (payload) => (await api.post("/vendors", payload)).data;
 export const updateVendor = async (id, payload, params = {}) => (await api.put(`/vendors/${id}`, payload, { params })).data;
 export const deleteVendor = async (id) => (await api.delete(`/vendors/${id}`)).data;

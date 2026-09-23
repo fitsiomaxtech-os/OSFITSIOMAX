@@ -5,12 +5,17 @@ the same reason the item catalogue is: a vendor supplying two branches is one ve
 two branches spelling the same supplier differently is how a spend figure stops being a
 spend figure. Stock itself stays per branch — nothing here holds a count.
 
-The link to stock is `item_ids`, the catalogue rows this vendor supplies. It is kept on
-the vendor rather than on the item because that is the direction both screens read it: the
-Vendor tab lists a vendor and what they supply, and Add Stock asks which vendors supply
-one item — a single-key lookup either way. Booking a delivery against a vendor adds that
-item to the list if it isn't there already, so the link is maintained by using it rather
-than by remembering to tick a box.
+Stock reaches a vendor two ways, and they answer different questions.
+
+`stock_ids` points into `vendor_stock`, the Stock Detail book this module owns: what the
+organisation buys, typed by hand, with the rate quoted for it. It is what the Vendor form
+links and what the bill on a vendor is made of. Nothing in it is a branch's stock — see
+StockIn for why it is not an inventory_items row.
+
+`item_ids` points into the sales catalogue and is written by nobody: booking a delivery
+against a vendor in Add Stock adds the item and its shelf on its own. That list is the
+delivery ledger's account of what has actually arrived from them, which is why the form
+cannot edit it and why the Shelves column on the tab means something.
 
 Deliveries are not stored here. They are the `kind="add"` rows in inventory_movements,
 which now carry vendor_id and a vendor_name snapshot; this module reads them for the
@@ -26,6 +31,7 @@ from database import v3_col
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_inventory import (
     VALID_CATEGORIES,
+    VALID_PAYMENT_MODES,
     VALID_UNITS,
     _escape_regex,
 )
@@ -58,6 +64,7 @@ async def ensure_vendor_indexes():
     movement ledger every time the tab is opened.
     """
     await v3_col("vendors").create_index([("name", 1)], name="vendor_name")
+    await v3_col("vendor_stock").create_index([("name", 1)], name="vendor_stock_name")
     await v3_col("inventory_movements").create_index(
         [("vendor_id", 1), ("created_at", -1)], name="vendor_recent"
     )
@@ -113,6 +120,20 @@ async def _delivery_stats(vendor_ids: List[str], branch: Optional[str]) -> dict:
     }
 
 
+async def _stock_map(stock_ids: List[str]) -> dict:
+    """The Stock Detail rows a page of vendors links to, by id.
+
+    Missing ones are simply absent rather than an error, unlike _stock_rows: a row deleted
+    from the book leaves the vendors that pointed at it readable, and the next save of one
+    drops the dead id on its own.
+    """
+    ids = [i for i in {*stock_ids} if i]
+    if not ids:
+        return {}
+    rows = await v3_col("vendor_stock").find({"id": {"$in": ids}}, {"_id": 0}).to_list(1000)
+    return {r["id"]: r for r in rows}
+
+
 async def _item_names(item_ids: List[str]) -> dict:
     ids = [i for i in {*item_ids} if i]
     if not ids:
@@ -123,24 +144,51 @@ async def _item_names(item_ids: List[str]) -> dict:
     return {r["id"]: r for r in rows}
 
 
-class SupplyIn(BaseModel):
-    """One line of the Stock Details column: this vendor supplies this catalogue row.
+class StockIn(BaseModel):
+    """A line of the Stock Detail book — one thing the organisation buys, typed by hand.
 
-    A rate, not a delivery. Nothing here touches a branch's shelf or the stock ledger —
-    stock arrives through Add Stock on the shelf itself, which is the only place that
-    knows which branch it arrived at. This is the agreed price and pack, kept so that
-    booking that delivery later is a confirmation rather than a fresh question.
+    Deliberately not an inventory_items row. The catalogue behind the Tablet, Supplementary
+    and Equipment tabs is what a branch sells over the counter, and every row in it needs a
+    shelf, a sale price and a low-stock level before it can exist. What gets bought from a
+    vendor is wider than that and known earlier: a water can, a box of gloves, an AC
+    service, priced before anybody has decided whether it is ever sold on. Asking a
+    purchase to become a sellable catalogue row first is what made this a dropdown nobody
+    could add to.
+
+    The two are not rivals. Stock that does get sold over the counter is still added on its
+    own shelf and still arrives through Add Stock, which is where a branch's count and its
+    ledger come from; this book is what was ordered and at what rate.
     """
-    item_id: str
-    # Typed rather than picked. There is no list of stock types in the OS and inventing a
-    # closed one here would mean a branch's own word for how something arrives — loose,
-    # per box, individual — being refused by a dropdown.
+    name: str
+    # The branch's own word for how it arrives — individual, loose, per box. No list,
+    # because there isn't one anywhere else in the OS to agree with.
     stock_type: Optional[str] = ""
     count: int = 0
-    # Blank means "as the catalogue row says" — the item already carries a unit, and
-    # repeating it on every supply line is a second copy that can disagree with the first.
     unit: Optional[str] = ""
     unit_price: float = 0
+
+
+def _clean_stock(payload: StockIn) -> dict:
+    name = " ".join((payload.name or "").split())
+    if not name:
+        raise _err(400, "A stock name is required")
+    unit = (payload.unit or "").strip()
+    if unit and unit not in VALID_UNITS:
+        raise _err(400, f"unit must be one of {', '.join(sorted(VALID_UNITS))}")
+    count = int(payload.count or 0)
+    price = float(payload.unit_price or 0)
+    if count < 0 or price < 0:
+        raise _err(400, "A count and a price cannot be negative")
+    return {
+        "name": name[:120],
+        "stock_type": " ".join((payload.stock_type or "").split())[:40],
+        "count": count,
+        "unit": unit,
+        "unit_price": round(price, 2),
+        # Stored rather than worked out on the way to the screen: it is what the rate was
+        # agreed at, and a figure read back months later shouldn't depend on today's code.
+        "total": round(count * price, 2),
+    }
 
 
 class VendorIn(BaseModel):
@@ -153,12 +201,18 @@ class VendorIn(BaseModel):
     city: Optional[str] = ""
     payment_terms: Optional[str] = ""
     notes: Optional[str] = ""
-    # What is owed to or agreed with them, as the form's one money box. Not a computed
-    # total of the rows below: those are per-item rates, and the figure a branch wants
-    # against a vendor is the one on the bill in front of them.
+    # What this vendor supplies, as ids into the Stock Detail book above. A vendor with
+    # none is one nobody has said anything about yet — the water supplier added before the
+    # water can was written down still has to be saveable.
+    stock_ids: List[str] = []
+    # The bill and what has gone against it. `amount` opens on the total of the linked
+    # stock and can be typed over, because a bill carries delivery, discount and tax that
+    # no rate on a line knows about. The balance is not stored — it is amount minus paid
+    # and storing a third number is storing a disagreement.
     amount: float = 0
-    # What they supply and at what rate — the Stock Details column of the form.
-    supplies: List[SupplyIn] = []
+    paid_amount: float = 0
+    payment_mode: Optional[str] = ""
+    payment_date: Optional[str] = ""
     # Kept rather than deleted once there is history against them — see delete_vendor.
     active: bool = True
 
@@ -173,6 +227,9 @@ def _clean(payload: VendorIn) -> dict:
     email = (payload.email or "").strip()
     if email and "@" not in email:
         raise _err(400, "That email address doesn't look right")
+    mode = (payload.payment_mode or "").strip().lower()
+    if mode and mode not in VALID_PAYMENT_MODES:
+        raise _err(400, f"payment_mode must be one of {', '.join(sorted(VALID_PAYMENT_MODES))}")
     return {
         "name": name,
         "contact_person": (payload.contact_person or "").strip(),
@@ -184,68 +241,47 @@ def _clean(payload: VendorIn) -> dict:
         "payment_terms": (payload.payment_terms or "").strip(),
         "notes": (payload.notes or "").strip(),
         "amount": round(max(float(payload.amount or 0), 0), 2),
+        "paid_amount": round(max(float(payload.paid_amount or 0), 0), 2),
+        "payment_mode": mode,
+        # A plain YYYY-MM-DD off a date input. Not parsed — an empty one means the payment
+        # hasn't been dated, which is different from dating it today on the vendor's behalf.
+        "payment_date": (payload.payment_date or "").strip()[:10],
         "active": bool(payload.active),
     }
 
 
-async def _supply_rows(supplies: List[SupplyIn]) -> tuple:
-    """The Stock Details rows, cleaned — and with them the two fields derived from them.
-
-    `item_ids` and `categories` are no longer sent by the form and are not asked for: an
-    item is linked because there is a row for it, and the shelf is the shelf that item
-    already sits on. Deriving both is what stops a vendor claiming to supply Equipment
-    while every row on it is a tablet, which is what a tick-box for each could say.
-
-    Returns (rows, item_ids, categories).
-    """
-    ids = list(dict.fromkeys([(sp.item_id or "").strip() for sp in supplies if (sp.item_id or "").strip()]))
-    if not ids:
-        return [], [], []
-    known = await _item_names(ids)
-    missing = [i for i in ids if i not in known]
+async def _stock_rows(ids: List[str]) -> List[dict]:
+    """The Stock Detail rows behind a list of ids, in the order they were picked."""
+    wanted = list(dict.fromkeys([(i or "").strip() for i in ids if (i or "").strip()]))
+    if not wanted:
+        return []
+    found = await v3_col("vendor_stock").find({"id": {"$in": wanted}}, {"_id": 0}).to_list(500)
+    by_id = {r["id"]: r for r in found}
+    missing = [i for i in wanted if i not in by_id]
     if missing:
-        raise _err(400, "One of the picked stock rows is no longer in the catalogue")
-
-    rows = []
-    seen = set()
-    for sp in supplies:
-        item_id = (sp.item_id or "").strip()
-        if not item_id or item_id in seen:
-            continue
-        seen.add(item_id)
-        unit = (sp.unit or "").strip()
-        if unit and unit not in VALID_UNITS:
-            raise _err(400, f"unit must be one of {', '.join(sorted(VALID_UNITS))}")
-        count = int(sp.count or 0)
-        price = float(sp.unit_price or 0)
-        if count < 0 or price < 0:
-            raise _err(400, "A count and a price cannot be negative")
-        stock_type = " ".join((sp.stock_type or "").split())[:40]
-        rows.append({
-            "item_id": item_id,
-            "stock_type": stock_type,
-            "count": count,
-            "unit": unit or known[item_id].get("unit", ""),
-            "unit_price": round(price, 2),
-            # Stored rather than left to the client: the form shows this figure and the
-            # row is what the figure was agreed at, so the two should not be able to part
-            # company in a list read months later.
-            "total": round(count * price, 2),
-        })
-    cats = sorted({known[r["item_id"]].get("category", "") for r in rows} & VALID_CATEGORIES)
-    return rows, [r["item_id"] for r in rows], cats
+        raise _err(400, "One of the picked stock rows no longer exists")
+    return [by_id[i] for i in wanted]
 
 
-def _decorate(doc: dict, stats: dict, items: dict) -> dict:
+def _decorate(doc: dict, stats: dict, items: dict, stock: dict = None) -> dict:
     supplied = [items[i] for i in doc.get("item_ids", []) if i in items]
+    linked = [(stock or {})[i] for i in doc.get("stock_ids", []) if i in (stock or {})]
     s = stats.get(doc["id"], {})
+    amount = float(doc.get("amount") or 0)
+    paid = float(doc.get("paid_amount") or 0)
     return {
-        # Vendors added before the Stock Details column existed carry neither field; the
-        # tab reads an absent list and an empty one the same way, so neither is worth a
-        # migration.
+        # Vendors added before any of this existed carry none of it; the tab reads an
+        # absent list and an empty one the same way, so none of it is worth a migration.
         "amount": 0,
-        "supplies": [],
+        "paid_amount": 0,
+        "payment_mode": "",
+        "payment_date": "",
+        "stock_ids": [],
         **doc,
+        "stock": linked,
+        "stock_count": len(linked),
+        # Worked out here rather than stored — see the note on VendorIn.
+        "balance": round(amount - paid, 2),
         "items": [{"id": i["id"], "name": i["name"], "category": i.get("category", ""), "unit": i.get("unit", "")} for i in supplied],
         "items_count": len(supplied),
         "deliveries": s.get("deliveries", 0),
@@ -289,29 +325,88 @@ async def list_vendors(
     docs = await v3_col("vendors").find(q, {"_id": 0}).sort("name", 1).to_list(500)
     stats = await _delivery_stats([d["id"] for d in docs], _stats_branch(user, branch_id))
     items = await _item_names([i for d in docs for i in d.get("item_ids", [])])
-    return [_decorate(d, stats, items) for d in docs]
+    stock = await _stock_map([i for d in docs for i in d.get("stock_ids", [])])
+    return [_decorate(d, stats, items, stock) for d in docs]
 
 
-@router.get("/catalogue")
-async def vendor_catalogue(
-    category: Optional[str] = None,
+@router.get("/stock")
+async def list_vendor_stock(
+    search: Optional[str] = None,
     _: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES)),
 ):
-    """The stock catalogue as a picker — what a vendor can be said to supply.
-
-    Deliberately not /inventory/items: that one answers "what does this branch hold", so
-    it needs a branch and a Super Admin has none. A vendor's supply list is about the
-    org-wide catalogue and nothing else, so this returns the rows with no counts attached.
-    """
+    """The Stock Detail book, org-wide, with how many vendors quote for each row."""
     q = {}
-    if category:
-        if category not in VALID_CATEGORIES:
-            raise _err(400, f"category must be one of {', '.join(sorted(VALID_CATEGORIES))}")
-        q["category"] = category
-    rows = await v3_col("inventory_items").find(
-        q, {"_id": 0, "id": 1, "name": 1, "brand": 1, "category": 1, "unit": 1}
-    ).sort("name", 1).to_list(500)
-    return rows
+    if search and search.strip():
+        q["name"] = {"$regex": _escape_regex(search.strip()), "$options": "i"}
+    rows = await v3_col("vendor_stock").find(q, {"_id": 0}).sort("name", 1).to_list(500)
+    used = await v3_col("vendors").aggregate([
+        {"$unwind": "$stock_ids"},
+        {"$group": {"_id": "$stock_ids", "n": {"$sum": 1}}},
+    ]).to_list(1000)
+    counts = {r["_id"]: r["n"] for r in used}
+    return [{**r, "vendor_count": counts.get(r["id"], 0)} for r in rows]
+
+
+@router.post("/stock")
+async def create_vendor_stock(payload: List[StockIn], user: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES))):
+    """Several at once, because the form adds them a row at a time before saving."""
+    if not payload:
+        raise _err(400, "Nothing to add")
+    docs = []
+    for one in payload:
+        doc = _clean_stock(one)
+        clash = await v3_col("vendor_stock").find_one(
+            {"name": {"$regex": f"^{_escape_regex(doc['name'])}$", "$options": "i"}}, {"_id": 0, "id": 1}
+        )
+        if clash:
+            raise _err(409, f"{doc['name']} is already in the stock list")
+        doc.update({
+            "id": str(uuid.uuid4()),
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+            "created_by": user.id,
+            "created_by_name": user.full_name,
+        })
+        docs.append(doc)
+    # Two rows of the same name in one save would each pass the check above and both land.
+    names = [d["name"].lower() for d in docs]
+    dupe = next((n for n in names if names.count(n) > 1), None)
+    if dupe:
+        raise _err(400, "The same stock name is on two rows")
+    await v3_col("vendor_stock").insert_many([d.copy() for d in docs])
+    return {"message": f"{len(docs)} stock row{'' if len(docs) == 1 else 's'} added", "stock": docs}
+
+
+@router.put("/stock/{stock_id}")
+async def update_vendor_stock(stock_id: str, payload: StockIn, _: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES))):
+    existing = await v3_col("vendor_stock").find_one({"id": stock_id}, {"_id": 0, "id": 1})
+    if not existing:
+        raise _err(404, "That stock row no longer exists")
+    doc = _clean_stock(payload)
+    clash = await v3_col("vendor_stock").find_one(
+        {"id": {"$ne": stock_id}, "name": {"$regex": f"^{_escape_regex(doc['name'])}$", "$options": "i"}},
+        {"_id": 0, "id": 1},
+    )
+    if clash:
+        raise _err(409, f"{doc['name']} is already in the stock list")
+    doc["updated_at"] = now_iso()
+    await v3_col("vendor_stock").update_one({"id": stock_id}, {"$set": doc})
+    return {"message": "Stock updated"}
+
+
+@router.delete("/stock/{stock_id}")
+async def delete_vendor_stock(stock_id: str, _: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES))):
+    """Removed along with every vendor's link to it.
+
+    Unlike a vendor, nothing in the ledger points here — a delivery records the branch's
+    own catalogue item, not this book — so there is nothing left dangling by deleting one.
+    """
+    stock = await v3_col("vendor_stock").find_one({"id": stock_id}, {"_id": 0, "name": 1})
+    if not stock:
+        raise _err(404, "That stock row no longer exists")
+    await v3_col("vendors").update_many({"stock_ids": stock_id}, {"$pull": {"stock_ids": stock_id}})
+    await v3_col("vendor_stock").delete_one({"id": stock_id})
+    return {"message": f"{stock['name']} removed from the stock list"}
 
 
 @router.get("/summary")
@@ -320,12 +415,19 @@ async def vendor_summary(
     user: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES)),
 ):
     """The four figures above the table."""
-    docs = await v3_col("vendors").find({}, {"_id": 0, "id": 1, "active": 1, "item_ids": 1}).to_list(500)
+    docs = await v3_col("vendors").find(
+        {}, {"_id": 0, "id": 1, "active": 1, "stock_ids": 1, "amount": 1, "paid_amount": 1}
+    ).to_list(500)
     stats = await _delivery_stats([d["id"] for d in docs], _stats_branch(user, branch_id))
     return {
         "vendors": len(docs),
         "active": len([d for d in docs if d.get("active", True)]),
-        "linked_items": len({i for d in docs for i in d.get("item_ids", [])}),
+        "linked_items": len({i for d in docs for i in d.get("stock_ids", [])}),
+        # What is still owed across every vendor. Floored at nought per vendor rather than
+        # in total, so one overpaid bill cannot quietly cancel out another's arrears.
+        "outstanding": round(sum(
+            max(float(d.get("amount") or 0) - float(d.get("paid_amount") or 0), 0) for d in docs
+        ), 2),
         "deliveries": sum(s.get("deliveries", 0) for s in stats.values()),
         "spend": round(sum(s.get("spend", 0) for s in stats.values()), 2),
     }
@@ -356,7 +458,14 @@ async def create_vendor(payload: VendorIn, user: V3UserOut = Depends(v3_require_
     )
     if clash:
         raise _err(409, f"{doc['name']} is already a vendor")
-    doc["supplies"], doc["item_ids"], doc["categories"] = await _supply_rows(payload.supplies)
+    linked = await _stock_rows(payload.stock_ids)
+    doc["stock_ids"] = [r["id"] for r in linked]
+    # Only ever set here. From now on these two are the delivery ledger's account of what
+    # has actually arrived from this vendor, written by link_vendor_to_item and by nothing
+    # on the form — a vendor's shelves are where their stock landed, not where they said
+    # it would.
+    doc["item_ids"] = []
+    doc["categories"] = []
 
     doc.update({
         "id": str(uuid.uuid4()),
@@ -366,8 +475,7 @@ async def create_vendor(payload: VendorIn, user: V3UserOut = Depends(v3_require_
         "created_by_name": user.full_name,
     })
     await v3_col("vendors").insert_one(doc.copy())
-    items = await _item_names(doc["item_ids"])
-    return _decorate(doc, {}, items)
+    return _decorate(doc, {}, {}, {r["id"]: r for r in linked})
 
 
 @router.put("/{vendor_id}")
@@ -380,14 +488,15 @@ async def update_vendor(vendor_id: str, payload: VendorIn, branch_id: Optional[s
     )
     if clash:
         raise _err(409, f"{doc['name']} is already a vendor")
-    doc["supplies"], doc["item_ids"], doc["categories"] = await _supply_rows(payload.supplies)
+    linked = await _stock_rows(payload.stock_ids)
+    doc["stock_ids"] = [r["id"] for r in linked]
 
     doc["updated_at"] = now_iso()
     await v3_col("vendors").update_one({"id": vendor_id}, {"$set": doc})
     fresh = await v3_col("vendors").find_one({"id": vendor_id}, {"_id": 0})
     stats = await _delivery_stats([vendor_id], _stats_branch(user, branch_id))
     items = await _item_names(fresh.get("item_ids", []))
-    return _decorate(fresh, stats, items)
+    return _decorate(fresh, stats, items, await _stock_map(fresh.get("stock_ids", [])))
 
 
 @router.delete("/{vendor_id}")
