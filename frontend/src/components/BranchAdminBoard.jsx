@@ -1723,7 +1723,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           ) : consultationsSubTab === "missed" ? (
             <MissedClassPanel />
           ) : consultationsSubTab === "physio_absence" ? (
-            <PhysioAbsencePanel mode="branch" />
+            <PhysioAbsencePanel mode="branch" branchId={branchId} />
           ) : consultationsSubTab === "manager" ? (
             <BranchDetailPage branchId={branchId} readOnly />
           ) : consultationsSubTab === "calendar" ? (

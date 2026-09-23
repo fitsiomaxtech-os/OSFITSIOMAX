@@ -407,7 +407,7 @@ function AbsenceDetail({ absenceId, onClose, onChanged }) {
   );
 }
 
-export function PhysioAbsencePanel({ mode = "branch" }) {
+export function PhysioAbsencePanel({ mode = "branch", branchId = null }) {
   const isPhysio = mode === "physio";
   const [data, setData] = useState({ absences: [], physios: [] });
   const [loading, setLoading] = useState(false);
@@ -418,12 +418,15 @@ export function PhysioAbsencePanel({ mode = "branch" }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await listPhysioAbsences());
+      // The board's branch rides along: a Super Admin opening this board through
+      // Operations has no branch of their own, and without it the server had no branch to
+      // list physios from — the picker opened on an empty box.
+      setData(await listPhysioAbsences(!isPhysio && branchId ? { branch_id: branchId } : undefined));
     } catch (err) {
       toast.error(errText(err, "Couldn't load absences"));
     }
     setLoading(false);
-  }, []);
+  }, [isPhysio, branchId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -503,6 +506,11 @@ export function PhysioAbsencePanel({ mode = "branch" }) {
                   {(data.physios || []).map((p) => (
                     <SelectItem key={p.id} value={p.id} className="text-sm text-slate-700">{p.name}</SelectItem>
                   ))}
+                  {!(data.physios || []).length && (
+                    <p className="px-2 py-3 text-center text-xs text-slate-400">
+                      {loading ? "Loading…" : "No physios at this branch"}
+                    </p>
+                  )}
                 </SelectContent>
               </Select>
             </label>

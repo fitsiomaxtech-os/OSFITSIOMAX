@@ -270,7 +270,10 @@ async def list_absences(
         me = await _my_physio(user)
         query["physio_ids"] = {"$in": me.get("physio_ids") or [me["id"]]}
     else:
-        scope = user.branch_id if not works_org_wide(user.role) else branch_id
+        # A login's own branch wins. The board's branch is taken only where the login has
+        # none — Super Admin/BD driving a branch's board, or an admin whose account names
+        # no branch — which would otherwise list no physios for the Mark Absent picker.
+        scope = user.branch_id if (user.branch_id and not works_org_wide(user.role)) else branch_id
         if scope:
             query["branch_id"] = scope
             physios = [{"id": p["id"], "name": p.get("full_name") or ""} for p in await _branch_physios(scope)]
