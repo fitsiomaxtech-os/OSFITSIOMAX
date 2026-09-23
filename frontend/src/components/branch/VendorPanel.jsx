@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Truck, Plus, Search, Pencil, Trash2, History, IndianRupee, Power, Wallet,
-  Building2, Phone, Mail, Boxes, X, UserRound, Package, ChevronRight, RefreshCw,
+  Plus, Search, Pencil, Trash2, History, Power, Wallet,
+  Building2, Phone, Mail, X, UserRound, Package, ChevronRight, RefreshCw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { QuickDateFilterBar, intersectDateFilters } from "@/components/QuickDateFilterBar";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
-  listVendors, vendorSummary, vendorDeliveries, createVendor, updateVendor, deleteVendor,
+  listVendors, vendorDeliveries, createVendor, updateVendor, deleteVendor,
   vendorStock, createVendorStock, updateVendorStock, deleteVendorStock,
 } from "@/lib/api";
 // The dialog shell, the labelled field and the input class the stock panel already uses.
@@ -145,6 +145,28 @@ const inRange = (row, range) => {
   if (to && on > to) return false;
   return true;
 };
+
+/**
+ * The four figures over the tab, and the four lists under it.
+ *
+ * They are the filter now rather than a read-out beside one: pressing a card is how the
+ * list below it is chosen, and exactly one is pressed at any time. That is what lets each
+ * figure be the length or the total of the list its own card opens — a number over a list
+ * it does not describe is the thing a summary row is most often wrong about.
+ *
+ * No icons. The corner glyphs said which card at a glance, which is worth having where a
+ * row of cards is only ever read; where it is pressed, the label and the ring around the
+ * pressed one carry that, and four glyphs in four corners are four things to look past.
+ *
+ * `count` is what the card shows and `rows` is what it opens, both off the already
+ * filtered lists, so the search box and the date range narrow the figures with the lists.
+ */
+const CARDS = [
+  { key: "vendors", label: "Vendors", color: "#7c3aed" },
+  { key: "stock", label: "Stock Items", color: "#0284c7" },
+  { key: "outstanding", label: "Outstanding", color: "#d97706" },
+  { key: "spend", label: "Purchase Spend", color: "#059669" },
+];
 
 /** A shelf chip, still what the Shelves column is drawn with. */
 const ShelfChip = ({ label, on = true, onClick, testid }) => {
@@ -281,8 +303,10 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const scope = branchId ? { branch_id: branchId } : {};
 
   const [vendors, setVendors] = useState([]);
-  const [summary, setSummary] = useState(null);
   const [stock, setStock] = useState([]);
+  // Which card is pressed, and so which list is under them. Vendors to begin with: it is
+  // the first card, and it is what the tab is called.
+  const [card, setCard] = useState("vendors");
   const [search, setSearch] = useState("");
   // Two controls, one narrowing. Both lists on the tab answer to it, which is why it
   // sits in the bar over both of them rather than in either card.
@@ -299,9 +323,8 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     setLoading(true);
     try {
       const s = branchId ? { branch_id: branchId } : {};
-      const [rows, totals, book] = await Promise.all([listVendors(s), vendorSummary(s), vendorStock()]);
+      const [rows, book] = await Promise.all([listVendors(s), vendorStock()]);
       setVendors(rows);
-      setSummary(totals);
       setStock(book);
     } catch (e) {
       toast.error(errText(e, "Couldn't load the vendors"));
@@ -326,6 +349,38 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   /** The stock list under the same dates. The search box is about vendors, so it isn't. */
   const visibleStock = useMemo(() => stock.filter((r) => inRange(r, range)), [stock, range]);
+
+  /**
+   * Vendors that still owe money, and vendors something has actually come in from.
+   *
+   * Both off `visible`, so they are narrowed by the same search and the same dates as the
+   * vendor list itself — and both sorted by the figure their card shows, because a list
+   * opened from a total is read from the biggest number down.
+   *
+   * A balance is floored at nought per vendor, the way the server totals it: one overpaid
+   * bill cannot quietly cancel out another vendor's arrears.
+   */
+  const owing = useMemo(
+    () => visible.filter((v) => Number(v.balance || 0) > 0).sort((a, b) => b.balance - a.balance),
+    [visible],
+  );
+  const supplying = useMemo(
+    () => visible.filter((v) => Number(v.spend || 0) > 0).sort((a, b) => b.spend - a.spend),
+    [visible],
+  );
+
+  const figures = useMemo(() => ({
+    vendors: { value: visible.length || "—", sub: `${visible.filter((v) => v.active !== false).length} switched on` },
+    stock: { value: visibleStock.length || "—", sub: "in the stock list" },
+    outstanding: {
+      value: fmt(owing.reduce((sum, v) => sum + Number(v.balance || 0), 0)),
+      sub: owing.length ? `${owing.length} vendor${owing.length === 1 ? "" : "s"} to pay` : "nothing to pay",
+    },
+    spend: {
+      value: fmt(supplying.reduce((sum, v) => sum + Number(v.spend || 0), 0)),
+      sub: "stock booked in, at cost",
+    },
+  }), [visible, visibleStock, owing, supplying]);
 
   const stockById = useMemo(() => Object.fromEntries(stock.map((r) => [r.id, r])), [stock]);
 
@@ -589,11 +644,21 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   return (
     <div className="space-y-4" data-testid="vendor-panel">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Vendors" value={summary?.vendors ?? "—"} sub={`${summary?.active ?? 0} switched on`} icon={Truck} color="#7c3aed" />
-        <StatTile label="Stock Items" value={stock.length || "—"} sub="in the stock list" icon={Boxes} color="#0284c7" />
-        <StatTile label="Outstanding" value={fmt(summary?.outstanding)} sub="still to pay vendors" icon={Wallet} color="#d97706" />
-        <StatTile label="Purchase Spend" value={fmt(summary?.spend)} sub="stock booked in, at cost" icon={IndianRupee} color="#059669" />
+      {/* Press one. See CARDS — the pressed card is the list below, and its figure is
+          that list's own length or total. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="vendor-cards">
+        {CARDS.map((c) => (
+          <StatTile
+            key={c.key}
+            label={c.label}
+            value={figures[c.key].value}
+            sub={figures[c.key].sub}
+            color={c.color}
+            active={card === c.key}
+            onClick={() => setCard(c.key)}
+            testid={`vendor-card-${c.key}`}
+          />
+        ))}
       </div>
 
       {/* The toolbar every list on the OS is read through: search, the five one-tap
@@ -665,10 +730,10 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
         </CardContent>
       </Card>
 
-      {/* The stock, first and on its own. A vendor is the answer to "who supplies
-          this", so the question has to be on screen before the answer is worth reading —
-          and a branch that has typed in ten things it buys should see ten things, not an
-          empty vendor table. */}
+      {/* What the Stock Items card opens. It used to sit above the vendor table with
+          both on screen at once, which read as two tabs' worth of list stacked on one
+          page; the cards are the way between them now. */}
+      {card === "stock" && (
       <Card className="overflow-hidden" data-testid="stock-card">
         <CardContent className="p-0">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
@@ -756,7 +821,9 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {card === "vendors" && (
       <Card className="overflow-hidden" data-testid="vendor-table-card">
         <CardContent className="p-0">
           <div className="border-b border-slate-100 px-4 py-3">
@@ -861,6 +928,111 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
           )}
         </CardContent>
       </Card>
+      )}
+
+      {/* The two money cards open a list rather than a table: each is one question — who
+          is owed, and who has actually delivered — and a column of eight for a question
+          of one is a table you have to read past to answer it.
+
+          Both carry the Deliveries button, because both figures are asked the same
+          follow-up: what is this made of. */}
+      {card === "outstanding" && (
+        <Card className="overflow-hidden" data-testid="outstanding-card">
+          <CardContent className="p-0">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Still to pay{owing.length ? ` · ${owing.length}` : ""}
+              </p>
+            </div>
+            {loading ? (
+              <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="outstanding-loading">Loading vendors...</p>
+            ) : owing.length === 0 ? (
+              <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="outstanding-empty">
+                {vendors.length === 0 ? "No vendors yet." : "Nothing is outstanding — every bill on this list is settled."}
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100" data-testid="outstanding-list">
+                {owing.map((v) => (
+                  <div key={v.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5" data-testid={`outstanding-row-${v.id}`}>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-800">{v.name}</p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {[v.city, v.contact_person, v.phone].filter(Boolean).join(" · ") || "No contact details"}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-bold text-amber-600">{fmt(v.balance)}</p>
+                      <p className="text-[11px] text-slate-400">
+                        {fmt(v.paid_amount)} paid of {fmt(v.amount)}
+                        {v.payment_date ? ` · ${v.payment_date}` : ""}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm" variant="outline" className="h-8 shrink-0 border-sky-200 text-sky-700 hover:bg-sky-50"
+                      onClick={() => openLedger(v)}
+                      data-testid={`outstanding-deliveries-${v.id}`}
+                    >
+                      <History className="mr-1 h-3.5 w-3.5" /> Deliveries
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {card === "spend" && (
+        <Card className="overflow-hidden" data-testid="spend-card">
+          <CardContent className="p-0">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Booked in{supplying.length ? ` · ${supplying.length}` : ""}
+              </p>
+            </div>
+            {loading ? (
+              <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="spend-loading">Loading vendors...</p>
+            ) : supplying.length === 0 ? (
+              <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="spend-empty">
+                {/* Spend is written by the stock ledger, not by this tab — a vendor can be
+                    fully typed in and still have nothing here until a delivery is booked
+                    in against them on a shelf. Saying so is the difference between an
+                    empty list and a list somebody thinks is broken. */}
+                {vendors.length === 0
+                  ? "No vendors yet."
+                  : "Nothing has been booked in yet — spend is written when a delivery is added on a stock shelf."}
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100" data-testid="spend-list">
+                {supplying.map((v) => (
+                  <div key={v.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5" data-testid={`spend-row-${v.id}`}>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-800">{v.name}</p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {v.deliveries} deliver{v.deliveries === 1 ? "y" : "ies"} · {v.units_supplied} unit{v.units_supplied === 1 ? "" : "s"}
+                        {v.last_supplied_at ? ` · ${when(v.last_supplied_at)}` : ""}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-bold text-emerald-700">{fmt(v.spend)}</p>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {(v.categories || []).map((c) => <ShelfChip key={c} label={SHELF_LABEL[c] || c} />)}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm" variant="outline" className="h-8 shrink-0 border-sky-200 text-sky-700 hover:bg-sky-50"
+                      onClick={() => openLedger(v)}
+                      data-testid={`spend-deliveries-${v.id}`}
+                    >
+                      <History className="mr-1 h-3.5 w-3.5" /> Deliveries
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {stockDraft && (
         <Modal
