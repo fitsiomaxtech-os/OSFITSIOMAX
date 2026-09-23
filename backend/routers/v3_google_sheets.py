@@ -28,6 +28,7 @@ from utils import now_iso, generate_patient_number, enquiry_created_at, find_enq
 from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
 from stage_utils import first_branch_stage_for
+import branch_routing
 import lead_control
 import lead_mapping
 from routers.v3_marketing import (
@@ -440,10 +441,24 @@ async def _pull_source_unlocked(source_id: str, range_: str = "A1:Z10000") -> Di
     source_branch_id = branch_ids[0] if len(branch_ids) == 1 else None
     verticals = source.get("verticals") or []
     default_vertical = verticals[0] if len(verticals) == 1 else "offline_physiotherapy"
-    # Resolved once for the whole import — every row from a source shares its branch, and so
-    # shares the entry stage that branch's Lead Control puts them on.
-    source_control = await lead_control.branch_lead_control(source_branch_id)
-    first_branch_stage = await first_branch_stage_for(source_control, "New Appointment")
+    # A row that names its own branch goes to that branch instead — one form asking "which
+    # is your preferred location" feeds every branch, and the source's single branch tag
+    # cannot say where such a row belongs. See branch_routing.
+    branch_router = await branch_routing.load()
+    # Lead Control and the entry stage are a property of the branch, not of the source, so
+    # they can no longer be resolved once for the whole pull. Cached per branch instead:
+    # a pull is thousands of rows across a handful of branches.
+    branch_entry: Dict[Optional[str], tuple] = {}
+    routed_to: Dict[str, int] = {}
+
+    async def _entry_for(branch_id: Optional[str]) -> tuple:
+        """(lead control, entry branch stage) for one branch, looked up once."""
+        if branch_id not in branch_entry:
+            control = await lead_control.branch_lead_control(branch_id)
+            branch_entry[branch_id] = (
+                control, await first_branch_stage_for(control, "New Appointment"),
+            )
+        return branch_entry[branch_id]
 
     for tab_name, headers, rows in per_tab:
         rows_received += len(rows)
@@ -538,9 +553,22 @@ async def _pull_source_unlocked(source_id: str, range_: str = "A1:Z10000") -> Di
                 if key not in mapped_values and value not in (None, ""):
                     custom_payload.setdefault(key, value)
 
-            # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
-            assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
-            patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
+            # Which branch this patient asked for, falling back to the source's own tag
+            # where the row names no branch (or names one nobody has) — that is where the
+            # row would have gone before this existed, so an unreadable answer costs
+            # nothing beyond the routing.
+            row_branch_id = branch_routing.routed_branch_id(row, mapping, branch_router) or source_branch_id
+            if row_branch_id and row_branch_id != source_branch_id:
+                name = branch_router.name_of(row_branch_id)
+                routed_to[name] = routed_to.get(name, 0) + 1
+            row_control, row_branch_stage = await _entry_for(row_branch_id)
+
+            # No Pre-Sales rep on a lead the Pre-Sales desk will never see. Read off the
+            # branch the row is going to, not the source's: the two branches need not run
+            # their leads the same way, and a lead routed to a Branch-Admin branch with a
+            # Pre-Sales rep on it sits in a queue that branch never opens.
+            assigned = None if row_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
+            patient_number = await generate_patient_number(row_branch_id) if row_branch_id else None
             # When the patient actually enquired, off the ad record, falling back to now
             # for a row that carries no such stamp -- a walk-in sheet, or a form whose
             # created_time column nobody mapped. See enquiry_created_at: a sync that runs
@@ -561,8 +589,8 @@ async def _pull_source_unlocked(source_id: str, range_: str = "A1:Z10000") -> Di
                 # branch only ADDS the branch assignment, landing the lead in that branch's New
                 # Appointment column too, without pulling it out of the usual Pre-Sales workflow.
                 "stage": "New Leads",
-                "branch_id": source_branch_id,
-                "branch_stage": first_branch_stage if source_branch_id else None,
+                "branch_id": row_branch_id,
+                "branch_stage": row_branch_stage if row_branch_id else None,
                 "notes": std_payload.get("notes", ""),
                 # The lead's own columns, straight across. Coercion already happened in
                 # split_mapping -- a sheet is typed by whoever fills it in, and an age of
@@ -607,6 +635,11 @@ async def _pull_source_unlocked(source_id: str, range_: str = "A1:Z10000") -> Di
         "rows_received": rows_received,
         "phone_column_used": last_mapping.get("phone"),
         "mapping_used": last_mapping,
+        # Only the rows that went somewhere other than the source's own branch, and only
+        # when a location column was read at all — on a branch's own sheet this is empty
+        # and the pull reads exactly as it always has.
+        "branch_column_used": last_mapping.get(branch_routing.BRANCH_FIELD),
+        "routed_to_branches": routed_to,
         "sample_errors": sample_errors + [f"tab not found: {t}" for t in tabs_missing],
     }
 

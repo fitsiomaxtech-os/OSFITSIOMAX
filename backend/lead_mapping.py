@@ -42,8 +42,14 @@ LEAD_COLUMN_FIELDS: List[Tuple[str, str]] = [
 # Not fields on a lead, and never were -- these land in extra_fields. They stay in the
 # catalogue because sheets in the field already map them and sources already store those
 # mappings; dropping them from the list would not delete the mapping, only hide it.
+#
+# Preferred Branch is no longer only kept, though: it is read. A form asking "which is your
+# preferred location" is one form feeding every branch, and mapping that column here is
+# what sends each row to the branch its answer names -- see backend/branch_routing.py. The
+# answer still lands in extra_fields exactly as before, because what the patient typed and
+# which branch it resolved to are two different facts and the second one can be wrong.
 LEGACY_EXTRA_FIELDS: List[Tuple[str, str]] = [
-    ("preferred_branch", "Preferred Branch"),
+    ("preferred_branch", "Preferred Branch (assigns the lead's branch)"),
     ("budget", "Budget"),
 ]
 
@@ -106,7 +112,8 @@ def catalogue(custom_fields: Optional[List[Dict[str, Any]]] = None) -> List[Dict
         },
         {
             "group": "Other",
-            "note": "Stored against the lead as extra detail.",
+            "note": "Stored against the lead as extra detail. Preferred Branch also decides "
+                    "which branch each row is imported to, when its answer names one.",
             "fields": [{"key": k, "label": lb} for k, lb in LEGACY_EXTRA_FIELDS],
         },
     ]

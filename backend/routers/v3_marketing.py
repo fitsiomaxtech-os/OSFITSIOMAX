@@ -12,6 +12,8 @@ from constants import V3_STAGES
 from security import hash_password
 from schemas.v3 import V3UserOut
 from stage_utils import first_branch_stage_for
+# Which branch a row asks for, where the sheet asks the patient at all.
+import branch_routing
 import lead_control
 # What a sheet column may be mapped onto, and how a mapped row is written. Shared with
 # the importer so the dropdown cannot offer a field the import would ignore.
@@ -62,7 +64,20 @@ FIELD_ALIASES = {
     # does ask which branch somebody wants says so: "branch" and "preferred branch" are
     # still Preferred Branch's, and they are the honest spellings for that question.
     "city": ["city", "town", "city/town", "town/city", "city / town"],
-    "preferred_branch": ["branch", "preferred branch", "location"],
+    # The branch the patient asked for, and -- since this column is what decides which
+    # branch a row is imported to (see branch_routing) -- the one spelling here it is worth
+    # being generous about. A form asks this as a whole sentence, and the sentence is the
+    # header: "Which is your preferred location?" squashes to nothing like "location", so
+    # the question went unmapped, the answer was filed as extra detail nobody reads, and
+    # every row of a form feeding four branches landed on one of them.
+    "preferred_branch": [
+        "branch", "preferred branch", "location", "preferred location",
+        "which is your preferred location", "which is your preferred branch",
+        "your preferred location", "your preferred branch", "which location",
+        "which branch", "select your preferred location", "choose your preferred location",
+        "preferred clinic", "nearest branch", "nearest location", "branch preference",
+        "location preference",
+    ],
     "budget": ["budget", "amount", "price range"],
     "notes": ["notes", "remarks", "comments", "message"],
 }
@@ -728,10 +743,27 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
     skipped_no_phone = 0
     skipped_duplicate = 0
     sample_errors: List[str] = []
-    # Resolved once for the whole sync — every row from a source shares its branch, and so
-    # shares the entry stage that branch's Lead Control puts them on.
-    source_control = await lead_control.branch_lead_control(source.get("branch_id"))
-    first_branch_stage = await first_branch_stage_for(source_control, "New Appointment")
+    # The branch this source is tagged to, read the same way the Sheets pull reads it: one
+    # branch auto-assigns, zero or several are a tag only. This used to read the legacy
+    # singular `branch_id`, which normalize_source backfills *from* rather than *to* — so a
+    # source carrying only the modern branch_ids list imported every row with no branch at
+    # all here, while Pull from Sheet on the same card filed them correctly.
+    branch_ids = source.get("branch_ids") or []
+    source_branch_id = branch_ids[0] if len(branch_ids) == 1 else None
+    # A row naming its own branch overrides that — see branch_routing, and the Sheets pull,
+    # which routes identically. Both buttons read one column_mapping and must agree.
+    branch_router = await branch_routing.load()
+    branch_entry: Dict[Optional[str], tuple] = {}
+    routed_to: Dict[str, int] = {}
+
+    async def _entry_for(branch_id: Optional[str]) -> tuple:
+        """(lead control, entry branch stage) for one branch, looked up once."""
+        if branch_id not in branch_entry:
+            control = await lead_control.branch_lead_control(branch_id)
+            branch_entry[branch_id] = (
+                control, await first_branch_stage_for(control, "New Appointment"),
+            )
+        return branch_entry[branch_id]
 
     for idx, row in enumerate(payload.rows):
         phone_raw = str(row.get(phone_key, "") or "").strip()
@@ -760,10 +792,18 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             if key not in mapped_values and value not in (None, ""):
                 custom_payload.setdefault(key, value)
 
-        # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
-        assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
-        source_branch_id = source.get("branch_id")
-        patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
+        # Which branch this patient asked for, falling back to the source's own tag where
+        # the row names no branch (or names one nobody has).
+        row_branch_id = branch_routing.routed_branch_id(row, mapping, branch_router) or source_branch_id
+        if row_branch_id and row_branch_id != source_branch_id:
+            branch_name = branch_router.name_of(row_branch_id)
+            routed_to[branch_name] = routed_to.get(branch_name, 0) + 1
+        row_control, row_branch_stage = await _entry_for(row_branch_id)
+
+        # No Pre-Sales rep on a lead the Pre-Sales desk will never see — read off the
+        # branch the row is going to, not the source's.
+        assigned = None if row_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
+        patient_number = await generate_patient_number(row_branch_id) if row_branch_id else None
         # Same as the Sheets importer: a lead is dated by when the patient enquired, not by
         # when this sync happened to reach them. See enquiry_created_at.
         enquired_at = enquiry_created_at(find_enquiry_stamp(ad_record, custom_payload))
@@ -781,8 +821,8 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             # branch only ADDS the branch assignment, landing the lead in that branch's New
             # Appointment column too, without pulling it out of the usual Pre-Sales workflow.
             "stage": "New Leads",
-            "branch_id": source_branch_id,
-            "branch_stage": first_branch_stage if source_branch_id else None,
+            "branch_id": row_branch_id,
+            "branch_stage": row_branch_stage if row_branch_id else None,
             "notes": std_payload.get("notes", ""),
             **{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")},
             "lead_data": ad_record,
@@ -813,6 +853,8 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
         "rows_received": len(payload.rows),
         "phone_column_used": phone_key,
         "mapping_used": mapping,
+        "branch_column_used": mapping.get(branch_routing.BRANCH_FIELD),
+        "routed_to_branches": routed_to,
         "sample_errors": sample_errors,
     }
 

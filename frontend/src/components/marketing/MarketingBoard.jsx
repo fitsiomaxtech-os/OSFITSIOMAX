@@ -349,7 +349,20 @@ Its Google Sheet link and column mapping are removed and cannot be restored. Lea
               </div>
               {pullResult && pullResult.source.id === s.id && (
                 <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-800" data-testid={`gs-pull-result-${s.id}`}>
-                  Imported <span className="font-bold">{pullResult.res.imported}</span> of {pullResult.res.rows_received} rows · {pullResult.res.skipped_duplicate || 0} dup · {pullResult.res.skipped_no_phone || 0} no phone
+                  <p>Imported <span className="font-bold">{pullResult.res.imported}</span> of {pullResult.res.rows_received} rows · {pullResult.res.skipped_duplicate || 0} dup · {pullResult.res.skipped_no_phone || 0} no phone</p>
+                  {/* Only the rows that went somewhere other than this card's own branch,
+                      because the sheet asked the patient which location they wanted. A
+                      branch's own sheet has no such column and this stays hidden. */}
+                  {Object.keys(pullResult.res.routed_to_branches || {}).length > 0 && (
+                    <p className="mt-1" data-testid={`gs-pull-routed-${s.id}`}>
+                      Sent by <code className="rounded bg-emerald-100 px-1">{pullResult.res.branch_column_used}</code> to{" "}
+                      {Object.entries(pullResult.res.routed_to_branches).map(([name, n], i, all) => (
+                        <span key={name}>
+                          <span className="font-semibold">{name}</span> ({n}){i < all.length - 1 ? ", " : ""}
+                        </span>
+                      ))}
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>
