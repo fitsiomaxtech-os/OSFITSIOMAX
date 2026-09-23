@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Truck, Plus, Search, Pencil, Trash2, History, IndianRupee, PackageCheck, Power,
-  Building2, Phone, Mail, Boxes, Link2,
+  Building2, Phone, Mail, Boxes, Link2, X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,9 @@ import {
 // Imported rather than copied: the two boards sit on the same tab row and a vendor form
 // with its own geometry would read as a different product.
 import { Modal, Field, inputCls, fmt, when, errText } from "@/components/branch/StoreInventoryPanel";
+import {
+  VENDOR_SERVICE_CATEGORIES, VENDOR_SERVICE_MAX_COUNT, VENDOR_SERVICE_MAX_LEN,
+} from "@/lib/vendorServices";
 
 /**
  * The three stock shelves a vendor can supply — the same keys the inventory catalogue and
@@ -30,9 +33,25 @@ const SHELVES = [
 
 const SHELF_LABEL = Object.fromEntries(SHELVES.map((s) => [s.key, s.label]));
 
+/**
+ * What a vendor is, as the chips on its row.
+ *
+ * Its own categories when it has them. When it hasn't — every vendor added before the
+ * Category field existed — the shelves it supplies, which is the only thing that was ever
+ * recorded about those rows and is still true of them. That fallback is what stops the
+ * column reading as a column of dashes on an existing list, and it costs nothing: the
+ * moment somebody opens one of those vendors and picks a category, its own wins.
+ */
+const vendorTags = (v) => {
+  const own = v.services || [];
+  if (own.length) return own;
+  return (v.categories || []).map((c) => SHELF_LABEL[c] || c);
+};
+
 const emptyDraft = {
   id: null, name: "", contact_person: "", phone: "", email: "", gst_number: "",
-  city: "", address: "", payment_terms: "", notes: "", categories: [], item_ids: [], active: true,
+  city: "", address: "", payment_terms: "", notes: "", services: [], categories: [],
+  item_ids: [], active: true,
 };
 
 const toDraft = (v) => ({
@@ -46,6 +65,7 @@ const toDraft = (v) => ({
   address: v.address || "",
   payment_terms: v.payment_terms || "",
   notes: v.notes || "",
+  services: v.services || [],
   categories: v.categories || [],
   item_ids: v.item_ids || [],
   active: v.active !== false,
@@ -64,6 +84,19 @@ const ShelfChip = ({ label, on = true, onClick, testid }) => {
     <span className={`rounded-[5px] border px-2 py-0.5 text-[11px] font-semibold ${cls}`} data-testid={testid}>{label}</span>
   );
 };
+
+/** A category the branch typed itself — the only chip that can be taken off again. */
+const CustomChip = ({ label, onRemove, testid }) => (
+  <span
+    className="inline-flex items-center gap-1 rounded-[5px] border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700"
+    data-testid={testid}
+  >
+    {label}
+    <button type="button" onClick={onRemove} className="text-violet-400 hover:text-violet-700" title={`Remove ${label}`}>
+      <X className="h-3 w-3" />
+    </button>
+  </span>
+);
 
 /**
  * FITSIOMAX STORE > Vendor — who supplies the stock, and which of it they supply.
@@ -86,7 +119,9 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const [summary, setSummary] = useState(null);
   const [catalogue, setCatalogue] = useState([]);
   const [search, setSearch] = useState("");
-  const [shelfFilter, setShelfFilter] = useState("");
+  const [catFilter, setCatFilter] = useState("");
+  // The typed-in category, held until it is added — a half-typed word is not a category.
+  const [typed, setTyped] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -115,11 +150,32 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return vendors.filter((v) => {
-      if (shelfFilter && !(v.categories || []).includes(shelfFilter)) return false;
+      if (catFilter && !vendorTags(v).includes(catFilter)) return false;
       if (!q) return true;
       return `${v.name} ${v.contact_person || ""} ${v.phone || ""} ${v.city || ""}`.toLowerCase().includes(q);
     });
-  }, [vendors, search, shelfFilter]);
+  }, [vendors, search, catFilter]);
+
+  /**
+   * The categories to offer as filters: the ones the list actually carries, in the order
+   * the form offers them and with anything typed in after.
+   *
+   * Deliberately not the whole suggestion list — a chip for Travel on a list where nobody
+   * supplies travel filters to an empty table, and eleven of those is a row of dead
+   * buttons above the thing you were trying to read.
+   */
+  const filterCats = useMemo(() => {
+    const used = new Set(vendors.flatMap(vendorTags));
+    const known = VENDOR_SERVICE_CATEGORIES.filter((c) => used.has(c));
+    const own = [...used].filter((c) => !VENDOR_SERVICE_CATEGORIES.includes(c)).sort();
+    return [...known, ...own];
+  }, [vendors]);
+
+  // A filter on a category that was the last vendor's, or was just renamed away, would
+  // otherwise leave the table empty with no chip lit to explain why.
+  useEffect(() => {
+    if (catFilter && !filterCats.includes(catFilter)) setCatFilter("");
+  }, [filterCats, catFilter]);
 
   // What the form offers to link. Narrowed to the shelves the vendor is marked as
   // supplying, because a list of every tablet, supplement and piece of equipment is not a
@@ -145,6 +201,11 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     }
   };
 
+  // The form is opened and closed through these rather than setDraft, so the typed-in
+  // category box never survives from one vendor to the next.
+  const openDraft = (d) => { setTyped(""); setDraft(d); };
+  const closeDraft = () => { setTyped(""); setDraft(null); };
+
   const payloadOf = (d) => ({
     name: d.name.trim(),
     contact_person: d.contact_person.trim(),
@@ -155,6 +216,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     address: d.address.trim(),
     payment_terms: d.payment_terms.trim(),
     notes: d.notes.trim(),
+    services: d.services,
     categories: d.categories,
     item_ids: d.item_ids,
     active: d.active,
@@ -166,7 +228,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
       () => (draft.id ? updateVendor(draft.id, payloadOf(draft), scope) : createVendor(payloadOf(draft))),
       draft.id ? "Vendor updated" : "Vendor added",
     );
-    if (ok) setDraft(null);
+    if (ok) closeDraft();
   };
 
   // Switching a vendor off is the ordinary end of one — they stop appearing in Add Stock
@@ -202,6 +264,35 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     return { ...d, categories, item_ids: d.item_ids.filter((id) => allowed.has(id)) };
   });
 
+  /** A suggestion chip. Off puts it on the vendor, on takes it back off. */
+  const toggleService = (name) => setDraft((d) => ({ ...d, services: toggleIn(d.services, name) }));
+
+  /**
+   * A category the branch typed. Matched against the suggestions case-insensitively
+   * first, so typing "water" lights the Water chip rather than sitting beside it as a
+   * second category that filters and totals on its own.
+   */
+  const addTyped = () => {
+    const name = typed.trim().replace(/\s+/g, " ");
+    if (!name) return;
+    const known = VENDOR_SERVICE_CATEGORIES.find((c) => c.toLowerCase() === name.toLowerCase());
+    const final = known || name;
+    if (final.length > VENDOR_SERVICE_MAX_LEN) {
+      toast.error(`Keep a category under ${VENDOR_SERVICE_MAX_LEN} characters`);
+      return;
+    }
+    if (draft.services.some((c) => c.toLowerCase() === final.toLowerCase())) {
+      setTyped("");
+      return;
+    }
+    if (draft.services.length >= VENDOR_SERVICE_MAX_COUNT) {
+      toast.error(`A vendor can carry ${VENDOR_SERVICE_MAX_COUNT} categories at most`);
+      return;
+    }
+    setDraft({ ...draft, services: [...draft.services, final] });
+    setTyped("");
+  };
+
   const empty = loading || visible.length === 0;
 
   const RowActions = ({ vendor }) => (
@@ -224,7 +315,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             <Power className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => setDraft(toDraft(vendor))}
+            onClick={() => openDraft(toDraft(vendor))}
             className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-violet-600"
             title="Edit" data-testid={`vendor-edit-${vendor.id}`}
           >
@@ -280,20 +371,22 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
               data-testid="vendor-search"
             />
           </div>
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="vendor-shelf-filter">
-            <ShelfChip label="All shelves" on={shelfFilter === ""} onClick={() => setShelfFilter("")} testid="vendor-shelf-filter-all" />
-            {SHELVES.map((s) => (
-              <ShelfChip
-                key={s.key}
-                label={s.label}
-                on={shelfFilter === s.key}
-                onClick={() => setShelfFilter(shelfFilter === s.key ? "" : s.key)}
-                testid={`vendor-shelf-filter-${s.key}`}
-              />
-            ))}
-          </div>
+          {filterCats.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="vendor-cat-filter">
+              <ShelfChip label="All" on={catFilter === ""} onClick={() => setCatFilter("")} testid="vendor-cat-filter-all" />
+              {filterCats.map((c) => (
+                <ShelfChip
+                  key={c}
+                  label={c}
+                  on={catFilter === c}
+                  onClick={() => setCatFilter(catFilter === c ? "" : c)}
+                  testid={`vendor-cat-filter-${c}`}
+                />
+              ))}
+            </div>
+          )}
           {canEdit && (
-            <Button onClick={() => setDraft({ ...emptyDraft })} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="vendor-new">
+            <Button onClick={() => openDraft({ ...emptyDraft })} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="vendor-new">
               <Plus className="mr-1.5 h-4 w-4" /> New Vendor
             </Button>
           )}
@@ -331,7 +424,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                       )}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {(v.categories || []).map((c) => <ShelfChip key={c} label={SHELF_LABEL[c] || c} />)}
+                      {vendorTags(v).map((c) => <ShelfChip key={c} label={c} />)}
                     </div>
                     <p className="mt-1.5 text-[11px] text-slate-500">
                       {v.items_count} item{v.items_count === 1 ? "" : "s"} · {v.deliveries} deliver{v.deliveries === 1 ? "y" : "ies"} · {fmt(v.spend)}
@@ -350,8 +443,8 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                       <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
                       <th className="px-4 py-2.5 font-semibold">Vendor</th>
                       <th className="px-4 py-2.5 font-semibold">Contact</th>
-                      <th className="px-4 py-2.5 font-semibold">Shelves</th>
-                      <th className="px-4 py-2.5 font-semibold">Supplies</th>
+                      <th className="px-4 py-2.5 font-semibold">Category</th>
+                      <th className="px-4 py-2.5 font-semibold">Stock Linked</th>
                       <th className="px-4 py-2.5 font-semibold">Deliveries</th>
                       <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
                     </tr>
@@ -375,9 +468,9 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-1">
-                            {(v.categories || []).length === 0
+                            {vendorTags(v).length === 0
                               ? <span className="text-[11px] text-slate-400">—</span>
-                              : v.categories.map((c) => <ShelfChip key={c} label={SHELF_LABEL[c] || c} />)}
+                              : vendorTags(v).map((c) => <ShelfChip key={c} label={c} />)}
                           </div>
                         </td>
                         <td className="px-4 py-3"><Supplies vendor={v} /></td>
@@ -404,15 +497,30 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
         <Modal
           title={draft.id ? "Edit Vendor" : "New Vendor"}
           subtitle="Shared across branches — each branch books its own deliveries"
-          onClose={() => setDraft(null)}
+          onClose={closeDraft}
           testid="vendor-modal"
           footer={<>
-            <Button variant="outline" onClick={() => setDraft(null)} data-testid="vendor-cancel">Cancel</Button>
+            <Button variant="outline" onClick={closeDraft} data-testid="vendor-cancel">Cancel</Button>
             <Button className="bg-violet-600 text-white hover:bg-violet-700" disabled={busy} onClick={saveVendor} data-testid="vendor-save">
               {draft.id ? "Save Changes" : "Add Vendor"}
             </Button>
           </>}
         >
+          {/* What the form is for, said once at the top rather than inferred from eight
+              labels. Only on a new vendor: by the time somebody is editing one they know
+              what a vendor is, and a note that never goes away stops being read. */}
+          {!draft.id && (
+            <div className="rounded-lg border border-violet-100 bg-violet-50/70 px-3 py-2.5 text-[12px] leading-relaxed" data-testid="vendor-explainer">
+              <p className="font-semibold text-violet-900">A vendor is anyone the branch pays for something that arrives.</p>
+              <p className="mt-0.5 text-violet-700">
+                The water can supplier, the broadband and phone line, the AC man, the housekeeping agency, the tablet
+                distributor. Add them once — every branch shares the list. For a vendor that supplies stock, pick them under{" "}
+                <span className="font-semibold">Add</span> on a Tablet, Supplement or Equipment row and their deliveries,
+                spend and supply list fill in on their own.
+              </p>
+            </div>
+          )}
+
           <Field label="Vendor Name *">
             <input className={inputCls} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Sri Medicals Distributors" data-testid="vendor-name" />
           </Field>
@@ -444,7 +552,52 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             <textarea rows={2} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400" value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} placeholder="Where the invoices come from" data-testid="vendor-address" />
           </Field>
 
-          <Field label="Supplies These Shelves" hint="Picks which stock can be linked below">
+          {/* What the vendor is. The suggestions are the categories a payment to them is
+              filed under on the Finance side, so the two screens say the same word about
+              the same supplier — and the box underneath is for the ones that list has no
+              word for, which is every branch's most interesting vendor. */}
+          <Field
+            label="Category"
+            hint={draft.services.length
+              ? `${draft.services.length} of ${VENDOR_SERVICE_MAX_COUNT} · first one shows on the list`
+              : "What they supply — tap the ones that fit, or type your own"}
+          >
+            <div className="flex flex-wrap gap-1.5" data-testid="vendor-services">
+              {VENDOR_SERVICE_CATEGORIES.map((c) => (
+                <ShelfChip
+                  key={c}
+                  label={c}
+                  on={draft.services.includes(c)}
+                  onClick={() => toggleService(c)}
+                  testid={`vendor-service-${c}`}
+                />
+              ))}
+              {draft.services.filter((c) => !VENDOR_SERVICE_CATEGORIES.includes(c)).map((c) => (
+                <CustomChip key={c} label={c} onRemove={() => toggleService(c)} testid={`vendor-service-own-${c}`} />
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                className={inputCls}
+                value={typed}
+                maxLength={VENDOR_SERVICE_MAX_LEN}
+                onChange={(e) => setTyped(e.target.value)}
+                // Enter inside a form field would otherwise submit nothing and close
+                // nothing — here it is the obvious way to finish typing a category.
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTyped(); } }}
+                placeholder="Something else — e.g. Laundry, Lift AMC, Pest Control"
+                data-testid="vendor-service-input"
+              />
+              <Button
+                type="button" variant="outline" className="shrink-0 border-violet-200 text-violet-700 hover:bg-violet-50"
+                onClick={addTyped} disabled={!typed.trim()} data-testid="vendor-service-add"
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" /> Add
+              </Button>
+            </div>
+          </Field>
+
+          <Field label="Supplies These Shelves" hint="Only for stock vendors — picks which stock can be linked below">
             <div className="flex flex-wrap gap-1.5" data-testid="vendor-shelves">
               {SHELVES.map((s) => (
                 <ShelfChip

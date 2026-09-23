@@ -22,6 +22,11 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from constants import (
+    VENDOR_SERVICE_CATEGORIES,
+    VENDOR_SERVICE_MAX_COUNT,
+    VENDOR_SERVICE_MAX_LEN,
+)
 from database import v3_col
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_inventory import (
@@ -122,6 +127,10 @@ class VendorIn(BaseModel):
     city: Optional[str] = ""
     payment_terms: Optional[str] = ""
     notes: Optional[str] = ""
+    # What this vendor is — water, internet, maintenance, housekeeping, the tablet
+    # distributor. Suggestions come from VENDOR_SERVICE_CATEGORIES, but anything typed is
+    # kept: see _clean_services.
+    services: List[str] = []
     # Which shelves this vendor supplies — the Store tabs in VALID_CATEGORIES. Empty means
     # "not said yet", not "none": a vendor added from the tab before anything is bought
     # from them still has to be saveable.
@@ -131,6 +140,44 @@ class VendorIn(BaseModel):
     item_ids: List[str] = []
     # Kept rather than deleted once there is history against them — see delete_vendor.
     active: bool = True
+
+
+# The suggestions indexed by their lowercased form, so a branch typing "water" or
+# "WATER" lands on the one stored spelling rather than creating a third category that
+# filters and totals separately from it.
+_SERVICE_BY_LOWER = {c.lower(): c for c in VENDOR_SERVICE_CATEGORIES}
+
+
+def _clean_services(values: List[str]) -> List[str]:
+    """The vendor's categories, in the order they were picked.
+
+    Open rather than closed, unlike the shelf list below it: the suggestions cover what a
+    branch pays for most months, and the one that isn't there — a lift contract, a laundry
+    — is exactly the one worth naming. What is enforced is only what keeps the chip row
+    readable: a trimmed string, a sane length, no duplicates and a ceiling on how many.
+
+    Order is kept rather than sorted because the first one a branch picks is the one it
+    thinks of the vendor as, and that is the chip the table has room to show.
+    """
+    out: List[str] = []
+    seen = set()
+    for raw in values or []:
+        name = " ".join(str(raw or "").split())
+        if not name:
+            continue
+        # A typed one that matches a suggestion becomes that suggestion, whatever case it
+        # arrived in.
+        name = _SERVICE_BY_LOWER.get(name.lower(), name)
+        if len(name) > VENDOR_SERVICE_MAX_LEN:
+            raise _err(400, f"\"{name[:20]}...\" is too long for a category — keep it under {VENDOR_SERVICE_MAX_LEN} characters")
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    if len(out) > VENDOR_SERVICE_MAX_COUNT:
+        raise _err(400, f"A vendor can carry {VENDOR_SERVICE_MAX_COUNT} categories at most")
+    return out
 
 
 def _clean(payload: VendorIn) -> dict:
@@ -156,6 +203,7 @@ def _clean(payload: VendorIn) -> dict:
         "city": (payload.city or "").strip(),
         "payment_terms": (payload.payment_terms or "").strip(),
         "notes": (payload.notes or "").strip(),
+        "services": _clean_services(payload.services),
         "categories": sorted(set(payload.categories) & VALID_CATEGORIES),
         "item_ids": list(dict.fromkeys([i for i in payload.item_ids if i])),
         "active": bool(payload.active),
@@ -176,6 +224,9 @@ def _decorate(doc: dict, stats: dict, items: dict) -> dict:
     supplied = [items[i] for i in doc.get("item_ids", []) if i in items]
     s = stats.get(doc["id"], {})
     return {
+        # Vendors added before categories existed carry none; the tab reads an absent list
+        # and an empty one the same way, and neither is worth a migration.
+        "services": [],
         **doc,
         "items": [{"id": i["id"], "name": i["name"], "category": i.get("category", "")} for i in supplied],
         "items_count": len(supplied),
@@ -189,6 +240,7 @@ def _decorate(doc: dict, stats: dict, items: dict) -> dict:
 @router.get("")
 async def list_vendors(
     category: Optional[str] = None,
+    service: Optional[str] = None,
     item_id: Optional[str] = None,
     search: Optional[str] = None,
     active_only: bool = False,
@@ -209,6 +261,10 @@ async def list_vendors(
         # Stock picker unable to show a vendor added five minutes ago, which is the only
         # way the shelves ever get marked in the first place.
         q["$and"] = [{"$or": [{"categories": category}, {"categories": {"$in": [None, []]}}]}]
+    if service and service.strip():
+        # Matched exactly and case-insensitively rather than as a substring: "Water" is a
+        # category, not a search term, and the search box above already does searching.
+        q["services"] = {"$regex": f"^{_escape_regex(service.strip())}$", "$options": "i"}
     if item_id:
         q["item_ids"] = item_id
     if active_only:
