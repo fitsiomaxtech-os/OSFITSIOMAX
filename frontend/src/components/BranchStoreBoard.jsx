@@ -379,8 +379,15 @@ export const FitsiomaxStorePanel = ({ branchId }) => {
           catalogues above: a branch buys from its own suppliers and is the only desk
           that knows them, and the write endpoints take branch_admin. The list itself is
           org-wide, so a vendor added here is the one every branch sees; the delivery
-          totals on each row are this branch's, pinned server-side. */}
-      {tab === "vendor" && <VendorPanel reloadToken={reloadTick} />}
+          totals on each row are this branch's.
+
+          `branchId` is what makes that last part true for everyone looking. A Branch
+          Admin is pinned to their own branch by the server whatever the client sends, so
+          this changed nothing for them — but this board is also how Super Admin and
+          Business Development open one branch's store from Operations, and without it
+          those two read a branch's Vendor tab showing every branch's deliveries and spend
+          while the three shelves beside it showed only this one's. */}
+      {tab === "vendor" && <VendorPanel branchId={branchId} reloadToken={reloadTick} />}
       {/* The same board Super Admin keeps this catalogue on, read-only. The tab has been
           in this row since it was built and had no panel behind it, so a branch clicking
           Treatments got "setup coming soon" for a list that has been populated all along.

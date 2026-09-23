@@ -30,15 +30,25 @@ from constants import (
 from database import v3_col
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_inventory import (
-    READ_ROLES,
     VALID_CATEGORIES,
-    WRITE_ROLES,
     _escape_regex,
 )
 from schemas.v3 import V3UserOut
 from utils import now_iso
 
 router = APIRouter(prefix="/api/v3/vendors", tags=["vendors"])
+
+# Who the Vendor tab is for: the branch that buys the stock and knows its suppliers, Super
+# Admin who oversees every branch's, and Business Development beside them. All three reach
+# it in the UI — Branch Admin through FITSIOMAX STORE on their own board, the other two
+# through Services and Products.
+#
+# Spelled out here rather than reusing v3_inventory's READ_ROLES, which is the same three
+# plus head_physio. A head physio reads stock counts because running the floor means
+# knowing what is on the shelf; who the branch buys from, on what terms and for how much is
+# a purchasing question and no screen of theirs asks it. Writing is the same three — there
+# is no desk that may add a vendor but not read one.
+VENDOR_ROLES = ("super_admin", "business_dev", "branch_admin")
 
 
 def _err(status: int, msg: str):
@@ -245,7 +255,7 @@ async def list_vendors(
     search: Optional[str] = None,
     active_only: bool = False,
     branch_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles(*READ_ROLES)),
+    user: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES)),
 ):
     """The vendor list, each row carrying what it supplies and what has come in from it.
 
@@ -282,7 +292,7 @@ async def list_vendors(
 @router.get("/catalogue")
 async def vendor_catalogue(
     category: Optional[str] = None,
-    _: V3UserOut = Depends(v3_require_roles(*READ_ROLES)),
+    _: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES)),
 ):
     """The stock catalogue as a picker — what a vendor can be said to supply.
 
@@ -304,7 +314,7 @@ async def vendor_catalogue(
 @router.get("/summary")
 async def vendor_summary(
     branch_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles(*READ_ROLES)),
+    user: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES)),
 ):
     """The four figures above the table."""
     docs = await v3_col("vendors").find({}, {"_id": 0, "id": 1, "active": 1, "item_ids": 1}).to_list(500)
@@ -323,7 +333,7 @@ async def vendor_deliveries(
     vendor_id: str,
     branch_id: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
-    user: V3UserOut = Depends(v3_require_roles(*READ_ROLES)),
+    user: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES)),
 ):
     """What has actually arrived from this vendor — the add rows of the stock ledger."""
     await _require_vendor(vendor_id)
@@ -336,7 +346,7 @@ async def vendor_deliveries(
 
 
 @router.post("")
-async def create_vendor(payload: VendorIn, user: V3UserOut = Depends(v3_require_roles(*WRITE_ROLES))):
+async def create_vendor(payload: VendorIn, user: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES))):
     doc = _clean(payload)
     clash = await v3_col("vendors").find_one(
         {"name": {"$regex": f"^{_escape_regex(doc['name'])}$", "$options": "i"}}, {"_id": 0, "id": 1}
@@ -358,7 +368,7 @@ async def create_vendor(payload: VendorIn, user: V3UserOut = Depends(v3_require_
 
 
 @router.put("/{vendor_id}")
-async def update_vendor(vendor_id: str, payload: VendorIn, branch_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles(*WRITE_ROLES))):
+async def update_vendor(vendor_id: str, payload: VendorIn, branch_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES))):
     await _require_vendor(vendor_id)
     doc = _clean(payload)
     clash = await v3_col("vendors").find_one(
@@ -378,7 +388,7 @@ async def update_vendor(vendor_id: str, payload: VendorIn, branch_id: Optional[s
 
 
 @router.delete("/{vendor_id}")
-async def delete_vendor(vendor_id: str, _: V3UserOut = Depends(v3_require_roles(*WRITE_ROLES))):
+async def delete_vendor(vendor_id: str, _: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES))):
     """Removed only while nothing has been bought from them.
 
     Once a delivery is booked against a vendor, that vendor is part of the stock ledger's
