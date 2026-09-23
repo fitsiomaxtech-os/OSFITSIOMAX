@@ -161,43 +161,59 @@ function DayRow({ absence, day, candidates, onChanged }) {
         <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 px-4 py-3">
           {!releasing ? (
             <>
-              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
-                <div className="min-w-0">
-                  <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    {day.state === "reassigned" ? "Hand to someone else" : "Covering physio"}
-                  </label>
-                  <Select value={toId} onValueChange={(v) => { setToId(v); setConfirmed(false); }}>
-                    <SelectTrigger
-                      className="h-9 w-full min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm hover:bg-slate-50 focus:ring-2 focus:ring-sky-200"
-                      data-testid={`absence-day-physio-${day.id}`}
-                    >
-                      <SelectValue placeholder="Select a physio…" />
-                    </SelectTrigger>
-                    {/* Above the popup's z-[60]: the list is portalled to <body>, and at the
-                        default z-50 it opened behind the popup, so the picker looked empty. */}
-                    <SelectContent className="z-[70] max-h-72 border-slate-200">
-                      {options.map((c) => (
-                        <SelectItem
+              {/* Every physio at the branch as a card, rather than a dropdown: the seats free
+                  at this hour are the whole decision, and a card shows them for everyone at
+                  once. The server sorts free first, fewest booked first, so the top card is
+                  the natural pick. Busy ones stay on the list with the reason, so the desk
+                  can see that opening an hour is all it would take. */}
+              <div>
+                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                  {day.state === "reassigned" ? "Hand to someone else" : "Who covers"} {timeOf(day.slot_time)}?
+                </p>
+                {options.length > 0 && (
+                  <div className="grid gap-1.5 sm:grid-cols-2" role="radiogroup" data-testid={`absence-day-physio-${day.id}`}>
+                    {options.map((c) => {
+                      const current = c.id === day.physio_id;
+                      const selectable = c.available && !current;
+                      const selected = toId === c.id;
+                      const free = Math.max((c.capacity || 0) - (c.taken || 0), 0);
+                      return (
+                        <button
                           key={c.id}
-                          value={c.id}
-                          disabled={!c.available || c.id === day.physio_id}
-                          className="text-sm text-slate-700"
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          disabled={!selectable}
+                          onClick={() => { setToId(c.id); setConfirmed(false); }}
+                          className={`flex min-w-0 items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition ${
+                            selected
+                              ? "border-sky-500 bg-sky-50 ring-2 ring-sky-200"
+                              : selectable
+                                ? "border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40"
+                                : "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60"
+                          }`}
+                          data-testid={`absence-day-physio-${day.id}-${c.id}`}
                         >
-                          {c.name} <span className="text-slate-400">· {c.available ? `${c.taken}/${c.capacity} booked` : c.reason}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">Note</label>
-                  <Input
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Optional"
-                    className="h-9 bg-white shadow-sm"
-                  />
-                </div>
+                          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                            selected ? "bg-sky-600 text-white" : selectable ? "bg-sky-100 text-sky-700" : "bg-slate-200 text-slate-500"
+                          }`}>
+                            {selected ? <CheckCircle2 className="h-4 w-4" /> : initialOf(c.name)}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-slate-800">{c.name}</span>
+                            <span className={`block truncate text-[11px] ${selectable ? "text-emerald-700" : "text-slate-500"}`}>
+                              {current
+                                ? "Covering now"
+                                : c.available
+                                  ? `${free} seat${free === 1 ? "" : "s"} free · ${c.taken}/${c.capacity} booked`
+                                  : c.reason}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {options.length > 0 && !hasFree && (
@@ -226,6 +242,15 @@ function DayRow({ absence, day, candidates, onChanged }) {
                     <span className="font-semibold">{picked?.name}</span> at {timeOf(day.slot_time)}.
                   </span>
                 </label>
+              )}
+
+              {toId && (
+                <Input
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Note (optional)"
+                  className="h-9 bg-white shadow-sm"
+                />
               )}
 
               <div className="flex flex-wrap items-center justify-between gap-2">
