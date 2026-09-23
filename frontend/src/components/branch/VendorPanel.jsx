@@ -33,13 +33,17 @@ const SHELVES = [
 const SHELF_LABEL = Object.fromEntries(SHELVES.map((s) => [s.key, s.label]));
 
 /**
- * How a unit of stock is counted — VALID_UNITS in backend/routers/v3_inventory.py, whole
- * rather than the per-shelf subsets the sales catalogue offers.
+ * What a stock row is bought for.
  *
- * The Stock Detail book is what gets bought, which is wider than what gets sold: the same
- * supplement is sold by the bottle and bought by the box, and a water can is neither.
+ * Three the organisation named, and Other, which opens a box to type into — no list of
+ * three survives contact with what a branch actually buys, and a fourth kind shouldn't
+ * need a deploy. The server takes the word as typed, so nothing here has to agree with
+ * a list anywhere else.
  */
-const UNITS = ["Strip", "Bottle", "Tube", "Sachet", "Pack", "Piece", "Box", "Set", "Pair"];
+const STOCK_TYPES = ["For Office", "Staffs", "Medical"];
+
+/** The typed-in stock type, kept out of the list by a value no type can have. */
+const OTHER_TYPE = "__other__";
 
 /** Matches VALID_PAYMENT_MODES in backend/routers/v3_inventory.py. */
 const PAYMENT_MODES = [
@@ -55,17 +59,35 @@ const OTHER_CITY = "__other__";
 // Row keys, so a row being removed doesn't make React reuse the one below it and carry
 // the wrong text into it. Never saved — the server sees the fields and nothing else.
 let rowKey = 0;
-const blankRow = () => ({ key: `r${++rowKey}`, name: "", stock_type: "", count: "", unit: "", unit_price: "" });
+const blankRow = () => ({ key: `r${++rowKey}`, name: "", stock_type: "", unit_price: "", paid: "unpaid", paid_amount: "" });
 
-const rowTotal = (r) => (Number(r.count) || 0) * (Number(r.unit_price) || 0);
+/** What a typed row costs. One row is one thing bought, so its price is its total. */
+const rowTotal = (r) => Number(r.unit_price) || 0;
+
+/** A typed row as the server takes it. Unpaid is nought, not a missing number. */
+const asStockPayload = (r) => ({
+  name: r.name.trim(),
+  stock_type: r.stock_type.trim(),
+  unit_price: Number(r.unit_price) || 0,
+  paid_amount: r.paid === "paid" ? Number(r.paid_amount) || 0 : 0,
+});
+
+/** What has gone against a saved stock row, in the words the form asks it in. */
+const paidText = (r) => {
+  const paid = Number(r.paid_amount || 0);
+  if (paid <= 0) return "Unpaid";
+  return paid >= Number(r.total || 0) ? "Paid" : `${fmt(paid)} paid`;
+};
 
 /**
  * The vendor draft carries more than the form shows.
  *
- * Email, GST, address, payment terms and notes came off the form in the redesign, but a
- * vendor saved before that still holds them and a save sends the whole record — so they
- * ride along untouched rather than being blanked by a form that no longer asks. The same
- * goes for `active`, which the row's own power button owns now.
+ * Email, GST, payment terms and notes came off the form in the redesign, but a vendor
+ * saved before that still holds them and a save sends the whole record — so they ride
+ * along untouched rather than being blanked by a form that no longer asks. The same goes
+ * for `active`, which the row's own power button owns now.
+ *
+ * `address` is on the form again, typed under the city; the rest of that list is not.
  */
 const emptyDraft = {
   id: null, name: "", contact_person: "", phone: "", email: "", gst_number: "",
@@ -91,7 +113,13 @@ const toDraft = (v) => ({
   payment_mode: v.payment_mode || "",
   payment_date: v.payment_date || "",
   active: v.active !== false,
+  // Typed rows are always new stock. What this vendor already supplies is in Linked
+  // Stock, ticked — editing a vendor is not the place to re-type their whole book.
+  rows: [blankRow()],
 });
+
+/** A fresh vendor form, with one empty stock row ready to type into. */
+const newDraft = (over = {}) => ({ ...emptyDraft, rows: [blankRow()], ...over });
 
 /** A shelf chip, and the filter row above the table. */
 const ShelfChip = ({ label, on = true, onClick, testid }) => {
@@ -134,6 +162,77 @@ const Readout = ({ label, value, tone = "text-slate-600" }) => (
     <div className={`flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold ${tone}`}>{value}</div>
   </div>
 );
+
+/**
+ * One stock row's four questions: what it is, what it is for, what it cost, what has been
+ * paid against it.
+ *
+ * Lives out here because two forms ask them — the vendor dialog, where stock is typed in
+ * the first place, and the pencil on a stock row, which fixes one already saved. Two
+ * copies of four fields is how the two drift into disagreeing about what a stock row is.
+ */
+const StockFields = ({ row, idx = 0, onChange }) => {
+  // A type the list doesn't offer can only have been typed, so the box stays open on it.
+  // Picking Other parks a single space here: empty would read as nothing chosen.
+  const typed = !!row.stock_type && !STOCK_TYPES.includes(row.stock_type);
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field label={<Req>Stock Name</Req>}>
+        <input className={inputCls} value={row.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="Enter stock name" data-testid={`stock-row-name-${idx}`} />
+      </Field>
+      <Field label="Stock Type">
+        <select
+          className={inputCls}
+          value={typed ? OTHER_TYPE : row.stock_type}
+          onChange={(e) => onChange({ stock_type: e.target.value === OTHER_TYPE ? " " : e.target.value })}
+          data-testid={`stock-row-type-${idx}`}
+        >
+          <option value="">Select stock type</option>
+          {STOCK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          <option value={OTHER_TYPE}>Other...</option>
+        </select>
+        {typed && (
+          <input
+            className={`${inputCls} mt-2`}
+            value={row.stock_type.trim()}
+            onChange={(e) => onChange({ stock_type: e.target.value || " " })}
+            placeholder="Type the stock type"
+            data-testid={`stock-row-type-other-${idx}`}
+          />
+        )}
+      </Field>
+      <Field label="Stock Price">
+        <input type="number" min="0" className={inputCls} value={row.unit_price} onChange={(e) => onChange({ unit_price: e.target.value })} placeholder="Enter price" data-testid={`stock-row-price-${idx}`} />
+      </Field>
+      <Field label="Payment">
+        {/* Unpaid is a state, not a blank box. Choosing Paid opens on the price, which is
+            what is owed until somebody says otherwise. */}
+        <select
+          className={inputCls}
+          value={row.paid}
+          onChange={(e) => onChange({
+            paid: e.target.value,
+            paid_amount: e.target.value === "paid" ? (row.paid_amount || row.unit_price) : "",
+          })}
+          data-testid={`stock-row-paid-${idx}`}
+        >
+          <option value="unpaid">Unpaid</option>
+          <option value="paid">Paid</option>
+        </select>
+        {row.paid === "paid" && (
+          <input
+            type="number" min="0"
+            className={`${inputCls} mt-2`}
+            value={row.paid_amount}
+            onChange={(e) => onChange({ paid_amount: e.target.value })}
+            placeholder="Paid amount"
+            data-testid={`stock-row-paid-amount-${idx}`}
+          />
+        )}
+      </Field>
+    </div>
+  );
+};
 
 /**
  * FITSIOMAX STORE > Vendor — who the organisation buys from, what it buys, what it owes.
@@ -233,21 +332,32 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   // A city the dropdown doesn't offer can only have been typed, so the box stays open on
   // it — including for a vendor saved before the dropdown existed.
-  const isTypedCity = !!draft && !!draft.city.trim() && !cityOptions.includes(draft.city);
+  const isTypedCity = !!draft && !!draft.city && !cityOptions.includes(draft.city);
 
   const linkedTotal = (ids) => ids.reduce((sum, id) => sum + Number(stockById[id]?.total || 0), 0);
 
   /**
-   * Ticking a stock row also refills the bill.
+   * The bill, from what is ticked plus what is typed.
    *
-   * The amount stays typeable afterwards, because a bill carries delivery, discount and
-   * tax that no rate on a line knows about — but it opens on what the lines add up to,
-   * which is right far more often than nought is.
+   * Both boxes stay typeable afterwards: a bill carries delivery, discount and tax that no
+   * rate on a line knows about. But they open on what the lines add up to, which is right
+   * far more often than nought is, and a figure that comes to nothing leaves whatever was
+   * typed there alone rather than wiping it.
    */
-  const toggleStock = (id) => setDraft((d) => {
-    const stock_ids = d.stock_ids.includes(id) ? d.stock_ids.filter((x) => x !== id) : [...d.stock_ids, id];
-    return { ...d, stock_ids, amount: stock_ids.length ? String(linkedTotal(stock_ids)) : "" };
-  });
+  const recalc = (d) => {
+    const total = linkedTotal(d.stock_ids) + d.rows.reduce((sum, r) => sum + rowTotal(r), 0);
+    const paid = d.rows.reduce((sum, r) => sum + (r.paid === "paid" ? Number(r.paid_amount) || 0 : 0), 0);
+    return {
+      ...d,
+      amount: total ? String(total) : d.amount,
+      paid_amount: paid ? String(paid) : d.paid_amount,
+    };
+  };
+
+  const toggleStock = (id) => setDraft((d) => recalc({
+    ...d,
+    stock_ids: d.stock_ids.includes(id) ? d.stock_ids.filter((x) => x !== id) : [...d.stock_ids, id],
+  }));
 
   const payloadOf = (d) => ({
     name: d.name.trim(),
@@ -259,11 +369,11 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     paid_amount: Number(d.paid_amount) || 0,
     payment_mode: d.payment_mode,
     payment_date: d.payment_date,
+    address: d.address.trim(),
     // Carried through untouched — the form stopped asking for these, it didn't delete
     // them. See emptyDraft.
     email: d.email.trim(),
     gst_number: d.gst_number.trim(),
-    address: d.address.trim(),
     payment_terms: d.payment_terms.trim(),
     notes: d.notes.trim(),
     active: d.active,
@@ -281,9 +391,34 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
       [!draft.city.trim(), "City is required"],
     ].find(([bad]) => bad);
     if (missing) { toast.error(missing[1]); return; }
+
+    // A row nobody touched is not an entry — the form opens with one, and somebody who
+    // only came to add a vendor shouldn't be told off about it.
+    const typed = draft.rows.filter((r) => r.name.trim() || r.stock_type.trim() || r.unit_price);
+    if (typed.some((r) => !r.name.trim())) { toast.error("Every stock row needs a name"); return; }
+
+    // The stock book first, then the vendor pointing at it. That way round because the
+    // vendor needs the ids, and because of how each half fails: stock that lands without
+    // its vendor is in the list and can be ticked by hand, a vendor linked to ids that
+    // don't exist can't save at all. A clashing name stops here with the vendor untouched.
+    let created = [];
+    if (typed.length) {
+      setBusy(true);
+      try {
+        const res = await createVendorStock(typed.map(asStockPayload));
+        created = (res.stock || []).map((r) => r.id);
+      } catch (e) {
+        toast.error(errText(e, "Couldn't add the stock"));
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    const d = { ...draft, stock_ids: [...new Set([...draft.stock_ids, ...created])] };
     const ok = await run(
-      () => (draft.id ? updateVendor(draft.id, payloadOf(draft), scope) : createVendor(payloadOf(draft))),
-      draft.id ? "Vendor updated" : "Vendor added",
+      () => (d.id ? updateVendor(d.id, payloadOf(d), scope) : createVendor(payloadOf(d))),
+      d.id ? "Vendor updated" : "Vendor added",
     );
     if (ok) setDraft(null);
   };
@@ -312,47 +447,32 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   // ---------------------------------------------------------------- the stock form
 
-  const setRow = (key, patch) => setStockDraft((d) => ({
+  // The rows being typed belong to the vendor form — stock is written where the vendor
+  // is, in the one dialog. Every edit re-totals the bill beside it.
+  const setRow = (key, patch) => setDraft((d) => recalc({
     ...d, rows: d.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)),
   }));
-  const addRow = () => setStockDraft((d) => ({ ...d, rows: [...d.rows, blankRow()] }));
-  const dropRow = (key) => setStockDraft((d) => {
+  const addRow = () => setDraft((d) => ({ ...d, rows: [...d.rows, blankRow()] }));
+  const dropRow = (key) => setDraft((d) => {
     const left = d.rows.filter((r) => r.key !== key);
-    return { ...d, rows: left.length ? left : [blankRow()] };
+    return recalc({ ...d, rows: left.length ? left : [blankRow()] });
   });
 
+  // The pencil on a saved row. Adding moved into the vendor form; fixing a typo in
+  // something already in the book still needs somewhere to happen.
   const editStock = (row) => setStockDraft({
     id: row.id,
-    rows: [{
-      key: `r${Date.now()}`,
-      name: row.name || "",
-      stock_type: row.stock_type || "",
-      count: row.count ? String(row.count) : "",
-      unit: row.unit || "",
-      unit_price: row.unit_price ? String(row.unit_price) : "",
-    }],
-  });
-
-  const asStockPayload = (r) => ({
-    name: r.name.trim(),
-    stock_type: r.stock_type.trim(),
-    count: Number(r.count) || 0,
-    unit: r.unit,
-    unit_price: Number(r.unit_price) || 0,
+    key: `r${Date.now()}`,
+    name: row.name || "",
+    stock_type: row.stock_type || "",
+    unit_price: row.unit_price ? String(row.unit_price) : "",
+    paid: Number(row.paid_amount || 0) > 0 ? "paid" : "unpaid",
+    paid_amount: row.paid_amount ? String(row.paid_amount) : "",
   });
 
   const saveStock = async () => {
-    // An untouched row is not an entry — somebody hit Add Another Stock and changed their
-    // mind, which shouldn't be an error message.
-    const filled = stockDraft.rows.filter((r) => r.name.trim() || r.stock_type.trim() || r.count || r.unit_price);
-    if (filled.length === 0) { toast.error("Type at least one stock name"); return; }
-    if (filled.some((r) => !r.name.trim())) { toast.error("Every row needs a stock name"); return; }
-    const ok = await run(
-      () => (stockDraft.id
-        ? updateVendorStock(stockDraft.id, asStockPayload(filled[0]))
-        : createVendorStock(filled.map(asStockPayload))),
-      stockDraft.id ? "Stock updated" : "Stock added",
-    );
+    if (!stockDraft.name.trim()) { toast.error("Type a stock name"); return; }
+    const ok = await run(() => updateVendorStock(stockDraft.id, asStockPayload(stockDraft)), "Stock updated");
     if (ok) setStockDraft(null);
   };
 
@@ -364,11 +484,11 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
    * row already ticked and the bill already showing what it comes to, so the only things
    * left to type are the ones only a person knows.
    */
-  const addVendorFor = (row) => setDraft({
-    ...emptyDraft,
+  const addVendorFor = (row) => setDraft(newDraft({
     stock_ids: [row.id],
     amount: row.total ? String(row.total) : "",
-  });
+    paid_amount: row.paid_amount ? String(row.paid_amount) : "",
+  }));
 
   const removeStock = async (row) => {
     const msg = row.vendor_count
@@ -485,23 +605,13 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
               />
             ))}
           </div>
+          {/* One button, because there is one dialog. Stock used to be added from a
+              second one of its own, which meant a branch writing down a single purchase
+              opened two forms and had to know to open them in the right order. */}
           {canEdit && (
-            <>
-              {/* Stock first, and in its own colour: it is the one that has to happen
-                  first. A vendor form opened before anything is in the stock list has
-                  nothing to link, and this is the button that says so. */}
-              <Button
-                variant="outline"
-                onClick={() => setStockDraft({ id: null, rows: [blankRow()] })}
-                className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                data-testid="vendor-stock-new"
-              >
-                <Plus className="mr-1.5 h-4 w-4" /> Add Stock Detail
-              </Button>
-              <Button onClick={() => setDraft({ ...emptyDraft })} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="vendor-new">
-                <Plus className="mr-1.5 h-4 w-4" /> Add Vendor
-              </Button>
-            </>
+            <Button onClick={() => setDraft(newDraft())} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="vendor-new">
+              <Plus className="mr-1.5 h-4 w-4" /> Add Vendor
+            </Button>
           )}
         </CardContent>
       </Card>
@@ -525,7 +635,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-loading">Loading stock...</p>
           ) : stock.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-empty">
-              No stock yet — use <span className="font-semibold">Add Stock Detail</span> to type in what the branch buys.
+              No stock yet — use <span className="font-semibold">Add Vendor</span> to type in what the branch buys and who supplies it.
             </p>
           ) : (
             <div className="divide-y divide-slate-100" data-testid="stock-list">
@@ -542,10 +652,11 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                     <p className="truncate text-[11px] text-slate-500">
                       {[
                         r.stock_type,
+                        // Only rows typed back when the form asked how many carry a count.
                         r.count ? `${r.count}${r.unit ? ` ${r.unit}` : ""}` : "",
-                        r.unit_price ? `${fmt(r.unit_price)} each` : "",
-                        r.total ? `${fmt(r.total)} total` : "",
-                      ].filter(Boolean).join(" · ") || "No quantity or rate yet"}
+                        r.total ? fmt(r.total) : "",
+                        paidText(r),
+                      ].filter(Boolean).join(" · ")}
                     </p>
                   </button>
 
@@ -700,96 +811,22 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
       {stockDraft && (
         <Modal
-          title={stockDraft.id ? "Edit Stock Detail" : "Add Stock Detail"}
+          title="Edit Stock Detail"
           onClose={() => setStockDraft(null)}
           testid="stock-modal"
           light
-          width="max-w-3xl"
-          bodyCls="p-4 space-y-4"
+          width="max-w-xl"
+          bodyCls="p-4"
           footer={<>
             <Button variant="outline" onClick={() => setStockDraft(null)} data-testid="stock-cancel">Cancel</Button>
             <Button className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={busy} onClick={saveStock} data-testid="stock-save">
-              {stockDraft.id ? "Save Changes" : "Save Stock"}
+              Save Changes
             </Button>
           </>}
         >
           <Panel title="Stock Details" icon={Package} tint="bg-emerald-50/70 text-emerald-700" testid="stock-entry">
-            {stockDraft.rows.map((r, idx) => (
-              <div key={r.key} className={idx > 0 ? "border-t border-slate-100 pt-3" : ""} data-testid={`stock-row-${idx}`}>
-                {stockDraft.rows.length > 1 && (
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Stock {idx + 1}</span>
-                    <button type="button" onClick={() => dropRow(r.key)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Remove this row" data-testid={`stock-row-drop-${idx}`}>
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label={<Req>Stock Name</Req>}>
-                    <input className={inputCls} value={r.name} onChange={(e) => setRow(r.key, { name: e.target.value })} placeholder="Enter stock name" data-testid={`stock-row-name-${idx}`} />
-                  </Field>
-                  <Field label="Stock Type">
-                    <input className={inputCls} value={r.stock_type} onChange={(e) => setRow(r.key, { stock_type: e.target.value })} placeholder="e.g. Individual" data-testid={`stock-row-type-${idx}`} />
-                  </Field>
-                  <Field label="Stock Count">
-                    <input type="number" min="0" className={inputCls} value={r.count} onChange={(e) => setRow(r.key, { count: e.target.value })} placeholder="Enter count" data-testid={`stock-row-count-${idx}`} />
-                  </Field>
-                  <Field label="Unit">
-                    <select className={inputCls} value={r.unit} onChange={(e) => setRow(r.key, { unit: e.target.value })} data-testid={`stock-row-unit-${idx}`}>
-                      <option value="">Select unit</option>
-                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Unit Price">
-                    <input type="number" min="0" className={inputCls} value={r.unit_price} onChange={(e) => setRow(r.key, { unit_price: e.target.value })} placeholder="Enter unit price" data-testid={`stock-row-price-${idx}`} />
-                  </Field>
-                  {/* Read-only because it is the count times the price and nothing else. A
-                      box you could type a different number into would be a third figure
-                      disagreeing with the two above it. */}
-                  <Readout label="Total Price" value={fmt(rowTotal(r))} />
-                </div>
-              </div>
-            ))}
-            {!stockDraft.id && (
-              <button
-                type="button"
-                onClick={addRow}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-300 px-3 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
-                data-testid="stock-row-add"
-              >
-                <Plus className="h-4 w-4" /> Add Another Stock
-              </button>
-            )}
+            <StockFields row={stockDraft} onChange={(patch) => setStockDraft({ ...stockDraft, ...patch })} />
           </Panel>
-
-          {/* What is already in the book, so the same thing isn't typed twice under two
-              spellings — the server refuses a duplicate name, and seeing the list is
-              kinder than being told. */}
-          {stock.length > 0 && !stockDraft.id && (
-            <div data-testid="stock-existing">
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">Already in the list</p>
-              <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-1.5">
-                {stock.map((r) => (
-                  <div key={r.id} className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs hover:bg-slate-50" data-testid={`stock-existing-${r.id}`}>
-                    <span className="min-w-0 truncate text-slate-700">
-                      <span className="font-semibold">{r.name}</span>
-                      {r.stock_type ? ` · ${r.stock_type}` : ""}
-                      {r.count ? ` · ${r.count}${r.unit ? ` ${r.unit}` : ""}` : ""}
-                      {r.unit_price ? ` · ${fmt(r.unit_price)} each` : ""}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeStock(r)}
-                      className="shrink-0 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                      title="Remove" data-testid={`stock-existing-drop-${r.id}`}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </Modal>
       )}
 
@@ -845,16 +882,63 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                   />
                 )}
               </Field>
+              {/* Where they actually are, typed and never picked: a door number is not a
+                  list, and the city above only says which town to look in. Optional —
+                  plenty of vendors are a phone number and a name, and one that is
+                  shouldn't be unsaveable for want of an address. */}
+              <Field label="Address">
+                <textarea
+                  rows={3}
+                  className={`${inputCls} h-auto resize-y py-2 leading-5`}
+                  value={draft.address}
+                  onChange={(e) => setDraft({ ...draft, address: e.target.value })}
+                  placeholder="Door no, street, area, pincode"
+                  data-testid="vendor-address"
+                />
+              </Field>
             </Panel>
 
             <div className="space-y-4 lg:col-span-2">
-              <Panel title="Linked Stock" icon={Package} tint="bg-emerald-50/70 text-emerald-700" testid="vendor-stock">
-                {stock.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400" data-testid="vendor-stock-empty">
-                    Nothing in the stock list yet. Close this and use <span className="font-semibold">Add Stock Detail</span> first.
-                  </p>
-                ) : (
-                  <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-1.5" data-testid="vendor-stock-list">
+              {/* Stock is typed here rather than in a dialog of its own: a vendor and what
+                  they supply are one thought, and asking for them separately meant opening
+                  two forms, in the right order, to write down one purchase. */}
+              <Panel title="Stock Details" icon={Package} tint="bg-emerald-50/70 text-emerald-700" testid="vendor-stock-entry">
+                {draft.rows.map((r, idx) => (
+                  <div key={r.key} className={idx > 0 ? "border-t border-slate-100 pt-3" : ""} data-testid={`stock-row-${idx}`}>
+                    {draft.rows.length > 1 && (
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Stock {idx + 1}</span>
+                        <button
+                          type="button"
+                          onClick={() => dropRow(r.key)}
+                          className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                          title="Remove this row" data-testid={`stock-row-drop-${idx}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    <StockFields row={r} idx={idx} onChange={(patch) => setRow(r.key, patch)} />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-300 px-3 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+                  data-testid="stock-row-add"
+                >
+                  <Plus className="h-4 w-4" /> Add Another Stock
+                </button>
+              </Panel>
+
+              {/* What is already in the book. Shown only when there is some, so a first
+                  vendor isn't met with an empty box telling them to go elsewhere — and
+                  kept, because the second vendor for the same thing links it rather than
+                  typing it again under a spelling the server would refuse. */}
+              {stock.length > 0 && (
+                <Panel title="Linked Stock" icon={Boxes} tint="bg-sky-50/70 text-sky-700" testid="vendor-stock">
+                  <p className="-mt-1 text-[11px] text-slate-400">Already in the stock list — tick anything else this vendor supplies.</p>
+                  <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-1.5" data-testid="vendor-stock-list">
                     {stock.map((r) => {
                       const on = draft.stock_ids.includes(r.id);
                       return (
@@ -871,8 +955,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                             {r.name}
                             <span className="ml-1 font-normal text-slate-400">
                               {r.stock_type ? `· ${r.stock_type} ` : ""}
-                              {r.count ? `· ${r.count}${r.unit ? ` ${r.unit}` : ""} ` : ""}
-                              {r.unit_price ? `· ${fmt(r.unit_price)} each` : ""}
+                              {`· ${paidText(r)}`}
                             </span>
                           </span>
                           <span className="shrink-0 font-semibold">{fmt(r.total)}</span>
@@ -880,14 +963,15 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                       );
                     })}
                   </div>
-                )}
-              </Panel>
+                </Panel>
+              )}
 
               <Panel title="Payment to Vendor" icon={Wallet} tint="bg-amber-50/70 text-amber-700" testid="vendor-payment">
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Field label="Total Amount">
-                    {/* Filled in from the ticked stock and left typeable: a bill carries
-                        delivery, discount and tax that no rate on a line knows about. */}
+                    {/* Filled in from the stock typed above and anything ticked below it,
+                        and left typeable: a bill carries delivery, discount and tax that
+                        no rate on a line knows about. */}
                     <input type="number" min="0" className={inputCls} value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} placeholder="Enter amount" data-testid="vendor-amount" />
                   </Field>
                   <Field label="Paid Amount">

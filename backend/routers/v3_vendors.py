@@ -160,34 +160,53 @@ class StockIn(BaseModel):
     ledger come from; this book is what was ordered and at what rate.
     """
     name: str
-    # The branch's own word for how it arrives — individual, loose, per box. No list,
-    # because there isn't one anywhere else in the OS to agree with.
+    # What the stock is bought for — For Office, Staffs, Medical, or whatever a branch
+    # types in place of them. Free text, because a list of three is a list somebody will
+    # need a fourth of, and nothing else in the OS holds one to agree with.
     stock_type: Optional[str] = ""
-    count: int = 0
-    unit: Optional[str] = ""
+    # A count and a unit came off the form: a purchase is a thing, what it is for and what
+    # it cost. They stay on the model because rows saved when the form asked still carry
+    # them — an edit that doesn't mention them leaves the stored ones alone, which is what
+    # the None default is for.
+    count: Optional[int] = None
+    unit: Optional[str] = None
     unit_price: float = 0
+    # What has gone against this row. Nought is the Unpaid the form shows.
+    paid_amount: float = 0
 
 
-def _clean_stock(payload: StockIn) -> dict:
+def _clean_stock(payload: StockIn, existing: dict = None) -> dict:
+    """The stored shape of one Stock Detail row.
+
+    `existing` is the row being edited, and it is only ever read for the two fields the
+    form no longer sends: a row typed back when it asked how many and in what unit keeps
+    both, rather than having them quietly zeroed by a form that stopped asking.
+    """
     name = " ".join((payload.name or "").split())
     if not name:
         raise _err(400, "A stock name is required")
-    unit = (payload.unit or "").strip()
+    old = existing or {}
+    unit = ((payload.unit if payload.unit is not None else old.get("unit")) or "").strip()
     if unit and unit not in VALID_UNITS:
         raise _err(400, f"unit must be one of {', '.join(sorted(VALID_UNITS))}")
-    count = int(payload.count or 0)
+    count = int((payload.count if payload.count is not None else old.get("count")) or 0)
     price = float(payload.unit_price or 0)
-    if count < 0 or price < 0:
-        raise _err(400, "A count and a price cannot be negative")
+    paid = float(payload.paid_amount or 0)
+    if count < 0 or price < 0 or paid < 0:
+        raise _err(400, "A count, a price and a paid amount cannot be negative")
     return {
         "name": name[:120],
         "stock_type": " ".join((payload.stock_type or "").split())[:40],
         "count": count,
         "unit": unit,
         "unit_price": round(price, 2),
+        "paid_amount": round(paid, 2),
         # Stored rather than worked out on the way to the screen: it is what the rate was
         # agreed at, and a figure read back months later shouldn't depend on today's code.
-        "total": round(count * price, 2),
+        #
+        # No count means one thing bought at that price, which is what the form types now;
+        # a row that carries a count is still that count times the rate.
+        "total": round(price * count, 2) if count else round(price, 2),
     }
 
 
@@ -391,10 +410,10 @@ async def create_vendor_stock(payload: List[StockIn], user: V3UserOut = Depends(
 
 @router.put("/stock/{stock_id}")
 async def update_vendor_stock(stock_id: str, payload: StockIn, _: V3UserOut = Depends(v3_require_roles(*VENDOR_ROLES))):
-    existing = await v3_col("vendor_stock").find_one({"id": stock_id}, {"_id": 0, "id": 1})
+    existing = await v3_col("vendor_stock").find_one({"id": stock_id}, {"_id": 0})
     if not existing:
         raise _err(404, "That stock row no longer exists")
-    doc = _clean_stock(payload)
+    doc = _clean_stock(payload, existing)
     clash = await v3_col("vendor_stock").find_one(
         {"id": {"$ne": stock_id}, "name": {"$regex": f"^{_escape_regex(doc['name'])}$", "$options": "i"}},
         {"_id": 0, "id": 1},
