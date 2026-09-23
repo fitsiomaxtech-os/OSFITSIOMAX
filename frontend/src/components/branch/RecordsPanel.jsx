@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, ChevronRight, Download, RefreshCw, Search, X } from "lucide-react";
+import { ArrowLeftRight, ChevronRight, Download, RefreshCw, Search, Truck, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { QuickDateFilterBar, intersectDateFilters } from "@/components/QuickDateFilterBar";
+import { VendorPanel } from "@/components/branch/VendorPanel";
 import { getBranchTransferRecords } from "@/lib/api";
 import { downloadCsv } from "@/lib/printable";
 import { dateStampFull, callTimeStamp } from "@/lib/time";
@@ -16,6 +17,7 @@ import { dateStampFull, callTimeStamp } from "@/lib/time";
  */
 const RECORD_TABS = [
   { key: "branch_transfers", label: "Branch Transfer Records", icon: ArrowLeftRight },
+  { key: "vendors", label: "Vendor Records", icon: Truck },
 ];
 
 const money = (n) => `Rs.${Math.round(Number(n) || 0).toLocaleString("en-IN")}`;
@@ -45,6 +47,18 @@ export const RecordsPanel = ({ branchId }) => {
         })}
       </div>
       {sub === "branch_transfers" && <BranchTransferRecords branchId={branchId} />}
+      {/* The store's own vendor screen, read-only.
+
+          Not a second copy of the book: it is the same panel against the same org-wide
+          collection, so a vendor added in FITSIOMAX STORE is on this tab the moment it
+          loads and there is no version of it that can disagree.
+
+          Read-only is what makes it a record rather than a duplicate. Everything a branch
+          comes to Records for is here — who is supplied by whom, what was billed, what is
+          still owed, and the deliveries behind each figure — and the one place a vendor is
+          typed, edited or switched off stays FITSIOMAX STORE. Two screens that both edit
+          the same rows is how a branch ends up asking which of them is right. */}
+      {sub === "vendors" && <VendorPanel branchId={branchId} canEdit={false} />}
     </div>
   );
 };

@@ -684,9 +684,10 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-loading">Loading stock...</p>
           ) : visibleStock.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-empty">
-              {stock.length === 0
-                ? <>No stock yet — use <span className="font-semibold">Add Vendor</span> to type in what the branch buys and who supplies it.</>
-                : "No stock was added in the range chosen."}
+              {stock.length > 0 ? "No stock was added in the range chosen."
+                : canEdit ? <>No stock yet — use <span className="font-semibold">Add Vendor</span> to type in what the branch buys and who supplies it.</>
+                  // A screen that cannot add one shouldn't name the button that does.
+                  : "No stock has been written down yet."}
             </p>
           ) : (
             <div className="divide-y divide-slate-100" data-testid="stock-list">
@@ -765,7 +766,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
           {empty ? (
             <p className="px-4 py-14 text-center text-sm text-slate-400" data-testid="vendor-empty">
               {loading ? "Loading vendors..."
-                : vendors.length === 0 ? "No vendors yet — add one, and type what it supplies while you are there."
+                : vendors.length === 0 ? (canEdit ? "No vendors yet — add one, and type what it supplies while you are there." : "No vendors yet.")
                   : dated ? "No vendors match that search in the range chosen."
                     : "Nothing matches that search."}
             </p>
