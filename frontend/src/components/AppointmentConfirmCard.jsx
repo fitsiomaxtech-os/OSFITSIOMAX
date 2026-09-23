@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { downloadPdf, sharePdf, usePdf, whatsappPdf } from "@/lib/pdf";
 import { PRINTABLE_STYLES, docHeadHtml, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
-import { to12h, endTime12h } from "@/lib/time";
+import { to12h } from "@/lib/time";
 
 /** "2026-08-05" -> "05 - 08 - 2026" */
 const dmyLabel = (d) => {
@@ -37,20 +37,18 @@ const weekdayDmy = (d) => {
   return `${weekday} ${day}-${m}-${y}`;
 };
 
-// `compact` drops the three facts the confirmation's own hero already states in bigger
+// `compact` drops the date and time the confirmation's own hero already states in bigger
 // type — the on-screen popup shows that hero, so repeating them underneath is noise. The
-// printed sheet keeps them, where the row list has to stand on its own as the record.
+// full list keeps them, where the rows have to stand on their own as the record.
 export const apptRows = (a, { compact = false } = {}) => [
   ["Reference No.", a.refNo],
   ["Patient", a.patient],
   ["Patient No.", a.patientNo],
   ["Phone", a.phone],
   compact ? null : ["Date", dmyLabel(a.date)],
-  compact ? null : ["Time", `${to12h(a.time)} – ${endTime12h(a.time, a.duration)}`],
-  // Popup drops it: the sheet is the record and still carries it, but on screen the
-  // start time is what the patient is told and a length beside it invites the question.
-  compact ? null : ["Duration", `${a.duration} minutes`],
-  compact ? null : ["CONSULTANT", a.headPhysio],
+  // Start only, and no length or Consultant beside it — see apptHtml. The time a patient
+  // is told to come is the whole of what is promised.
+  compact ? null : ["Time", to12h(a.time)],
   a.branch ? ["Branch", a.branch] : null,
   // Where an online appointment actually happens, so the sheet the patient keeps carries
   // it as plainly as a branch name. Kept in the compact popup too, unlike Date and Time
@@ -61,7 +59,13 @@ export const apptRows = (a, { compact = false } = {}) => [
 ];
 
 // The printed sheet: a calendar tile and the when/where up top, the patient's details and
-// the booking beneath, then the standing instructions. Every field apptRows carries is on it.
+// the booking beneath, then the standing instructions.
+//
+// The hero states the start time alone, for the same reason the popup's does: a
+// consultation runs as long as it needs to, so a printed end time or a length beside it
+// promises the patient something the branch cannot hold to. The Consultant is off it too —
+// who takes the session can change between the booking and the day, and the sheet is the
+// copy the patient keeps.
 export const apptHtml = (a) => {
   const [y, m, d] = String(a.date || "").split("-");
   const day = y && m && d ? new Date(`${a.date}T00:00:00`) : null;
@@ -85,12 +89,10 @@ export const apptHtml = (a) => {
       <div style="min-width:0">
         <p class="label">Your Appointment</p>
         <div class="when">${escapeHtml(weekdayLabel(a.date))}</div>
-        <div class="time">${escapeHtml(to12h(a.time))} – ${escapeHtml(endTime12h(a.time, a.duration))}</div>
-        <div class="facts">
-          <span>Duration <b>${escapeHtml(a.duration)} minutes</b></span>
-          <span>Consultant <b>${escapeHtml(a.headPhysio)}</b></span>
-          ${meet ? `<span>Google Meet <b>${escapeHtml(meet)}</b></span>` : a.branch ? `<span>At <b>${escapeHtml(a.branch)}</b></span>` : ""}
-        </div>
+        <div class="time">${escapeHtml(to12h(a.time))}</div>
+        ${meet
+          ? `<div class="facts"><span>Google Meet <b>${escapeHtml(meet)}</b></span></div>`
+          : a.branch ? `<div class="facts"><span>At <b>${escapeHtml(a.branch)}</b></span></div>` : ""}
       </div>
     </div>
 
