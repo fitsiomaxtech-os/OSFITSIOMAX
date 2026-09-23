@@ -84,6 +84,70 @@ export const DURATION_OPTIONS = [
   { minutes: 120, label: "2 hours" },
 ];
 
+// ---------- Physiotherapy consultation packages ----------
+//
+// The Physiotherapy consultation shelf is sold as one of three packages rather than named
+// freely, and each one's length follows from what is in it — so the package is picked and
+// the duration is read off it, not chosen.
+//
+// Mirrors CONSULTATION_PACKAGES in backend/routers/v3_store.py, which is the authority:
+// it derives duration_minutes from `key` on the way in and ignores whatever this form
+// sends for it. So `minutes` here only decides what the preview below the dropdown says.
+// The keys have to stay identical to the backend's — a key it does not know is refused
+// rather than saved with a guessed length.
+//
+// Only Physiotherapy. Fitness and Diet Consultations name themselves and pick their own
+// duration, as they always have.
+export const CONSULTATION_PACKAGES = [
+  {
+    key: "only_consultation",
+    label: "Only Consultation",
+    minutes: 45,
+    breakdown: "45 mins",
+    durationLabel: "45 mins",
+  },
+  {
+    key: "consultation_plus_physio",
+    label: "Consultation + 20 mins Physio",
+    minutes: 65,
+    // One booking end to end: the physio follows the consultation in the same slot.
+    breakdown: "45 mins + 20 mins = 65 mins",
+    durationLabel: "65 mins",
+  },
+  {
+    key: "consultation_plus_session",
+    label: "Consultation + 1 Session",
+    minutes: 45,
+    breakdown: "45 mins + 1 Session",
+    // Not "45 mins". A row promising a session that reads as 45 minutes looks like the
+    // session was forgotten, wherever it is listed.
+    durationLabel: "45 mins + 1 Session",
+    // Said out loud in the form, because "45 mins" against a package whose name promises a
+    // session reads like a mistake otherwise. A session has no length in this system to add
+    // -- a session package carries a count, not a duration -- and it is booked whenever the
+    // patient is next free, so holding time for it here would block out a physio's calendar
+    // for an appointment nobody has made.
+    note: "The session is booked separately. Only the 45-minute consultation is held in the calendar.",
+  },
+];
+
+const packageByKey = (key) => CONSULTATION_PACKAGES.find((p) => p.key === key) || null;
+
+/**
+ * What one item's length should read as, anywhere it is listed.
+ *
+ * A packaged consultation says what it is made of rather than a bare figure, because
+ * "45 mins" against a package whose name promises a session reads as though the session
+ * had been forgotten. Everything else reads as whatever duration was picked, falling back
+ * to the raw minutes for a length no longer on the buttons.
+ */
+export const itemDurationLabel = (item) => {
+  const pkg = packageByKey(item?.consultation_package);
+  if (pkg) return pkg.durationLabel;
+  const minutes = item?.duration_minutes;
+  return DURATION_OPTIONS.find((d) => d.minutes === minutes)?.label || `${minutes} mins`;
+};
+
 // ---------- Package artwork ----------
 //
 // The form asks for a 1080 x 1080 square, so anything larger is carrying pixels this OS
@@ -360,10 +424,27 @@ const PACKAGE_KINDS = {
   },
 };
 
+// The sentinel for "this row keeps the name it already has". An item created before the
+// packages existed is not one of the three, and opening it to change its price must not
+// quietly rename it to whichever package happened to sort first.
+const KEEP_EXISTING_NAME = "__existing__";
+
 const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation", category = "physiotherapy" }) => {
   const cfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   const isEdit = Boolean(item);
+  // Only the Physiotherapy consultation shelf is sold as fixed packages — see
+  // CONSULTATION_PACKAGES. Everything else still types a name and picks a duration.
+  const usesPackages = cfg.itemType === "consultation" && category === "physiotherapy";
   const [name, setName] = useState(item?.name || "");
+  // Which package this is. A saved key wins; failing that an older row whose name happens
+  // to read as one of the labels is recognised as that package, so the shelf converges as
+  // rows are edited rather than needing a migration. Anything else keeps its own name.
+  const [pkgKey, setPkgKey] = useState(() => {
+    if (!usesPackages) return "";
+    if (item?.consultation_package && packageByKey(item.consultation_package)) return item.consultation_package;
+    if (item) return (CONSULTATION_PACKAGES.find((p) => p.label === item.name) || {}).key || KEEP_EXISTING_NAME;
+    return CONSULTATION_PACKAGES[0].key;
+  });
   const [description, setDescription] = useState(item?.description || "");
   const [priceOnline, setPriceOnline] = useState(item?.price_online ?? DEFAULT_PRICE_ONLINE);
   const [priceOffline, setPriceOffline] = useState(item?.price_offline ?? DEFAULT_PRICE_OFFLINE);
@@ -371,8 +452,13 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
   const image = usePackageImage(item);
   const [saving, setSaving] = useState(false);
 
+  const chosenPackage = usesPackages ? packageByKey(pkgKey) : null;
+  // A packaged row is named and timed by its package; everything else by the two fields.
+  const effectiveName = chosenPackage ? chosenPackage.label : name;
+  const effectiveDuration = chosenPackage ? chosenPackage.minutes : duration;
+
   const submit = async () => {
-    if (!name.trim()) { toast.error(`${cfg.noun} name is required`); return; }
+    if (!effectiveName.trim()) { toast.error(`${cfg.noun} name is required`); return; }
     setSaving(true);
     try {
       const image_url = await image.resolve();
@@ -383,12 +469,16 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
       const payload = {
         item_type: cfg.itemType,
         category,
-        name: name.trim(),
+        name: effectiveName.trim(),
         description,
         image_url,
         price_online: online,
         price_offline: offline,
-        duration_minutes: duration,
+        duration_minutes: effectiveDuration,
+        // The server re-derives the duration from this and ignores the line above, so the
+        // two can never be saved disagreeing. Null on a row keeping its own name, which
+        // also clears the key off a packaged row that was moved back to a free name.
+        consultation_package: chosenPackage ? chosenPackage.key : null,
       };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
@@ -417,8 +507,28 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-5">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Name</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Initial Physiotherapy Assessment" data-testid="consultation-create-name" />
+            <label className="mb-1 block text-xs font-semibold text-slate-600">
+              {usesPackages ? "Package" : "Name"}
+            </label>
+            {usesPackages ? (
+              <select
+                value={pkgKey}
+                onChange={(e) => setPkgKey(e.target.value)}
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                data-testid="consultation-create-package"
+              >
+                {/* Only ever offered to a row that already has a name of its own, and
+                    listed first because it is the one it is currently on. */}
+                {pkgKey === KEEP_EXISTING_NAME && (
+                  <option value={KEEP_EXISTING_NAME}>{item?.name} (existing name)</option>
+                )}
+                {CONSULTATION_PACKAGES.map((p) => (
+                  <option key={p.key} value={p.key}>{p.label}</option>
+                ))}
+              </select>
+            ) : (
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Initial Physiotherapy Assessment" data-testid="consultation-create-name" />
+            )}
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Description</label>
@@ -432,7 +542,22 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
             />
           </div>
           <PackageImageField image={image} testidPrefix="consultation-create" />
-          {!cfg.noDuration && (
+          {/* A packaged consultation's length is not a choice — it is read off the package
+              picked above, so the buttons are replaced by what that package comes to. */}
+          {!cfg.noDuration && chosenPackage ? (
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">{cfg.durationLabel}</label>
+              <div className="rounded-md border border-sky-100 bg-sky-50 px-3 py-2" data-testid="consultation-create-duration-derived">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-sky-900">
+                  <Clock className="h-3.5 w-3.5" />{chosenPackage.breakdown}
+                </p>
+                <p className="mt-0.5 text-[11px] text-sky-700">Set by the package.</p>
+                {chosenPackage.note && (
+                  <p className="mt-1 text-[11px] text-slate-500" data-testid="consultation-create-duration-note">{chosenPackage.note}</p>
+                )}
+              </div>
+            </div>
+          ) : !cfg.noDuration && (
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600">{cfg.durationLabel}</label>
               <div className="flex flex-wrap gap-2" data-testid="consultation-create-duration">
@@ -1017,7 +1142,7 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
                     <Clock className="h-3.5 w-3.5" />{viewCfg.durationLabel}
                   </span>
                   <span className="text-sm font-extrabold text-sky-900">
-                    {DURATION_OPTIONS.find((d) => d.minutes === item.duration_minutes)?.label || `${item.duration_minutes} mins`}
+                    {itemDurationLabel(item)}
                   </span>
                 </div>
               )}
@@ -1294,7 +1419,7 @@ const PhysiotherapyPanel = ({ kind = "consultation", category = "physiotherapy",
                         <Clock className="h-3.5 w-3.5" />{cfg.durationLabel}
                       </span>
                       <span className="text-sm font-extrabold text-sky-900">
-                        {DURATION_OPTIONS.find((d) => d.minutes === it.duration_minutes)?.label || `${it.duration_minutes} mins`}
+                        {itemDurationLabel(it)}
                       </span>
                     </div>
                   )}

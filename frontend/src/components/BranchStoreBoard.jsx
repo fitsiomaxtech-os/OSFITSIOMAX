@@ -14,7 +14,7 @@ import {
   CONSULTATIONS_SUBTABS,
   SESSIONS_SUBTABS,
   PlaceholderPanel,
-  DURATION_OPTIONS,
+  itemDurationLabel,
   PriceModeBadges,
   SessionPriceBoxes,
   ViewItemModal,
@@ -80,7 +80,7 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durati
                           <Clock className="h-3.5 w-3.5" />{durationLabel}
                         </span>
                         <span className="text-sm font-extrabold text-sky-900">
-                          {DURATION_OPTIONS.find((d) => d.minutes === it.duration_minutes)?.label || `${it.duration_minutes} mins`}
+                          {itemDurationLabel(it)}
                         </span>
                       </div>
                     )}
