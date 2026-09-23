@@ -9076,9 +9076,16 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                             {f.sub ? <p className="truncate text-[11px] text-slate-400" title={String(f.sub)}>{f.sub}</p> : null}
                           </div>
                         </div>
-                        <p className="text-lg font-extrabold leading-none text-slate-800">
-                          {f.amount != null ? `Rs.${Number(f.amount).toLocaleString("en-IN")}` : "—"}
-                        </p>
+                        {/* No amount, no line. A fee with nothing set against it used to
+                            print an em dash here, at the same size and weight as a price —
+                            a bold stroke under the title that reads as a value rather than
+                            as the absence of one. The card already says what it wants: its
+                            title, and a button to collect. */}
+                        {f.amount != null ? (
+                          <p className="text-lg font-extrabold leading-none text-slate-800">
+                            {`Rs.${Number(f.amount).toLocaleString("en-IN")}`}
+                          </p>
+                        ) : null}
                         {f.paid ? (
                           <>
                             <span className="text-[11px] font-medium capitalize text-emerald-700">
