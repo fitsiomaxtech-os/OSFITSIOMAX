@@ -115,6 +115,11 @@ const STAGE_ROLE_CANCELLED = "cancelled";
 const STAGE_ROLE_RNR = "rnr";
 const STAGE_ROLE_PORTFOLIO = "portfolio";
 const STAGE_ROLE_FOLLOW_UP = "follow_up";
+// The fourth exit, and the other stage a lead stops on. Rolled like the rest because the
+// board has to recognise it twice over: to offer it from Appointment at all, and to go on
+// counting a written-off lead under it after a consultant has moved the patient along the
+// consultation pipeline underneath (see rowStageName and matchesBranchStage).
+const STAGE_ROLE_NOT_A_PROSPECT = "not_a_prospect";
 
 // What each role was called when it shipped. Only ever a fallback: a stage row that predates
 // the stamping pass carries no role, and until the next backend restart stamps it, the name
@@ -125,6 +130,7 @@ const STAGE_ROLE_FALLBACK_NAMES = {
   [STAGE_ROLE_RNR]: "RNR",
   [STAGE_ROLE_PORTFOLIO]: "Portfolio",
   [STAGE_ROLE_FOLLOW_UP]: "Follow Up",
+  [STAGE_ROLE_NOT_A_PROSPECT]: "Not a prospect",
 };
 
 // Does this stage row carry `role`? Trusts the stamp where there is one, so a stage renamed
@@ -755,7 +761,15 @@ export const matchesBranchStage = (lead, stage, isConsultationOnlyStage = () => 
   // Cancel is an abandonment rather than an ending, so it keeps whatever it holds and is
   // never read as finished. Both spellings: this pipeline stores "Cancelled" and the
   // consultation one is named "Cancel", and the two pill sets are shown in one row.
-  const abandoned = here === "Cancelled" || here === "Cancel";
+  //
+  // Writing a lead off as never having been a prospect is the same kind of stop, and needs
+  // the same exemption for the same reason: the branch usually reaches that conclusion
+  // after the appointment, by which point a consultant may have moved the patient along
+  // the consultation pipeline -- and handedOver below would drop the lead out of the pill
+  // that was just set on it. Named as a literal rather than by role because this function
+  // is module-level and has no stage list to ask; a renamed stage loses the exemption the
+  // same way Cancelled beside it would.
+  const abandoned = here === "Cancelled" || here === "Cancel" || here === "Not a prospect";
   const finished = !abandoned && isCourseComplete(lead);
   // Only the Consultation-ONLY stages hand a lead over — a name both pipelines share gets a
   // single pill backed by the sales-side field, so releasing on one would drop a lead out of
@@ -1116,8 +1130,18 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     (lead) => !!mirrorStage && !!lead?.branch_stage && lead.branch_stage === realEntryStage?.name,
     [mirrorStage, realEntryStage],
   );
+  // Which branch stages the chip says instead of the consultation stage underneath. Every
+  // is_final one, plus Not a prospect -- which is deliberately not final (it keeps its pill
+  // on the strip; see leadPillStages) but stops the lead just as squarely. Without it a
+  // written-off lead whose consultation had moved on would be listed under the Not a
+  // prospect pill while its own chip read "Consultation Visit", which is the exact
+  // disagreement the note above describes for a cancellation.
   const finalBranchStages = useMemo(
-    () => new Set(stages.filter((s) => s.is_final).map((s) => s.name)),
+    () => new Set(
+      stages
+        .filter((s) => s.is_final || stageHasRole(s, STAGE_ROLE_NOT_A_PROSPECT))
+        .map((s) => s.name),
+    ),
     [stages],
   );
   const rowStageName = useCallback(
@@ -2826,11 +2850,17 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   const appointmentStageName = stageNameForRole(stages, STAGE_ROLE_APPOINTMENT);
   const cancelledStageName = stageNameForRole(stages, STAGE_ROLE_CANCELLED);
   const inAppointmentStage = lead.branch_stage === appointmentStageName;
-  // The three real stages reachable from Appointment. Reschedule is the fourth exit and is
+  // The four real stages reachable from Appointment. Reschedule is the fifth exit and is
   // not in here, because it is not a stage at all -- see the pill itself.
+  //
+  // Not a prospect is in the list for the reason it sits where it does in the pipeline:
+  // the branch usually learns there was never a client here at the point the appointment
+  // is made or missed, so Appointment is the stage it has to be reachable from. Left out,
+  // it would be drawn on the card and dead on every lead that could actually use it.
   const APPOINTMENT_EXITS = [
     stageNameForRole(stages, STAGE_ROLE_RNR),
     stageNameForRole(stages, STAGE_ROLE_FOLLOW_UP),
+    stageNameForRole(stages, STAGE_ROLE_NOT_A_PROSPECT),
     cancelledStageName,
   ];
   // `!!name` guards the matchesBranchStage call below: a lead with no consultation_stage

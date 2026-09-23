@@ -26,6 +26,7 @@ V3_BRANCH_STAGES = [
     "Portfolio",
     "Follow Up",
     "Appointment Date & Time",
+    "Not a prospect",
     "Cancelled",
 ]
 
@@ -57,6 +58,20 @@ BRANCH_CANCELLED_STAGE = "Cancelled"
 # Where a booked consultation lands. The other half of the booking dialog's two outcomes,
 # BRANCH_CANCELLED_STAGE being the first.
 BRANCH_APPOINTMENT_STAGE = "Appointment Date & Time"
+
+# Where a lead goes when the branch decides there is no client here to win -- the enquiry
+# was a wrong number, a competitor, a price-check, somebody outside the catchment, or a
+# person who simply does not want treatment. Sits directly after the appointment stage
+# because that is where the branch usually finds out: the call is made or the visit is
+# booked, and only then is it clear this was never a prospect.
+#
+# Not the same thing as BRANCH_CANCELLED_STAGE beside it, which is why it is its own stage
+# rather than another reason code on that one. A cancellation is a real client calling off
+# a real appointment -- the slot goes back on the calendar and the branch may well rebook
+# them. This is the lead being written off, and nothing is released because there was
+# nothing worth holding. Keeping the two apart is what lets a branch read its cancellation
+# rate as cancellations rather than as bad leads.
+BRANCH_NOT_A_PROSPECT_STAGE = "Not a prospect"
 
 # ------------------------------------------------------------------- Branch arms ("sales")
 #
@@ -96,10 +111,16 @@ SALES_STAGE_ROLE_PORTFOLIO = "portfolio"
 # Appointment. Named by role for the same reason as the rest: renamed, it silently vanished
 # from that list rather than being renamed in it.
 SALES_STAGE_ROLE_FOLLOW_UP = "follow_up"
+# The fourth exit from Appointment, and named by role for the same reason Follow Up is: the
+# board has to know which pill this is to offer it there at all (see APPOINTMENT_EXITS in
+# BranchAdminBoard.jsx), and to keep counting a written-off lead under it once a consultant
+# has moved the patient along the consultation pipeline underneath.
+SALES_STAGE_ROLE_NOT_A_PROSPECT = "not_a_prospect"
 
 SALES_STAGE_ROLES_BY_NAME = {
     BRANCH_APPOINTMENT_STAGE: SALES_STAGE_ROLE_APPOINTMENT,
     BRANCH_CANCELLED_STAGE: SALES_STAGE_ROLE_CANCELLED,
+    BRANCH_NOT_A_PROSPECT_STAGE: SALES_STAGE_ROLE_NOT_A_PROSPECT,
     BRANCH_ADMIN_RNR_STAGE: SALES_STAGE_ROLE_RNR,
     "Portfolio": SALES_STAGE_ROLE_PORTFOLIO,
     "Follow Up": SALES_STAGE_ROLE_FOLLOW_UP,

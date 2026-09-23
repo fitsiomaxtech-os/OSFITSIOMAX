@@ -6,7 +6,7 @@ import logging
 
 from database import client
 from indexes import ensure_core_indexes
-from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages, migrate_consultation_stages, migrate_head_consultation_stages, deactivate_legacy_demo_admin, migrate_consultant_roles, migrate_branch_admin_roles, backfill_consultant_branches_from_employees, migrate_designation_roles, retire_aliased_designation_roles, ensure_structure_departments, dedupe_department_designations, sync_head_physio_doctors, consolidate_head_physio_doctors, retire_experts_without_a_login, backfill_login_history_from_sessions, normalize_session_item_prices, normalize_lead_session_package_prices, migrate_course_prices_to_totals, ensure_fitness_packages, repair_flattened_fitness_prices, backfill_branch_codes, backfill_patient_numbers, backfill_lead_enquiry_dates, backfill_zumba_package_sessions, ensure_rnr_stage, ensure_branch_admin_stages, ensure_branch_cancelled_stage, ensure_sales_stage_roles, ensure_sales_arm_split, ensure_consultation_booked_stage, ensure_rehab_stage, ensure_diet_and_completed_stages, ensure_diet_chart_stage, retire_consultation_completed_stage, undo_branch_leads_stage, ensure_branch_lead_sources
+from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages, migrate_consultation_stages, migrate_head_consultation_stages, deactivate_legacy_demo_admin, migrate_consultant_roles, migrate_branch_admin_roles, backfill_consultant_branches_from_employees, migrate_designation_roles, retire_aliased_designation_roles, ensure_structure_departments, dedupe_department_designations, sync_head_physio_doctors, consolidate_head_physio_doctors, retire_experts_without_a_login, backfill_login_history_from_sessions, normalize_session_item_prices, normalize_lead_session_package_prices, migrate_course_prices_to_totals, ensure_fitness_packages, repair_flattened_fitness_prices, backfill_branch_codes, backfill_patient_numbers, backfill_lead_enquiry_dates, backfill_zumba_package_sessions, ensure_rnr_stage, ensure_branch_admin_stages, ensure_branch_cancelled_stage, ensure_sales_stage_roles, ensure_sales_arm_split, ensure_branch_not_a_prospect_stage, ensure_consultation_booked_stage, ensure_rehab_stage, ensure_diet_and_completed_stages, ensure_diet_chart_stage, retire_consultation_completed_stage, undo_branch_leads_stage, ensure_branch_lead_sources
 from routers.v3_google_sheets import start_auto_sync_scheduler
 from payment_reminders import start_payment_reminder_scheduler
 import lead_purge
@@ -106,6 +106,10 @@ async def startup_seed_data():
     # Last of all the sales passes: it copies whatever they left into the online arm, so
     # anything added after it would land on the offline side only.
     await ensure_sales_arm_split()
+    # The exception to the line above, and why it inserts itself once per arm rather than
+    # once: it has to run after the split, or the boot that first creates the online arm
+    # copies an offline pipeline that does not have this stage yet.
+    await ensure_branch_not_a_prospect_stage()
     await migrate_consultation_stages()
     # After the consultation stages exist, and before the three passes below that position
     # themselves by order: this one goes in at the head of the pipeline and pushes every

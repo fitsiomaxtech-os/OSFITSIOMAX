@@ -7,10 +7,12 @@ from security import hash_password
 from constants import (
     V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
     BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE,
-    BRANCH_CANCELLED_STAGE,
+    BRANCH_CANCELLED_STAGE, BRANCH_APPOINTMENT_STAGE, BRANCH_NOT_A_PROSPECT_STAGE,
     SALES_STAGE_ROLES_BY_NAME,
     SALES_STAGE_ROLE_CANCELLED,
     SALES_STAGE_ROLE_RNR,
+    SALES_STAGE_ROLE_APPOINTMENT,
+    SALES_STAGE_ROLE_NOT_A_PROSPECT,
     SALES_ARM_OFFLINE, SALES_ARM_ONLINE,
 )
 import lead_control
@@ -284,6 +286,98 @@ async def ensure_branch_cancelled_stage() -> None:
         "role": SALES_STAGE_ROLE_CANCELLED,
         "created_at": now_iso(),
     })
+
+
+# Recognising one of the behavioural sales stages on a row read straight out of the
+# collection. The role where the row carries one, the name it shipped under where it does
+# not -- the same two-step the board does in stageHasRole (BranchAdminBoard.jsx), and the
+# reason a stage Super Admin has renamed is still found by the passes below rather than
+# quietly created a second time beside itself.
+def _sales_row_has_role(row: dict, role: str, shipped_name: str) -> bool:
+    if row.get("role"):
+        return row["role"] == role
+    return row.get("name") == shipped_name
+
+
+async def ensure_branch_not_a_prospect_stage() -> None:
+    """Give the Branch (sales) pipeline its "Not a prospect" pill, right after Appointment.
+
+    The branch needs somewhere to put an enquiry that was never a client -- a wrong number,
+    a competitor ringing round for prices, somebody outside the catchment, somebody who has
+    decided against treatment. Until now the only stage that said anything of the kind was
+    Cancelled, which means something else entirely: a real client calling off a real
+    appointment, with a slot to hand back and a rebooking to chase. Written off into that
+    one, dead leads inflated the cancellation rate and buried the bookings actually worth
+    ringing back.
+
+    Positioned against the appointment stage rather than at a fixed index, because that is
+    where the branch finds out -- the call is made or the visit is booked, and only then is
+    it clear there was nothing here. Pipeline Stage Management can reorder everything around
+    it afterwards.
+
+    Not is_final, unlike Cancelled. A final stage is dropped from the strip on a branch
+    running its own leads (see leadPillStages), which is exactly the branch that most needs
+    to read this list back: Cancelled can afford to lose its pill because cancelling happens
+    in the appointment dialog and the pill only ever showed leftovers, while this stage is
+    reached from the strip and nowhere else.
+
+    No applies_to: a lead that is not a prospect is not a prospect whether the branch runs
+    its own leads or is fed by Pre-Sales, so both modes get the pill.
+
+    Run once per arm, since each Branch pipeline carries its own copy of every stage -- and
+    after ensure_sales_arm_split, which would otherwise copy an offline-only insert across
+    on the next boot and leave the online arm a boot behind. Idempotent, and a no-op until
+    the sales stages exist.
+    """
+    rows = await v3_col("pipeline_stages").find(
+        {"type": "sales"}, {"_id": 0, "name": 1, "order": 1, "arm": 1, "role": 1}
+    ).sort("order", 1).to_list(400)
+    if not rows:
+        return
+    # Grouped by arm rather than filtered to the two known ones: a database mid-upgrade
+    # still has rows with no arm at all, and those are one shared pipeline that must get
+    # the stage exactly once.
+    by_arm = {}
+    for row in rows:
+        by_arm.setdefault(row.get("arm"), []).append(row)
+
+    for arm, arm_rows in by_arm.items():
+        if any(
+            _sales_row_has_role(r, SALES_STAGE_ROLE_NOT_A_PROSPECT, BRANCH_NOT_A_PROSPECT_STAGE)
+            for r in arm_rows
+        ):
+            continue
+        after = next(
+            (r for r in arm_rows
+             if _sales_row_has_role(r, SALES_STAGE_ROLE_APPOINTMENT, BRANCH_APPOINTMENT_STAGE)),
+            None,
+        )
+        if not after:
+            continue  # nothing to position against on this arm
+        insert_order = (after.get("order") or 0) + 1
+        # `{"arm": None}` matches a missing field as well as a null one in MongoDB, which is
+        # what the un-split case needs -- those rows have no `arm` key at all.
+        arm_filter = {"arm": arm} if arm else {"arm": None}
+        await v3_col("pipeline_stages").update_many(
+            {"type": "sales", "order": {"$gte": insert_order}, **arm_filter},
+            {"$inc": {"order": 1}},
+        )
+        doc = {
+            "id": str(uuid.uuid4()),
+            "name": BRANCH_NOT_A_PROSPECT_STAGE,
+            # Slate. Cancelled's rose is the colour of something called off, and this is
+            # not that -- grey is the pipeline reading "set aside", and keeps the two
+            # endings from looking like one at a glance across the strip.
+            "color": "#64748b",
+            "type": "sales",
+            "order": insert_order,
+            "is_final": False,
+            "role": SALES_STAGE_ROLE_NOT_A_PROSPECT,
+            "created_at": now_iso(),
+        }
+        if arm:
+            doc["arm"] = arm
+        await v3_col("pipeline_stages").insert_one(doc)
 
 
 async def ensure_consultation_booked_stage() -> None:
