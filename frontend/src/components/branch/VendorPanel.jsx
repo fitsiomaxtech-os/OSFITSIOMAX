@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Truck, Plus, Search, Pencil, Trash2, History, IndianRupee, Power, Wallet,
-  Building2, Phone, Mail, Boxes, X, UserRound, Package, ChevronRight,
+  Building2, Phone, Mail, Boxes, X, UserRound, Package, ChevronRight, CalendarDays,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -121,7 +121,23 @@ const toDraft = (v) => ({
 /** A fresh vendor form, with one empty stock row ready to type into. */
 const newDraft = (over = {}) => ({ ...emptyDraft, rows: [blankRow()], ...over });
 
-/** A shelf chip, and the filter row above the table. */
+/**
+ * Whether a row was written down inside the dates asked for.
+ *
+ * `created_at` is an ISO string and the boxes hand back YYYY-MM-DD, so the first ten
+ * characters compare as text with no parsing and no timezone to get wrong. A row from
+ * before the field existed carries no date at all: it shows while nothing is being asked
+ * and hides the moment a date is, because it cannot answer the question.
+ */
+const inDates = (row, from, to) => {
+  const on = (row.created_at || "").slice(0, 10);
+  if (!on) return !from && !to;
+  if (from && on < from) return false;
+  if (to && on > to) return false;
+  return true;
+};
+
+/** A shelf chip, still what the Shelves column is drawn with. */
 const ShelfChip = ({ label, on = true, onClick, testid }) => {
   const cls = on
     ? "border-violet-200 bg-violet-50 text-violet-700"
@@ -259,7 +275,9 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const [summary, setSummary] = useState(null);
   const [stock, setStock] = useState([]);
   const [search, setSearch] = useState("");
-  const [shelfFilter, setShelfFilter] = useState("");
+  // Both lists on the tab answer to it, which is why it sits in the bar over both of
+  // them rather than in either card.
+  const [dates, setDates] = useState({ from: "", to: "" });
   // Where the City dropdown's options come from. Branches carry no city of their own, so
   // this is their names — which is what the org calls the places it operates in — with
   // the cities already on vendors folded in and a typed one always possible.
@@ -299,11 +317,17 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return vendors.filter((v) => {
-      if (shelfFilter && !(v.categories || []).includes(shelfFilter)) return false;
+      if (!inDates(v, dates.from, dates.to)) return false;
       if (!q) return true;
       return `${v.name} ${v.contact_person || ""} ${v.phone || ""} ${v.city || ""}`.toLowerCase().includes(q);
     });
-  }, [vendors, search, shelfFilter]);
+  }, [vendors, search, dates]);
+
+  /** The stock list under the same dates. The search box is about vendors, so it isn't. */
+  const visibleStock = useMemo(
+    () => stock.filter((r) => inDates(r, dates.from, dates.to)),
+    [stock, dates],
+  );
 
   /** Branch names and the cities already in use, deduplicated and sorted. */
   const cityOptions = useMemo(() => {
@@ -334,6 +358,13 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
   // it — including for a vendor saved before the dropdown existed.
   const isTypedCity = !!draft && !!draft.city && !cityOptions.includes(draft.city);
 
+  /**
+   * What the stock this vendor is already down as supplying comes to.
+   *
+   * The dialog has no list to tick any more — stock is typed in it instead. This still
+   * counts, because clicking a row in the Stock list opens the form with that row's id
+   * already on it, and the bill should open on what that row costs.
+   */
   const linkedTotal = (ids) => ids.reduce((sum, id) => sum + Number(stockById[id]?.total || 0), 0);
 
   /**
@@ -354,10 +385,6 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     };
   };
 
-  const toggleStock = (id) => setDraft((d) => recalc({
-    ...d,
-    stock_ids: d.stock_ids.includes(id) ? d.stock_ids.filter((x) => x !== id) : [...d.stock_ids, id],
-  }));
 
   const payloadOf = (d) => ({
     name: d.name.trim(),
@@ -593,17 +620,44 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
               data-testid="vendor-search"
             />
           </div>
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="vendor-shelf-filter">
-            <ShelfChip label="All shelves" on={shelfFilter === ""} onClick={() => setShelfFilter("")} testid="vendor-shelf-filter-all" />
-            {SHELVES.map((sh) => (
-              <ShelfChip
-                key={sh.key}
-                label={sh.label}
-                on={shelfFilter === sh.key}
-                onClick={() => setShelfFilter(shelfFilter === sh.key ? "" : sh.key)}
-                testid={`vendor-shelf-filter-${sh.key}`}
-              />
-            ))}
+          {/* Dates, where the shelf chips were. The chips filtered by where a vendor's
+              stock had landed, which is a fact about the ledger rather than about the
+              vendor; when it was written down is the question this tab is actually asked.
+              Both lists below answer to it. The Shelves column still reads the same. */}
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="vendor-date-filter">
+            <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
+            <input
+              type="date"
+              value={dates.from}
+              max={dates.to || undefined}
+              onChange={(e) => setDates({ ...dates, from: e.target.value })}
+              className="h-9 rounded-md border border-slate-200 px-2 text-xs text-slate-600 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400"
+              title="Added on or after"
+              data-testid="vendor-date-from"
+            />
+            <span className="text-xs text-slate-400">to</span>
+            <input
+              type="date"
+              value={dates.to}
+              min={dates.from || undefined}
+              onChange={(e) => setDates({ ...dates, to: e.target.value })}
+              className="h-9 rounded-md border border-slate-200 px-2 text-xs text-slate-600 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400"
+              title="Added on or before"
+              data-testid="vendor-date-to"
+            />
+            {/* Only there when there is something to clear — an X beside two empty
+                boxes is a button that does nothing. */}
+            {(dates.from || dates.to) && (
+              <button
+                type="button"
+                onClick={() => setDates({ from: "", to: "" })}
+                className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                title="Clear the dates"
+                data-testid="vendor-date-clear"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
           {/* One button, because there is one dialog. Stock used to be added from a
               second one of its own, which meant a branch writing down a single purchase
@@ -624,22 +678,24 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
         <CardContent className="p-0">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Stock{stock.length ? ` · ${stock.length}` : ""}
+              Stock{visibleStock.length ? ` · ${visibleStock.length}` : ""}
             </p>
-            {stock.length > 0 && canEdit && (
+            {visibleStock.length > 0 && canEdit && (
               <p className="text-[11px] text-slate-400">Click a stock to add the vendor who supplies it</p>
             )}
           </div>
 
           {loading ? (
             <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-loading">Loading stock...</p>
-          ) : stock.length === 0 ? (
+          ) : visibleStock.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-slate-400" data-testid="stock-empty">
-              No stock yet — use <span className="font-semibold">Add Vendor</span> to type in what the branch buys and who supplies it.
+              {stock.length === 0
+                ? <>No stock yet — use <span className="font-semibold">Add Vendor</span> to type in what the branch buys and who supplies it.</>
+                : "No stock was added between those dates."}
             </p>
           ) : (
             <div className="divide-y divide-slate-100" data-testid="stock-list">
-              {stock.map((r) => (
+              {visibleStock.map((r) => (
                 <div key={r.id} className="flex items-center gap-1 px-2 py-1" data-testid={`stock-item-${r.id}`}>
                   <button
                     type="button"
@@ -714,8 +770,9 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
           {empty ? (
             <p className="px-4 py-14 text-center text-sm text-slate-400" data-testid="vendor-empty">
               {loading ? "Loading vendors..."
-                : vendors.length === 0 ? "No vendors yet — add the stock first, then the vendor who supplies it."
-                  : "Nothing matches that search."}
+                : vendors.length === 0 ? "No vendors yet — add one, and type what it supplies while you are there."
+                  : (dates.from || dates.to) ? "No vendors match that search or those dates."
+                    : "Nothing matches that search."}
             </p>
           ) : (
             <>
@@ -845,8 +902,8 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
             </Button>
           </>}
         >
-          {/* Who they are is four short answers; what they supply and what has been paid
-              are the other two thirds. They stack on a phone, vendor first. */}
+          {/* Who they are down the left; what is being bought and what has been paid
+              down the right. They stack on a phone, vendor first. */}
           <div className="grid gap-4 lg:grid-cols-3">
             <Panel title="Vendor Details" icon={UserRound} tint="bg-violet-50/70 text-violet-700" testid="vendor-details">
               <Field label={<Req>Vendor Name</Req>}>
@@ -931,47 +988,12 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
                 </button>
               </Panel>
 
-              {/* What is already in the book. Shown only when there is some, so a first
-                  vendor isn't met with an empty box telling them to go elsewhere — and
-                  kept, because the second vendor for the same thing links it rather than
-                  typing it again under a spelling the server would refuse. */}
-              {stock.length > 0 && (
-                <Panel title="Linked Stock" icon={Boxes} tint="bg-sky-50/70 text-sky-700" testid="vendor-stock">
-                  <p className="-mt-1 text-[11px] text-slate-400">Already in the stock list — tick anything else this vendor supplies.</p>
-                  <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-1.5" data-testid="vendor-stock-list">
-                    {stock.map((r) => {
-                      const on = draft.stock_ids.includes(r.id);
-                      return (
-                        <button
-                          key={r.id}
-                          type="button"
-                          onClick={() => toggleStock(r.id)}
-                          className={`flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs ${
-                            on ? "border-emerald-200 bg-emerald-50 font-semibold text-emerald-800" : "border-transparent text-slate-600 hover:bg-slate-50"
-                          }`}
-                          data-testid={`vendor-stock-${r.id}`}
-                        >
-                          <span className="min-w-0 truncate">
-                            {r.name}
-                            <span className="ml-1 font-normal text-slate-400">
-                              {r.stock_type ? `· ${r.stock_type} ` : ""}
-                              {`· ${paidText(r)}`}
-                            </span>
-                          </span>
-                          <span className="shrink-0 font-semibold">{fmt(r.total)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </Panel>
-              )}
-
               <Panel title="Payment to Vendor" icon={Wallet} tint="bg-amber-50/70 text-amber-700" testid="vendor-payment">
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Field label="Total Amount">
-                    {/* Filled in from the stock typed above and anything ticked below it,
-                        and left typeable: a bill carries delivery, discount and tax that
-                        no rate on a line knows about. */}
+                    {/* Filled in from the stock typed above and left typeable: a bill
+                        carries delivery, discount and tax that no rate on a line knows
+                        about. */}
                     <input type="number" min="0" className={inputCls} value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} placeholder="Enter amount" data-testid="vendor-amount" />
                   </Field>
                   <Field label="Paid Amount">
