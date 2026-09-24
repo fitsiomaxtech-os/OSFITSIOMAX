@@ -713,7 +713,8 @@ const MENU_ITEMS = [
  * one row per section, each opening full-screen with a back arrow. Five segmented tabs
  * across a phone is five glyphs to learn; a list says what each one is.
  */
-const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff }) => {
+// `onBack` is for a host with no bottom bar to leave by: the menu then carries its own way out.
+const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff, onBack }) => {
   const [open, setOpen] = useState(null);
   const [query, setQuery] = useState("");
   const [me, setMe] = useState(null);
@@ -757,7 +758,20 @@ const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff }) => {
 
   return (
     <div className="-mx-1 rounded-2xl bg-white px-4 pb-4 pt-4 shadow-sm" data-testid="my-profile-menu">
-      <h2 className="truncate text-xl font-bold text-slate-800" data-testid="my-profile-greeting">{name}</h2>
+      <div className="flex items-center gap-1">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="-ml-1.5 rounded-full p-1.5 text-slate-700 active:bg-slate-100"
+            aria-label="Back"
+            data-testid="my-profile-back"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+        )}
+        <h2 className="truncate text-xl font-bold text-slate-800" data-testid="my-profile-greeting">{name}</h2>
+      </div>
 
       <label className="mt-3 flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2.5">
         <Search className="h-4 w-4 shrink-0 text-slate-400" />
@@ -840,8 +854,8 @@ const PHONE_BAR_TABS = TABS.map((t) => ({ ...t, phone: PHONE_BAR_MODES[t.key] })
  */
 // `keepBack` keeps Back on a phone with the one-row bar, for a host with no bottom bar to
 // leave by (BDE, Accountant open this from the header).
-// `phoneMenu` swaps the tabs for PhoneProfileMenu below md. Branch Admin only, for now.
-export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false, keepBack = false, hideTimeOff = false, phoneMenu = false }) => {
+// `phoneMenu` swaps the tabs for PhoneProfileMenu below md, for every host.
+export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false, keepBack = false, hideTimeOff = false, phoneMenu = true }) => {
   const [tab, setTab] = useState("attendance");
   const phone = usePhone();
   // Super Admin has no one above them to ask for leave, so the tab is not offered.
@@ -849,7 +863,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = fa
   const phoneTabs = hideTimeOff ? PHONE_BAR_TABS.filter((t) => t.key !== "timeoff") : PHONE_BAR_TABS;
 
   if (phoneMenu && phone) {
-    return <PhoneProfileMenu user={user} roleLabel={roleLabel} onLogout={onLogout} hideTimeOff={hideTimeOff} />;
+    return <PhoneProfileMenu user={user} roleLabel={roleLabel} onLogout={onLogout} hideTimeOff={hideTimeOff} onBack={keepBack || !phoneBar ? onBack : null} />;
   }
 
   return (

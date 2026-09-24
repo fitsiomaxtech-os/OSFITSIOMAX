@@ -1715,7 +1715,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       </div>
 
       {profileOpen && (
-        <MyProfilePage user={currentUser} roleLabel={roleLabel} onBack={() => setProfileOpen(false)} onLogout={onLogout} phoneBar phoneMenu />
+        <MyProfilePage user={currentUser} roleLabel={roleLabel} onBack={() => setProfileOpen(false)} onLogout={onLogout} phoneBar />
       )}
 
       {/* Hidden, not unmounted, while My Profile is open: `contents` keeps every view a
