@@ -722,7 +722,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = fa
           <button
             type="button"
             onClick={onLogout}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 py-1.5 text-sm font-medium text-rose-600 shadow-sm hover:bg-rose-50 md:hidden"
+            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 py-1.5 text-sm font-medium text-rose-600 shadow-sm hover:bg-rose-50 md:hidden"
             data-testid="my-profile-logout"
           >
             <LogOut className="h-4 w-4" />

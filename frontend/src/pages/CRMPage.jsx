@@ -1139,7 +1139,7 @@ export const CRMPage = ({ auth, onLogout }) => {
 
                   Only the roles the endpoint answers for: a bell shown to a physio would
                   count nothing and open a 403. */}
-              {canSeeSessionPayments && <SessionPaymentBell canDecide={showSuperAdminBoard || showBranchBoard} />}
+              {canSeeSessionPayments && <SessionPaymentBell canDecide={showSuperAdminBoard || showBranchBoard} mobilePage={showSuperAdminBoard} />}
               {canReadFeedback && (
                 <button
                   type="button"
@@ -1351,6 +1351,7 @@ export const CRMPage = ({ auth, onLogout }) => {
               roleLabel={roleLabel}
               onBack={() => setShowProfile(false)}
               onLogout={showSuperAdminBoard ? logout : undefined}
+              phoneBar={showSuperAdminBoard}
             />
           </Suspense>
         ) : (
