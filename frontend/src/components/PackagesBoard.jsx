@@ -687,9 +687,9 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   const isZumba = category === "zumba";
   const isOfflineOnly = OFFLINE_ONLY_CATEGORIES.has(category);
   const isHomeVisit = HOME_VISIT_CATEGORIES.has(category);
-  // Only the Consultant shelf is booked from the Appointment popup, which is where the
-  // Branch Admin types the amount; nothing reads the flag anywhere else yet.
-  const canManualPrice = category === "home_visit_consultation";
+  // Both Home Visit shelves. Consultant: typed in the Appointment popup. Physiotherapy:
+  // typed on the Treatment Fee card once the Consultant has chosen the package.
+  const canManualPrice = isHomeVisit;
   const [manualPrice, setManualPrice] = useState(Boolean(item?.manual_price));
   const isManual = canManualPrice && manualPrice;
   // Rehab and anything else sold as a whole course: the two price boxes hold the course
@@ -934,13 +934,13 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                     <input type="checkbox" className="mt-0.5" checked={manualPrice} onChange={(e) => setManualPrice(e.target.checked)} />
                     <span>
                       <span className="block font-semibold">Branch Admin enters the amount</span>
-                      <span className="block text-amber-700">No fixed price — typed at booking, e.g. a Distance visit.</span>
+                      <span className="block text-amber-700">No fixed price — the Branch Admin types it, e.g. a Distance visit.</span>
                     </span>
                   </label>
                 )}
                 {isManual ? (
                   <p className="mb-2 rounded-md bg-amber-100/70 px-2.5 py-2 text-[11px] font-semibold text-amber-800" data-testid="session-create-manual-note">
-                    Amount: set by the Branch Admin at booking
+                    Amount: set by the Branch Admin
                   </p>
                 ) : (
                 <>
@@ -1107,7 +1107,7 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
           <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
             {manual
-              ? <span className="text-xs font-bold text-amber-900" data-testid={testid ? `${testid}-manual` : undefined}>Set by Branch Admin at booking</span>
+              ? <span className="text-xs font-bold text-amber-900" data-testid={testid ? `${testid}-manual` : undefined}>Set by Branch Admin</span>
               : <span className="text-sm font-extrabold text-amber-900">₹{packageTotal(item, "offline")}</span>}
           </div>
         </div>

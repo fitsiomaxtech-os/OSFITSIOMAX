@@ -1281,6 +1281,7 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
         "session_package_id": None,
         "session_package_name": None,
         "session_package_price": None,
+        "session_package_manual": None,
         "session_package_sessions": None,
         "session_package_mode": None,
         "diagnosis": None,

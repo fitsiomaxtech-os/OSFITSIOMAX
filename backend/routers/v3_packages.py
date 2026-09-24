@@ -1101,6 +1101,39 @@ async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user:
     return {"message": "Payment collected", "transaction_id": transaction_id, "lead": V3LeadOut(**updated).model_dump()}
 
 
+class V3SessionPackageAmountInput(BaseModel):
+    amount: float
+
+
+@router.post("/leads/{lead_id}/session-package-amount", response_model=dict)
+async def set_session_package_amount(lead_id: str, payload: V3SessionPackageAmountInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
+    """The Branch Admin prices a Treatment Package that has no catalogue price (a Home
+    Visit > Physiotherapy Distance package). Only before the Treatment Fee is collected:
+    after that the figure is a financial record."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not lead.get("session_package_manual"):
+        raise HTTPException(status_code=400, detail="This package has a fixed price")
+    if lead.get("treatment_fee_paid") is not None:
+        raise HTTPException(status_code=400, detail="The Treatment Fee has already been collected")
+    if not payload.amount or payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Enter an amount above 0")
+    amount = round(float(payload.amount), 2)
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"session_package_price": amount, "updated_at": _now()}})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "session_package_amount_set",
+        "details": f"Treatment package amount set · {lead.get('session_package_name') or 'package'} · Rs.{amount}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Amount saved", "lead": V3LeadOut(**updated).model_dump()}
+
+
 @router.post("/leads/{lead_id}/collect-treatment-fee", response_model=dict)
 async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     """Branch admin collects the Treatment Fee for the Session package the Head
@@ -1135,6 +1168,8 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     # every lead already stranded by the ones that did.)
     if lead.get("package_paid") is None:
         raise HTTPException(status_code=400, detail="Treatment Fee can only be collected after the Consultation Fee has been collected")
+    if lead.get("session_package_id") and lead.get("session_package_manual") and lead.get("session_package_price") is None:
+        raise HTTPException(status_code=400, detail="Enter the amount for this treatment package first")
     if not lead.get("session_package_id") or lead.get("session_package_price") is None:
         raise HTTPException(status_code=400, detail="No treatment package was selected by the CONSULTANT yet")
 

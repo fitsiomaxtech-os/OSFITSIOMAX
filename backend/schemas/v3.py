@@ -380,6 +380,10 @@ class V3LeadOut(BaseModel):
     session_package_price: Optional[float] = None
     session_package_sessions: Optional[int] = None
     session_package_mode: Optional[str] = None
+    # The Treatment Package has no catalogue price (a Home Visit > Physiotherapy Distance
+    # package): session_package_price stays empty until the Branch Admin types it on the
+    # Treatment Fee card.
+    session_package_manual: Optional[bool] = None
     # The Rehab course (FITSIO STORE > Rehab) chosen alongside the Rehab referral, kept
     # apart from session_package_* because a patient can be sent away with treatment and
     # rehab both, and one set of fields could only hold one of them. This model ignores

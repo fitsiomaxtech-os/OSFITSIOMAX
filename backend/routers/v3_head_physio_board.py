@@ -615,12 +615,20 @@ async def hp_consultation_decision(
         base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
         sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
         price = round(base_price * sessions, 2) if base_price is not None and sessions else base_price
+        # A package Super Admin left unpriced (a Distance house visit) is priced by the
+        # branch, on the Treatment Fee card. Re-saving the decision on the same package
+        # keeps whatever the branch already typed.
+        manual = bool(item.get("manual_price"))
+        if manual:
+            same = lead.get("session_package_id") == item["id"] and lead.get("session_package_manual")
+            price = lead.get("session_package_price") if same else None
         updates.update({
             "session_package_id": item["id"],
             "session_package_name": item["name"],
             "session_package_price": price,
             "session_package_sessions": sessions,
             "session_package_mode": payload.mode,
+            "session_package_manual": manual,
         })
         detail += f" · Package: {item['name']} ({sessions} sessions)"
 

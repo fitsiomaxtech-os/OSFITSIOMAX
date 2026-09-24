@@ -12,7 +12,7 @@ import { ProgressionTab } from "@/components/ProgressionTab";
 import { LeadMarks, RescheduledTag, TransferredTag } from "@/components/ui/lead-marks";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
-  collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
+  collectPackagePayment, collectTreatmentFee, setSessionPackageAmount, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignPhysioWithSessions, assignRehab, getDoctorCalendar, getLeadPhysioProgress,
   rehabSessionsForLead,
@@ -1681,7 +1681,7 @@ const rowFeeGate = (l, fee) => {
   // satisfies, so treatment is not gated on the consultation money the way the two parallel
   // programmes are — it is gated on the package the Consultant was meant to choose.
   if (fee === "treatment") {
-    return !l.session_package_id || l.session_package_price == null
+    return !l.session_package_id || (l.session_package_price == null && !l.session_package_manual)
       ? { label: "Open", note: "No package chosen", hint: "The CONSULTANT has not chosen a treatment package yet", to: null }
       : null;
   }
@@ -2739,6 +2739,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
 
   // Collect Treatment Fee popup (Branch Admin only) — at the Treatment Fee stage, any payment method
   const [treatmentFeeDraft, setTreatmentFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
+  // The amount the branch types for a Treatment Package with no catalogue price (a Home
+  // Visit > Physiotherapy Distance package), before the fee can be collected.
+  const [pkgAmountDraft, setPkgAmountDraft] = useState("");
+  const [savingPkgAmount, setSavingPkgAmount] = useState(false);
   const [collectingTreatmentFee, setCollectingTreatmentFee] = useState(false);
   // Same second-step confirm popup as packageConfirmDraft above, but for Cash/UPI/Card
   // on the Treatment Fee. Cheque and Partial Payment keep their existing single-popup
@@ -3662,7 +3666,16 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // bare item_type check offered a Zumba class as a Treatment Package. An item saved
   // before the other shelves existed carries no category and is a treatment package by
   // definition, so it keeps its place here.
-  const treatmentPackageItems = useMemo(() => storeItems.filter((i) => i.item_type === "session" && (i.category || "physiotherapy") === "physiotherapy").sort(byDuration), [storeItems]);
+  //
+  // A patient booked as a House Visit is treated at home, so their packages come off the
+  // Home Visit > Physiotherapy shelf instead.
+  const homeVisitLead = selectedLead?.visit_type === "home";
+  const treatmentPackageItems = useMemo(() => storeItems.filter((i) => i.item_type === "session" && (
+    homeVisitLead ? i.category === "home_visit" : (i.category || "physiotherapy") === "physiotherapy"
+  )).sort(byDuration), [storeItems, homeVisitLead]);
+  // A Home Visit package is a fixed number of visits rather than weeks at a chosen pace,
+  // so it asks for no sessions per week.
+  const isHomeVisitPackage = (item) => item?.category === "home_visit";
   // The Rehab shelf, offered beside the referral itself. A rehab course is a session item
   // under its own category and is priced the same way — a per-session rate whose total is
   // the rate times the course's session count.
@@ -3738,11 +3751,15 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     if (decisionDraft.treatment) {
       if (!decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
       const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+      if (isHomeVisitPackage(item)) {
+        payload = { ...payload, item_id: decisionDraft.item_id, sessions_override: Number(item.sessions_offline) || 1 };
+      } else {
       const weeks = weeksFromPackageName(item?.name);
       if (!weeks) { toast.error("Couldn't read a week count from this package's name"); return; }
       const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
       if (!perWeek) { toast.error("Enter sessions per week"); return; }
       payload = { ...payload, item_id: decisionDraft.item_id, sessions_override: weeks * perWeek };
+      }
     }
     setSavingDecision(true);
     try {
@@ -7413,8 +7430,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                 // nothing to book.
                 const treatmentReady = !decisionDraft.treatment || (
                   !!decisionDraft.item_id
-                  && !!selectedPackageWeeks
-                  && !!parseInt(decisionDraft.sessionsPerWeek, 10)
+                  && (isHomeVisitPackage(selectedPackage) || (
+                    !!selectedPackageWeeks
+                    && !!parseInt(decisionDraft.sessionsPerWeek, 10)
+                  ))
                 );
                 // Diet asks nothing: the referral is to the Nutritionist's consultation,
                 // which is the whole of what a Consultant decides on that side.
@@ -7486,6 +7505,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                   if (key === "treatment") {
                     const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
                     if (!item) return { text: "Choose a package", incomplete: true };
+                    if (isHomeVisitPackage(item)) {
+                      const visits = Number(item.sessions_offline) || 0;
+                      return { text: `${item.name} · ${visits} visit${visits === 1 ? "" : "s"} · House Visit`, incomplete: false };
+                    }
                     const weeks = weeksFromPackageName(item.name);
                     const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
                     if (!perWeek) return { text: `${item.name} — choose sessions/week`, incomplete: true };
@@ -7767,6 +7790,18 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         {decisionDraft.item_id && (() => {
                           const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
                           if (!item) return null;
+                          if (isHomeVisitPackage(item)) {
+                            const visits = Number(item.sessions_offline) || 0;
+                            return (
+                              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/70 p-3" data-testid="cons-decision-package-summary">
+                                <p className="text-sm font-semibold text-slate-800">{item.name} · House Visit</p>
+                                <p className="mt-1 text-xs text-slate-600">
+                                  <span className="text-sm font-semibold text-slate-800">{visits} Total Visit{visits === 1 ? "" : "s"}</span>
+                                  {" "}at the patient's home
+                                </p>
+                              </div>
+                            );
+                          }
                           // Head Physio sees the session count only -- never the price.
                           // The Treatment Fee amount is derived server-side from
                           // sessions_override and shown to Branch Admin at fee collection.
@@ -10144,6 +10179,47 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                           {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
                         </div>
                       </div>
+                      {/* A package with no catalogue price is priced here by the branch,
+                          and the fee is collected on that figure. */}
+                      {selectedLead.session_package_manual && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5" data-testid="cons-treatment-fee-manual">
+                          <label className="mb-1 block text-[11px] font-semibold text-amber-800">
+                            Package Amount (₹){selectedLead.session_package_price != null ? ` · set at Rs.${selectedLead.session_package_price}` : " · enter to continue"}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min="1"
+                              value={pkgAmountDraft}
+                              onChange={(e) => setPkgAmountDraft(e.target.value)}
+                              placeholder={selectedLead.session_package_price != null ? String(selectedLead.session_package_price) : "Enter the amount"}
+                              className="h-9 bg-white"
+                              data-testid="cons-treatment-fee-manual-amount"
+                            />
+                            <Button
+                              size="sm"
+                              className="h-9 shrink-0 bg-amber-600 text-xs text-white hover:bg-amber-700"
+                              disabled={savingPkgAmount || !(Number(pkgAmountDraft) > 0)}
+                              onClick={async () => {
+                                setSavingPkgAmount(true);
+                                try {
+                                  const res = await setSessionPackageAmount(selectedLead.id, Number(pkgAmountDraft));
+                                  takeLead(res.lead);
+                                  setPkgAmountDraft("");
+                                  toast.success("Package amount saved");
+                                } catch (err) {
+                                  toast.error(err?.response?.data?.detail || "Could not save the amount");
+                                }
+                                setSavingPkgAmount(false);
+                              }}
+                              data-testid="cons-treatment-fee-manual-save"
+                            >
+                              {savingPkgAmount ? "Saving..." : "Save"}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {!(selectedLead.session_package_manual && selectedLead.session_package_price == null) && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                         <PaymentModeSelect
@@ -10154,6 +10230,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         />
                         <p className="mt-1 text-[11px] text-slate-400">Pick a payment method to open its own Collect popup.</p>
                       </div>
+                      )}
                         </>
                       )}
                     </div>
