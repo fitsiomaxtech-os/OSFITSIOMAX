@@ -4740,14 +4740,14 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                 numbered and titled already, so a subtitle spelling their order out again
                 was a second row of chrome on the one dialog that needs its height for
                 slots. The same reasoning shrinks the bar itself. */}
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-2 sm:px-5 sm:py-2.5">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2 sm:px-5 sm:py-2.5">
               <div className="flex min-w-0 items-center gap-2">
-                <Calendar className="h-4 w-4 shrink-0 text-slate-500" />
-                <p className="truncate text-sm font-bold text-slate-800">Appointment</p>
+                <Calendar className="h-4 w-4 shrink-0 text-sky-600" />
+                <p className="truncate text-sm font-semibold text-slate-900">Appointment</p>
                 {/* What the first step settled, kept in sight while the slot is picked,
                     with the way back to change it. */}
                 {apptDraft.step === "book" && (
-                  <span className="ml-1 inline-flex min-w-0 items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-0.5 text-xs font-semibold text-teal-700" data-testid="branch-appt-visit-chip">
+                  <span className="ml-1 inline-flex min-w-0 items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-xs font-semibold text-sky-700" data-testid="branch-appt-visit-chip">
                     {apptDraft.visit_type === "home" ? <Home className="h-3.5 w-3.5 shrink-0" /> : <Building2 className="h-3.5 w-3.5 shrink-0" />}
                     <span className="truncate">
                       {apptDraft.visit_type === "home"
@@ -4757,7 +4757,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     <button
                       type="button"
                       onClick={() => setApptDraft({ ...apptDraft, step: "visit" })}
-                      className="shrink-0 font-bold text-teal-800 underline underline-offset-2 hover:text-teal-900"
+                      className="shrink-0 font-bold text-sky-800 underline underline-offset-2 hover:text-sky-900"
                       data-testid="branch-appt-visit-change"
                     >
                       Change
@@ -4765,7 +4765,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   </span>
                 )}
               </div>
-              <button onClick={() => setApptDraft(null)} className="shrink-0 rounded-lg border-2 border-orange-200 bg-orange-100 p-1.5 text-orange-600 transition hover:border-orange-300 hover:bg-orange-200 hover:text-orange-700" data-testid="branch-appt-close">
+              <button onClick={() => setApptDraft(null)} className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" aria-label="Close" data-testid="branch-appt-close">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -4796,12 +4796,12 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                             setApptDraft({ ...apptDraft, visit_type: "branch", visit_package_id: "", visit_package: null, step: "book" });
                           }
                         }}
-                        className={`flex items-start gap-3 rounded-xl border-2 p-4 text-left transition ${
-                          on ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"
+                        className={`flex items-start gap-3 rounded-xl border p-4 text-left transition ${
+                          on ? "border-sky-500 bg-sky-50 shadow-sm" : "border-slate-200 bg-white hover:border-sky-300 hover:bg-slate-50"
                         }`}
                         data-testid={`branch-appt-visit-${v.key}`}
                       >
-                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${on ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${on ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`}>
                           <Icon className="h-5 w-5" />
                         </span>
                         <span className="min-w-0">
@@ -4854,8 +4854,8 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                               visit_package_amount: it.manual_price ? (apptDraft.visit_package_id === it.id ? apptDraft.visit_package_amount : "") : null,
                               step: it.manual_price ? "package" : "book",
                             })}
-                            className={`flex items-start justify-between gap-3 rounded-xl border-2 p-3 text-left transition ${
-                              picked ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"
+                            className={`flex items-start justify-between gap-3 rounded-xl border p-3 text-left transition ${
+                              picked ? "border-sky-500 bg-sky-50 shadow-sm" : "border-slate-200 bg-white hover:border-sky-300 hover:bg-slate-50"
                             }`}
                             data-testid={`branch-appt-package-${it.id}`}
                           >
@@ -4870,7 +4870,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                               {it.manual_price
                                 ? <span className="text-xs font-bold text-amber-700">Enter amount</span>
                                 : <span className="text-base font-extrabold text-slate-900">₹{total}</span>}
-                              {picked && <CheckCircle2 className="h-5 w-5 text-teal-600" />}
+                              {picked && <CheckCircle2 className="h-5 w-5 text-sky-600" />}
                             </span>
                           </button>
                         );
@@ -4880,7 +4880,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   {/* The amount for a package Super Admin left unpriced. Typed here, by the
                       desk that agreed it with the patient, and charged exactly as typed. */}
                   {apptDraft.visit_package?.manual && (
-                    <div className="mt-4 rounded-xl border-2 border-amber-200 bg-amber-50 p-3" data-testid="branch-appt-package-amount">
+                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3" data-testid="branch-appt-package-amount">
                       <label className="mb-1 block text-xs font-bold text-amber-800">Amount for {apptDraft.visit_package.name}</label>
                       <div className="relative max-w-xs">
                         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-amber-700">₹</span>
@@ -4898,7 +4898,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     </div>
                   )}
                 </div>
-                <div className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-3 py-2 sm:px-5 sm:py-2.5">
+                <div className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/60 px-3 py-2 sm:px-5 sm:py-2.5">
                   <Button variant="outline" size="sm" onClick={() => setApptDraft({ ...apptDraft, step: "visit" })} data-testid="branch-appt-package-back">
                     <ChevronLeft className="mr-1 h-4 w-4" />Back
                   </Button>
@@ -4907,7 +4907,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     {apptDraft.visit_package?.manual && (
                       <Button
                         size="sm"
-                        className="bg-teal-600 text-white hover:bg-teal-700"
+                        className="bg-sky-600 text-white hover:bg-sky-700"
                         onClick={() => {
                           if (!(Number(apptDraft.visit_package_amount) > 0)) { toast.error("Enter the amount"); return; }
                           setApptDraft({ ...apptDraft, step: "book" });
@@ -4994,7 +4994,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                                   // violet-300, which a light blue cannot hold.
                                   ? "bg-sky-200 text-sky-900 shadow-sm hover:bg-sky-300"
                                   : isToday
-                                  ? "border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
+                                  ? "border border-sky-400 text-sky-700 hover:bg-sky-50"
                                   : "text-slate-600 hover:bg-slate-100"
                               }`}
                               title={hasSlots ? "A CONSULTANT is available on this day" : undefined}
@@ -5043,11 +5043,11 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                             setApptDraft({ ...apptDraft, physio_id: doc.id, appointment_time: "", duration: null });
                             setApptTime({ h: "", m: "", ap: "AM" });
                           }}
-                          className={`flex w-full items-center gap-3 rounded-lg border-2 p-3.5 text-left transition ${active ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"}`}
+                          className={`flex w-full items-center gap-3 rounded-lg border p-3.5 text-left transition ${active ? "border-sky-500 bg-sky-50 shadow-sm" : "border-slate-200 bg-white hover:border-sky-300 hover:bg-slate-50"}`}
                           data-testid={`branch-appt-expert-${doc.id}`}
                         >
                           {/* The consultant's own face where HR has one on file, their
-                              initial in the column's teal where they do not — the same
+                              initial in the column's blue where they do not — the same
                               component the directory and the signed-in header use, so a
                               photo cannot appear on some boards and not others. The ring
                               carries the picked state a solid fill used to, which a
@@ -5055,8 +5055,8 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                           <EmployeeAvatar
                             employee={doc}
                             size={44}
-                            fallbackClassName={active ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"}
-                            className={active ? "ring-2 ring-teal-500" : ""}
+                            fallbackClassName={active ? "bg-sky-600 text-white" : "bg-sky-100 text-sky-700"}
+                            className={active ? "ring-2 ring-sky-500" : ""}
                           />
                           <div className="min-w-0">
                             <p className="truncate text-sm font-bold text-slate-800">{doc.full_name}</p>
@@ -5079,7 +5079,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                               {open > 0 ? "Available" : "Not available"}
                             </span>
                           </div>
-                          {active && <CheckCircle2 className="ml-auto h-5 w-5 shrink-0 text-teal-600" />}
+                          {active && <CheckCircle2 className="ml-auto h-5 w-5 shrink-0 text-sky-600" />}
                         </button>
                       );
                     })}
@@ -5103,7 +5103,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     a missing room is a confirmation about to go out with nowhere in it. */}
                 {apptSelectedExpert && (apptMeetLink || onlineArm) && (
                   apptMeetLink ? (
-                    <div className="mt-3 rounded-lg border-2 border-violet-200 bg-violet-50 p-3" data-testid="branch-appt-meet-link">
+                    <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="branch-appt-meet-link">
                       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-violet-500">
                         <Video className="h-3.5 w-3.5" /> Google Meet
                       </p>
@@ -5119,7 +5119,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                       <p className="mt-1.5 text-[10px] text-violet-500">Goes to the patient with the confirmation.</p>
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-lg border-2 border-amber-200 bg-amber-50 p-3" data-testid="branch-appt-no-meet-link">
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="branch-appt-no-meet-link">
                       <p className="text-xs font-semibold text-amber-800">No Google Meet link for this CONSULTANT.</p>
                       <p className="mt-0.5 text-[10px] text-amber-700">
                         The confirmation will go out without one. Add it in MANAGEMENT → CONSULTANT CALENDAR.
@@ -5152,7 +5152,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                 ) : !apptDayPublished ? (
                   // Not on this day at all. The Consultant Calendar is the only thing that
                   // fixes it, so it is named rather than left to be found.
-                  <div className="rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-no-slots">
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-no-slots">
                     <p className="text-sm font-semibold text-amber-800">Not available on this date.</p>
                     <p className="mt-0.5 text-xs text-amber-700">
                       Confirm with the consultant, then open MANAGEMENT → CONSULTANT CALENDAR and mark the day available.
@@ -5162,7 +5162,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   <>
                     {/* Available, and the hours they said they would be here. The whole of
                         what the calendar has to say about this day, said once. */}
-                    <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-3" data-testid="branch-appt-available">
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3" data-testid="branch-appt-available">
                       <span className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200">
                         <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
                         Available
@@ -5190,7 +5190,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                           placeholder="7"
                           value={apptTime.h}
                           onChange={(e) => setApptClock({ h: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-                          className="h-12 w-16 rounded-lg border-2 border-slate-200 text-center text-xl font-bold text-slate-800 outline-none focus:border-teal-400"
+                          className="h-12 w-16 rounded-lg border border-slate-200 text-center text-xl font-bold text-slate-800 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400"
                           data-testid="branch-appt-hour"
                         />
                         <span className="text-xl font-bold text-slate-400">:</span>
@@ -5201,16 +5201,16 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                           placeholder="15"
                           value={apptTime.m}
                           onChange={(e) => setApptClock({ m: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-                          className="h-12 w-16 rounded-lg border-2 border-slate-200 text-center text-xl font-bold text-slate-800 outline-none focus:border-teal-400"
+                          className="h-12 w-16 rounded-lg border border-slate-200 text-center text-xl font-bold text-slate-800 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400"
                           data-testid="branch-appt-minute"
                         />
-                        <div className="ml-1 flex overflow-hidden rounded-lg border-2 border-slate-200">
+                        <div className="ml-1 flex overflow-hidden rounded-lg border border-slate-200">
                           {["AM", "PM"].map((half) => (
                             <button
                               key={half}
                               type="button"
                               onClick={() => setApptClock({ ap: half })}
-                              className={`px-3 py-2.5 text-sm font-bold transition ${apptTime.ap === half ? "bg-teal-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+                              className={`px-3 py-2.5 text-sm font-bold transition ${apptTime.ap === half ? "bg-sky-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
                               data-testid={`branch-appt-${half.toLowerCase()}`}
                             >
                               {half}
@@ -5229,7 +5229,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                         the field that caused it rather than as a 409 over a dialog that has
                         already been confirmed. */}
                     {apptClash && (
-                      <div className="mt-3 rounded-lg border-2 border-rose-200 bg-rose-50 px-4 py-3" data-testid="branch-appt-clash">
+                      <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3" data-testid="branch-appt-clash">
                         <p className="text-sm font-semibold text-rose-800">
                           {to12h(apptDraft.appointment_time)} runs into {to12h(apptClash.time)}
                           {apptClash.lead_name ? ` — ${apptClash.lead_name}` : ""}.
@@ -5243,7 +5243,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                     {/* Outside the published hours: said, never blocked. See the note at
                         the head of this step. */}
                     {!apptClash && apptOutsideHours && (
-                      <div className="mt-3 rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-outside-hours">
+                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-outside-hours">
                         <p className="text-sm font-semibold text-amber-800">{to12h(apptDraft.appointment_time)} is outside the hours published for this day.</p>
                         <p className="mt-0.5 text-xs text-amber-700">
                           {apptDayHours ? `${apptSelectedExpert?.full_name} is down for ${apptDayHours}. ` : ""}
@@ -5264,7 +5264,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                           {apptSlotsForExpert.filter((x) => x.booked).map((x) => (
                             <div
                               key={x.slot_time}
-                              className="flex items-center justify-between gap-2 rounded-lg border-2 border-slate-200 bg-slate-100 px-3 py-2"
+                              className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2"
                               data-testid={`branch-appt-slot-${x.time}`}
                             >
                               <span className="min-w-0">
@@ -5280,7 +5280,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                                 <button
                                   type="button"
                                   onClick={() => openSlotEdit(x)}
-                                  className="shrink-0 rounded-md border border-slate-300 bg-white p-1.5 text-slate-500 transition hover:border-teal-400 hover:bg-teal-50 hover:text-teal-600"
+                                  className="shrink-0 rounded-md border border-slate-300 bg-white p-1.5 text-slate-500 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-600"
                                   title={`Reschedule the ${to12h(x.time)} booking${x.lead_name ? ` — ${x.lead_name}` : ""}`}
                                   data-testid={`branch-appt-slot-edit-${x.time}`}
                                 >
@@ -5299,12 +5299,12 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
 
             {/* No cancelling from here. This dialog books a slot; dropping the lead out of
                 the pipeline is the Cancelled stage pill's job, and that one asks first. */}
-            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-100 px-3 py-2 sm:px-5 sm:py-2.5">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/60 px-3 py-2 sm:px-5 sm:py-2.5">
               <div className="flex shrink-0 items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
               <Button
                 size="sm"
-                className="bg-teal-600 text-white hover:bg-teal-700"
+                className="bg-sky-600 text-white hover:bg-sky-700"
                 // A clash is the one thing this button will not carry through. The hour is
                 // typed now, so an overlap is a slip rather than a choice, and the panel
                 // above has already named whose appointment it runs into.
