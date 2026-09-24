@@ -34,7 +34,10 @@ import {
   ChevronRight,
   Clock,
   Home,
+  KeyRound,
+  LogOut,
   Palmtree,
+  Search,
   ShieldAlert,
   ShieldCheck,
   UserRound,
@@ -678,6 +681,144 @@ const MonthlyCalendarTab = ({ user }) => {
   );
 };
 
+// ---------- the phone menu ----------
+
+/** True below md — the width the boards' bottom bars are drawn at. Read rather than left to
+ *  CSS so only one of the two layouts is mounted, and a month is not fetched twice. */
+const usePhone = () => {
+  const query = "(max-width: 767px)";
+  const [phone, setPhone] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = () => setPhone(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return phone;
+};
+
+// The same sections as the tabs, as a settings list: what each one is called, and what is
+// behind it, so the line under the title answers "is it in here" before it is opened.
+const MENU_ITEMS = [
+  { key: "profile", title: "Profile", sub: "Name, profile picture, employee details", icon: UserRound },
+  { key: "security", title: "Account", sub: "Password, two-step verification", icon: KeyRound },
+  { key: "attendance", title: "Attendance", sub: "Today, month hours, history", icon: Clock },
+  { key: "calendar", title: "Monthly Calendar", sub: "Branch working and leave days", icon: CalendarDays },
+  { key: "timeoff", title: "Time Off", sub: "Leave and permission requests", icon: Palmtree },
+];
+
+/**
+ * My Profile on a phone, laid out like a messenger's settings: who I am at the top, then
+ * one row per section, each opening full-screen with a back arrow. Five segmented tabs
+ * across a phone is five glyphs to learn; a list says what each one is.
+ */
+const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff }) => {
+  const [open, setOpen] = useState(null);
+  const [query, setQuery] = useState("");
+  const [me, setMe] = useState(null);
+
+  // For the photo: the signed-in user object carries the name but not the picture.
+  useEffect(() => {
+    let live = true;
+    myProfile().then((d) => { if (live) setMe(d); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  const items = hideTimeOff ? MENU_ITEMS.filter((i) => i.key !== "timeoff") : MENU_ITEMS;
+  const q = query.trim().toLowerCase();
+  const shown = q ? items.filter((i) => `${i.title} ${i.sub}`.toLowerCase().includes(q)) : items;
+  const name = me?.full_name || user?.full_name || "";
+
+  if (open) {
+    const item = items.find((i) => i.key === open);
+    return (
+      <div className="space-y-4" data-testid={`my-profile-screen-${open}`}>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOpen(null)}
+            className="-ml-1 rounded-full p-1.5 text-slate-700 active:bg-slate-100"
+            aria-label="Back"
+            data-testid="my-profile-screen-back"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+          <h2 className="text-lg font-semibold text-slate-800">{item?.title}</h2>
+        </div>
+        {open === "calendar" ? <MonthlyCalendarTab user={user} />
+          : open === "attendance" ? <AttendanceTab />
+          : open === "timeoff" ? <TimeOffTab />
+            : open === "security" ? <SecurityTab />
+              : <ProfileTab roleLabel={roleLabel} />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="-mx-1 rounded-2xl bg-white px-4 pb-4 pt-4 shadow-sm" data-testid="my-profile-menu">
+      <h2 className="truncate text-xl font-bold text-slate-800" data-testid="my-profile-greeting">{name}</h2>
+
+      <label className="mt-3 flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2.5">
+        <Search className="h-4 w-4 shrink-0 text-slate-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search"
+          className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+          data-testid="my-profile-menu-search"
+        />
+      </label>
+
+      <div className="mt-5 flex flex-col items-center">
+        {roleLabel && (
+          <div className="relative mb-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
+            {roleLabel}
+            <span className="absolute -bottom-1.5 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-b border-r border-slate-200 bg-white" />
+          </div>
+        )}
+        <button type="button" onClick={() => setOpen("profile")} aria-label="Open profile" data-testid="my-profile-menu-avatar">
+          <EmployeeAvatar employee={me || user} size={96} className="text-4xl" />
+        </button>
+      </div>
+
+      <ul className="mt-5 divide-y divide-slate-100">
+        {shown.map(({ key, title, sub, icon: Icon }) => (
+          <li key={key}>
+            <button
+              type="button"
+              onClick={() => setOpen(key)}
+              className="flex w-full items-center gap-4 py-3.5 text-left active:bg-slate-50"
+              data-testid={`my-profile-menu-${key}`}
+            >
+              <Icon className="h-5 w-5 shrink-0 text-slate-600" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[15px] font-medium text-slate-800">{title}</span>
+                <span className="block truncate text-xs text-slate-500">{sub}</span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+            </button>
+          </li>
+        ))}
+        {!shown.length && <li className="py-6 text-center text-sm text-slate-400">No matches</li>}
+        {onLogout && !q && (
+          <li>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="flex w-full items-center gap-4 py-3.5 text-left text-rose-600 active:bg-rose-50"
+              data-testid="my-profile-menu-logout"
+            >
+              <LogOut className="h-5 w-5 shrink-0" />
+              <span className="text-[15px] font-medium">Log out</span>
+            </button>
+          </li>
+        )}
+      </ul>
+    </div>
+  );
+};
+
 // ---------- the page ----------
 
 // The Physio board's phone bar: five tabs in one row, so four go to their glyph and Leave
@@ -699,11 +840,17 @@ const PHONE_BAR_TABS = TABS.map((t) => ({ ...t, phone: PHONE_BAR_MODES[t.key] })
  */
 // `keepBack` keeps Back on a phone with the one-row bar, for a host with no bottom bar to
 // leave by (BDE, Accountant open this from the header).
-export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false, keepBack = false, hideTimeOff = false }) => {
+// `phoneMenu` swaps the tabs for PhoneProfileMenu below md. Branch Admin only, for now.
+export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false, keepBack = false, hideTimeOff = false, phoneMenu = false }) => {
   const [tab, setTab] = useState("attendance");
+  const phone = usePhone();
   // Super Admin has no one above them to ask for leave, so the tab is not offered.
   const tabs = hideTimeOff ? TABS.filter((t) => t.key !== "timeoff") : TABS;
   const phoneTabs = hideTimeOff ? PHONE_BAR_TABS.filter((t) => t.key !== "timeoff") : PHONE_BAR_TABS;
+
+  if (phoneMenu && phone) {
+    return <PhoneProfileMenu user={user} roleLabel={roleLabel} onLogout={onLogout} hideTimeOff={hideTimeOff} />;
+  }
 
   return (
     <div className="space-y-4" data-testid="my-profile-page">
