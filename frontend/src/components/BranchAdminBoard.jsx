@@ -74,7 +74,7 @@ import {
   getLeadAppointmentCard,
   listStoreItems,
 } from "@/lib/api";
-import { to12h, callTimeStamp, callDateStamp, dateStampFull } from "@/lib/time";
+import { to12h, endTime12h, callTimeStamp, callDateStamp, dateStampFull } from "@/lib/time";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
@@ -5268,7 +5268,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                               data-testid={`branch-appt-slot-${x.time}`}
                             >
                               <span className="min-w-0">
-                                <span className="block truncate text-sm font-bold text-slate-500">{to12h(x.time)}</span>
+                                <span className="block text-sm font-bold text-slate-500">{to12h(x.time)} – {endTime12h(x.time, Number(x.duration) || apptSlotMinutes)}</span>
                                 <span className="block truncate text-[11px] font-semibold text-slate-400">
                                   {x.review_id ? "Review" : "Booked"}{x.lead_name ? ` · ${x.lead_name}` : ""}
                                 </span>

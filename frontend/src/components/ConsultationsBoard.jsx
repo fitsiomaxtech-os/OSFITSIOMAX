@@ -2434,7 +2434,7 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
                         title={x.lead_name || (x.review_id ? "Review" : "Booked")}
                         data-testid={`${testPrefix}-booked-${x.time}`}
                       >
-                        {to12h(x.time)}
+                        {to12h(x.time)} – {endTime12h(x.time, Number(x.duration) || slotMinutes)}
                       </span>
                     ))}
                   </div>
