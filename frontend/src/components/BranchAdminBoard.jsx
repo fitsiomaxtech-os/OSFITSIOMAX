@@ -29,6 +29,7 @@ import {
   UserX,
   Clock,
   MoreHorizontal,
+  UserCircle,
   Star,
   AlertCircle,
   PhoneOff,
@@ -94,6 +95,7 @@ import { ClientReviewsPanel } from "@/components/reviews/ClientReviewsPanel";
 import { ZumbaPanel } from "@/components/branch/ZumbaPanel";
 import { FitnessPanel } from "@/components/branch/FitnessPanel";
 import { RecordsPanel } from "@/components/branch/RecordsPanel";
+import { MyProfilePage } from "@/components/MyProfilePage";
 import { CreateLeadModal, DEPARTMENT_OPTIONS, LEAD_DATA_FIELDS } from "@/components/CreateLeadModal";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
@@ -922,7 +924,9 @@ function BulkDeleteLeadsModal({ leads, onClose, onDeleted, purge = false }) {
   );
 }
 
-export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null, canTransferBranch = false }) => {
+// `roleLabel` / `onLogout` are for the phone bar's My Profile stop, which opens the page in
+// the board's place (so the bar stays under it) with Logout on its Security tab.
+export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null, canTransferBranch = false, roleLabel = "", onLogout }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {}, stages: [] });
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
   const [loading, setLoading] = useState(false);
@@ -933,6 +937,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const [selectedLead, setSelectedLead] = useState(null);
   const [activeView, setActiveView] = useState("pipeline");
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [consultationsSubTab, setConsultationsSubTab] = useState("head_physio");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
@@ -1677,7 +1682,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <button
               key={tab.key}
               type="button"
-              onClick={() => setActiveView(tab.key)}
+              onClick={() => { setProfileOpen(false); setActiveView(tab.key); }}
               className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
                 activeView === tab.key
                   ? "border-sky-500 text-sky-700"
@@ -1694,6 +1699,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             with only one of them findable. */}
       </div>
 
+      {profileOpen && (
+        <MyProfilePage user={currentUser} roleLabel={roleLabel} onBack={() => setProfileOpen(false)} onLogout={onLogout} phoneBar />
+      )}
+
+      {/* Hidden, not unmounted, while My Profile is open: `contents` keeps every view a
+          flex child of the root as before, and the lists keep their state for the way back. */}
+      <div className={profileOpen ? "hidden" : "contents"}>
       {activeView === "consultations" ? (
         <div className="space-y-4" data-testid="branch-consultations-headphysio">
           {/* Three across on a phone, so they land as even rows in the order they are
@@ -2706,6 +2718,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 
         </>
       )}
+      </div>
 
       {loading && (
         <div className="fixed bottom-20 right-4 rounded-md bg-slate-900 px-3 py-2 text-sm text-white md:bottom-4">Loading...</div>
@@ -2725,15 +2738,15 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-slate-500/85 md:hidden"
         data-testid="branch-bottom-nav"
       >
-        <div className="grid" style={{ gridTemplateColumns: `repeat(${bottomTabs.length + 1}, minmax(0, 1fr))` }}>
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${bottomTabs.length + 2}, minmax(0, 1fr))` }}>
           {bottomTabs.map((tab) => {
             const Icon = tab.icon;
-            const active = activeView === tab.key;
+            const active = !profileOpen && activeView === tab.key;
             return (
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => { setActiveView(tab.key); setShowMoreMenu(false); }}
+                onClick={() => { setProfileOpen(false); setActiveView(tab.key); setShowMoreMenu(false); }}
                 aria-current={active ? "page" : undefined}
                 className={`relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition-colors ${
                   active ? "text-white" : "text-slate-200 active:text-white"
@@ -2754,13 +2767,27 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             onClick={() => setShowMoreMenu((v) => !v)}
             aria-expanded={showMoreMenu}
             className={`relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition-colors ${
-              moreTabs.some((t) => t.key === activeView) || showMoreMenu ? "text-white" : "text-slate-200 active:text-white"
+              (!profileOpen && moreTabs.some((t) => t.key === activeView)) || showMoreMenu ? "text-white" : "text-slate-200 active:text-white"
             }`}
             data-testid="branch-bottom-nav-more"
           >
-            {moreTabs.some((t) => t.key === activeView) && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-white" />}
+            {!profileOpen && moreTabs.some((t) => t.key === activeView) && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-white" />}
             <MoreHorizontal className="h-[18px] w-[18px] flex-none" />
             <span className="w-full truncate text-center text-[9px] font-semibold leading-tight">More</span>
+          </button>
+          {/* My Profile, and Logout on its Security tab -- the phone header carries neither. */}
+          <button
+            type="button"
+            onClick={() => { setProfileOpen(true); setShowMoreMenu(false); }}
+            aria-current={profileOpen ? "page" : undefined}
+            className={`relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition-colors ${
+              profileOpen ? "text-white" : "text-slate-200 active:text-white"
+            }`}
+            data-testid="branch-bottom-nav-profile"
+          >
+            {profileOpen && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-white" />}
+            <UserCircle className="h-[18px] w-[18px] flex-none" />
+            <span className="w-full truncate text-center text-[9px] font-semibold leading-tight">Profile</span>
           </button>
         </div>
       </nav>
@@ -2793,7 +2820,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 <button
                   key={tab.key}
                   type="button"
-                  onClick={() => { setActiveView(tab.key); setShowMoreMenu(false); }}
+                  onClick={() => { setProfileOpen(false); setActiveView(tab.key); setShowMoreMenu(false); }}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium ${active ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"}`}
                   data-testid={`branch-bottom-nav-sheet-${tab.key}`}
                 >

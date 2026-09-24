@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
   Trash2,
   RefreshCw,
+  UserCircle,
   UserPlus,
   Users,
   X,
@@ -31,6 +32,7 @@ import { CandidatePullButton } from "@/components/hr/CandidatePullButton";
 import { CandidateSheetPanel } from "@/components/hr/CandidateSheetPanel";
 import { RecruitmentStagesPanel } from "@/components/hr/RecruitmentStagesPanel";
 import { to12h } from "@/lib/time";
+import { MyProfilePage } from "@/components/MyProfilePage";
 import {
   recruitmentBoard,
   recruitmentCreateCandidate,
@@ -93,7 +95,9 @@ const VIEWS = [
   { key: "sources", label: "Source Manage", icon: FileSpreadsheet },
 ];
 
-export const HumanResourceBoard = ({ user }) => {
+// `roleLabel` / `onLogout` are for the phone bar's My Profile stop: the page stands in the
+// board's place with the bar still under it, and Logout sits on its Security tab.
+export const HumanResourceBoard = ({ user, roleLabel = "", onLogout }) => {
   const [board, setBoard] = useState({ stages: [], candidates: [], summary: {}, sources: [], interview_modes: [] });
   const [loading, setLoading] = useState(false);
   const [stageFilter, setStageFilter] = useState("all");
@@ -185,6 +189,10 @@ export const HumanResourceBoard = ({ user }) => {
           );
         })}
       </div>
+
+      {view === "profile" && (
+        <MyProfilePage user={user} roleLabel={roleLabel} onBack={() => setView("pipeline")} onLogout={onLogout} phoneBar />
+      )}
 
       {view === "sources" && (
         <SourceManageView
@@ -345,6 +353,18 @@ export const HumanResourceBoard = ({ user }) => {
             </button>
           );
         })}
+        {/* My Profile, and Logout on its Security tab -- the phone header carries neither. */}
+        <button
+          type="button"
+          onClick={() => setView("profile")}
+          className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium leading-tight ${
+            view === "profile" ? "text-indigo-600" : "text-slate-400"
+          }`}
+          data-testid="hr-nav-profile"
+        >
+          <UserCircle className="h-5 w-5" />
+          Profile
+        </button>
       </nav>
 
       {showAdd && (

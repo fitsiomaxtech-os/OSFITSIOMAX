@@ -18,7 +18,6 @@ import {
   Stethoscope,
   UserCircle,
   UserPlus,
-  UserRound,
   Users,
   Workflow,
   X,
@@ -49,14 +48,6 @@ import {
 } from "@/lib/api";
 import { toast, Toaster } from "@/components/ui/sonner";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 // Everyone's own clock, in the bar above every board. Static rather than one of the
 // lazy boards below: it is on screen for every role from the first paint, so splitting
 // it would only add a round trip to the one control that is always there.
@@ -909,6 +900,15 @@ export const CRMPage = ({ auth, onLogout }) => {
   }, [canReadFeedback, role, auth?.user?.branch_id]);
   const showHumanResourceBoard = isHumanResourceRole(role);
 
+  // Phones: who reaches My Profile from their bottom bar rather than the header, and whose
+  // Logout lives on My Profile's Security tab rather than in the header. BDE and Accountant
+  // have no bottom bar, so they keep the header avatar and lose only the logout beside it.
+  // A Consultant's bar is sm:hidden where the others are md:hidden, hence two breakpoints.
+  const profileInFooter = showSuperAdminBoard || showHumanResourceBoard || showHeadPhysioBoard;
+  const logoutInProfile = profileInFooter || showPhysioBoard || showBranchBoard || showBusinessDevBoard || showAccountantBoard;
+  const profileInFooterClass = !profileInFooter ? "flex" : showHeadPhysioBoard ? "hidden sm:flex" : "hidden md:flex";
+  const logoutInProfileClass = !logoutInProfile ? "" : showHeadPhysioBoard ? "hidden sm:inline-flex" : "hidden md:inline-flex";
+
   const filteredAppointmentsForPhysioBoards = appointments;
 
   // Settings' Marketing Source / CI/CD ROOTS switcher. Not a row of its own: each screen
@@ -956,12 +956,8 @@ export const CRMPage = ({ auth, onLogout }) => {
                 <button type="button" onClick={() => setShowPhysioCalendar(true)} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-calendar">
                   <CalendarDays className="h-5 w-5" />
                 </button>
-                <button type="button" onClick={() => setShowProfile(true)} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-profile">
-                  <UserCircle className="h-5 w-5" />
-                </button>
-                <button type="button" onClick={logout} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-logout">
-                  <LogOut className="h-5 w-5" />
-                </button>
+                {/* No profile or logout here: the bottom bar's Profile opens My Profile, and
+                    Logout sits on its Security tab. */}
               </div>
             </div>
           )}
@@ -1013,46 +1009,8 @@ export const CRMPage = ({ auth, onLogout }) => {
                     )}
                   </button>
                 )}
-                {/* The account menu: the only place logout is reachable from this header,
-                    and the way to My Profile now that the title line is a name rather than
-                    a button. The label above the items is not decoration -- it is what
-                    makes this an account menu rather than a bare button, so there is
-                    something naming the account being opened or signed out of. */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-md p-1 hover:bg-slate-50"
-                      aria-label="Account"
-                      data-testid="branch-mobile-header-profile"
-                    >
-                      <EmployeeAvatar employee={auth.user} size={28} />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56" data-testid="branch-mobile-header-account-menu">
-                    <DropdownMenuLabel className="pb-1">
-                      <span className="block truncate text-sm font-semibold leading-tight text-slate-900">{auth.user.full_name}</span>
-                      <span className="block truncate text-[10px] font-medium uppercase tracking-wide text-slate-400">
-                        {roleLabel}{myBranchName && ` · ${myBranchName}`}
-                      </span>
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {/* Monthly Calendar, Attendance, Time Off and Security, as a page with
-                        its own tab row -- the same MyProfilePage the desktop header opens,
-                        standing in place of the board rather than over it. A month of
-                        attendance eleven columns wide is not something a popup can hold,
-                        which is why it stopped being a dialog in the first place. */}
-                    <DropdownMenuItem onSelect={() => setShowProfile(true)} data-testid="branch-mobile-header-my-profile">
-                      <UserRound className="mr-2 h-4 w-4" />
-                      My Profile
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={logout} className="text-rose-600 focus:text-rose-700" data-testid="branch-mobile-header-logout">
-                      <LogOut className="mr-2 h-4 w-4" />
-                      Logout
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {/* No account menu: the bottom bar's Profile opens My Profile, and Logout
+                    sits on its Security tab. */}
               </div>
             </div>
           )}
@@ -1165,7 +1123,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                 onClick={() => setShowProfile(true)}
                 // Super Admin's phone reaches My Profile (and Logout, inside it) from the
                 // bottom bar, so the header drops both below md.
-                className={`${showSuperAdminBoard ? "hidden md:flex" : "flex"} items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-slate-50`}
+                className={`${profileInFooterClass} items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-slate-50`}
                 data-testid="role-board-profile-button"
               >
                 {/* Whoever is signed in, by their own face. The same component the HR
@@ -1187,7 +1145,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                 variant="outline"
                 size="sm"
                 onClick={logout}
-                className={`border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3 ${showSuperAdminBoard ? "hidden md:inline-flex" : ""}`}
+                className={`border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3 ${logoutInProfileClass}`}
                 data-testid="role-board-logout-button"
               >
                 <LogOut className="h-4 w-4" />
@@ -1350,8 +1308,9 @@ export const CRMPage = ({ auth, onLogout }) => {
               user={auth.user}
               roleLabel={roleLabel}
               onBack={() => setShowProfile(false)}
-              onLogout={showSuperAdminBoard ? logout : undefined}
-              phoneBar={showSuperAdminBoard}
+              onLogout={logoutInProfile ? logout : undefined}
+              phoneBar={logoutInProfile}
+              keepBack={!profileInFooter}
               hideTimeOff={showSuperAdminBoard}
             />
           </Suspense>
@@ -1425,7 +1384,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showBranchBoard && (
-          <BranchAdminBoard branchId={auth?.user?.branch_id} currentUser={auth?.user} canTransferBranch />
+          <BranchAdminBoard branchId={auth?.user?.branch_id} currentUser={auth?.user} canTransferBranch roleLabel={roleLabel} onLogout={logout} />
         )}
 
         {showHeadPhysioBoard && (
@@ -1433,14 +1392,14 @@ export const CRMPage = ({ auth, onLogout }) => {
           // not the branch's. Without it this fell to the branch-wide query and every
           // Consultant read every other Consultant's consultations. Operations and Branch
           // Control mount the same board with `supervising` instead and keep the branch view.
-          <HeadPhysioBoard branchId={auth?.user?.branch_id} branchIds={auth?.user?.branch_ids} user={auth?.user} mine search={hpSearch} onSearchChange={setHpSearch} roleLabel={roleLabel} />
+          <HeadPhysioBoard branchId={auth?.user?.branch_id} branchIds={auth?.user?.branch_ids} user={auth?.user} mine search={hpSearch} onSearchChange={setHpSearch} roleLabel={roleLabel} onLogout={logout} />
         )}
 
         {showPhysioBoard && (
           // user/roleLabel are for the board's own My Profile stop — the fourth glyph on
           // the phone's bottom bar, which renders the same page this one does from the
           // header button, inside the board so the bar stays under it.
-          <PhysioBoard user={auth.user} roleLabel={roleLabel} />
+          <PhysioBoard user={auth.user} roleLabel={roleLabel} onLogout={logout} />
         )}
 
         {showDietBoard && (
@@ -1448,7 +1407,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showHumanResourceBoard && (
-          <HumanResourceBoard user={auth.user} />
+          <HumanResourceBoard user={auth.user} roleLabel={roleLabel} onLogout={logout} />
         )}
 
         {showAccountantBoard && <AccountantBoard />}

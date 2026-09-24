@@ -88,7 +88,8 @@ const VIEW_TABS = [
 const PROFILE_TAB = { key: "profile", label: "My Profile", icon: UserCircle };
 const BOTTOM_TABS = [...VIEW_TABS, PROFILE_TAB];
 
-export const PhysioBoard = ({ physioId, user, roleLabel } = {}) => {
+// `onLogout` puts Logout on My Profile's Security tab, the phone header having none.
+export const PhysioBoard = ({ physioId, user, roleLabel, onLogout } = {}) => {
   const [activeTab, setActiveTab] = useState("treatment");
   // Absence is marked by the physio for themselves. A desk driving somebody else's board
   // from Operations marks it from Branch Admin > Management > Physio Absence instead.
@@ -175,7 +176,7 @@ export const PhysioBoard = ({ physioId, user, roleLabel } = {}) => {
           reads a month of attendance, which is not a request to make for a tab nobody
           opened. */}
       {activeTab === "profile" && (
-        <MyProfilePage user={user} roleLabel={roleLabel} onBack={() => setActiveTab("treatment")} phoneBar />
+        <MyProfilePage user={user} roleLabel={roleLabel} onBack={() => setActiveTab("treatment")} onLogout={onLogout} phoneBar />
       )}
 
       {/* Phones only. It used to render at every width, so a desk got a bar pinned

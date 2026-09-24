@@ -697,7 +697,9 @@ const PHONE_BAR_TABS = TABS.map((t) => ({ ...t, phone: PHONE_BAR_MODES[t.key] })
  * whose bottom bar opens this page. It is handed to the Security tab, which draws the
  * button below md; from md up the header's own logout is on screen.
  */
-export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false, hideTimeOff = false }) => {
+// `keepBack` keeps Back on a phone with the one-row bar, for a host with no bottom bar to
+// leave by (BDE, Accountant open this from the header).
+export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false, keepBack = false, hideTimeOff = false }) => {
   const [tab, setTab] = useState("attendance");
   // Super Admin has no one above them to ask for leave, so the tab is not offered.
   const tabs = hideTimeOff ? TABS.filter((t) => t.key !== "timeoff") : TABS;
@@ -706,7 +708,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = fa
   return (
     <div className="space-y-4" data-testid="my-profile-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className={`min-w-0 items-center gap-3 ${phoneBar ? "hidden sm:flex" : "flex"}`}>
+        <div className={`min-w-0 items-center gap-3 ${phoneBar && !keepBack ? "hidden sm:flex" : "flex"}`}>
           <button
             type="button"
             onClick={onBack}

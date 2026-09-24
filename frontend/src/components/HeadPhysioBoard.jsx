@@ -119,7 +119,7 @@ const isDone = (...stages) => stages.some((s) => /complete/i.test(String(s || ""
  * Operations or Branch Control is not the person it shows, and their profile does not
  * belong on someone else's bar.
  */
-export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, mine = false, search = "", onSearchChange, roleLabel }) => {
+export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false, mine = false, search = "", onSearchChange, roleLabel, onLogout }) => {
   const [workTab, setWorkTab] = useState("consultations");
   const withProfile = roleLabel !== undefined;
   const profileOpen = withProfile && workTab === "profile";
@@ -828,7 +828,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
           way back. Mounted only while it is the tab — it reads a month of attendance. */}
       {profileOpen && (
         <div className="sm:hidden">
-          <MyProfilePage user={user} roleLabel={roleLabel} onBack={() => setWorkTab("consultations")} phoneBar />
+          <MyProfilePage user={user} roleLabel={roleLabel} onBack={() => setWorkTab("consultations")} onLogout={onLogout} phoneBar />
         </div>
       )}
 
