@@ -932,7 +932,10 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         )
         if not item:
             raise HTTPException(status_code=404, detail="Consultation package not found")
-        if item.get("item_type") != "consultation":
+        # A House Visit patient's consultation is sold off Home Visit > Consultant rather
+        # than the Consultations shelf -- the consultant went to their home.
+        home_pkg = item.get("category") == "home_visit_consultation" and lead.get("visit_type") == "home"
+        if item.get("item_type") != "consultation" and not home_pkg:
             raise HTTPException(
                 status_code=400,
                 detail="Only a Consultation package can be sold as the Consultation Fee",
@@ -940,7 +943,24 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         # Online and offline are priced separately, and which one applies is a fact about
         # the appointment rather than anything the desk chooses while taking the money.
         mode = lead.get("appointment_mode") or "offline"
-        price = item.get("price_online") if mode == "online" else item.get("price_offline")
+        if home_pkg:
+            # The package booked with the appointment costs what was agreed then --
+            # including an amount the branch typed for a Distance visit. Any other Home
+            # Visit package costs what the catalogue says; one with no catalogue price
+            # can only be sold on the booking that typed it.
+            if item["id"] == lead.get("visit_package_id") and lead.get("visit_package_price") is not None:
+                price = lead["visit_package_price"]
+            elif item.get("manual_price"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{item.get('name')}' is priced when the appointment is booked. Rebook the appointment on it to set the amount.",
+                )
+            else:
+                rate = float(item.get("price_offline") or 0)
+                visits = int(item.get("sessions_offline") or 0)
+                price = round(rate if item.get("price_is_total") else rate * visits)
+        else:
+            price = item.get("price_online") if mode == "online" else item.get("price_offline")
 
         # Correcting a collection already taken for this same package keeps the price it
         # was taken at. This endpoint does first collections and corrections both, and the

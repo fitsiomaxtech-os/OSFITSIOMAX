@@ -3694,11 +3694,35 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // In catalogue order rather than by price or name, because that is the order they are
   // read in on Services & Products and the order they escalate in.
   const consultationPackageItems = useMemo(() => {
+    // A House Visit patient's consultation is sold off Home Visit > Consultant instead.
+    if (homeVisitLead) {
+      return storeItems
+        .filter((i) => i.category === "home_visit_consultation")
+        .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    }
     const rank = (i) => CONSULTATION_PACKAGE_ORDER.indexOf(i.consultation_package);
     return storeItems
       .filter((i) => i.item_type === "consultation" && CONSULTATION_PACKAGE_ORDER.includes(i.consultation_package))
       .sort((a, b) => rank(a) - rank(b));
-  }, [storeItems]);
+  }, [storeItems, homeVisitLead]);
+
+  /**
+   * What one package on the Consultation Fee dropdown costs, or null for no price.
+   * A Home Visit > Consultant package booked with the appointment costs what was agreed
+   * then (a Distance amount included); another one costs its visits at its rate, or
+   * nothing if it has no catalogue price. Mirrors collect_package_payment.
+   */
+  const consultationOptionPrice = useCallback((i) => {
+    if (!i) return null;
+    if (i.category === "home_visit_consultation") {
+      if (i.id === selectedLead?.visit_package_id && selectedLead?.visit_package_price != null) return selectedLead.visit_package_price;
+      if (i.manual_price) return null;
+      const rate = Number(i.price_offline) || 0;
+      const visits = Number(i.sessions_offline) || 0;
+      return Math.round(i.price_is_total ? rate : rate * visits);
+    }
+    return consultationItemPrice(i, selectedLead?.appointment_mode || "offline");
+  }, [selectedLead?.visit_package_id, selectedLead?.visit_package_price, selectedLead?.appointment_mode]);
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
@@ -4021,9 +4045,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       //
       // A collection being corrected reopens on the package it was taken for, so fixing a
       // payment mode does not make anyone re-pick what the patient already bought.
-      consultation_item_id: lead.package_id || "",
+      // A House Visit opens on the package booked with the appointment, at the price
+      // agreed then.
+      consultation_item_id: lead.package_id || (lead.visit_type === "home" ? lead.visit_package_id || "" : ""),
       payment_mode: lead.package_payment_mode || "cash",
-      amount: lead.package_paid ?? lead.package_price ?? "",
+      amount: lead.package_paid ?? lead.package_price ?? (lead.visit_type === "home" ? lead.visit_package_price ?? "" : ""),
       // Typed by hand or not at all -- see FeeAmountEntry. Reloaded from what was
       // actually agreed and recorded, never worked back out of what was collected.
       discount: lead.package_payment_details?.discount_amount ?? "",
@@ -4217,8 +4243,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
       return selectedLead.package_price;
     }
     const item = consultationPackageItems.find((i) => i.id === id);
-    return item ? consultationItemPrice(item, selectedLead?.appointment_mode || "offline") : null;
-  }, [consultationPackageItems, selectedLead?.package_id, selectedLead?.package_price, selectedLead?.appointment_mode]);
+    return item ? consultationOptionPrice(item) : null;
+  }, [consultationPackageItems, selectedLead?.package_id, selectedLead?.package_price, consultationOptionPrice]);
 
   const consultationChosenPrice = consultationPriceForId(collectFeeDraft?.consultation_item_id);
 
@@ -10314,10 +10340,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       >
                         <option value="">Select a package…</option>
                         {consultationPackageItems.map((i) => {
-                          const price = consultationItemPrice(i, selectedLead.appointment_mode || "offline");
+                          const price = consultationOptionPrice(i);
                           return (
                             <option key={i.id} value={i.id}>
-                              {i.name}{price != null ? ` — Rs.${price}` : " — no price set"}
+                              {i.name}{price != null ? ` — Rs.${price}` : i.manual_price ? " — amount set at booking" : " — no price set"}
                             </option>
                           );
                         })}
@@ -10344,7 +10370,9 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       )}
                       {consultationPackageItems.length === 0 && (
                         <p className="mt-1 text-[11px] text-rose-700" data-testid="cons-collect-fee-package-empty">
-                          No consultation packages are set up yet — add them under Services &amp; Products &gt; Consultations.
+                          {homeVisitLead
+                            ? "No House Visit packages are set up yet — add them under Services & Products > Home Visit > Consultant."
+                            : "No consultation packages are set up yet — add them under Services & Products > Consultations."}
                         </p>
                       )}
                     </div>
