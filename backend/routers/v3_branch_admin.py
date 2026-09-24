@@ -1292,13 +1292,16 @@ def _consultant_day(expert: dict, date_str: str, bookings: list, slot_minutes: O
         windows.append((start, start + length))
     windows.sort()
 
+    # The published windows laid end to end — the consultant's shifts for the day
+    # (e.g. Morning 7:00–14:00), independent of what is booked inside them.
+    blocks: list = []
+    for start, end in windows:
+        if blocks and start <= blocks[-1][1]:
+            blocks[-1][1] = max(blocks[-1][1], end)
+        else:
+            blocks.append([start, end])
+
     if slot_minutes:
-        blocks: list = []
-        for start, end in windows:
-            if blocks and start <= blocks[-1][1]:
-                blocks[-1][1] = max(blocks[-1][1], end)
-            else:
-                blocks.append([start, end])
         offered = []
         for start, end in blocks:
             t = start
@@ -1328,6 +1331,7 @@ def _consultant_day(expert: dict, date_str: str, bookings: list, slot_minutes: O
 
     return {
         "published_slot_count": len(offered),
+        "day_blocks": [{"start": _clock_text(a), "end": _clock_text(min(b, 24 * 60 - 1))} for a, b in blocks],
         "free_slots": [
             {"slot_time": f"{date_str}T{_clock_text(t)}", "time": _clock_text(t), "duration": length}
             for t, length in free
@@ -1445,6 +1449,7 @@ async def v3_available_experts(
             # Consultation Duration — see _consultant_day.
             "free_slots": day["free_slots"],
             "booked_slots": day["booked_slots"],
+            "day_blocks": day["day_blocks"],
         })
     return {
         "date": date,

@@ -3168,6 +3168,12 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   // desk at 2 PM, and naming their day as 7 AM to 7 PM would invite a booking into the
   // gap they go home in.
   const apptDayBlocks = useMemo(() => {
+    // The consultant's published shifts, straight from the calendar. Building them out of
+    // the slot grid instead splits a shift wherever an off-grid booking punches a hole.
+    const published = (apptSelectedExpert?.day_blocks || [])
+      .map((b) => [apptMinutesOf(b.start), apptMinutesOf(b.end)])
+      .filter(([a, b]) => a !== null && b !== null);
+    if (published.length) return published;
     const rows = apptSlotsForExpert
       .map((x) => [apptMinutesOf(x.time), apptMinutesOf(x.time) + (Number(x.duration) || 0)])
       .filter(([a]) => a !== null)
@@ -3179,8 +3185,9 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
       else blocks.push([a, b]);
     });
     return blocks;
-  }, [apptSlotsForExpert]);
+  }, [apptSlotsForExpert, apptSelectedExpert]);
 
+  const apptShiftName = (mins) => (mins < 12 * 60 ? "Morning" : mins < 17 * 60 ? "Afternoon" : "Evening");
   const apptDayHours = apptDayBlocks.map(([a, b]) => `${to12h(apptClockText(a))} – ${to12h(apptClockText(b))}`).join(" · ");
 
   // A typed time outside every published stretch. Said, not refused: the branch may have
@@ -5167,10 +5174,15 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                         <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
                         Available
                       </span>
-                      <p className="mt-2 text-xs text-emerald-800">
-                        {apptSelectedExpert?.full_name} takes consultations on this date
-                        {apptDayHours ? <>, working <b className="font-semibold">{apptDayHours}</b></> : ""}.
-                      </p>
+                      {apptDayBlocks.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {apptDayBlocks.map(([a, b]) => (
+                            <span key={a} className="rounded-md bg-white px-2 py-1 text-xs text-emerald-800 ring-1 ring-inset ring-emerald-200">
+                              <b className="font-semibold">{apptShiftName(a)}</b> · {to12h(apptClockText(a))} – {to12h(apptClockText(b))}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* The hour itself. Three fields and not one text box, because a
@@ -5221,7 +5233,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                       <p className="mt-1.5 text-[11px] text-slate-400">
                         {apptDraft.appointment_time
                           ? <>Booking <b className="font-semibold text-slate-600">{to12h(apptDraft.appointment_time)}</b> for {apptSlotMinutes} minutes.</>
-                          : <>Type the hour and minute agreed with the patient. {apptSlotMinutes} minutes, per FITSIO STORE.</>}
+                          : <>{apptSlotMinutes}-minute consultation.</>}
                       </p>
                     </div>
 
