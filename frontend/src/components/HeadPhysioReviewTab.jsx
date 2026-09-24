@@ -145,7 +145,7 @@ const StageBadge = ({ stage }) => (
  * an overdue review that fell out of Today would sit in a list nobody opens, which is
  * exactly how a patient's week-one review gets missed.
  */
-export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange = null, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken }) => {
+export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange = null, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken, homeVisitScope = null }) => {
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState(null); // { review, head_physio_notes, head_physio_suggestions }
@@ -211,15 +211,24 @@ export const HeadPhysioReviewTab = ({ branchId = null, selectedDate, dateRange =
     return () => true;
   }, [dateRange, selectedDate]);
 
+  // The Consultant board's House Visit tab and the main Review tab are this one list split
+  // by where the patient is seen: "only" keeps the house-visit patients, "exclude" the
+  // rest, null (every other caller) the whole list.
+  const inVisitScope = useCallback((r) => (
+    homeVisitScope === "only" ? r.visit_type === "home"
+      : homeVisitScope === "exclude" ? r.visit_type !== "home"
+      : true
+  ), [homeVisitScope]);
+
   const dueList = useMemo(() => {
     const all = [...(data.overdue || []), ...(data.today || []), ...(data.upcoming || [])];
-    return all.filter((r) => inScope(r.review_date || ""));
-  }, [data, inScope]);
+    return all.filter((r) => inScope(r.review_date || "") && inVisitScope(r));
+  }, [data, inScope, inVisitScope]);
 
   const completedList = useMemo(() => {
     const all = data.completed || [];
-    return all.filter((r) => inScope(r.review_date || ""));
-  }, [data.completed, inScope]);
+    return all.filter((r) => inScope(r.review_date || "") && inVisitScope(r));
+  }, [data.completed, inScope, inVisitScope]);
 
   // Outstanding first, then what's already written — the day's reviews are one list, not
   // two tabs to check. Each row already reads differently by status, so splitting them

@@ -808,11 +808,22 @@ async def hp_reviews(
 
     rows = await v3_col("reviews").find(query, {"_id": 0}).sort("review_date", 1).to_list(2000)
     stars = await _client_week_stars(rows)
+    # Where the patient is seen, off their lead: the Consultant board splits House Visit
+    # patients onto their own tab, reviews included, and a review row carries no visit
+    # type of its own.
+    lead_ids = list({r.get("lead_id") for r in rows if r.get("lead_id")})
+    home_ids = set()
+    if lead_ids:
+        home = await v3_col("leads").find(
+            {"id": {"$in": lead_ids}, "visit_type": "home"}, {"_id": 0, "id": 1}
+        ).to_list(len(lead_ids))
+        home_ids = {h["id"] for h in home}
 
     today = _today()
     out = {"today": [], "upcoming": [], "overdue": [], "completed": [], "today_date": today}
     for r in rows:
         r["client_rating"] = stars.get(r.get("id"))
+        r["visit_type"] = "home" if r.get("lead_id") in home_ids else "branch"
         if r.get("status") == COMPLETED:
             out["completed"].append(_shape(r))
         elif (r.get("review_date") or "") == today:

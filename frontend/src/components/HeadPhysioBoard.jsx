@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  Home,
   LayoutList,
   Package,
   RefreshCw,
@@ -76,6 +77,10 @@ const TAB_GRID_COLS = {
 const WORK_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar, color: "#0284c7" },
   { key: "review", label: "Weekly Review", icon: ClipboardCheck, color: "#7c3aed" },
+  // Patients booked as a House Visit (the consultant goes to them), off the branch's
+  // Appointment popup. Their consultations and reviews are worked here, with the same
+  // popups as everyone else's, and are left out of the three tabs beside it.
+  { key: "house_visit", label: "House Visit", icon: Home, color: "#ea580c" },
   { key: "all", label: "All", icon: LayoutList, color: "#0d9488" },
   // What the consultant's patients said: the star rating and written feedback from each
   // weekly review, read-only. Not a queue, so it carries no count.
@@ -104,6 +109,14 @@ const ALL_KINDS = [
 // A stage counts as finished when it says so. Read from the name rather than matched
 // against a list of them, because these are renamed in Pipeline Stage Management and a
 // hardcoded "Consultation Completed" would quietly stop matching the day someone edits it.
+// The House Visit tab's own row: the same three lists the board has, holding only the
+// house-visit patients.
+const HOUSE_VISIT_SUBTABS = [
+  { key: "consultations", label: "Consultation" },
+  { key: "review", label: "Weekly Review" },
+  { key: "all", label: "All" },
+];
+
 const isDone = (...stages) => stages.some((s) => /complete/i.test(String(s || "")));
 
 /**
@@ -143,6 +156,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
   // The rows behind those counts, so All can merge all three into one list.
   const [consultRows, setConsultRows] = useState([]);
   const [reviewRows, setReviewRows] = useState([]);
+  // The same four, for the House Visit tab's own consultation and review lists.
+  const [hvSub, setHvSub] = useState("consultations");
+  const [hvConsultStages, setHvConsultStages] = useState({});
+  const [hvReviewCount, setHvReviewCount] = useState(0);
+  const [hvConsultRows, setHvConsultRows] = useState([]);
+  const [hvReviewRows, setHvReviewRows] = useState([]);
   // New Rehab is a patient with no package recommended yet — the same shape as the other
   // cards: what is still waiting on this Head Physio, not everything on their list.
   // Whatever the first head-consultation stage is currently called.
@@ -161,8 +180,11 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
   // lead's raw pipeline stage, which in a mixed list said nothing about which of the three
   // kinds of work a row was, and read as "All" for anyone whose stage happened to be named
   // that. Which list a row belongs to is the thing this column exists to answer.
-  const allRows = useMemo(() => [
-    ...consultRows.map((l) => {
+  //
+  // Built by one function for both the All tab and House Visit > All, which merge
+  // different lists into the same shape. `hv` marks which tab a row opens on.
+  const buildAllRows = (cRows, rRows, hv) => [
+    ...cRows.map((l) => {
       // A Rehab consultation still to be held is what this row is on the day for, so it
       // is named and dated as that rather than as the first consultation long finished.
       const rehabDue = !!l.rehab_after_treatment && !l.rehab_consulted_at && !!l.rehab_consult_date;
@@ -170,6 +192,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
         return {
           key: `c-${l.id}`,
           kind: "consult",
+          hv,
           leadId: l.id,
           name: l.name || "Unknown",
           patientNo: l.patient_number || "",
@@ -186,6 +209,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
       return {
         key: `c-${l.id}`,
         kind: "consult",
+        hv,
         leadId: l.id,
         name: l.name || "Unknown",
         patientNo: l.patient_number || "",
@@ -210,9 +234,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
         appointment_rescheduled_from: l.appointment_rescheduled_from || "",
       };
     }),
-    ...reviewRows.filter((r) => matches(r.lead_name, r.phone, r.patient_number)).map((r) => ({
+    ...rRows.filter((r) => matches(r.lead_name, r.phone, r.patient_number)).map((r) => ({
       key: `r-${r.id}`,
       kind: "review",
+      hv,
       reviewId: r.id,
       name: r.lead_name || "Unknown",
       patientNo: r.patient_number || "",
@@ -242,7 +267,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
       if (!a.at) return b.at ? 1 : 0;
       if (!b.at) return -1;
       return a.at.localeCompare(b.at);
-    }), [consultRows, reviewRows]);
+    });
+  const allRows = useMemo(() => buildAllRows(consultRows, reviewRows, false), [consultRows, reviewRows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hvAllRows = useMemo(() => buildAllRows(hvConsultRows, hvReviewRows, true), [hvConsultRows, hvReviewRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // What All actually renders. Narrowed by the filter on the All card itself; the
   // count on that card stays the full total, because it is the card's own figure and
@@ -273,10 +300,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
    * real thing, so a name only ever groups rows that have neither of the other two and
    * there is nothing better to go on.
    */
-  const groupedAllRows = useMemo(() => {
+  const groupRows = (rows) => {
     const groups = [];
     const byKey = new Map();
-    for (const r of visibleAllRows) {
+    for (const r of rows) {
       // Falling back to the row's own key leaves an unidentifiable row standing alone,
       // which is the right answer: with no number, no phone and no name there is nothing
       // to say it is the same person as the next one like it.
@@ -306,7 +333,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
       g.entries.push(r);
     }
     return groups;
-  }, [visibleAllRows]);
+  };
+  const groupedAllRows = useMemo(() => groupRows(visibleAllRows), [visibleAllRows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hvGroupedAllRows = useMemo(() => groupRows(hvAllRows), [hvAllRows]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Which merged list the All table is drawing: the board's, or House Visit's.
+  const hvAllOpen = workTab === "house_visit" && hvSub === "all";
+  const shownGroups = hvAllOpen ? hvGroupedAllRows : groupedAllRows;
 
   const [loading, setLoading] = useState(false);
   // The patient whose entries are being listed, held by key rather than by object so a
@@ -315,12 +347,14 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
   // there describing work that is no longer there.
   const [entriesForKey, setEntriesForKey] = useState(null);
   const entriesFor = useMemo(
-    () => (entriesForKey ? groupedAllRows.find((g) => g.key === entriesForKey) || null : null),
-    [entriesForKey, groupedAllRows],
+    () => (entriesForKey ? shownGroups.find((g) => g.key === entriesForKey) || null : null),
+    [entriesForKey, shownGroups],
   );
   // Set by View on the All list, consumed by whichever board owns that row's popup.
   const [autoOpenLead, setAutoOpenLead] = useState(null);
   const [autoOpenReview, setAutoOpenReview] = useState(null);
+  const [hvAutoOpenLead, setHvAutoOpenLead] = useState(null);
+  const [hvAutoOpenReview, setHvAutoOpenReview] = useState(null);
 
   // Held rather than written inline at the mount below, and for two reasons. The board is
   // memoised, and a fresh arrow on every render of this one is a prop that has changed, so
@@ -334,6 +368,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
     setConsultStageNames(names || []);
   }, []);
   const clearAutoOpenLead = useCallback(() => setAutoOpenLead(null), []);
+  const handleHvConsultCounts = useCallback((_total, stages) => setHvConsultStages(stages || {}), []);
+  const clearHvAutoOpenLead = useCallback(() => setHvAutoOpenLead(null), []);
 
   /**
    * View on an All row. The two queues merged into that list keep their own detail popups,
@@ -344,6 +380,14 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
    * modal rendered inside display:none does not appear.
    */
   const openRow = (r) => {
+    if (r.hv) {
+      // A house-visit row opens in the House Visit tab's own lists, which are the boards
+      // that hold it.
+      setWorkTab("house_visit");
+      if (r.kind === "consult") { setHvSub("consultations"); setHvAutoOpenLead(r.leadId); return; }
+      setHvSub("review"); setHvAutoOpenReview(r.reviewId);
+      return;
+    }
     if (r.kind === "consult") { setWorkTab("consultations"); setAutoOpenLead(r.leadId); return; }
     setWorkTab("review"); setAutoOpenReview(r.reviewId);
   };
@@ -514,6 +558,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               const n = t.key === "client_reviews" ? "★"
                 : t.key === "consultations" ? (consultStages[firstStage] || 0)
                 : t.key === "review" ? reviewCount
+                // What is waiting on the house-visit side: new consultations and reviews
+                // still to write, the two figures the cards beside it give for the rest.
+                : t.key === "house_visit" ? (hvConsultStages[firstStage] || 0) + hvReviewCount
                 // All is the two of them together, every stage, nothing narrowed.
                 : consultCount + reviewCount;
               // The caption names the scope the figure was counted over, so it has to
@@ -528,6 +575,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               const sub = t.key === "client_reviews" ? "stars & feedback"
                 : t.key === "consultations" ? (firstStage ? `in ${firstStage}` : when)
                 : t.key === "review" ? when
+                : t.key === "house_visit" ? `to do ${when}`
                 : `everything ${when}`;
               // The wrapper keeps the phone's side-scrolling row of fixed-width cards; the
               // tile itself fills whatever it is given.
@@ -602,6 +650,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               autoOpenLeadId={autoOpenLead}
               onAutoOpened={clearAutoOpenLead}
               reloadToken={refreshTick}
+              // House-visit patients are worked from the House Visit tab instead.
+              homeVisitScope="exclude"
             />
           </div>
 
@@ -615,6 +665,64 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
               autoOpenReviewId={autoOpenReview}
               onAutoOpened={() => setAutoOpenReview(null)}
               reloadToken={refreshTick}
+              homeVisitScope="exclude"
+            />
+          </div>
+
+          {/* House Visit: the same three lists as the board, holding only the patients the
+              consultant goes to. Its consultation and review lists are the same boards as
+              the tabs above, filtered the other way, so the process is the one a branch
+              consultation goes through. Mounted and hidden like those, so the card's
+              count stays live. */}
+          {workTab === "house_visit" && (
+            <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="hp-house-visit-subtabs">
+              {HOUSE_VISIT_SUBTABS.map((st) => (
+                <button
+                  key={st.key}
+                  type="button"
+                  onClick={() => setHvSub(st.key)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                    hvSub === st.key ? "bg-orange-50 text-orange-700 ring-1 ring-orange-200" : "text-slate-600 hover:bg-slate-50"
+                  }`}
+                  data-testid={`hp-house-visit-sub-${st.key}`}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className={workTab === "house_visit" && hvSub === "consultations" ? "" : "hidden"} data-testid="hp-house-visit-consultations">
+            <ConsultationsBoard
+              branchId={effectiveBranchId}
+              viewerRole="head_physio"
+              mine={mine}
+              externalDateFilter={dateRange}
+              hideDateFilter
+              externalSearch={search}
+              mobileCards
+              showOwnStageBar={false}
+              externalStageFilter={workTab === "house_visit" && hvSub === "consultations" ? firstStage : null}
+              onCountChange={handleHvConsultCounts}
+              onRowsChange={setHvConsultRows}
+              autoOpenLeadId={hvAutoOpenLead}
+              onAutoOpened={clearHvAutoOpenLead}
+              reloadToken={refreshTick}
+              homeVisitScope="only"
+            />
+          </div>
+
+          <div className={workTab === "house_visit" && hvSub === "review" ? "" : "hidden"} data-testid="hp-house-visit-review">
+            <HeadPhysioReviewTab
+              branchId={supervising ? effectiveBranchId : null}
+              selectedDate={null}
+              dateRange={dateRange}
+              onCountChange={setHvReviewCount}
+              onRowsChange={setHvReviewRows}
+              autoOpenReviewId={hvAutoOpenReview}
+              onAutoOpened={() => setHvAutoOpenReview(null)}
+              reloadToken={refreshTick}
+              homeVisitScope="only"
             />
           </div>
 
@@ -632,14 +740,14 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
             </div>
           )}
 
-          {workTab === "all" && (
-            <div data-testid="hp-work-all">
+          {(workTab === "all" || hvAllOpen) && (
+            <div data-testid={hvAllOpen ? "hp-house-visit-all" : "hp-work-all"}>
               {/* Six columns can't reflow onto a phone, so the same rows render as cards
                   there rather than scrolling sideways past the ones that matter. */}
               <div className="space-y-2 sm:hidden">
-                {groupedAllRows.length === 0 ? (
+                {shownGroups.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">{emptyAllText}</p>
-                ) : groupedAllRows.map((g, i) => {
+                ) : shownGroups.map((g, i) => {
                   const st = groupStage(g);
                   const who = collapse(g.entries, (e) => e.who);
                   const when = collapse(g.entries, (e) => e.when);
@@ -699,9 +807,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, supervising = false
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {groupedAllRows.length === 0 ? (
+                    {shownGroups.length === 0 ? (
                       <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">{emptyAllText}</td></tr>
-                    ) : groupedAllRows.map((g, i) => {
+                    ) : shownGroups.map((g, i) => {
                       const st = groupStage(g);
                       const many = g.entries.length > 1;
                       return (
