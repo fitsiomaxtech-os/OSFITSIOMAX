@@ -563,6 +563,12 @@ class V3LeadOut(BaseModel):
     # Appointment popup; a "home" booking is worked from the House Visit tab instead of
     # Consultation.
     visit_type: Optional[str] = None
+    # The Home Visit > Consultant package a "home" booking was made on, copied off the
+    # catalogue when it was booked. Empty for a branch visit.
+    visit_package_id: Optional[str] = None
+    visit_package_name: Optional[str] = None
+    visit_package_price: Optional[float] = None
+    visit_package_visits: Optional[int] = None
     appointment_date: Optional[str] = None
     appointment_time: Optional[str] = None
     appointment_datetime: Optional[str] = None

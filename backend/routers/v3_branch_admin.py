@@ -286,7 +286,17 @@ def _appt_card_html(a: dict) -> str:
     if a["branch"]:
         og_desc += f" at {a['branch']}"
 
+    # A house visit happens at the patient's home, so the branch's address and the
+    # "arrive early" line would send them somewhere they are not expected.
+    house_visit = bool(a.get("house_visit"))
+    if house_visit:
+        og_desc = f"{_weekday_label(a['date'])} · {when} · House Visit"
+
     rows = [("CONSULTANT", a["head_physio"])]
+    if house_visit:
+        rows.append(("Visit", "House Visit"))
+        if a.get("package_name"):
+            rows.append(("Package", a["package_name"]))
     if a["ref_no"]:
         rows.append(("Reference", a["ref_no"]))
     rows_html = "".join(
@@ -324,7 +334,8 @@ def _appt_card_html(a: dict) -> str:
       <div class="hero-label">Your Appointment</div>
       <div class="hero-date">{_esc(_weekday_label(a['date']))}</div>
       <div class="hero-time">{_esc(when)}</div>
-      {f'<div class="hero-with">at {_esc(a["branch"])}</div>' if a["branch"] else ''}
+      {'<div class="hero-with">House Visit — at your home</div>' if house_visit
+       else f'<div class="hero-with">at {_esc(a["branch"])}</div>' if a["branch"] else ''}
     </div>
     <div class="greet">Hi {_esc(a['patient'])},</div>
     {'<div class="banner">This appointment has been cancelled. Please contact the branch to book another.</div>'
@@ -333,8 +344,10 @@ def _appt_card_html(a: dict) -> str:
     <table>{rows_html}</table>
     {f'<div class="box"><div class="box-label">Notes</div><p>{_esc(a["notes"])}</p></div>' if a["notes"] else ''}
     {f'<div class="box"><div class="box-label">Location</div><p>{_esc(a["branch_address"])}</p>{map_html}</div>'
-     if (a["branch_address"] or map_html) else ''}
-    {'' if cancelled else '<div class="note"><p>Please arrive 10 minutes early.</p></div>'}
+     if (a["branch_address"] or map_html) and not house_visit else ''}
+    {'' if cancelled else
+     '<div class="note"><p>Our consultant will come to your home at this time.</p></div>' if house_visit else
+     '<div class="note"><p>Please arrive 10 minutes early.</p></div>'}
   </div>
 </div>
 <p class="foot">FITSIOMAX · Physiotherapy &amp; Rehabilitation</p>
@@ -381,6 +394,8 @@ async def v3_public_appointment(share_token: str):
         # A cancelled booking keeps its link working, but says so rather than showing a
         # confirmation for an appointment that is no longer happening.
         "cancelled": appt.get("status") == "cancelled",
+        "house_visit": appt.get("visit_type") == "home",
+        "package_name": appt.get("visit_package_name") or "",
     }))
 
 
@@ -694,6 +709,31 @@ class V3BranchAppointmentInput(BaseModel):
     # "branch" | "home". Omitted by the calls that only move an existing booking (the
     # handover and the slot edit), which leaves whatever the lead already holds.
     visit_type: Optional[str] = None
+    # The Home Visit > Consultant package the patient chose, required when visit_type is
+    # "home". Only the id travels: the name and price are read off the catalogue here, so
+    # the figure on the booking is the one the catalogue charges.
+    visit_package_id: Optional[str] = None
+
+
+# The catalogue shelf a house-visit consultation is sold from — PackagesBoard's
+# HOME_VISIT_SUBTABS, Consultant sub-tab.
+HOME_VISIT_CONSULTATION_CATEGORY = "home_visit_consultation"
+
+
+def _visit_package_fields(item: Optional[dict]) -> dict:
+    """The House Visit package as it is kept on the lead and its appointment, or the same
+    keys emptied. Priced the way the catalogue prices it: a per-visit rate times the
+    visits, unless the row already holds the whole fee."""
+    if not item:
+        return {"visit_package_id": None, "visit_package_name": None, "visit_package_price": None, "visit_package_visits": None}
+    rate = float(item.get("price_offline") or 0)
+    visits = int(item.get("sessions_offline") or 0)
+    return {
+        "visit_package_id": item.get("id"),
+        "visit_package_name": item.get("name"),
+        "visit_package_price": round(rate if item.get("price_is_total") else rate * visits),
+        "visit_package_visits": visits,
+    }
 
 
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
@@ -727,6 +767,18 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     booking = final_stage == appointment_stage
     if payload.visit_type is not None and payload.visit_type not in ("branch", "home"):
         raise HTTPException(status_code=400, detail="visit_type must be 'branch' or 'home'")
+    # A house visit is booked on a package or not at all: the consultant is going to the
+    # patient's door, and what that visit costs is agreed before the day is.
+    visit_package = None
+    if booking and payload.visit_type == "home":
+        if not payload.visit_package_id:
+            raise HTTPException(status_code=400, detail="Pick a House Visit package")
+        visit_package = await v3_col("store_items").find_one(
+            {"id": payload.visit_package_id, "category": HOME_VISIT_CONSULTATION_CATEGORY}, {"_id": 0}
+        )
+        if not visit_package:
+            raise HTTPException(status_code=404, detail="House Visit package not found")
+    package_fields = _visit_package_fields(visit_package)
     physio = await v3_col("doctors").find_one(
         {"id": payload.physio_id}, {"_id": 0, "full_name": 1, "slot_details": 1, "meet_link": 1}
     )
@@ -795,6 +847,9 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     }
     if payload.visit_type is not None:
         updates["visit_type"] = payload.visit_type
+        # Written whenever a visit type is stated, so moving a house visit back to the
+        # branch drops its package rather than leaving it on the lead.
+        updates.update(package_fields)
     # When the appointment is booked (not cancelled), hand the lead to BOTH consultation
     # pipelines at once:
     #   - Head Physio's own board -> its first stage ("New Appointment"), where they pick it up
@@ -868,6 +923,9 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             "created_by_role": user.role,
             "updated_at": now_iso(),
         }
+        if payload.visit_type is not None:
+            appt_fields["visit_type"] = payload.visit_type
+            appt_fields.update(package_fields)
         if payload.ref_no:
             appt_fields["ref_no"] = payload.ref_no
         if payload.share_token:
@@ -896,6 +954,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
              f"{payload.appointment_date} {payload.appointment_time} with {physio['full_name']}"
              if is_reschedule else
              f"Appointment {payload.appointment_date} {payload.appointment_time} with {physio['full_name']} → {final_stage}")
+            + (f" · House Visit: {visit_package.get('name')}" if visit_package else "")
             + (f" · Notes: {payload.notes.strip()}" if payload.notes else "")
         ),
         "created_by": user.full_name,
@@ -2245,6 +2304,9 @@ async def v3_lead_appointment_card(lead_id: str, _: V3UserOut = Depends(v3_curre
         "meetLink": (appt.get("meet_link") or "").strip(),
         "notes": appt.get("notes") or "",
         "bookedBy": appt.get("created_by") or "Branch Admin",
+        "houseVisit": appt.get("visit_type") == "home",
+        "packageName": appt.get("visit_package_name") or "",
+        "packagePrice": appt.get("visit_package_price"),
     }
 
 

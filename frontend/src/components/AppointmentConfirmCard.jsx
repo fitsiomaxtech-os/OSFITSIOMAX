@@ -37,6 +37,8 @@ const weekdayDmy = (d) => {
   return `${weekday} ${day}-${m}-${y}`;
 };
 
+const packageLabel = (a) => (a.packagePrice != null ? `${a.packageName} · ₹${a.packagePrice}` : a.packageName);
+
 // `compact` drops the date and time the confirmation's own hero already states in bigger
 // type — the on-screen popup shows that hero, so repeating them underneath is noise. The
 // full list keeps them, where the rows have to stand on their own as the record.
@@ -50,6 +52,10 @@ export const apptRows = (a, { compact = false } = {}) => [
   // is told to come is the whole of what is promised.
   compact ? null : ["Time", to12h(a.time)],
   a.branch ? ["Branch", a.branch] : null,
+  // A house visit is not at the branch, so the slip says so, and names the package the
+  // patient agreed to pay for it.
+  a.houseVisit ? ["Visit", "House Visit"] : null,
+  a.houseVisit && a.packageName ? ["Package", packageLabel(a)] : null,
   // Where an online appointment actually happens, so the sheet the patient keeps carries
   // it as plainly as a branch name. Kept in the compact popup too, unlike Date and Time
   // above: those are dropped because the card overhead already shouts them, and this one
@@ -92,6 +98,7 @@ export const apptHtml = (a) => {
         <div class="time">${escapeHtml(to12h(a.time))}</div>
         ${meet
           ? `<div class="facts"><span>Google Meet <b>${escapeHtml(meet)}</b></span></div>`
+          : a.houseVisit ? `<div class="facts"><span><b>House Visit</b> — at your home</span></div>`
           : a.branch ? `<div class="facts"><span>At <b>${escapeHtml(a.branch)}</b></span></div>` : ""}
       </div>
     </div>
@@ -108,7 +115,9 @@ export const apptHtml = (a) => {
           ["Date", dmyLabel(a.date)],
           a.branch ? ["Branch", a.branch] : null,
           meet ? ["Google Meet", meet] : null,
-          !meet && a.branchAddress ? ["Location", a.branchAddress] : null,
+          a.houseVisit ? ["Visit", "House Visit"] : null,
+          a.houseVisit && a.packageName ? ["Package", packageLabel(a)] : null,
+          !meet && !a.houseVisit && a.branchAddress ? ["Location", a.branchAddress] : null,
           ["Booked By", a.bookedBy],
         ])}
       </div>
@@ -118,7 +127,7 @@ export const apptHtml = (a) => {
     <div class="note">
       <p class="label">Before you come</p>
       <ul class="steps">
-        <li>${meet ? "Please join the meeting 5 minutes early." : "Please arrive 10 minutes early."}</li>
+        <li>${meet ? "Please join the meeting 5 minutes early." : a.houseVisit ? "Our consultant will come to your home at this time." : "Please arrive 10 minutes early."}</li>
         <li>To reschedule or cancel, contact the branch quoting reference <b>${escapeHtml(a.refNo)}</b>.</li>
       </ul>
     </div>

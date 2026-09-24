@@ -71,6 +71,7 @@ import {
   setLeadFlags,
   rnrAttempt,
   getLeadAppointmentCard,
+  listStoreItems,
 } from "@/lib/api";
 import { to12h, callTimeStamp, callDateStamp, dateStampFull } from "@/lib/time";
 import { EmployeeAvatar } from "@/components/ui/employee-avatar";
@@ -2886,7 +2887,20 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
   const [editing, setEditing] = useState(false);
   const [transferring, setTransferring] = useState(false);
 
-  const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration } | null
+  const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration, visit_type, visit_package_id, step } | null
+  // The Home Visit > Consultant catalogue, offered when the appointment is a house visit.
+  // Read when that step is reached rather than with the card: most bookings are at the
+  // branch and never need it.
+  const [hvPackages, setHvPackages] = useState({ items: [], loading: false, error: "" });
+  const loadHvPackages = async () => {
+    setHvPackages((p) => ({ ...p, loading: true, error: "" }));
+    try {
+      const rows = await listStoreItems("home_visit_consultation", "session");
+      setHvPackages({ items: rows || [], loading: false, error: "" });
+    } catch (e) {
+      setHvPackages({ items: [], loading: false, error: e?.response?.data?.detail || "Could not load the House Visit packages" });
+    }
+  };
   // Asked before the lead is cancelled off the Appointment stage. A boolean rather than a
   // draft: there is nothing to fill in, only something to be sure about.
   const [cancelDraft, setCancelDraft] = useState(false);
@@ -3280,7 +3294,9 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
     // the same pair — no second round trip to learn what the server called it.
     const refNo = `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`;
     const shareToken = randomToken();
-    await scheduleBranchAppointment(lead.id, { ...draft, ref_no: refNo, share_token: shareToken });
+    // step and visit_package are the popup's own bookkeeping, not part of the booking.
+    const { step: _step, visit_package: _pkg, ...payload } = draft;
+    const saved = await scheduleBranchAppointment(lead.id, { ...payload, ref_no: refNo, share_token: shareToken });
     toast.success(`Appointment ${draft.appointment_date} ${to12h(draft.appointment_time)} → ${draft.final_stage}`);
     setApptDraft(null);
     // The confirmation shows first and only tells the parent to close once it's
@@ -3304,6 +3320,10 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
       time: draft.appointment_time,
       duration: draft.duration || 30,
       headPhysio: hp?.full_name || lead.assigned_physio_name || "—",
+      // Read back off the saved lead: the server prices the package off the catalogue.
+      houseVisit: saved?.visit_type === "home",
+      packageName: saved?.visit_package_name || "",
+      packagePrice: saved?.visit_package_price ?? null,
       // The room this was booked into. The server writes the same value onto the
       // appointment off the expert's own record, so what is shared here is what the
       // booking holds.
@@ -4034,6 +4054,15 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                           // Where the consultation happens. A House Visit booking is worked
                           // from the House Visit tab rather than Consultation.
                           visit_type: lead.visit_type === "home" ? "home" : "branch",
+                          // A house visit is booked on a Home Visit > Consultant package.
+                          visit_package_id: lead.visit_type === "home" ? (lead.visit_package_id || "") : "",
+                          visit_package: lead.visit_type === "home" && lead.visit_package_id
+                            ? { id: lead.visit_package_id, name: lead.visit_package_name }
+                            : null,
+                          // The popup asks where the consultation happens before anything
+                          // else, every time it opens: "visit" → ("package" for a house
+                          // visit) → "book", the date / consultant / time grid.
+                          step: "visit",
                         });
                         // The three time fields, opened on whatever the lead is already
                         // sitting on — reopening a booking has to show its own hour rather
@@ -4675,7 +4704,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               not by the order they are written here — inline wins wherever dvh is
               understood, and is dropped as invalid wherever it is not, leaving the class. */}
           <div
-            className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            className={`flex max-h-[calc(100vh-2rem)] w-full ${apptDraft.step === "book" ? "max-w-5xl" : "max-w-2xl"} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}
             style={{ maxHeight: "calc(100dvh - 2rem)" }}
           >
             {/* One line, and only the word for what this is. The three steps below are
@@ -4686,12 +4715,139 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               <div className="flex min-w-0 items-center gap-2">
                 <Calendar className="h-4 w-4 shrink-0 text-slate-500" />
                 <p className="truncate text-sm font-bold text-slate-800">Appointment</p>
+                {/* What the first step settled, kept in sight while the slot is picked,
+                    with the way back to change it. */}
+                {apptDraft.step === "book" && (
+                  <span className="ml-1 inline-flex min-w-0 items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-0.5 text-xs font-semibold text-teal-700" data-testid="branch-appt-visit-chip">
+                    {apptDraft.visit_type === "home" ? <Home className="h-3.5 w-3.5 shrink-0" /> : <Building2 className="h-3.5 w-3.5 shrink-0" />}
+                    <span className="truncate">
+                      {apptDraft.visit_type === "home"
+                        ? `House Visit${apptDraft.visit_package?.name ? ` · ${apptDraft.visit_package.name}` : ""}`
+                        : "Offline Consultation"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setApptDraft({ ...apptDraft, step: "visit" })}
+                      className="shrink-0 font-bold text-teal-800 underline underline-offset-2 hover:text-teal-900"
+                      data-testid="branch-appt-visit-change"
+                    >
+                      Change
+                    </button>
+                  </span>
+                )}
               </div>
               <button onClick={() => setApptDraft(null)} className="shrink-0 rounded-lg border-2 border-orange-200 bg-orange-100 p-1.5 text-orange-600 transition hover:border-orange-300 hover:bg-orange-200 hover:text-orange-700" data-testid="branch-appt-close">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
+            {/* Asked first, before any date: where the consultation happens. Offline goes
+                straight to the slot. A house visit is sold on a Home Visit > Consultant
+                package, so that is picked next and the slot after it. */}
+            {apptDraft.step === "visit" && (
+              <div className="overflow-y-auto p-4 sm:p-6" data-testid="branch-appt-visit-step">
+                <p className="mb-1 text-base font-bold text-slate-800">How will {lead.name || "the patient"} be consulted?</p>
+                <p className="mb-4 text-xs text-slate-500">Choose where the consultation happens. You'll pick the date and time next.</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {[
+                    { key: "branch", label: "Offline Consultation", sub: "The patient comes to the branch", icon: Building2 },
+                    { key: "home", label: "House Visit", sub: "The consultant goes to the patient's home — pick a package next", icon: Home },
+                  ].map((v) => {
+                    const Icon = v.icon;
+                    const on = apptDraft.visit_type === v.key;
+                    return (
+                      <button
+                        key={v.key}
+                        type="button"
+                        onClick={() => {
+                          if (v.key === "home") {
+                            setApptDraft({ ...apptDraft, visit_type: "home", step: "package" });
+                            loadHvPackages();
+                          } else {
+                            setApptDraft({ ...apptDraft, visit_type: "branch", visit_package_id: "", visit_package: null, step: "book" });
+                          }
+                        }}
+                        className={`flex items-start gap-3 rounded-xl border-2 p-4 text-left transition ${
+                          on ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"
+                        }`}
+                        data-testid={`branch-appt-visit-${v.key}`}
+                      >
+                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${on ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-bold text-slate-800">{v.label}</span>
+                          <span className="mt-0.5 block text-xs text-slate-500">{v.sub}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {apptDraft.step === "package" && (
+              <div className="flex min-h-0 flex-1 flex-col" data-testid="branch-appt-package-step">
+                <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+                  <p className="mb-1 text-base font-bold text-slate-800">House Visit package</p>
+                  <p className="mb-4 text-xs text-slate-500">Pick the package this visit is booked on. The appointment is booked next.</p>
+                  {hvPackages.loading ? (
+                    <p className="py-10 text-center text-sm text-slate-400">Loading packages…</p>
+                  ) : hvPackages.error ? (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-6 text-center text-sm text-rose-700">
+                      {hvPackages.error}
+                      <button type="button" onClick={loadHvPackages} className="ml-2 font-semibold underline">Try again</button>
+                    </div>
+                  ) : hvPackages.items.length === 0 ? (
+                    // Nothing to pick means nothing to book on, and saying where packages
+                    // come from is more use than an empty list.
+                    <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
+                      No House Visit packages yet. Add one under Services and Products → Home Visit → Consultant.
+                    </p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2" data-testid="branch-appt-packages">
+                      {hvPackages.items.map((it) => {
+                        const picked = apptDraft.visit_package_id === it.id;
+                        const visits = Number(it.sessions_offline) || 0;
+                        const rate = Number(it.price_offline) || 0;
+                        const total = Math.round(it.price_is_total ? rate : rate * visits);
+                        return (
+                          <button
+                            key={it.id}
+                            type="button"
+                            onClick={() => setApptDraft({ ...apptDraft, visit_type: "home", visit_package_id: it.id, visit_package: { id: it.id, name: it.name }, step: "book" })}
+                            className={`flex items-start justify-between gap-3 rounded-xl border-2 p-3 text-left transition ${
+                              picked ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"
+                            }`}
+                            data-testid={`branch-appt-package-${it.id}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-bold text-slate-800">{it.name}</span>
+                              {it.description ? <span className="mt-0.5 line-clamp-2 block text-xs text-slate-500">{it.description}</span> : null}
+                              <span className="mt-1 block text-[11px] text-slate-500">
+                                {visits} {visits === 1 ? "visit" : "visits"}{!it.price_is_total && visits > 1 ? ` · ₹${rate} per visit` : ""}
+                              </span>
+                            </span>
+                            <span className="flex shrink-0 flex-col items-end gap-1">
+                              <span className="text-base font-extrabold text-slate-900">₹{total}</span>
+                              {picked && <CheckCircle2 className="h-5 w-5 text-teal-600" />}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-3 py-2 sm:px-5 sm:py-2.5">
+                  <Button variant="outline" size="sm" onClick={() => setApptDraft({ ...apptDraft, step: "visit" })} data-testid="branch-appt-package-back">
+                    <ChevronLeft className="mr-1 h-4 w-4" />Back
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setApptDraft(null)}>Cancel</Button>
+                </div>
+              </div>
+            )}
+
+            {apptDraft.step === "book" && (<>
             {/* Three steps left to right: the date narrows who's available, the chosen
                 Head Physio narrows which times exist. Each column only fills in once the
                 one before it has an answer. */}
@@ -5068,30 +5224,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
 
             {/* No cancelling from here. This dialog books a slot; dropping the lead out of
                 the pipeline is the Cancelled stage pill's job, and that one asks first. */}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-3 py-2 sm:px-5 sm:py-2.5">
-              <div className="flex items-center gap-2" data-testid="branch-appt-visit-type">
-                <span className="text-xs font-semibold text-slate-500">Visit</span>
-                <div className="flex rounded-lg border border-slate-200 bg-white p-0.5">
-                  {[
-                    { key: "branch", label: "At Branch", icon: Building2 },
-                    { key: "home", label: "House Visit", icon: Home },
-                  ].map((v) => {
-                    const Icon = v.icon;
-                    const on = (apptDraft.visit_type || "branch") === v.key;
-                    return (
-                      <button
-                        key={v.key}
-                        type="button"
-                        onClick={() => setApptDraft({ ...apptDraft, visit_type: v.key })}
-                        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition ${on ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
-                        data-testid={`branch-appt-visit-${v.key}`}
-                      >
-                        <Icon className="h-3.5 w-3.5" />{v.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-100 px-3 py-2 sm:px-5 sm:py-2.5">
               <div className="flex shrink-0 items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
               <Button
@@ -5105,6 +5238,12 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   if (!apptDraft.appointment_date) { toast.error("Pick a date"); return; }
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
                   if (!apptDraft.appointment_time) { toast.error("Type the time agreed with the patient"); return; }
+                  if (apptDraft.visit_type === "home" && !apptDraft.visit_package_id) {
+                    toast.error("Pick a House Visit package");
+                    setApptDraft({ ...apptDraft, step: "package" });
+                    loadHvPackages();
+                    return;
+                  }
                   try {
                     await bookLeadInto(apptDraft);
                   } catch (e) {
@@ -5121,6 +5260,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
               </Button>
               </div>
             </div>
+            </>)}
           </div>
         </div>
       )}
