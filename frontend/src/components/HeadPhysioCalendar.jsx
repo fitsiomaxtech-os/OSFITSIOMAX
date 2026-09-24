@@ -1145,41 +1145,25 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         asks first and the affirming press must be the one that means it. */}
                     {isConsultant && (
                       <div className="space-y-3" data-testid="consultant-day-availability">
-                        <div
-                          className={`rounded-xl border-2 p-4 ${focusedOpenCount > 0 ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}
-                          data-testid="consultant-day-status"
-                        >
-                          <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold ring-1 ring-inset ${focusedOpenCount > 0 ? "bg-white text-emerald-700 ring-emerald-200" : "bg-white text-slate-500 ring-slate-200"}`}>
-                            <span className={`inline-block h-1.5 w-1.5 rounded-full ${focusedOpenCount > 0 ? "bg-emerald-500" : "bg-slate-400"}`} />
-                            {focusedDates.length > 1
-                              ? `${focusedOpenCount} of ${focusedDates.length} days available`
-                              : focusedOpenCount > 0 ? "Available" : "Not available"}
-                          </span>
-                          <p className="mt-2 text-xs text-slate-600">
-                            {focusedOpenCount > 0
-                              ? <>{selectedDoctor.full_name} takes consultations on {focusedDates.length > 1 ? "these days" : "this day"}{dayShiftLabel ? <>, working <b className="font-semibold">{dayShiftLabel}</b></> : ""}. The time itself is fixed with the patient on BRANCH LEADS → APPOINTMENT.</>
-                              : <>{selectedDoctor.full_name} is not offered on {focusedDates.length > 1 ? "these days" : "this day"} — the booking popup will not list them for it.</>}
-                          </p>
-                          {/* What closing the day would be closing over. Said before the
-                              button rather than in the error after it: the branch is about
-                              to be told these cannot be removed, and knowing that while
-                              deciding is the difference between a considered press and a
-                              refused one. */}
-                          {focusedBookings.length > 0 && (
-                            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid="consultant-day-bookings">
-                              <p className="text-[11px] font-semibold text-amber-800">
-                                {focusedBookings.length} appointment{focusedBookings.length === 1 ? "" : "s"} already booked — {focusedDates.length > 1 ? "these days" : "this day"} stays open for {focusedBookings.length === 1 ? "it" : "them"} whatever is set here.
-                              </p>
-                              <ul className="mt-1 space-y-0.5">
-                                {focusedBookings.map(([slot, b]) => (
-                                  <li key={slot} className="text-[11px] text-amber-700">
-                                    {shortDate(slot.split("T")[0])} · {to12h(slot.slice(11, 16))}{b?.lead_name ? ` — ${b.lead_name}` : ""}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
+                        {/* What closing the day would be closing over. Said before the
+                            button rather than in the error after it: the branch is about
+                            to be told these cannot be removed, and knowing that while
+                            deciding is the difference between a considered press and a
+                            refused one. */}
+                        {focusedBookings.length > 0 && (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid="consultant-day-bookings">
+                            <p className="text-[11px] font-semibold text-amber-800">
+                              {focusedBookings.length} appointment{focusedBookings.length === 1 ? "" : "s"} already booked — {focusedDates.length > 1 ? "these days" : "this day"} stays open for {focusedBookings.length === 1 ? "it" : "them"} whatever is set here.
+                            </p>
+                            <ul className="mt-1 space-y-0.5">
+                              {focusedBookings.map(([slot, b]) => (
+                                <li key={slot} className="text-[11px] text-amber-700">
+                                  {shortDate(slot.split("T")[0])} · {to12h(slot.slice(11, 16))}{b?.lead_name ? ` — ${b.lead_name}` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
 
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
