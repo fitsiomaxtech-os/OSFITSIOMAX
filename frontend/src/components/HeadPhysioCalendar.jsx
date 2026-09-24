@@ -368,11 +368,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
       setCalendarData((prev) => (prev ? { ...prev, day_shifts: nextDayShifts } : prev));
       // Restage the affected days across their new window. Anything staged under the old
       // one is dropped: half a morning plus half an evening is not a day anyone meant.
-      const restaged = [
-        ...pendingSlots.filter((s) => !dates.some((d) => s.slot_time.startsWith(`${d}T`))),
+      setPendingSlots((prev) => [
+        ...prev.filter((s) => !dates.some((d) => s.slot_time.startsWith(`${d}T`))),
         ...dates.flatMap((d) => stagedSlotsForDay(d, nextDayShifts[d] || shift)),
-      ];
-      setPendingSlots(restaged);
+      ]);
       const dayLabel = dates.length === 1 ? shortDate(dates[0]) : `${dates.length} days`;
       toast.success(
         nextDayShifts[dates[0]]
@@ -380,15 +379,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
           : `${dayLabel} back on ${shift?.shift_name || "the usual day"}`,
       );
       setDayShiftPicker(false);
-      setSavingDayShift(false);
-      // Handed back so Mark available in the same popup can publish the restaged days
-      // without waiting a render for the state above to land.
-      return restaged;
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not change the day's shift");
     }
     setSavingDayShift(false);
-    return null;
   };
 
   // The video room this expert meets patients in, as typed. Held apart from the record so
@@ -487,9 +481,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
     setSelectedDates((prev) => [...prev, d]);
     setSelectedDate(d);
     setPendingSlots((prev) => [...prev.filter((s) => !s.slot_time.startsWith(`${d}T`)), ...stagedSlotsForDay(d)]);
-    // The consultant's whole answer for a day — its shift, and open or not — lives in the
-    // popup, so picking a date opens it rather than leaving it a click further away.
-    if (isConsultant) setDayShiftPicker(true);
   };
 
   const prevMonth = () => {
@@ -655,21 +646,18 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
       setSelectedDate(null);
       await loadCalendar();
       await loadDoctors();
-      setUnsaving(false);
-      return true;
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to remove slots");
     }
     setUnsaving(false);
-    return false;
   };
 
-  const saveChanges = async (slots = pendingSlots) => {
-    if (!selectedDoctor || !Array.isArray(slots) || slots.length === 0) return false;
+  const saveChanges = async () => {
+    if (!selectedDoctor || pendingSlots.length === 0) return;
     setSaving(true);
     try {
-      const toAdd = slots.filter((s) => !s._remove);
-      const toRemove = slots.filter((s) => s._remove);
+      const toAdd = pendingSlots.filter((s) => !s._remove);
+      const toRemove = pendingSlots.filter((s) => s._remove);
 
       if (toRemove.length > 0) {
         await removeCalendarSlots(selectedDoctor.id, { slot_times: toRemove.map((s) => s.slot_time) });
@@ -687,28 +675,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
       setPendingSlots([]);
       await loadCalendar();
       await loadDoctors();
-      setSaving(false);
-      return true;
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Save failed");
     }
     setSaving(false);
-    return false;
-  };
-
-  // The popup's Mark available: a changed shift is saved first, and the days it restaged
-  // are what gets published, so the day opens across the hours just picked.
-  const markAvailableFromPicker = async (shiftIds) => {
-    let slots = pendingSlots;
-    if (shiftIds) {
-      slots = await saveDayShift(shiftIds);
-      if (!slots) return;
-    }
-    if (await saveChanges(slots)) setDayShiftPicker(false);
-  };
-
-  const markUnavailableFromPicker = async () => {
-    if (await unsaveDays()) setDayShiftPicker(false);
   };
 
   const countSlotsForDay = (day) => {
@@ -996,7 +966,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                   </Button>
                 )}
                 {!isConsultant && pendingSlots.length > 0 && (
-                  <Button size="sm" onClick={() => saveChanges()} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white text-xs" data-testid="save-slots-btn">
+                  <Button size="sm" onClick={saveChanges} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white text-xs" data-testid="save-slots-btn">
                     {saving ? "Saving..." : "Save Changes"}
                   </Button>
                 )}
@@ -1214,7 +1184,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
                             size="sm"
-                            onClick={() => saveChanges()}
+                            onClick={saveChanges}
                             disabled={saving || nothingToOpen}
                             className="bg-emerald-600 text-white hover:bg-emerald-700"
                             data-testid="consultant-mark-available"
@@ -1356,19 +1326,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
           onClose={() => setDayShiftPicker(false)}
           noneLabel={shift?.shift_name ? `${shift.shift_name} — as usual` : "The usual working day"}
           noneHint="No exception: the day runs whatever they are rostered on"
-          availability={isConsultant ? {
-            isOpen: focusedOpenCount > 0,
-            status: focusedDates.length > 1
-              ? `${focusedOpenCount} of ${focusedDates.length} days available now`
-              : focusedOpenCount > 0 ? "Available now" : "Not available now",
-            nothingToOpen,
-            nothingToClose,
-            busy: saving || unsaving,
-            marking: saving,
-            unmarking: unsaving,
-            onMarkAvailable: markAvailableFromPicker,
-            onMarkUnavailable: markUnavailableFromPicker,
-          } : null}
         />
       )}
     </div>

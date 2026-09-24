@@ -31,10 +31,6 @@ export const ShiftPickerModal = ({
   saving = false,
   noneLabel = "No shift — full day",
   noneHint = "The whole working day is offered",
-  // Optional open/closed decision said above the shifts — the consultant's calendar asks
-  // both in one place. `onMarkAvailable` gets the ticked shifts when they differ from
-  // `value` (null when unchanged), so a new shift and the opening go out as one press.
-  availability = null,
 }) => {
   const [picked, setPicked] = useState(value);
 
@@ -78,36 +74,6 @@ export const ShiftPickerModal = ({
 
   return (
     <CenteredPicker title={title} onClose={onClose} testid="shift-picker-modal">
-      {availability && (
-        <div className="mb-3 rounded-xl border border-slate-200 bg-white p-2.5" data-testid="shift-picker-availability">
-          <p className="mb-2 px-0.5 text-[11px] font-semibold text-slate-600">
-            <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${availability.isOpen ? "bg-emerald-500" : "bg-slate-400"}`} />
-            {availability.status}
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              disabled={saving || availability.busy || (availability.nothingToOpen && unchanged)}
-              onClick={() => availability.onMarkAvailable(unchanged ? null : ordered)}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-              data-testid="shift-picker-mark-available"
-            >
-              {availability.marking && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {availability.nothingToOpen && unchanged ? "Already available" : "Mark available"}
-            </button>
-            <button
-              type="button"
-              disabled={saving || availability.busy || availability.nothingToClose}
-              onClick={availability.onMarkUnavailable}
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-              data-testid="shift-picker-mark-unavailable"
-            >
-              {availability.unmarking && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Mark not available
-            </button>
-          </div>
-        </div>
-      )}
       <p className="mb-2 px-1 text-[11px] leading-snug text-slate-500">
         Tick every window this expert works. Two of them — a morning and an evening — opens
         both halves of the day and leaves the hours between them closed.
