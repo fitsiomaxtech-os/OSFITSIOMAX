@@ -65,6 +65,7 @@ import {
   getLeadActivity,
   getLeadRemarks,
   moveBranchStage,
+  moveConsultationStage,
   stagesList,
   scheduleBranchFollowUp,
   rescheduleBranchFollowUp,
@@ -125,6 +126,10 @@ const STAGE_ROLE_FOLLOW_UP = "follow_up";
 // counting a written-off lead under it after a consultant has moved the patient along the
 // consultation pipeline underneath (see rowStageName and matchesBranchStage).
 const STAGE_ROLE_NOT_A_PROSPECT = "not_a_prospect";
+
+// Branch Consultation's cancel stage. The Branch Leads card offers it as its Cancel pill,
+// moving consultation_stage rather than branch_stage -- see consultationCancelStage.
+const CONSULTATION_CANCEL_STAGE = "Cancel";
 
 // What each role was called when it shipped. Only ever a fallback: a stage row that predates
 // the stamping pass carries no role, and until the next backend restart stamps it, the name
@@ -1227,6 +1232,16 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // in it. The constant is the fallback for the moment before the list has arrived.
   const consultationOpeningStage = useMemo(
     () => consultationStages[0]?.name || BRANCH_CONSULTATION_OPENING_STAGE,
+    [consultationStages],
+  );
+
+  // Branch Consultation's Cancel stage, lent to the Branch Leads card as its Cancel pill.
+  // Linked rather than copied: the stage lives in the consultation pipeline only, so a
+  // lead cancelled from Branch Leads is counted under that pipeline's Cancel card and not
+  // under a second, Branch-side stage of the same name. By name because the backend's
+  // move endpoint treats "Cancel" as the side-exit by name too.
+  const consultationCancelStage = useMemo(
+    () => consultationStages.find((s) => s.name === CONSULTATION_CANCEL_STAGE) || null,
     [consultationStages],
   );
 
@@ -2636,6 +2651,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           // So the highlighted pill on the card reads the lead the same way the bar above
           // counted it — see matchesBranchStage.
           consultationOpeningStage={consultationOpeningStage}
+          // The Consultation pipeline's Cancel stage, offered as the card's last pill. The
+          // stage stays in Branch Consultation; the pill only moves the lead onto it.
+          consultationCancelStage={consultationCancelStage}
           onlineArm={armScoped}
           canTransferBranch={canTransferBranch}
           onClose={() => setSelectedLead(null)}
@@ -2842,7 +2860,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 // appointment about to be confirmed. At a branch it is nothing — the consultation is held
 // in a room, the field that would set a link is not offered on that board at all, and an
 // amber panel naming a gap nobody there can fill is noise on every booking they make.
-function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, onOpenConsultationStage, consultationOpeningStage = null, openedFromMirror = false, onlineArm = false, canTransferBranch = false }) {
+function BranchLeadModal({ lead, branchId, stages, consultationCancelStage = null, onClose, onUpdate, onMoved, onOpenConsultationStage, consultationOpeningStage = null, openedFromMirror = false, onlineArm = false, canTransferBranch = false }) {
   // The board offers two entry stages — the mirrored Pre-Sales "Leads" pill and the branch's
   // own first stage — but a single lead only ever came in through one of them, so its
   // pipeline shows that one and drops the other. Everything from RNR onwards is shared.
@@ -4139,6 +4157,27 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                       </button>
                     );
                   })}
+                  {/* Cancel, borrowed from Branch Consultation. Not a Branch stage: it
+                      writes consultation_stage, so the lead leaves these pills and is
+                      counted under the Consultation tab's Cancel card. Reachable from
+                      Appointment, which is where a booking gets called off. */}
+                  {consultationCancelStage && (() => {
+                    const tint = consultationCancelStage.color || "#e11d48";
+                    const isActive = lead.consultation_stage === consultationCancelStage.name;
+                    return (
+                      <button
+                        type="button"
+                        disabled={isActive}
+                        onClick={() => setCancelDraft(true)}
+                        title="Moves this lead to Cancel in Branch Consultation"
+                        className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-90"
+                        style={isActive ? { background: tint, color: "#ffffff" } : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }}
+                        data-testid="branch-stage-btn-consultation-cancel"
+                      >
+                        {consultationCancelStage.name}
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -5376,7 +5415,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   {apptSlotLabel(lead)
                     ? <>The {apptSlotLabel(lead)} slot{lead.assigned_physio_name ? ` with ${lead.assigned_physio_name}` : ""} goes back on the calendar for someone else to take. </>
                     : <>Any slot this lead is holding goes back on the calendar. </>}
-                  {lead.name} moves to Cancelled, which is the end of the Branch pipeline.
+                  {lead.name} moves to {consultationCancelStage?.name || CONSULTATION_CANCEL_STAGE} in Branch Consultation and leaves the Branch Leads pills.
                 </span>
               </div>
               {/* Rebooking is the other door, and it is one press away on the same card.
@@ -5397,9 +5436,17 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   setCancelling(true);
                   // Stays open if the move was refused, so the reason is read beside the
                   // button that caused it rather than over a card that has just closed.
-                  const moved = await moveStage(cancelledStageName);
+                  const target = consultationCancelStage?.name || CONSULTATION_CANCEL_STAGE;
+                  let moved = false;
+                  try {
+                    await moveConsultationStage(lead.id, target);
+                    toast.success(`Moved to ${target}`);
+                    moved = true;
+                  } catch (err) {
+                    toast.error(err?.response?.data?.detail || "Cancel failed");
+                  }
                   setCancelling(false);
-                  if (moved) setCancelDraft(false);
+                  if (moved) { setCancelDraft(false); onMoved && onMoved(target); }
                 }}
                 data-testid="branch-cancel-confirm-submit"
               >

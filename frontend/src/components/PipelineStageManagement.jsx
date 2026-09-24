@@ -99,6 +99,13 @@ const BRANCH_ADMIN_CONTROL = "branch_admin";
 // there is no document behind it to edit, delete or reorder.
 const MIRROR_ROW_ID = "presales-new-leads";
 
+// Branch Leads' Cancel pill is Branch Consultation's Cancel stage, lent to the lead card
+// rather than copied into this pipeline (see consultationCancelStage in BranchAdminBoard).
+// Listed on the Branch Leads tabs so the link is visible here, and drawn read-only: the
+// stage is edited, recoloured or deleted on the Branch Consultation tab, where it lives.
+const LINKED_CANCEL_ROW_ID = "consultation-cancel-link";
+const LINKED_ROW_IDS = [MIRROR_ROW_ID, LINKED_CANCEL_ROW_ID];
+
 export const PipelineStageManagement = ({ leading = null }) => {
   const [type, setType] = useState("pre_sales");
   const [stages, setStages] = useState([]);
@@ -137,8 +144,23 @@ export const PipelineStageManagement = ({ leading = null }) => {
   // the active list, the other four existing solely to put a count in a tab label — with
   // the counts gone so is the reason, so a load and every pipeline switch costs one call
   // instead of five.
+  // Branch Consultation's Cancel, for the linked row on the Branch Leads tabs.
+  const [linkedCancel, setLinkedCancel] = useState(null);
   const load = useCallback(async () => {
     setStages(await stagesList(apiType, arm));
+    if (apiType === "sales") {
+      const consult = await stagesList("consultation").catch(() => []);
+      const cancel = (consult || []).find((st) => st.name === "Cancel");
+      setLinkedCancel(cancel ? {
+        id: LINKED_CANCEL_ROW_ID,
+        name: cancel.name,
+        color: cancel.color,
+        lead_count: cancel.lead_count,
+        linkedFrom: "Branch Consultation",
+      } : null);
+    } else {
+      setLinkedCancel(null);
+    }
   }, [apiType, arm]);
 
   useEffect(() => { load(); }, [load]);
@@ -150,7 +172,8 @@ export const PipelineStageManagement = ({ leading = null }) => {
   const splitsByStrip = apiType === "sales" && arm === "offline";
 
   const { stripRows, hiddenRows } = useMemo(() => {
-    if (!splitsByStrip) return { stripRows: stages, hiddenRows: [] };
+    const linked = linkedCancel ? [linkedCancel] : [];
+    if (!splitsByStrip) return { stripRows: [...stages, ...linked], hiddenRows: [] };
     // Modelled on a branch running its own leads, which is the mode that has a strip worth
     // describing. `applies_to` drops the other mode's entry stage before anything else, the
     // same way _branch_stages does before the board ever sees it.
@@ -174,10 +197,10 @@ export const PipelineStageManagement = ({ leading = null }) => {
         .map((st) => st.id),
     );
     return {
-      stripRows: [...(mirror ? [mirror] : []), ...stages.filter((st) => onStrip.has(st.id))],
+      stripRows: [...(mirror ? [mirror] : []), ...stages.filter((st) => onStrip.has(st.id)), ...linked],
       hiddenRows: stages.filter((st) => !onStrip.has(st.id)),
     };
-  }, [stages, splitsByStrip]);
+  }, [stages, splitsByStrip, linkedCancel]);
 
   // Where a row sits in the pipeline itself, which is what the Order column has always
   // meant. Read off the real list rather than off the half it is drawn in: the two halves
@@ -218,7 +241,7 @@ export const PipelineStageManagement = ({ leading = null }) => {
   // the real list, so the pipeline keeps one order rather than gaining a display one.
   const move = async (s, dir) => {
     const group = hiddenRows.some((x) => x.id === s.id) ? hiddenRows : stripRows;
-    const within = group.filter((x) => x.id !== MIRROR_ROW_ID);
+    const within = group.filter((x) => !LINKED_ROW_IDS.includes(x.id));
     const neighbour = within[within.findIndex((x) => x.id === s.id) + dir];
     if (!neighbour) return;
     const idx = stages.findIndex((x) => x.id === s.id);
@@ -235,7 +258,7 @@ export const PipelineStageManagement = ({ leading = null }) => {
   // arrows are disabled on now that "next" is a question about the half rather than the list.
   const atGroupEdge = useCallback((st, dir) => {
     const group = hiddenRows.some((x) => x.id === st.id) ? hiddenRows : stripRows;
-    const within = group.filter((x) => x.id !== MIRROR_ROW_ID);
+    const within = group.filter((x) => !LINKED_ROW_IDS.includes(x.id));
     return !within[within.findIndex((x) => x.id === st.id) + dir];
   }, [stripRows, hiddenRows]);
 
@@ -255,7 +278,8 @@ export const PipelineStageManagement = ({ leading = null }) => {
   // and offering either would suggest the strip's first pill is Super Admin's to rename,
   // when what it is called is fixed in _presales_mirror_stage.
   const renderRow = (s, muted = false) => {
-    const isMirror = s.id === MIRROR_ROW_ID;
+    const isLinked = s.id === LINKED_CANCEL_ROW_ID;
+    const isMirror = s.id === MIRROR_ROW_ID || isLinked;
     return (
       <tr
         key={s.id}
@@ -307,7 +331,14 @@ export const PipelineStageManagement = ({ leading = null }) => {
               sixth stage somebody forgot to give an order to, and the entry stage below
               reads as one with no pill for no reason -- when they are the two halves of
               one position. */}
-          {isMirror ? (
+          {isLinked ? (
+            <span
+              className="ml-2 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-indigo-600"
+              title={`Not a Branch Leads stage: the lead card's ${s.name} pill moves the lead onto ${s.linkedFrom}'s ${s.name} stage. Edit or delete it on the ${s.linkedFrom} tab.`}
+            >
+              Linked · {s.linkedFrom}
+            </span>
+          ) : isMirror ? (
             <span
               className="ml-2 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-indigo-600"
               title={`Not a stage of its own: the strip's first pill, counting every lead still sitting on ${s.mirrors}. The board builds it, so it cannot be renamed, reordered or deleted.`}

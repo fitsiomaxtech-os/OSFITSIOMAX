@@ -1676,11 +1676,22 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
         "consultation_stage": payload.consultation_stage,
         "updated_at": now_iso(),
     }})
+    # Cancel is also the Branch Leads card's Cancel pill, which reaches it straight off a
+    # booked Appointment. The slot that booking holds goes back on the calendar, the way the
+    # Branch pipeline's own Cancelled stage always released it (see v3_move_branch_stage).
+    freed = 0
+    if payload.consultation_stage == "Cancel":
+        res = await v3_col("appointments").update_many(
+            {"lead_id": lead_id, "status": "new_appointment"},
+            {"$set": {"status": "cancelled", "updated_at": now_iso()}},
+        )
+        freed = res.modified_count
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "consultation_stage_moved",
-        "details": f"Consultation: {previous} → {payload.consultation_stage}",
+        "details": f"Consultation: {previous} → {payload.consultation_stage}"
+                   + (f" · {freed} appointment{'' if freed == 1 else 's'} cancelled, slot freed" if freed else ""),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),
