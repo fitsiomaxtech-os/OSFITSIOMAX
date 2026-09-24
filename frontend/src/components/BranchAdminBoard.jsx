@@ -1735,11 +1735,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               is offered on all of these. Rehab declines it on its own — a programme day is
               worked on the floor with the equipment in the room. See HeadPhysioCalendar. */}
           {consultationsSubTab === "physio" ? (
-            <HeadPhysioCalendar branchId={branchId} profileType="physio" onlineArm={armScoped} />
+            <HeadPhysioCalendar branchId={branchId} profileType="physio" onlineArm={armScoped} onOpenTimeManagement={() => setConsultationsSubTab("time")} />
           ) : consultationsSubTab === "zumba" ? (
             <ZumbaMastersPanel branchId={branchId} />
           ) : consultationsSubTab === "diet" ? (
-            <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" onlineArm={armScoped} />
+            <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" onlineArm={armScoped} onOpenTimeManagement={() => setConsultationsSubTab("time")} />
           ) : consultationsSubTab === "missed" ? (
             <MissedClassPanel />
           ) : consultationsSubTab === "physio_absence" ? (
@@ -1754,7 +1754,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             // The Google Meet field rides on this: only an online arm's own admin is asked
             // for a video room, because only their consultations are held in one. The three
             // calendars above are room desks and never carry it — see HeadPhysioCalendar.
-            <HeadPhysioCalendar branchId={branchId} onlineArm={armScoped} />
+            <HeadPhysioCalendar branchId={branchId} onlineArm={armScoped} onOpenTimeManagement={() => setConsultationsSubTab("time")} />
           )}
         </div>
       ) : activeView === "zumba" ? (

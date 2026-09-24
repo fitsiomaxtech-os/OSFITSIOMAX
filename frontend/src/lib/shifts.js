@@ -74,3 +74,32 @@ export const shiftIdsOf = (expertOrWindow) => {
   if (Array.isArray(ids) && ids.length > 0) return ids.filter(Boolean);
   return expertOrWindow?.shift_id ? [expertOrWindow.shift_id] : [];
 };
+
+// ---- Keeping TIME MANAGEMENT and the calendars on the same shifts ----
+// A shift edited in one place has to show in the other without a page reload: the
+// calendar's shift list and TIME MANAGEMENT read the same rows. Whoever changes a shift or
+// a roster announces it; everyone else on the page (source !== theirs) refetches.
+const SHIFTS_CHANGED = "osfitsio:shifts-changed";
+
+export const announceShiftsChanged = (branchId, source) => {
+  try {
+    window.dispatchEvent(new CustomEvent(SHIFTS_CHANGED, { detail: { branchId, source } }));
+  } catch { /* no window — nothing to tell */ }
+};
+
+/** Runs `cb` when another screen changed this branch's shifts, and when the tab regains focus. */
+export const onShiftsChanged = (branchId, source, cb) => {
+  const onEvent = (e) => {
+    const d = e?.detail || {};
+    if (d.source === source) return;
+    if (d.branchId && branchId && d.branchId !== branchId) return;
+    cb();
+  };
+  const onVisible = () => { if (document.visibilityState === "visible") cb(); };
+  window.addEventListener(SHIFTS_CHANGED, onEvent);
+  document.addEventListener("visibilitychange", onVisible);
+  return () => {
+    window.removeEventListener(SHIFTS_CHANGED, onEvent);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
+};

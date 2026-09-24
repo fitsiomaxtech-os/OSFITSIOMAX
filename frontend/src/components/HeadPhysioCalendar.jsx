@@ -30,7 +30,7 @@ import {
   setDoctorMeetLink,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
-import { gridTimesFor, hoursLabel, shiftIdsOf } from "@/lib/shifts";
+import { announceShiftsChanged, gridTimesFor, hoursLabel, onShiftsChanged, shiftIdsOf } from "@/lib/shifts";
 
 const CONSULTATION_TYPES = [
   { value: "initial", label: "Initial Consultation", color: "bg-blue-100 text-blue-700 border-blue-300" },
@@ -83,7 +83,7 @@ function getFirstDayOfMonth(year, month) {
 // held over video needs an address to hold it at, and one held in a treatment room does
 // not. Passed in rather than worked out here, because the answer is a fact about whose
 // board this is and only BranchAdminBoard is holding that.
-export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onlineArm = false }) => {
+export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onlineArm = false, onOpenTimeManagement }) => {
   const isPhysio = profileType === "physio";
   const isCoach = profileType === "nutrition_coach";
   const isRehab = profileType === "rehab";
@@ -255,6 +255,13 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   }, [branchId]);
 
   useEffect(() => { loadShifts(); }, [loadShifts]);
+
+  // Kept in step with TIME MANAGEMENT: a shift renamed or re-timed there, or an expert moved
+  // onto another one, shows here without a reload (and when the tab comes back into focus).
+  useEffect(
+    () => onShiftsChanged(branchId, `calendar-${profileType}`, () => { loadShifts(); loadCalendar(); loadDoctors(); }),
+    [branchId, profileType, loadShifts, loadCalendar, loadDoctors],
+  );
 
   const [savingCapacity, setSavingCapacity] = useState(false);
 
@@ -507,6 +514,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
       toast.success(`${saved?.name || shiftDraft.name} · ${to12h(saved?.start_time || shiftDraft.start_time)} – ${to12h(saved?.end_time || shiftDraft.end_time)}`);
       setShiftDraft(null);
       await loadShifts();
+      announceShiftsChanged(branchId, `calendar-${profileType}`);
       // Fetched here rather than through loadCalendar so the picked days can be re-cut
       // across the new hours on the same click, not one render behind.
       if (selectedDoctor) {
@@ -1111,6 +1119,17 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                               ? `One-off — ${selectedDoctor.full_name} stays on ${shift?.shift_name || "their usual day"}.`
                               : "Changes this day only, not their shift."}
                           </span>
+                          {onOpenTimeManagement && (
+                            <button
+                              type="button"
+                              onClick={onOpenTimeManagement}
+                              className="ml-auto rounded-md px-2 py-0.5 text-[10px] font-semibold text-violet-600 hover:bg-violet-50"
+                              title="Add shifts, delete them, or change who is on which — MANAGEMENT → TIME MANAGEMENT"
+                              data-testid="day-shift-open-time-management"
+                            >
+                              Time Management →
+                            </button>
+                          )}
                         </div>
                         <ul className="divide-y divide-slate-100">
                           <li>

@@ -16,7 +16,7 @@ import {
   updateShift,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
-import { hoursLabel, shiftIdsOf } from "@/lib/shifts";
+import { announceShiftsChanged, hoursLabel, onShiftsChanged, shiftIdsOf } from "@/lib/shifts";
 
 /**
  * TIME MANAGEMENT — the hours the branch runs, and who works which of them.
@@ -431,6 +431,16 @@ export const TimeManagementPanel = ({ branchId }) => {
 
   useEffect(() => { loadRoster(); }, [loadRoster]);
 
+  // A shift edited from a calendar lands here without a reload, and the other way round.
+  useEffect(
+    () => onShiftsChanged(branchId, "time-management", () => { loadShifts(); loadRoster(); }),
+    [branchId, loadShifts, loadRoster],
+  );
+  const reloadAndAnnounce = async () => {
+    await Promise.all([loadShifts(), loadRoster()]);
+    announceShiftsChanged(branchId, "time-management");
+  };
+
   const assign = async (expert, shiftIds) => {
     setAssigning(expert.id);
     try {
@@ -446,6 +456,7 @@ export const TimeManagementPanel = ({ branchId }) => {
       );
       setPicking(null);
       await loadRoster();
+      announceShiftsChanged(branchId, "time-management");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't set the shift");
     }
@@ -464,6 +475,7 @@ export const TimeManagementPanel = ({ branchId }) => {
       setNewShift(NEW_SHIFT);
       setAdding(false);
       await loadShifts();
+      announceShiftsChanged(branchId, "time-management");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't add the shift");
     }
@@ -558,7 +570,7 @@ export const TimeManagementPanel = ({ branchId }) => {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="shift-list">
               {shifts.map((s) => (
-                <ShiftCard key={s.id} shift={s} onSaved={() => Promise.all([loadShifts(), loadRoster()])} onDeleted={() => Promise.all([loadShifts(), loadRoster()])} />
+                <ShiftCard key={s.id} shift={s} onSaved={reloadAndAnnounce} onDeleted={reloadAndAnnounce} />
               ))}
             </div>
           )}
