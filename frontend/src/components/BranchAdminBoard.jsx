@@ -1670,7 +1670,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // scrolling inside it.
     <div className={`flex flex-col gap-4 [&>*]:min-w-0 ${embedded ? "" : "pb-20 md:pb-0"}`} data-testid="branch-admin-board-root">
       {/* View Tabs — desk only; a phone gets the bottom nav at the end of this file. */}
-      <div className="hidden items-center gap-1 overflow-x-auto border-b border-slate-200 pb-0 md:flex" data-testid="branch-view-tabs">
+      <div className="show-scrollbar hidden items-center gap-1 overflow-x-auto border-b border-slate-200 pb-0 md:flex" data-testid="branch-view-tabs">
         {VIEW_TABS.map((tab) => {
           const Icon = tab.icon;
           return (

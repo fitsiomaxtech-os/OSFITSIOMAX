@@ -85,6 +85,28 @@ code {
     }
 }
 
+/* The one exception, opted into per element: a strip wider than the screen whose
+   overflow a mouse user would otherwise never find (Operations > Branch's tab row).
+   Outside the base layer so it beats the `*` rule above. */
+.show-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+
+.show-scrollbar::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+}
+
+.show-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+}
+
+.show-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
 @layer base {
     [data-debug-wrapper="true"] {
         display: contents !important;
