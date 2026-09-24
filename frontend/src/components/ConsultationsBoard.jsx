@@ -10218,10 +10218,19 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       </div>
                       {/* A package with no catalogue price is priced here by the branch,
                           and the fee is collected on that figure. */}
-                      {selectedLead.session_package_manual && (
+                      {selectedLead.session_package_manual && (() => {
+                        // One session's amount, multiplied out over the package.
+                        const pkgSessions = Number(selectedLead.session_package_sessions) || 0;
+                        const savedRate = selectedLead.session_package_price != null && pkgSessions
+                          ? Math.round((selectedLead.session_package_price / pkgSessions) * 100) / 100
+                          : null;
+                        const typedRate = Number(pkgAmountDraft) || 0;
+                        return (
                         <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5" data-testid="cons-treatment-fee-manual">
                           <label className="mb-1 block text-[11px] font-semibold text-amber-800">
-                            Package Amount (₹){selectedLead.session_package_price != null ? ` · set at Rs.${selectedLead.session_package_price}` : " · enter to continue"}
+                            Per Session Amount (₹){selectedLead.session_package_price != null
+                              ? ` · set at Rs.${savedRate ?? selectedLead.session_package_price}/session = Rs.${selectedLead.session_package_price}`
+                              : " · enter to continue"}
                           </label>
                           <div className="flex items-center gap-2">
                             <Input
@@ -10229,7 +10238,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                               min="1"
                               value={pkgAmountDraft}
                               onChange={(e) => setPkgAmountDraft(e.target.value)}
-                              placeholder={selectedLead.session_package_price != null ? String(selectedLead.session_package_price) : "Enter the amount"}
+                              placeholder={savedRate != null ? String(savedRate) : "Amount for 1 session"}
                               className="h-9 bg-white"
                               data-testid="cons-treatment-fee-manual-amount"
                             />
@@ -10254,8 +10263,14 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                               {savingPkgAmount ? "Saving..." : "Save"}
                             </Button>
                           </div>
+                          {typedRate > 0 && pkgSessions > 0 && (
+                            <p className="mt-1.5 text-[11px] font-semibold text-amber-900" data-testid="cons-treatment-fee-manual-total">
+                              Rs.{typedRate} × {pkgSessions} sessions = Rs.{Math.round(typedRate * pkgSessions * 100) / 100}
+                            </p>
+                          )}
                         </div>
-                      )}
+                        );
+                      })()}
                       {!(selectedLead.session_package_manual && selectedLead.session_package_price == null) && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>

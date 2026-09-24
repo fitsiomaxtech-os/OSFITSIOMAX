@@ -948,8 +948,9 @@ export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;
 export const collectPackagePayment = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-package-payment`, payload)).data;
 export const collectTreatmentFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-treatment-fee`, payload)).data;
-// Prices a Treatment Package that has no catalogue price (Home Visit > Physiotherapy Distance).
-export const setSessionPackageAmount = async (leadId, amount) => (await api.post(`/leads/${leadId}/session-package-amount`, { amount })).data;
+// Prices a Treatment Package that has no catalogue price (Home Visit > Physiotherapy Distance):
+// the amount for one session, which the server multiplies by the package's sessions.
+export const setSessionPackageAmount = async (leadId, perSessionAmount) => (await api.post(`/leads/${leadId}/session-package-amount`, { per_session_amount: perSessionAmount })).data;
 export const assignPhysioWithSessions = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-physio-sessions`, payload)).data;
 // Who has delivered this patient's treatment days and how far each of them got — the
 // physios the patient has been through, oldest first, then the one they are with now.

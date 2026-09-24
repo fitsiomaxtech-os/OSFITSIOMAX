@@ -1122,7 +1122,8 @@ async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user:
 
 
 class V3SessionPackageAmountInput(BaseModel):
-    amount: float
+    # The amount for ONE session. The package's price is this times its session count.
+    per_session_amount: float
 
 
 @router.post("/leads/{lead_id}/session-package-amount", response_model=dict)
@@ -1137,15 +1138,19 @@ async def set_session_package_amount(lead_id: str, payload: V3SessionPackageAmou
         raise HTTPException(status_code=400, detail="This package has a fixed price")
     if lead.get("treatment_fee_paid") is not None:
         raise HTTPException(status_code=400, detail="The Treatment Fee has already been collected")
-    if not payload.amount or payload.amount <= 0:
+    if not payload.per_session_amount or payload.per_session_amount <= 0:
         raise HTTPException(status_code=400, detail="Enter an amount above 0")
-    amount = round(float(payload.amount), 2)
+    # The desk agrees a per-session figure; the package is that many sessions of it, and
+    # the Treatment Fee is collected on the whole.
+    per_session = round(float(payload.per_session_amount), 2)
+    sessions = int(lead.get("session_package_sessions") or 0)
+    amount = round(per_session * sessions, 2) if sessions > 0 else per_session
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {"session_package_price": amount, "updated_at": _now()}})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "session_package_amount_set",
-        "details": f"Treatment package amount set · {lead.get('session_package_name') or 'package'} · Rs.{amount}",
+        "details": f"Treatment package amount set · {lead.get('session_package_name') or 'package'} · Rs.{per_session} x {sessions or 1} sessions = Rs.{amount}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
