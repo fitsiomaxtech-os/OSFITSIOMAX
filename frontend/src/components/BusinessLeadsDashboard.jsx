@@ -1272,8 +1272,12 @@ function DashboardTab({
       {/* Tabs. One wrapping row of pills, the open one in sky — the shape Settings' own
           two views already sit on. Sub-tabs and not eight more entries on the nav above,
           because every one of them is a view of this Dashboard; the tabs up there are
-          other desks' boards. */}
-      <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-subtabs">
+          other desks' boards.
+
+          On a phone the pills wrapped onto three lines. Below sm they sit on one line as
+          icons, and only the open tab spells out its name -- the strip still says where
+          you are without costing three rows of a small screen. */}
+      <div className="flex flex-nowrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:flex-wrap" data-testid="bd-dash-subtabs">
         {DASH_SUB_TABS.map((g) => {
           const Icon = g.icon;
           const active = g.key === openGroup;
@@ -1283,10 +1287,13 @@ function DashboardTab({
               type="button"
               onClick={() => selectGroup(g.key)}
               aria-pressed={active}
-              className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
+              aria-label={g.label}
+              title={g.label}
+              className={`inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-md py-2 text-sm font-medium transition sm:shrink-0 sm:flex-none sm:px-3 ${active ? "flex-auto bg-sky-50 px-2 text-sky-700" : "flex-1 px-1 text-slate-600 hover:bg-slate-50"}`}
               data-testid={`bd-dash-subtab-${g.key}`}
             >
-              <Icon className="h-4 w-4" />{g.label}
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className={active ? "truncate sm:overflow-visible" : "hidden sm:inline"}>{g.label}</span>
             </button>
           );
         })}
