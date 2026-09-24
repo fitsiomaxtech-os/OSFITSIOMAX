@@ -501,8 +501,8 @@ export const TimeManagementPanel = ({ branchId }) => {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button size="sm" variant="outline" onClick={loadShifts} className="h-8 text-xs" data-testid="shifts-refresh">
-              <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+            <Button onClick={loadShifts} className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600" title="Refresh" aria-label="Refresh" data-testid="shifts-refresh">
+              <RefreshCw className="h-4 w-4" />
             </Button>
             <Button
               size="sm"

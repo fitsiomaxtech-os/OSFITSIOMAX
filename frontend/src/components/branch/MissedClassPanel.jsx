@@ -493,8 +493,8 @@ export default function MissedClassPanel() {
           A day here is a day the patient has paid for and not been given. Book it onto the physio's calendar,
           after the days they already hold.
         </p>
-        <Button size="sm" variant="outline" onClick={load} disabled={loading} className="shrink-0" data-testid="missed-class-refresh">
-          <RefreshCw className={`mr-1 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+        <Button onClick={load} disabled={loading} className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600" title="Refresh" aria-label="Refresh" data-testid="missed-class-refresh">
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
       </div>
 

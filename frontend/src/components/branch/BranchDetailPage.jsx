@@ -76,7 +76,7 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
               a second press from racing the first, where the slower of two replies wins
               and can put older data back on the page. */}
           <Button
-            variant="outline"
+            className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
             onClick={refresh}
             disabled={refreshing}
             title="Refresh"

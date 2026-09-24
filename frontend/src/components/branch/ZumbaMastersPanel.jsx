@@ -74,8 +74,8 @@ export const ZumbaMastersPanel = ({ branchId }) => {
               <Music className="h-4 w-4 text-violet-500" /> Zumba Masters
             </h3>
           </div>
-          <Button size="sm" variant="outline" onClick={load} disabled={loading} className="h-8 shrink-0 text-xs" data-testid="zumba-masters-refresh">
-            <RefreshCw className={`mr-1 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          <Button onClick={load} disabled={loading} className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600" title="Refresh" aria-label="Refresh" data-testid="zumba-masters-refresh">
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </div>
 
