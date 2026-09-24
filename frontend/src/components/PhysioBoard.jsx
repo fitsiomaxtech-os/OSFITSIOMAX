@@ -23,6 +23,7 @@ import {
   Users,
   UserX,
   X,
+  Home,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +67,9 @@ import { to12h, slotTo12h } from "@/lib/time";
 // top-right page button instead, alongside Profile on the top-left.
 const VIEW_TABS = [
   { key: "treatment", label: "Treatment", icon: ClipboardList },
+  // The same day board as Treatment, holding only the patients booked as a House Visit —
+  // the physio goes to them. Treatment stops listing those patients.
+  { key: "home_visit", label: "House Visit", icon: Home },
   { key: "review", label: "Send to Review", icon: ClipboardCheck },
   { key: "patients", label: "Patients", icon: Users },
   // The physio's own days off, and handing the patients booked on them to a colleague.
@@ -102,9 +106,10 @@ export const PhysioBoard = ({ physioId, user, roleLabel, onLogout } = {}) => {
   // stay mounted (hidden via CSS, not unmounted) so every badge stays live even
   // while another tab is the one showing.
   const [treatmentCount, setTreatmentCount] = useState(0);
+  const [homeVisitCount, setHomeVisitCount] = useState(0);
   const [reviewCount, setReviewCount] = useState(0);
   const [patientsCount, setPatientsCount] = useState(0);
-  const badgeFor = { treatment: treatmentCount, review: reviewCount, patients: patientsCount };
+  const badgeFor = { treatment: treatmentCount, home_visit: homeVisitCount, review: reviewCount, patients: patientsCount };
 
   // Where the open tab's search and date filter render. A callback ref rather than
   // useRef: the node has to arrive as state so the tabs re-render once it exists,
@@ -160,7 +165,10 @@ export const PhysioBoard = ({ physioId, user, roleLabel, onLogout } = {}) => {
       </div>
 
       <div style={{ display: activeTab === "treatment" ? "block" : "none" }}>
-        <TreatmentTab physioId={physioId} onCountChange={setTreatmentCount} toolbarSlot={slotFor("treatment")} />
+        <TreatmentTab physioId={physioId} scope="exclude_home" onCountChange={setTreatmentCount} toolbarSlot={slotFor("treatment")} />
+      </div>
+      <div style={{ display: activeTab === "home_visit" ? "block" : "none" }}>
+        <TreatmentTab physioId={physioId} scope="home" onCountChange={setHomeVisitCount} toolbarSlot={slotFor("home_visit")} />
       </div>
       <div style={{ display: activeTab === "review" ? "block" : "none" }}>
         <ReviewTab physioId={physioId} onCountChange={setReviewCount} toolbarSlot={slotFor("review")} />
@@ -475,7 +483,7 @@ const starWeekOf = (r) => Math.floor(((r.sessionNumber || 1) - 1) / 7) + 1;
 
 const rowStars = (r) => r.lead?.star_weeks?.[`${r.track || "treatment"}:${starWeekOf(r)}`] || null;
 
-function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
+function TreatmentTab({ physioId, onCountChange, toolbarSlot, scope = "all" }) {
   const [leads, setLeads] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -509,6 +517,13 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   useEffect(() => { load(); }, [load]);
 
   const leadById = useMemo(() => Object.fromEntries(leads.map((l) => [l.id, l])), [leads]);
+  // Treatment and House Visit are this one tab split by where the patient is treated:
+  // "home" keeps the House Visit patients, "exclude_home" keeps everybody else.
+  const inScope = useCallback((lead) => (
+    scope === "home" ? lead?.visit_type === "home"
+      : scope === "exclude_home" ? lead?.visit_type !== "home"
+      : true
+  ), [scope]);
 
   // The treatment and rehab days booked against this physio on a given day, earliest
   // time first.
@@ -526,6 +541,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
       .filter((s) => (s.slot_time || "").startsWith(date))
       .forEach((s) => {
         const lead = leadById[s.lead_id];
+        if (!inScope(lead)) return;
         rows.push({
           key: `day-${s.id}`,
           lead: lead || { id: s.lead_id, name: s.lead_name },
@@ -547,7 +563,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
         });
       });
     return rows.sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-  }, [sessions, leadById]);
+  }, [sessions, leadById, inScope]);
 
   const dayRows = useMemo(() => rowsFor(selectedDate), [rowsFor, selectedDate]);
 
@@ -594,7 +610,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
    * on the first render of the tab — a build the compiler and the linter both pass.
    */
   const courses = useMemo(() => {
-    const inTreatment = leads.filter((l) => (l.total_sessions || 0) > 0);
+    const inTreatment = leads.filter((l) => (l.total_sessions || 0) > 0 && inScope(l));
     const isFinished = (l) => !l.review_pending && (l.completed_sessions || 0) >= l.total_sessions;
     // One row shape for both lists, so the Ongoing and Completed cards are the same card
     // reading different numbers rather than two layouts that drift apart.
@@ -618,7 +634,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
       completed: done.map(row),
       ongoing: inTreatment.filter((l) => !isFinished(l)).map(row),
     };
-  }, [leads]);
+  }, [leads, inScope]);
 
   // Matches a row against the search box — one definition because the day list and the
   // two caseload lists are searched by the same box in the same toolbar, and a name that

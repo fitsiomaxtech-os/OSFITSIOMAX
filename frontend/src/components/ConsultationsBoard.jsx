@@ -2933,6 +2933,10 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   };
   const [assignTrack, setAssignTrack] = useState("treatment"); // "treatment" | "rehab"
   const [physioOptions, setPhysioOptions] = useState([]);
+  // A House Visit patient can be treated by a physio from any branch: the branch is
+  // picked first, and the physio list is that branch's. "" until one is picked.
+  const [physioBranchId, setPhysioBranchId] = useState("");
+  const [loadingPhysioOptions, setLoadingPhysioOptions] = useState(false);
   const [physioPick, setPhysioPick] = useState("");
   const [assigningPhysio, setAssigningPhysio] = useState(false);
   // The Client Portal login the server made on its own when treatment was just booked —
@@ -5092,6 +5096,26 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setCollectingTreatmentFee(false);
   };
 
+  // The physios of whichever branch was picked for a House Visit patient. cross_branch
+  // lets a branch admin list another branch's physios; the server allows it for them only.
+  const loadPhysiosForBranch = async (bid) => {
+    setPhysioBranchId(bid);
+    setPhysioPick("");
+    setShowSlotPicker(false);
+    setPhysioCalendarData(null);
+    setPickedSessionSlots([]);
+    setPhysioOptions([]);
+    if (!bid) return;
+    setLoadingPhysioOptions(true);
+    try {
+      const rows = await getDoctors({ branch_id: bid, cross_branch: true });
+      setPhysioOptions((rows || []).filter((d) => d.profile_type === "physio"));
+    } catch {
+      setPhysioOptions([]);
+    }
+    setLoadingPhysioOptions(false);
+  };
+
   // ---- Physio Assign (Branch Admin) — after fees are collected ----
   // The same picker books two different courses. `track` says which: the treatment package
   // (its own sessions, paid by the Treatment Fee) or the rehab course (its own days, paid
@@ -5107,6 +5131,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setPickerDate(null);
     setPickerMonth(new Date().getMonth());
     setPickerYear(new Date().getFullYear());
+    // House Visit: nothing is listed until a branch is chosen — see loadPhysiosForBranch.
+    if (selectedLead?.visit_type === "home") {
+      setPhysioBranchId("");
+      setPhysioOptions([]);
+      return;
+    }
     let physios = [];
     try {
       const rows = await getDoctors({ branch_id: branchId });
@@ -12140,9 +12170,40 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     </p>
                   </div>
 
-                  <p className="text-[11px] text-slate-500">Available physios in this branch — pick one to choose their {isRehabAssign ? "rehab days" : "treatment dates"}</p>
+                  {selectedLead?.visit_type === "home" && (
+                    <div data-testid="cons-physio-branch-picker">
+                      <p className="mb-1.5 text-[11px] font-semibold text-slate-600">House Visit — 1. Choose the branch</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(branchNames)
+                          .sort((a, b) => (a[1] || "").localeCompare(b[1] || ""))
+                          .map(([bid, bname]) => (
+                            <button
+                              key={bid}
+                              type="button"
+                              onClick={() => loadPhysiosForBranch(bid)}
+                              className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
+                                physioBranchId === bid ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                              }`}
+                              data-testid={`cons-physio-branch-${bid}`}
+                            >
+                              {bname || "Unnamed branch"}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
 
-                  {physioOptions.length === 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    {selectedLead?.visit_type === "home"
+                      ? `2. Choose the physio${physioBranchId ? ` from ${branchNames[physioBranchId] || "this branch"}` : ""} — then their ${isRehabAssign ? "rehab days" : "treatment dates"}`
+                      : `Available physios in this branch — pick one to choose their ${isRehabAssign ? "rehab days" : "treatment dates"}`}
+                  </p>
+
+                  {selectedLead?.visit_type === "home" && !physioBranchId ? (
+                    <p className="rounded-md border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">Choose a branch above to see its physios.</p>
+                  ) : loadingPhysioOptions ? (
+                    <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">Loading physios…</p>
+                  ) : physioOptions.length === 0 ? (
                     <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">No physios found for this branch yet.</p>
                   ) : (
                     <div className="max-h-40 space-y-1.5 overflow-y-auto">

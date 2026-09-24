@@ -886,6 +886,10 @@ async def v3_get_doctors(
     # appointment; anything else is ignored, so an unset or misspelt value leaves the list
     # as it has always been rather than emptying a calendar.
     vertical: Optional[str] = None,
+    # A House Visit patient can be treated by a physio from any branch, so the branch's
+    # Assign Physio asks for another branch's physios by name. Honoured for the branch
+    # admins only; every other desk stays held to its own branch.
+    cross_branch: bool = False,
     user: V3UserOut = Depends(v3_current_user),
 ):
     query: Dict[str, object] = {}
@@ -893,7 +897,9 @@ async def v3_get_doctors(
     # Off the predicates, not the literals. Two things were wrong with the list: the
     # consultation desk moved off `head_physio` onto `consultant`, and `online_physio` was
     # never in it — so both were left unscoped and shown every branch's experts.
-    if (is_branch_admin_role(user.role) or is_head_physio_role(user.role) or is_physio_role(user.role)) and user.branch_id:
+    if cross_branch and branch_id and (is_branch_admin_role(user.role) or user.role in ("super_admin", "business_dev")):
+        scope_branch = branch_id
+    elif (is_branch_admin_role(user.role) or is_head_physio_role(user.role) or is_physio_role(user.role)) and user.branch_id:
         scope_branch = user.branch_id
     elif branch_id:
         scope_branch = branch_id
