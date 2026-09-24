@@ -28,6 +28,7 @@ import {
   KeyRound,
   Laptop,
   Loader2,
+  LogOut,
   Mail,
   ShieldCheck,
   ShieldOff,
@@ -415,7 +416,12 @@ const SessionsPanel = ({ sessions, lastLoginAt, onChanged }) => {
 
 // ---------- the tab ----------
 
-export const SecurityTab = () => {
+/**
+ * `onLogout` is for a host whose phone header carries no logout — Super Admin. The button
+ * sits at the foot of this tab below md, and is always drawn, even if the settings fail
+ * to load, so a phone is never left without a way to sign out.
+ */
+export const SecurityTab = ({ onLogout } = {}) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -433,18 +439,36 @@ export const SecurityTab = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  const logoutButton = onLogout && (
+    <button
+      type="button"
+      onClick={onLogout}
+      className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-600 shadow-sm hover:bg-rose-50 md:hidden"
+      data-testid="my-security-logout"
+    >
+      <LogOut className="h-4 w-4" />
+      Logout
+    </button>
+  );
+
   if (loading) {
     return (
-      <p className="flex items-center justify-center gap-2 py-16 text-sm text-slate-400" data-testid="my-security-loading">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading your security settings…
-      </p>
+      <div className="space-y-4">
+        <p className="flex items-center justify-center gap-2 py-16 text-sm text-slate-400" data-testid="my-security-loading">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading your security settings…
+        </p>
+        {logoutButton}
+      </div>
     );
   }
   if (error) {
     return (
-      <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" data-testid="my-security-error">
-        {error}
-      </p>
+      <div className="space-y-4">
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" data-testid="my-security-error">
+          {error}
+        </p>
+        {logoutButton}
+      </div>
     );
   }
 
@@ -453,6 +477,7 @@ export const SecurityTab = () => {
       <PasswordPanel changedAt={data.password_changed_at} onChanged={load} />
       <TwoFactorPanel state={data.two_factor} emailMasked={data.email_masked} onChanged={load} />
       <SessionsPanel sessions={data.sessions} lastLoginAt={data.last_login_at} onChanged={load} />
+      {logoutButton}
 
       <p className="text-center text-xs text-slate-400" data-testid="my-security-footnote">
         These settings are yours alone — nobody else can change them for you. If you're locked out, ask HR to reset your password from Credentials.

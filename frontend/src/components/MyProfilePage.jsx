@@ -34,7 +34,6 @@ import {
   ChevronRight,
   Clock,
   Home,
-  LogOut,
   Palmtree,
   ShieldAlert,
   ShieldCheck,
@@ -694,8 +693,8 @@ const PHONE_BAR_TABS = TABS.map((t) => ({ ...t, phone: PHONE_BAR_MODES[t.key] })
  */
 /**
  * `onLogout` is for a host whose phone header no longer carries a logout — Super Admin,
- * whose bottom bar opens this page. Below md the button sits beside Back; from md up the
- * header's own logout is on screen, so this one is not drawn.
+ * whose bottom bar opens this page. It is handed to the Security tab, which draws the
+ * button below md; from md up the header's own logout is on screen.
  */
 export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false }) => {
   const [tab, setTab] = useState("attendance");
@@ -718,17 +717,6 @@ export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = fa
             </h2>
           </div>
         </div>
-        {onLogout && (
-          <button
-            type="button"
-            onClick={onLogout}
-            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 py-1.5 text-sm font-medium text-rose-600 shadow-sm hover:bg-rose-50 md:hidden"
-            data-testid="my-profile-logout"
-          >
-            <LogOut className="h-4 w-4" />
-            Logout
-          </button>
-        )}
         {/* Full width on a phone, where the bar is its own row of four columns; sized to
             its labels from sm up. It used to be pinned to w-96, which fitted three tabs
             and cut all four down to "Atte…", "Tim…", "My …", "Sec…" — a tab clipped to
@@ -748,7 +736,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = fa
       {tab === "calendar" ? <MonthlyCalendarTab user={user} />
         : tab === "attendance" ? <AttendanceTab />
         : tab === "timeoff" ? <TimeOffTab />
-          : tab === "security" ? <SecurityTab />
+          : tab === "security" ? <SecurityTab onLogout={onLogout} />
             : <ProfileTab roleLabel={roleLabel} />}
     </div>
   );
