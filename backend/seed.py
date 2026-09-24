@@ -1320,6 +1320,31 @@ async def normalize_lead_session_package_prices() -> None:
             )
 
 
+async def flag_manual_session_packages() -> None:
+    """Mark the leads whose Treatment Package is priced by the branch.
+
+    A package ticked "Branch Admin enters the amount" is stored at a placeholder price of
+    0. A Consultation Decision saved on one before the decision knew about the flag wrote
+    that 0 times the sessions onto the lead as the fee, and never marked the lead -- so the
+    Treatment Fee card offered to collect nothing instead of asking for the amount.
+
+    Only leads whose Treatment Fee has not been collected: once it has, the figure is a
+    financial record. Idempotent: a lead already marked is skipped, which also keeps an
+    amount the branch has since typed."""
+    items = await v3_col("store_items").find({"manual_price": True}, {"_id": 0, "id": 1}).to_list(500)
+    ids = [i["id"] for i in items]
+    if not ids:
+        return
+    await v3_col("leads").update_many(
+        {
+            "session_package_id": {"$in": ids},
+            "treatment_fee_paid": None,
+            "session_package_manual": {"$ne": True},
+        },
+        {"$set": {"session_package_manual": True, "session_package_price": None, "updated_at": now_iso()}},
+    )
+
+
 async def backfill_branch_codes() -> None:
     """Every branch needs a short unique code (e.g. 'ANN' for Anna Nagar, 'ECR' for ECR)
     that prefixes its patients' Patient Numbers. Auto-derives one from the branch name

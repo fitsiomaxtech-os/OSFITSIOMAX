@@ -1134,7 +1134,13 @@ async def set_session_package_amount(lead_id: str, payload: V3SessionPackageAmou
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if not lead.get("session_package_manual"):
+    # Read off the package as well as the lead, so a lead saved before the lead carried
+    # the mark can still be priced.
+    manual = bool(lead.get("session_package_manual"))
+    if not manual and lead.get("session_package_id"):
+        pkg = await v3_col("store_items").find_one({"id": lead["session_package_id"]}, {"_id": 0, "manual_price": 1})
+        manual = bool(pkg and pkg.get("manual_price"))
+    if not manual:
         raise HTTPException(status_code=400, detail="This package has a fixed price")
     if lead.get("treatment_fee_paid") is not None:
         raise HTTPException(status_code=400, detail="The Treatment Fee has already been collected")
@@ -1145,7 +1151,7 @@ async def set_session_package_amount(lead_id: str, payload: V3SessionPackageAmou
     per_session = round(float(payload.per_session_amount), 2)
     sessions = int(lead.get("session_package_sessions") or 0)
     amount = round(per_session * sessions, 2) if sessions > 0 else per_session
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"session_package_price": amount, "updated_at": _now()}})
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"session_package_price": amount, "session_package_manual": True, "updated_at": _now()}})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
