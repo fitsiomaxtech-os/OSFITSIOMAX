@@ -482,6 +482,16 @@ const DayDetailModal = ({ row, date, onClose, onSaved }) => {
   );
 };
 
+// Who each summary card counts, and so who clicking it lists. The same tests the cards
+// count with, so a card's figure and the length of its list always agree.
+const CARD_MATCH = {
+  present: (r) => r.present_days > 0,
+  wfh: (r) => r.present_days > 0 && !!r.remote,
+  yet: (r) => r.present_days === 0 && !["absent", "leave", "week_off", "holiday"].includes(r.status),
+  away: (r) => r.away_days > 0,
+  permission: (r) => r.permission_days > 0,
+};
+
 export const AttendanceTab = () => {
   const [period, setPeriod] = useState("day");
   const [day, setDay] = useState(todayIso());
@@ -493,6 +503,9 @@ export const AttendanceTab = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [opened, setOpened] = useState(null);
+  // Which summary card the list below is narrowed to. "total" is everyone the dropdowns
+  // leave on screen.
+  const [card, setCard] = useState("total");
 
   // Exactly the parameters the chosen span needs, so the server is never sent a month and
   // a range at once and left to guess which was meant.
@@ -520,18 +533,31 @@ export const AttendanceTab = () => {
   // are the server's own figures, which is the same set of rows counted the same way.
   const tiles = useMemo(() => {
     if (!filtered) return k;
-    const present = shown.filter((r) => r.present_days > 0);
     return {
       total_employees: shown.length,
-      present_working: present.length,
-      work_from_home: present.filter((r) => r.remote).length,
-      absent_leave: shown.filter((r) => r.away_days > 0).length,
-      on_permission: shown.filter((r) => r.permission_days > 0).length,
-      yet_to_login: single
-        ? shown.filter((r) => r.present_days === 0 && !["absent", "leave", "week_off", "holiday"].includes(r.status)).length
-        : null,
+      present_working: shown.filter(CARD_MATCH.present).length,
+      work_from_home: shown.filter(CARD_MATCH.wfh).length,
+      absent_leave: shown.filter(CARD_MATCH.away).length,
+      on_permission: shown.filter(CARD_MATCH.permission).length,
+      yet_to_login: single ? shown.filter(CARD_MATCH.yet).length : null,
     };
   }, [filtered, k, shown, single]);
+
+  // Yet to Login is a single-day card; over a span it is not drawn, so it cannot stay the
+  // filter either.
+  const activeCard = card === "yet" && !single ? "total" : card;
+  // The list under the cards: the dropdowns' rows, narrowed to the card picked. The cards
+  // themselves keep counting the dropdowns' rows, so every figure stays readable while one
+  // of them is open.
+  const listed = useMemo(
+    () => (activeCard === "total" ? shown : shown.filter(CARD_MATCH[activeCard])),
+    [shown, activeCard],
+  );
+  // Pressing the open card again puts the list back to everyone.
+  const pickCard = (key) => setCard((c) => (c === key ? "total" : key));
+  const emptyText = activeCard !== "total"
+    ? "Nobody on this card."
+    : filtered ? "Nobody matches these filters." : "No active employees.";
 
   // Period, date, filters and Refresh share one row; it wraps only when the screen is too
   // narrow to hold them.
@@ -616,16 +642,16 @@ export const AttendanceTab = () => {
       </Card>
 
       <div className={`grid grid-cols-2 gap-3 ${single ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
-        <Stat label="Total Employees" value={tiles.total_employees ?? 0} tone="text-indigo-600" testid="hr-att-k-total" />
-        <Stat label={single ? "Present / Working" : "Worked at all"} value={tiles.present_working ?? 0} tone="text-emerald-600" testid="hr-att-k-present" />
-        <Stat label="Work from Home" value={tiles.work_from_home ?? 0} tone="text-violet-600" testid="hr-att-k-wfh" />
-        {single && <Stat label="Yet to Login" value={tiles.yet_to_login ?? 0} tone="text-amber-500" testid="hr-att-k-yet" />}
-        <Stat label="Absent / Leave" value={tiles.absent_leave ?? 0} tone="text-rose-600" testid="hr-att-k-away" />
+        <Stat label="Total Employees" value={tiles.total_employees ?? 0} tone="text-indigo-600" onClick={() => setCard("total")} active={activeCard === "total"} testid="hr-att-k-total" />
+        <Stat label={single ? "Present / Working" : "Worked at all"} value={tiles.present_working ?? 0} tone="text-emerald-600" onClick={() => pickCard("present")} active={activeCard === "present"} testid="hr-att-k-present" />
+        <Stat label="Work from Home" value={tiles.work_from_home ?? 0} tone="text-violet-600" onClick={() => pickCard("wfh")} active={activeCard === "wfh"} testid="hr-att-k-wfh" />
+        {single && <Stat label="Yet to Login" value={tiles.yet_to_login ?? 0} tone="text-amber-500" onClick={() => pickCard("yet")} active={activeCard === "yet"} testid="hr-att-k-yet" />}
+        <Stat label="Absent / Leave" value={tiles.absent_leave ?? 0} tone="text-rose-600" onClick={() => pickCard("away")} active={activeCard === "away"} testid="hr-att-k-away" />
         {/* Its own tile because it is the one figure here that is neither present nor
             away: an approved permission is somebody who came in and had agreed hours out
             of the middle of it, and folding it into either of the two beside it would say
             something about their day that is not true. */}
-        <Stat label="On Permission" value={tiles.on_permission ?? 0} tone="text-sky-600" testid="hr-att-k-permission" />
+        <Stat label="On Permission" value={tiles.on_permission ?? 0} tone="text-sky-600" onClick={() => pickCard("permission")} active={activeCard === "permission"} testid="hr-att-k-permission" />
       </div>
 
       {loading && !data ? <p className="text-sm text-slate-500">Loading...</p> : (
@@ -635,7 +661,7 @@ export const AttendanceTab = () => {
             beside it -- so behind a sideways swipe somebody sees a name and half a
             department. The same rows, the same figures, stacked. */}
         <div className="space-y-2 md:hidden" data-testid="hr-att-cards">
-          {shown.map((r) => {
+          {listed.map((r) => {
             // On a single day the card opens that person's day, as the eye does on the
             // table. Over a span there is no one day to open, so it is not a button.
             const openDay = single ? () => setOpened(r) : null;
@@ -699,8 +725,8 @@ export const AttendanceTab = () => {
               </div>
             );
           })}
-          {shown.length === 0 && (
-            <Empty>{filtered ? "Nobody matches these filters." : "No active employees."}</Empty>
+          {listed.length === 0 && (
+            <Empty>{emptyText}</Empty>
           )}
         </div>
 
@@ -730,7 +756,7 @@ export const AttendanceTab = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map((r) => (
+                  {listed.map((r) => (
                     <tr key={r.employee_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-att-row-${r.employee_id}`}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -802,10 +828,10 @@ export const AttendanceTab = () => {
                       )}
                     </tr>
                   ))}
-                  {shown.length === 0 && (
+                  {listed.length === 0 && (
                     <tr>
                       <td colSpan={single ? 8 : 6} className="px-4 py-10 text-center text-slate-400">
-                        {filtered ? "Nobody matches these filters." : "No active employees."}
+                        {emptyText}
                       </td>
                     </tr>
                   )}
