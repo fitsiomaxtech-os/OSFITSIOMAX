@@ -1089,6 +1089,30 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                           </span>
                         )}
                       </h4>
+                      {/* Top right, beside the date they act on. */}
+                      {isConsultant && (
+                        <div className="ml-auto flex flex-wrap items-center justify-end gap-2" data-testid="consultant-day-actions">
+                          <Button
+                            size="sm"
+                            onClick={saveChanges}
+                            disabled={saving || nothingToOpen}
+                            className="bg-emerald-600 text-white hover:bg-emerald-700"
+                            data-testid="consultant-mark-available"
+                          >
+                            {saving ? "Saving..." : nothingToOpen && focusedOpenCount > 0 ? "Already available" : "Mark available"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={unsaveDays}
+                            disabled={unsaving || nothingToClose}
+                            className="border-rose-200 text-rose-600 hover:bg-rose-50"
+                            data-testid="consultant-mark-unavailable"
+                          >
+                            {unsaving ? "Removing..." : "Mark not available"}
+                          </Button>
+                        </div>
+                      )}
                       {!isConsultant && (
                         <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
                           <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-400 inline-block" /> Available</span>
@@ -1259,8 +1283,8 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                         The two buttons are one decision said both ways round rather than a
                         toggle: closing a day can strand appointments already on it, so it
                         asks first and the affirming press must be the one that means it. */}
-                    {isConsultant && (
-                      <div className="space-y-3" data-testid="consultant-day-availability">
+                    {isConsultant && focusedBookings.length > 0 && (
+                      <div className="mb-4 space-y-3" data-testid="consultant-day-availability">
                         {/* What closing the day would be closing over. Said before the
                             button rather than in the error after it: the branch is about
                             to be told these cannot be removed, and knowing that while
@@ -1281,27 +1305,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                           </div>
                         )}
 
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            size="sm"
-                            onClick={saveChanges}
-                            disabled={saving || nothingToOpen}
-                            className="bg-emerald-600 text-white hover:bg-emerald-700"
-                            data-testid="consultant-mark-available"
-                          >
-                            {saving ? "Saving..." : nothingToOpen && focusedOpenCount > 0 ? "Already available" : "Mark available"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={unsaveDays}
-                            disabled={unsaving || nothingToClose}
-                            className="border-rose-200 text-rose-600 hover:bg-rose-50"
-                            data-testid="consultant-mark-unavailable"
-                          >
-                            {unsaving ? "Removing..." : "Mark not available"}
-                          </Button>
-                        </div>
                       </div>
                     )}
                     {/* A shift can be edited down to less than one slot — 7:00 to 7:20 with
