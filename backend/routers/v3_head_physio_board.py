@@ -491,6 +491,52 @@ async def _rehab_package_fields(item_id: str, mode: str):
     return fields, f" · Rehab: {rehab_item['name']} ({r_sessions} sessions)"
 
 
+# Home Visit > Physiotherapy (PackagesBoard's HOME_VISIT_SUBTABS): the per-visit rates a
+# house-visit patient's treatment is charged at.
+HOME_VISIT_PHYSIO_CATEGORY = "home_visit"
+
+
+def _visit_kind(name: Optional[str]) -> Optional[str]:
+    n = (name or "").lower()
+    if "distance" in n:
+        return "distance"
+    if "standard" in n:
+        return "standard"
+    return None
+
+
+async def _home_visit_rate_item(lead: dict) -> dict:
+    """The Home Visit > Physiotherapy package a house-visit patient's treatment is priced
+    off: the one of the same kind (Distance / Standard) as the Home Visit > Consultant
+    package booked at the appointment. Matched by the word in the two names, since the
+    two shelves are priced separately and share nothing else; failing that by whether
+    both are priced by the branch; failing that the shelf's only package."""
+    shelf = await v3_col("store_items").find(
+        {"item_type": "session", "category": HOME_VISIT_PHYSIO_CATEGORY}, {"_id": 0}
+    ).sort("created_at", 1).to_list(100)
+    if not shelf:
+        raise HTTPException(status_code=400, detail="No Home Visit > Physiotherapy package is set up to price this House Visit")
+    kind = _visit_kind(lead.get("visit_package_name"))
+    if kind:
+        same_kind = [i for i in shelf if _visit_kind(i.get("name")) == kind]
+        if same_kind:
+            return same_kind[0]
+    booked = await v3_col("store_items").find_one(
+        {"id": lead.get("visit_package_id")}, {"_id": 0, "manual_price": 1}
+    ) if lead.get("visit_package_id") else None
+    if booked is not None:
+        same_pricing = [i for i in shelf if bool(i.get("manual_price")) == bool(booked.get("manual_price"))]
+        if len(same_pricing) == 1:
+            return same_pricing[0]
+    if len(shelf) == 1:
+        return shelf[0]
+    raise HTTPException(
+        status_code=400,
+        detail=f"No Home Visit > Physiotherapy package matches the booked House Visit package "
+               f"'{lead.get('visit_package_name') or '—'}'. Name them alike (Distance / Standard).",
+    )
+
+
 @router.post("/leads/{lead_id}/consultation-decision", response_model=dict)
 async def hp_consultation_decision(
     lead_id: str,
@@ -614,14 +660,24 @@ async def hp_consultation_decision(
         base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
         base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
         sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
+        # A House Visit patient picks the same treatment package as anyone else; only the
+        # rate differs. It is the per-visit price of the Home Visit > Physiotherapy package
+        # of the kind booked at the appointment (Distance or Standard), so the Consultant
+        # is never asked that again.
+        rate_item = item
+        if lead.get("visit_type") == "home" and item.get("category") != HOME_VISIT_PHYSIO_CATEGORY:
+            rate_item = await _home_visit_rate_item(lead)
+            base_price = rate_item.get("price_offline")
         price = round(base_price * sessions, 2) if base_price is not None and sessions else base_price
         # A package Super Admin left unpriced (a Distance house visit) is priced by the
         # branch, on the Treatment Fee card. Re-saving the decision on the same package
         # keeps whatever the branch already typed.
-        manual = bool(item.get("manual_price"))
+        manual = bool(rate_item.get("manual_price"))
         if manual:
             same = lead.get("session_package_id") == item["id"] and lead.get("session_package_manual")
             price = lead.get("session_package_price") if same else None
+        if rate_item is not item:
+            detail += f" · House Visit rate: {rate_item.get('name')}"
         updates.update({
             "session_package_id": item["id"],
             "session_package_name": item["name"],

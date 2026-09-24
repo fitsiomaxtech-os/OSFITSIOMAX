@@ -1301,10 +1301,15 @@ async def normalize_lead_session_package_prices() -> None:
     course_items = await _course_priced_item_ids() | await _home_visit_item_ids()
     leads = await v3_col("leads").find(
         {"session_package_sessions": {"$ne": None}, "treatment_fee_paid": None},
-        {"_id": 0, "id": 1, "session_package_sessions": 1, "session_package_price": 1, "session_package_mode": 1, "session_package_id": 1},
+        {"_id": 0, "id": 1, "session_package_sessions": 1, "session_package_price": 1, "session_package_mode": 1, "session_package_id": 1,
+         "visit_type": 1, "session_package_manual": 1},
     ).to_list(2000)
     for lead in leads:
         if lead.get("session_package_id") in course_items:
+            continue
+        # A House Visit patient's treatment is charged at a Home Visit > Physiotherapy rate
+        # (or one the branch typed), not the flat branch rate this restores.
+        if lead.get("visit_type") == "home" or lead.get("session_package_manual"):
             continue
         rate = SESSION_ITEM_RATE_PER_SESSION_ONLINE if lead.get("session_package_mode") == "online" else SESSION_ITEM_RATE_PER_SESSION_OFFLINE
         expected_price = round(lead["session_package_sessions"] * rate, 2)

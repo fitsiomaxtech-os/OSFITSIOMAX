@@ -3667,15 +3667,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // before the other shelves existed carries no category and is a treatment package by
   // definition, so it keeps its place here.
   //
-  // A patient booked as a House Visit is treated at home, so their packages come off the
-  // Home Visit > Physiotherapy shelf instead.
+  // A patient booked as a House Visit picks from the same packages. Only the price differs,
+  // and the server reads it off the Home Visit > Physiotherapy package matching the
+  // Distance / Standard choice made at booking, so the Consultant is not asked it again.
   const homeVisitLead = selectedLead?.visit_type === "home";
-  const treatmentPackageItems = useMemo(() => storeItems.filter((i) => i.item_type === "session" && (
-    homeVisitLead ? i.category === "home_visit" : (i.category || "physiotherapy") === "physiotherapy"
-  )).sort(byDuration), [storeItems, homeVisitLead]);
-  // A Home Visit package is a fixed number of visits rather than weeks at a chosen pace,
-  // so it asks for no sessions per week.
-  const isHomeVisitPackage = (item) => item?.category === "home_visit";
+  const treatmentPackageItems = useMemo(() => storeItems.filter((i) => i.item_type === "session" && (i.category || "physiotherapy") === "physiotherapy").sort(byDuration), [storeItems]);
   // The Rehab shelf, offered beside the referral itself. A rehab course is a session item
   // under its own category and is priced the same way — a per-session rate whose total is
   // the rate times the course's session count.
@@ -3751,15 +3747,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     if (decisionDraft.treatment) {
       if (!decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
       const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
-      if (isHomeVisitPackage(item)) {
-        payload = { ...payload, item_id: decisionDraft.item_id, sessions_override: Number(item.sessions_offline) || 1 };
-      } else {
       const weeks = weeksFromPackageName(item?.name);
       if (!weeks) { toast.error("Couldn't read a week count from this package's name"); return; }
       const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
       if (!perWeek) { toast.error("Enter sessions per week"); return; }
       payload = { ...payload, item_id: decisionDraft.item_id, sessions_override: weeks * perWeek };
-      }
     }
     setSavingDecision(true);
     try {
@@ -7430,10 +7422,8 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                 // nothing to book.
                 const treatmentReady = !decisionDraft.treatment || (
                   !!decisionDraft.item_id
-                  && (isHomeVisitPackage(selectedPackage) || (
-                    !!selectedPackageWeeks
-                    && !!parseInt(decisionDraft.sessionsPerWeek, 10)
-                  ))
+                  && !!selectedPackageWeeks
+                  && !!parseInt(decisionDraft.sessionsPerWeek, 10)
                 );
                 // Diet asks nothing: the referral is to the Nutritionist's consultation,
                 // which is the whole of what a Consultant decides on that side.
@@ -7505,10 +7495,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                   if (key === "treatment") {
                     const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
                     if (!item) return { text: "Choose a package", incomplete: true };
-                    if (isHomeVisitPackage(item)) {
-                      const visits = Number(item.sessions_offline) || 0;
-                      return { text: `${item.name} · ${visits} visit${visits === 1 ? "" : "s"} · House Visit`, incomplete: false };
-                    }
                     const weeks = weeksFromPackageName(item.name);
                     const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
                     if (!perWeek) return { text: `${item.name} — choose sessions/week`, incomplete: true };
@@ -7766,6 +7752,13 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                     return (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
+                        {/* Says where the money comes from without naming a figure — the
+                            Consultant never sees a price here. */}
+                        {homeVisitLead && (
+                          <p className="mb-2 rounded-md border border-orange-200 bg-orange-50 px-2.5 py-1.5 text-[11px] text-orange-800" data-testid="cons-decision-house-visit-note">
+                            House Visit{selectedLead?.visit_package_name ? ` · ${selectedLead.visit_package_name}` : ""} — charged at the Home Visit rate chosen at booking.
+                          </p>
+                        )}
                         <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
                           {treatmentPackageItems.map((i) => {
                             const selected = decisionDraft.item_id === i.id;
@@ -7790,18 +7783,6 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         {decisionDraft.item_id && (() => {
                           const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
                           if (!item) return null;
-                          if (isHomeVisitPackage(item)) {
-                            const visits = Number(item.sessions_offline) || 0;
-                            return (
-                              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/70 p-3" data-testid="cons-decision-package-summary">
-                                <p className="text-sm font-semibold text-slate-800">{item.name} · House Visit</p>
-                                <p className="mt-1 text-xs text-slate-600">
-                                  <span className="text-sm font-semibold text-slate-800">{visits} Total Visit{visits === 1 ? "" : "s"}</span>
-                                  {" "}at the patient's home
-                                </p>
-                              </div>
-                            );
-                          }
                           // Head Physio sees the session count only -- never the price.
                           // The Treatment Fee amount is derived server-side from
                           // sessions_override and shown to Branch Admin at fee collection.
