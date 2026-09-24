@@ -583,7 +583,7 @@ const FIXED_SESSIONS = 7;
 
 // Rehab and Fitness both run a longer course than the rest, so their shelves are fixed at
 // their own length. Anything not named here keeps the standard count.
-const FIXED_SESSIONS_BY_CATEGORY = { rehab: 26, fitness: 26, zumba: 12 };
+const FIXED_SESSIONS_BY_CATEGORY = { rehab: 26, fitness: 26, zumba: 12, home_visit_consultation: 1 };
 const fixedSessionsFor = (category) => FIXED_SESSIONS_BY_CATEGORY[category] ?? FIXED_SESSIONS;
 
 /**
@@ -658,7 +658,22 @@ const COURSE_TOTAL_CATEGORIES = new Set(["rehab", "fitness"]);
 //
 // The stored row still carries both prices -- the booking path picks one by mode, and a
 // zero on the other reads as free -- so what is entered once is written to both.
-const OFFLINE_ONLY_CATEGORIES = new Set(["fitness", "home_visit"]);
+const OFFLINE_ONLY_CATEGORIES = new Set(["fitness", "home_visit", "home_visit_consultation"]);
+
+/**
+ * Home Visit is split in two — a consultant coming to the house, and a physiotherapist
+ * doing so — and each is sold as one package with one price. There is no online/offline
+ * choice to make about somebody at your door, so neither the form nor the card mentions
+ * a mode at all: one box, headed Home Visit.
+ *
+ * Physiotherapy keeps the plain "home_visit" category so the packages created before the
+ * split still sit on it; Consultant is the new shelf beside it.
+ */
+export const HOME_VISIT_SUBTABS = [
+  { key: "consultant", label: "Consultant", icon: Stethoscope, category: "home_visit_consultation", noun: "home visit consultation" },
+  { key: "physiotherapy", label: "Physiotherapy", icon: Activity, category: "home_visit", noun: "home visit physiotherapy package" },
+];
+const HOME_VISIT_CATEGORIES = new Set(HOME_VISIT_SUBTABS.map((t) => t.category));
 const COURSE_TOTAL_DEFAULTS = { rehab: { online: 14000, offline: 18000 } };
 
 // Only a whole number of months is a plan. Anything else is a Zumba row saved before this
@@ -671,6 +686,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   const isEdit = Boolean(item);
   const isZumba = category === "zumba";
   const isOfflineOnly = OFFLINE_ONLY_CATEGORIES.has(category);
+  const isHomeVisit = HOME_VISIT_CATEGORIES.has(category);
   // Rehab and anything else sold as a whole course: the two price boxes hold the course
   // amount, not a per-session rate. What is stored is still the rate (see submit) — this is
   // only about which figure the person filling the form is asked for.
@@ -788,7 +804,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="session-create-modal">
       <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
-          <p className="text-base font-semibold">{`${isEdit ? "Edit" : "Add"} ${isZumba ? "Zumba Membership" : "Session Package"}`}</p>
+          <p className="text-base font-semibold">{`${isEdit ? "Edit" : "Add"} ${isZumba ? "Zumba Membership" : isHomeVisit ? "Home Visit Package" : "Session Package"}`}</p>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="session-create-close">
             <X className="h-4 w-4" />
           </button>
@@ -862,7 +878,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
           ) : (
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">
-              {isOfflineOnly ? "Offline Setup" : "Online & Offline Setup"}
+              {isHomeVisit ? "Package Setup" : isOfflineOnly ? "Offline Setup" : "Online & Offline Setup"}
             </label>
             <div className={`grid gap-2 ${isOfflineOnly ? "grid-cols-1" : "grid-cols-2"}`} data-testid="session-create-mode-boxes">
               {!isOfflineOnly && (
@@ -904,13 +920,15 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
               </div>
               )}
               <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
-                <p className="mb-2 flex items-center gap-1 text-xs font-bold text-amber-800"><MapPin className="h-3 w-3" />Offline Mode</p>
-                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">{isCourseTotal ? `Amount for ${sessions} Sessions` : "Per Session Amount"}</label>
+                <p className="mb-2 flex items-center gap-1 text-xs font-bold text-amber-800">
+                  {isHomeVisit ? <><Home className="h-3 w-3" />Home Visit</> : <><MapPin className="h-3 w-3" />Offline Mode</>}
+                </p>
+                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">{isCourseTotal ? `Amount for ${sessions} Sessions` : isHomeVisit ? "Per Visit Amount" : "Per Session Amount"}</label>
                 <div className="relative mb-2">
                   <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-amber-600">₹</span>
                   <Input type="number" min="0" value={priceOffline} onChange={(e) => setPriceOffline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-offline" />
                 </div>
-                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Sessions</label>
+                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">{isHomeVisit ? "Visits" : "Sessions"}</label>
                 {/* One count behind both boxes — submit writes the same number to
                     sessions_online and sessions_offline, so two independent inputs would be
                     two ways to set one stored value. Editing either moves both. */}
@@ -1038,6 +1056,7 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
   // It says "At the gym" rather than "Offline Mode", which is the same answer the Online
   // filter needs: this is sold in the room, and here is what it costs.
   const showOffline = mode !== "online" || offlineOnly;
+  const homeVisit = HOME_VISIT_CATEGORIES.has(item.category);
   return (
   <div className={`grid gap-2 ${mode === "all" && !offlineOnly ? "grid-cols-2" : "grid-cols-1"}`} data-testid={testid}>
     {showOnline && (
@@ -1056,11 +1075,11 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
     {showOffline && (
       <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800">
-          <MapPin className="h-3.5 w-3.5" />{offlineOnly ? "At the gym" : "Offline Mode"}
+          {homeVisit ? <Home className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}{homeVisit ? "Home Visit" : offlineOnly ? "At the gym" : "Offline Mode"}
         </p>
         <div className="space-y-1.5 text-xs text-amber-800">
-          {!courseOnly && <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>}
-          <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_offline ?? 0} Sessions</span></div>
+          {!courseOnly && <div className="flex items-center justify-between"><span>{homeVisit ? "Per Visit" : "Per Session"}</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>}
+          <div className="flex items-center justify-between"><span>{homeVisit ? "Total Visits" : "Total Sessions"}</span><span className="font-bold">{item.sessions_offline ?? 0} {homeVisit ? "Visits" : "Sessions"}</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
             <span className="text-sm font-extrabold text-amber-900">₹{packageTotal(item, "offline")}</span>
@@ -1440,6 +1459,42 @@ const ConsultationsPanel = ({ reloadToken, toolbarSlot, modeFilter = "all" }) =>
   );
 };
 
+// Home Visit's Consultant / Physiotherapy split. Each sub-tab is its own category on the
+// session panel every other session-shaped shelf uses, keyed so switching does not leave
+// the other sub-tab's rows on screen while the new ones load.
+const HomeVisitPanel = ({ reloadToken, toolbarSlot, modeFilter = "all" }) => {
+  const [sub, setSub] = useState(HOME_VISIT_SUBTABS[0].key);
+  const current = HOME_VISIT_SUBTABS.find((t) => t.key === sub) || HOME_VISIT_SUBTABS[0];
+  return (
+    <div className="space-y-4" data-testid="packages-panel-home-visit">
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="home-visit-subtabs">
+        {HOME_VISIT_SUBTABS.map((t) => {
+          const Icon = t.icon;
+          const active = sub === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setSub(t.key)}
+              data-testid={`home-visit-subtab-${t.key}`}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              <Icon className="h-4 w-4" />{t.label}
+            </button>
+          );
+        })}
+      </div>
+      <SessionsPhysiotherapyPanel
+        key={current.category}
+        category={current.category}
+        noun={current.noun}
+        reloadToken={reloadToken}
+        toolbarSlot={toolbarSlot}
+        modeFilter={modeFilter}
+      />
+    </div>
+  );
+};
+
 const HISTORY_ACTION_LABELS = {
   consultation_paid: "Consultation Sold",
   package_sold: "Package Sold",
@@ -1641,11 +1696,8 @@ const SESSION_LIKE_TABS = {
   // OFFLINE_ONLY_CATEGORIES names it, so a workshop takes the plain shape: the standard
   // session count, priced per session, with both an online and an offline price asked for.
   workshop: { category: "workshop", noun: "workshop" },
-  // Named in OFFLINE_ONLY_CATEGORIES and nothing else, so a home visit is priced per
-  // visit like the standard shelf but asked for once: there is no version of somebody
-  // coming to your house that happens over video, and a second box for it would take a
-  // figure the store could charge for a service that cannot be delivered.
-  home_visit: { category: "home_visit", noun: "home visit" },
+  // Home Visit is not here: it has Consultant and Physiotherapy sub-tabs of its own, so it
+  // renders HomeVisitPanel instead (see HOME_VISIT_SUBTABS).
 };
 
 const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "workshop", "home_visit", "diet", "history", "treatment", "physio_type", "vendor", ...INVENTORY_TABS]);
@@ -1929,6 +1981,7 @@ export const PackagesBoard = () => {
           modeFilter={modeFilter}
         />
       )}
+      {view === "catalog" && tab === "home_visit" && <HomeVisitPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
       {view === "catalog" && tab === "diet" && <PhysiotherapyPanel kind="diet_package" reloadToken={reloadTick} toolbarSlot={createSlot} />}
       {view === "history" && <HistoryPanel reloadToken={reloadTick} />}
       {view === "catalog" && tab === "treatment" && <TreatmentTypesBoard />}

@@ -13,6 +13,7 @@ import {
   MODE_TAB_KEYS,
   CONSULTATIONS_SUBTABS,
   SESSIONS_SUBTABS,
+  HOME_VISIT_SUBTABS,
   PlaceholderPanel,
   itemDurationLabel,
   PriceModeBadges,
@@ -266,7 +267,42 @@ const SESSION_LIKE_TABS = {
   rehab: { category: "rehab", empty: "No rehab packages available yet." },
   zumba: { category: "zumba", empty: "No Zumba classes available yet." },
   workshop: { category: "workshop", empty: "No workshops available yet." },
-  home_visit: { category: "home_visit", empty: "No home visits available yet." },
+};
+
+// Home Visit's Consultant / Physiotherapy split, read-only here like every other shelf.
+// The sub-tabs are Super Admin's own list, so the two pages cannot disagree about them.
+const BranchHomeVisitPanel = ({ reloadToken, modeFilter = "all" }) => {
+  const [sub, setSub] = useState(HOME_VISIT_SUBTABS[0].key);
+  const current = HOME_VISIT_SUBTABS.find((t) => t.key === sub) || HOME_VISIT_SUBTABS[0];
+  return (
+    <div className="space-y-4" data-testid="branch-store-panel-home-visit">
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-home-visit-subtabs">
+        {HOME_VISIT_SUBTABS.map((t) => {
+          const Icon = t.icon;
+          const active = sub === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setSub(t.key)}
+              data-testid={`branch-home-visit-subtab-${t.key}`}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              <Icon className="h-4 w-4" />{t.label}
+            </button>
+          );
+        })}
+      </div>
+      <BranchItemsPanel
+        key={current.category}
+        category={current.category}
+        itemType="session"
+        emptyLabel={`No ${current.noun}s available yet.`}
+        testidPrefix={`branch-home-visit-${current.key}`}
+        reloadToken={reloadToken}
+        modeFilter={modeFilter}
+      />
+    </div>
+  );
 };
 
 // The three shelves that are stock: a catalogue, a count per branch, and the same add,
@@ -275,7 +311,7 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 
 // Which tabs have a panel of their own. The rest fall through to the placeholder, and a
 // tab graduates by being added here rather than by another branch in the JSX below.
-const PANELS_BUILT = new Set(["consultations", "sessions", "diet", "treatment", "vendor", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
+const PANELS_BUILT = new Set(["consultations", "sessions", "diet", "treatment", "vendor", "home_visit", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
 
 /**
  * A branch's own FITSIO STORE — scoped to its own vertical rather than offering every
@@ -361,6 +397,7 @@ export const FitsiomaxStorePanel = ({ branchId }) => {
       {tab === "consultations" && <BranchConsultationsPanel reloadToken={reloadTick} modeFilter={modeFilter} />}
       {tab === "sessions" && <BranchSessionsPanel reloadToken={reloadTick} modeFilter={modeFilter} />}
       {tab === "diet" && <BranchDietPanel reloadToken={reloadTick} modeFilter={modeFilter} />}
+      {tab === "home_visit" && <BranchHomeVisitPanel reloadToken={reloadTick} modeFilter={modeFilter} />}
       {/* Keyed by category: without it React keeps the same instance across a tab switch
           and the previous shelf's rows sit there until the new ones land. */}
       {SESSION_LIKE_TABS[tab] && (
