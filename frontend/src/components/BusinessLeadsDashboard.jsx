@@ -353,7 +353,10 @@ export const BusinessLeadsDashboard = ({ currentUser = null, tab, onTabChange })
           Always on screen, unlike Branch Admin's own copy (`hidden md:flex`) -- that board
           has a fixed bottom nav for phones to fall back on and this one has none, so
           hiding the strip would leave a phone with no way between tabs. */}
-      <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200" data-testid="bd-tab-bar">
+      {/* Hidden on a phone's Dashboard when the bottom nav is on: its tabs are down there,
+          and Add Lead and Refresh have moved into the Dashboard's own toolbar, so all that
+          was left here was an empty rule and a gap above the tabs. */}
+      <div className={`${phoneFooter && activeTab === "dashboard" ? "hidden sm:flex" : "flex"} items-center gap-1 overflow-x-auto border-b border-slate-200`} data-testid="bd-tab-bar">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = isTabActive(activeTab, tab.key);
