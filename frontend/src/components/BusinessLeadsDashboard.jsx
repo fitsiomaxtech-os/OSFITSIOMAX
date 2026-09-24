@@ -1289,11 +1289,13 @@ function DashboardTab({
               aria-pressed={active}
               aria-label={g.label}
               title={g.label}
-              className={`inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-md py-2 text-sm font-medium transition sm:shrink-0 sm:flex-none sm:px-3 ${active ? "flex-auto bg-sky-50 px-2 text-sky-700" : "flex-1 px-1 text-slate-600 hover:bg-slate-50"}`}
+              className={`inline-flex min-w-0 flex-auto items-center justify-center whitespace-nowrap rounded-md px-2 py-2 text-sm font-medium transition-all duration-500 ease-in-out sm:shrink-0 sm:flex-none sm:px-3 ${active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
               data-testid={`bd-dash-subtab-${g.key}`}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              <span className={active ? "truncate sm:overflow-visible" : "hidden sm:inline"}>{g.label}</span>
+              {/* Width and opacity rather than display, so the name slides open on the tab
+                  you pick and folds away on the one you left instead of snapping. */}
+              <span className={`overflow-hidden text-ellipsis transition-all duration-500 ease-in-out sm:ml-2 sm:max-w-none sm:opacity-100 ${active ? "ml-2 max-w-[9rem] opacity-100" : "ml-0 max-w-0 opacity-0"}`}>{g.label}</span>
             </button>
           );
         })}
