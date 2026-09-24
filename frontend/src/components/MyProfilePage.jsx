@@ -147,7 +147,8 @@ const Tile = ({ label, value, sub, tone = "text-slate-800", accent = "", testid 
   <div className={`rounded-xl border bg-white px-3 py-2.5 shadow-sm ${accent || "border-slate-200"}`} data-testid={testid}>
     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
     <p className={`mt-0.5 text-xl font-extrabold leading-tight ${tone}`}>{value}</p>
-    {sub && <p className="mt-0.5 text-[10px] leading-tight text-slate-400">{sub}</p>}
+    {/* The explanatory line under a figure is desktop-only; a phone keeps label and value. */}
+    {sub && <p className="mt-0.5 hidden text-[10px] leading-tight text-slate-400 md:block">{sub}</p>}
   </div>
 );
 
@@ -189,7 +190,7 @@ const TodayStrip = ({ row, standard }) => {
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
           <Clock className="h-4 w-4 text-slate-400" />
           Today
-          <span className="text-xs font-normal text-slate-400">
+          <span className="hidden text-xs font-normal text-slate-400 md:inline">
             (Standard: {standard?.start} – {standard?.end})
           </span>
         </h3>
@@ -486,7 +487,7 @@ const AttendanceTab = () => {
               above are real either way — they are what this person pressed — and only the
               marks (leave, absent, half day) are missing without the link. */}
           {data && !data.linked && (
-            <p className="text-center text-xs text-slate-400" data-testid="my-attendance-unlinked">
+            <p className="hidden text-center text-xs text-slate-400 md:block" data-testid="my-attendance-unlinked">
               No employee record is linked to this login, so HR's marks — leave, absent, half day — are not shown here.
               The hours are your own clock.
             </p>
@@ -534,7 +535,7 @@ const ProfileTab = ({ roleLabel }) => {
   return (
     <div className="space-y-4" data-testid="my-profile-profile-tab">
       {!data.linked && (
-        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" data-testid="my-profile-unlinked">
+        <p className="hidden rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 md:block" data-testid="my-profile-unlinked">
           This login is not linked to an employee record, so only what the account itself carries is shown below.
           Ask HR to link it from Credentials.
         </p>
@@ -615,7 +616,7 @@ const ProfileTab = ({ roleLabel }) => {
               <Field label="IFSC" value={data.ifsc} />
             </div>
           ) : (
-            <p className="text-sm text-slate-400">Nothing on file. HR adds this on your employee record.</p>
+            <p className="text-sm text-slate-400">Nothing on file.<span className="hidden md:inline"> HR adds this on your employee record.</span></p>
           )}
         </Panel>
       </div>
@@ -623,7 +624,7 @@ const ProfileTab = ({ roleLabel }) => {
       {/* Where a correction goes. Everything above is HR's to write — a page that shows a
           wrong phone number and says nothing about how to fix it makes the reader hunt for
           somebody to tell. */}
-      <p className="text-center text-xs text-slate-400" data-testid="my-profile-footnote">
+      <p className="hidden text-center text-xs text-slate-400 md:block" data-testid="my-profile-footnote">
         These details are held by HR. Anything wrong here is corrected on your employee record — ask HR to update it.
       </p>
     </div>
@@ -696,8 +697,11 @@ const PHONE_BAR_TABS = TABS.map((t) => ({ ...t, phone: PHONE_BAR_MODES[t.key] })
  * whose bottom bar opens this page. It is handed to the Security tab, which draws the
  * button below md; from md up the header's own logout is on screen.
  */
-export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false }) => {
+export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false, hideTimeOff = false }) => {
   const [tab, setTab] = useState("attendance");
+  // Super Admin has no one above them to ask for leave, so the tab is not offered.
+  const tabs = hideTimeOff ? TABS.filter((t) => t.key !== "timeoff") : TABS;
+  const phoneTabs = hideTimeOff ? PHONE_BAR_TABS.filter((t) => t.key !== "timeoff") : PHONE_BAR_TABS;
 
   return (
     <div className="space-y-4" data-testid="my-profile-page">
@@ -724,8 +728,8 @@ export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = fa
             squeezing it back into an ellipsis; the row wraps instead. */}
         <div className="w-full sm:w-auto sm:shrink-0" data-testid="my-profile-tabs-wrap">
           {phoneBar
-            ? <SegmentedTabs tabs={PHONE_BAR_TABS} value={tab} onChange={setTab} testid="my-profile-tabs" fit />
-            : <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={3} fit />}
+            ? <SegmentedTabs tabs={phoneTabs} value={tab} onChange={setTab} testid="my-profile-tabs" fit />
+            : <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} testid="my-profile-tabs" mobileCols={3} fit />}
         </div>
       </div>
 
@@ -735,7 +739,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = fa
           happened today. */}
       {tab === "calendar" ? <MonthlyCalendarTab user={user} />
         : tab === "attendance" ? <AttendanceTab />
-        : tab === "timeoff" ? <TimeOffTab />
+        : tab === "timeoff" && !hideTimeOff ? <TimeOffTab />
           : tab === "security" ? <SecurityTab onLogout={onLogout} />
             : <ProfileTab roleLabel={roleLabel} />}
     </div>

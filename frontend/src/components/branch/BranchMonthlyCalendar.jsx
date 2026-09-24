@@ -84,12 +84,12 @@ export const BranchMonthlyCalendar = ({ branchId }) => {
   return (
     <div className="space-y-4" data-testid="branch-monthly-calendar">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
           <Button size="sm" variant="outline" onClick={() => shiftMonth(-1)} data-testid="mcal-prev"><ChevronLeft className="h-4 w-4" /></Button>
-          <p className="w-40 text-center text-base font-semibold text-slate-700" data-testid="mcal-month">{monthLabel}</p>
+          <p className="flex-1 text-center text-base font-semibold text-slate-700 sm:w-40 sm:flex-none" data-testid="mcal-month">{monthLabel}</p>
           <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} data-testid="mcal-next"><ChevronRight className="h-4 w-4" /></Button>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex w-full flex-wrap items-center justify-center gap-2 text-xs sm:w-auto sm:justify-end">
           <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700" data-testid="mcal-working-count">{workingCount} working</span>
           <span className="rounded-full bg-rose-50 px-2.5 py-1 font-semibold text-rose-600" data-testid="mcal-leave-count">{leaveCount} leave</span>
           {!canEdit && data && (
@@ -98,7 +98,7 @@ export const BranchMonthlyCalendar = ({ branchId }) => {
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">
+      <p className="hidden text-xs text-slate-500 md:block">
         {canEdit
           ? "Tap days to select them, then mark them Working or Leave. Leave days are closed on the Consultant and Physiotherapist calendars and for consultation bookings."
           : "Set by this branch's Branch Admin, Super Admin or BDE. Leave days are closed on the Consultant and Physiotherapist calendars."}
@@ -111,7 +111,7 @@ export const BranchMonthlyCalendar = ({ branchId }) => {
           ))}
         </div>
         <div className="grid grid-cols-7">
-          {Array.from({ length: leadBlanks }, (_, i) => <div key={`b-${i}`} className="min-h-[4.5rem] border-b border-r border-slate-100 bg-slate-50/40 sm:min-h-[6rem]" />)}
+          {Array.from({ length: leadBlanks }, (_, i) => <div key={`b-${i}`} className="min-h-[3.5rem] border-b border-r border-slate-100 bg-slate-50/40 sm:min-h-[6rem]" />)}
           {days.map((day) => {
             const n = Number(day.date.slice(8));
             const isLeave = day.status === "leave";
@@ -125,18 +125,21 @@ export const BranchMonthlyCalendar = ({ branchId }) => {
                 onClick={() => toggle(day.date)}
                 disabled={!canEdit}
                 title={isLeave ? `Leave${day.note ? ` — ${day.note}` : day.source === "weekly" ? " — weekly off" : ""}` : `Working · ${to12h(day.open)} – ${to12h(day.close)}`}
-                className={`relative flex min-h-[4.5rem] flex-col items-start gap-0.5 border-b border-r border-slate-100 p-1.5 text-left transition sm:min-h-[6rem] sm:p-2 ${
+                className={`relative flex min-h-[3.5rem] flex-col items-center gap-1 border-b border-r border-slate-100 p-1 text-center sm:items-start sm:gap-0.5 sm:text-left transition sm:min-h-[6rem] sm:p-2 ${
                   isPicked ? "bg-sky-100 ring-2 ring-inset ring-sky-500"
                     : isLeave ? "bg-rose-50/70" : "bg-white"
                 } ${canEdit ? "cursor-pointer hover:bg-sky-50" : "cursor-default"}`}
                 data-testid={`mcal-day-${day.date}`}
               >
                 <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold sm:text-sm ${isToday ? "bg-sky-600 text-white" : isLeave ? "text-rose-600" : "text-slate-700"}`}>{n}</span>
-                <span className={`rounded px-1 py-0.5 text-[9px] font-bold uppercase leading-none sm:text-[10px] ${isLeave ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-700"}`}>
+                {/* A phone cell is ~40px wide, where "WORKING" does not fit: a working day is
+                    a green dot there, and a leave day keeps its short word. */}
+                <span className={`rounded px-1 py-0.5 text-[9px] font-bold uppercase leading-none sm:text-[10px] ${isLeave ? "bg-rose-100 text-rose-600" : "hidden bg-emerald-100 text-emerald-700 sm:inline"}`}>
                   {isLeave ? (day.source === "weekly" ? "Off" : "Leave") : "Working"}
                 </span>
+                {!isLeave && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 sm:hidden" />}
                 {!isLeave && <span className="hidden text-[10px] text-slate-400 sm:block">{to12h(day.open)} – {to12h(day.close)}</span>}
-                {day.note && <span className="line-clamp-2 w-full break-words text-[10px] font-medium text-rose-500">{day.note}</span>}
+                {day.note && <span className="hidden w-full break-words sm:line-clamp-2 text-[10px] font-medium text-rose-500">{day.note}</span>}
                 {chosen && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-amber-400" title="Set on this calendar" />}
               </button>
             );
@@ -144,7 +147,7 @@ export const BranchMonthlyCalendar = ({ branchId }) => {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+      <div className="flex flex-wrap items-center justify-center gap-3 text-[11px] text-slate-500 sm:justify-start">
         <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded bg-emerald-100" />Working</span>
         <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded bg-rose-100" />Leave / weekly off</span>
         <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" />Changed on this calendar</span>

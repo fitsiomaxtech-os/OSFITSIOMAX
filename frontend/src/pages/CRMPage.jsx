@@ -1352,6 +1352,7 @@ export const CRMPage = ({ auth, onLogout }) => {
               onBack={() => setShowProfile(false)}
               onLogout={showSuperAdminBoard ? logout : undefined}
               phoneBar={showSuperAdminBoard}
+              hideTimeOff={showSuperAdminBoard}
             />
           </Suspense>
         ) : (
