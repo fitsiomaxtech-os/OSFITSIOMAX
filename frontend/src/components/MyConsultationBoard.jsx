@@ -263,15 +263,10 @@ const ConsultBranchSwitches = () => {
           data-testid="my-consultation-branch-switches"
         >
           <section className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-lg bg-white shadow-xl">
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
-              <div className="min-w-0">
-                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-                  <Building2 className="h-4 w-4 text-slate-400" /> Take consultations at
-                </h3>
-                <p className="mt-0.5 text-[11px] text-slate-400">
-                  {onCount} of {rows.length} branches On · a branch that is On lists you on its Consultant Calendar
-                </p>
-              </div>
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <h3 className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-slate-800">
+                <Building2 className="h-4 w-4 text-slate-400" /> Take consultations at
+              </h3>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
