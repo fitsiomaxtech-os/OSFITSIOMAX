@@ -1199,6 +1199,27 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     # every lead already stranded by the ones that did.)
     if lead.get("package_paid") is None:
         raise HTTPException(status_code=400, detail="Treatment Fee can only be collected after the Consultation Fee has been collected")
+    # A House Visit is collected on a per-session fee typed at the desk. It prices the
+    # package here, before anything else reads the price, and only while nothing has been
+    # collected on it — after that the figure is a financial record.
+    if (payload.per_session_fee is not None and lead.get("visit_type") == "home"
+            and lead.get("session_package_id") and lead.get("treatment_fee_paid") is None):
+        if payload.per_session_fee <= 0:
+            raise HTTPException(status_code=400, detail="Enter a per session fee above 0")
+        pkg_sessions = int(lead.get("session_package_sessions") or 0) or 1
+        priced = round(float(payload.per_session_fee) * pkg_sessions, 2)
+        if priced != lead.get("session_package_price"):
+            await v3_col("leads").update_one({"id": lead_id}, {"$set": {"session_package_price": priced, "updated_at": _now()}})
+            await v3_col("lead_activity").insert_one({
+                "id": str(uuid.uuid4()),
+                "lead_id": lead_id,
+                "action": "session_package_amount_set",
+                "details": f"House Visit treatment priced · Rs.{payload.per_session_fee}/session × {pkg_sessions} sessions = Rs.{priced}",
+                "created_by": user.full_name,
+                "created_by_role": user.role,
+                "created_at": _now(),
+            })
+            lead["session_package_price"] = priced
     if lead.get("session_package_id") and lead.get("session_package_manual") and lead.get("session_package_price") is None:
         raise HTTPException(status_code=400, detail="Enter the amount for this treatment package first")
     if not lead.get("session_package_id") or lead.get("session_package_price") is None:

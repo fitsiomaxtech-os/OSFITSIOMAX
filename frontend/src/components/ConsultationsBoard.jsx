@@ -4101,6 +4101,11 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setTreatmentFeeDraft({
       payment_mode: lead.treatment_fee_payment_mode || "cash",
       amount: lead.treatment_fee_paid ?? lead.session_package_price ?? "",
+      // House Visit only: the fee for one session, typed at collection -- the amount is
+      // this times the sessions being paid for. Opens on the rate already set, if any.
+      per_session: lead.visit_type === "home" && lead.session_package_price != null && total
+        ? String(round2(lead.session_package_price / total))
+        : "",
       // Typed by hand or not at all -- see FeeAmountEntry. Nothing about a short
       // amount infers one, so a reopened draft carries only the discount that was
       // actually agreed and recorded, never one worked back out of what was collected.
@@ -4142,8 +4147,16 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // package's own per-session rate, so the numbers always agree with "N sessions x
   // Rs.rate/session" shown elsewhere. Total to split is the locked-in
   // session_package_price/session_package_sessions, never client-editable fields.
-  const treatmentFeeTotal = selectedLead?.session_package_price || 0;
+  //
+  // A House Visit patient's Treatment Fee is collected on a per-session fee typed in the
+  // payment popup instead of an amount, so until it is collected the total is that fee
+  // times the package's sessions. The server prices the package off the same figure.
+  const hvTreatment = selectedLead?.visit_type === "home" && selectedLead?.treatment_fee_paid == null;
+  const hvPerSession = hvTreatment ? (parseFloat(treatmentFeeDraft?.per_session) || 0) : 0;
   const treatmentFeeTotalSessions = selectedLead?.session_package_sessions || 0;
+  const treatmentFeeTotal = hvTreatment
+    ? round2(hvPerSession * (treatmentFeeTotalSessions || 1))
+    : (selectedLead?.session_package_price || 0);
   const perSessionRate = treatmentFeeTotalSessions ? treatmentFeeTotal / treatmentFeeTotalSessions : 0;
   const partialInstallments = treatmentFeeDraft?.partial_installments || [];
   const partialSessionsTotal = partialInstallments.reduce((sum, i) => sum + (parseInt(i.sessions, 10) || 0), 0);
@@ -4321,6 +4334,17 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     setTreatmentFeeDraft({ ...treatmentFeeDraft, sessions_now: value, amount: round2(Math.max(0, computed - treatmentDiscount)) });
   };
 
+  // House Visit: typing the per-session fee re-computes the amount over the sessions being
+  // paid for now, the same way changing that count does.
+  const setTreatmentPerSession = (value) => {
+    const fee = parseFloat(value) || 0;
+    const raw = treatmentFeeDraft?.sessions_now;
+    const sessionsNum = raw === "" || raw == null ? (treatmentFeeTotalSessions || 1) : (parseInt(raw, 10) || 0);
+    setTreatmentFeeDraft({ ...treatmentFeeDraft, per_session: value, amount: round2(Math.max(0, fee * sessionsNum - treatmentDiscount)) });
+  };
+  // Carried on every Treatment Fee call while it is a House Visit's first collection.
+  const withHvFee = (payload) => (hvTreatment && hvPerSession > 0 ? { ...payload, per_session_fee: hvPerSession } : payload);
+
   // Attaches the hand-entered discount, plus sessions_now/balance_due_date, to a
   // Cash/UPI/Card/Account Transfer/Cheque payload. The due date is required whenever
   // anything is still owed after this collection — fewer sessions than the package,
@@ -4347,7 +4371,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // since their amount is editable and (for UPI/Card) they need their own fields.
   const buildTreatmentFeePayload = () => {
     const mode = treatmentFeeDraft.payment_mode;
-    const payload = { payment_mode: mode };
+    const payload = withHvFee({ payment_mode: mode });
     if (mode === "cheque") {
       if (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim()) {
         toast.error("Bank Name and Cheque Number are required");
@@ -4792,7 +4816,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // above); omit it for Cheque/Partial Payment, which build their own from the
   // inline fields via buildTreatmentFeePayload.
   async function submitTreatmentFee(directPayload) {
-    const payload = directPayload || buildTreatmentFeePayload();
+    const payload = directPayload ? withHvFee(directPayload) : buildTreatmentFeePayload();
     if (!payload) return;
     setCollectingTreatmentFee(true);
     // Only the call is guarded — see submitConsultationFee. A fault while building the
@@ -10218,7 +10242,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       </div>
                       {/* A package with no catalogue price is priced here by the branch,
                           and the fee is collected on that figure. */}
-                      {selectedLead.session_package_manual && (() => {
+                      {selectedLead.session_package_manual && selectedLead.visit_type !== "home" && (() => {
                         // One session's amount, multiplied out over the package.
                         const pkgSessions = Number(selectedLead.session_package_sessions) || 0;
                         const savedRate = selectedLead.session_package_price != null && pkgSessions
@@ -10271,7 +10295,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         </div>
                         );
                       })()}
-                      {!(selectedLead.session_package_manual && selectedLead.session_package_price == null) && (
+                      {(selectedLead.visit_type === "home" || !(selectedLead.session_package_manual && selectedLead.session_package_price == null)) && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                         <PaymentModeSelect
@@ -10820,7 +10844,39 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                       </>
                     )}
 
-                    {!picking && mode !== "partial" && (
+                    {/* House Visit: the fee for one session is what the desk types, and the
+                        amount below is worked out from it. On every mode, Partial included,
+                        because each of them prices the sessions off this rate. */}
+                    {hvTreatment && !picking && !continuing && (
+                      <div className="rounded-md border border-orange-200 bg-orange-50 p-2.5" data-testid="cons-treatment-fee-per-session">
+                        <label className="mb-1 block text-[11px] font-semibold text-orange-800">House Visit · Per Session Fee (₹) *</label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={treatmentFeeDraft.per_session ?? ""}
+                          onChange={(e) => setTreatmentPerSession(e.target.value)}
+                          placeholder="Fee for 1 session"
+                          className="h-9 bg-white"
+                          data-testid="cons-treatment-fee-per-session-input"
+                        />
+                      </div>
+                    )}
+
+                    {!picking && mode !== "partial" && hvTreatment && !continuing && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">{modeLabel} Amount (₹)</label>
+                        <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
+                          {hvPerSession > 0 ? `Rs.${treatmentComputedAmount}` : "—"}
+                        </div>
+                        {hvPerSession > 0 && (
+                          <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
+                            {treatmentSessionsNow} session{treatmentSessionsNow === 1 ? "" : "s"} × Rs.{hvPerSession}/session = Rs.{treatmentComputedAmount}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {!picking && mode !== "partial" && !(hvTreatment && !continuing) && (
                       <div>
                         {SETTLED_NOW_MODES.includes(mode) ? (
                           continuing ? (
@@ -11038,7 +11094,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
                         onClick={submitTreatmentModePopup}
                         disabled={
                           collectingTreatmentFee ||
-                          selectedLead.session_package_price == null ||
+                          (hvTreatment ? !(hvPerSession > 0) : selectedLead.session_package_price == null) ||
                           // Everything from here to the discount check belongs to the tender
                           // being typed, and there isn't one while `picking` — the accepted
                           // ones passed these on their way onto the list.

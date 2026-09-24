@@ -781,6 +781,10 @@ class V3CollectTreatmentFeeInput(BaseModel):
     # Cheque and Partial Payment keep using the locked amount as before.
     payment_mode: str
     amount: Optional[float] = None
+    # House Visit patients only: the fee for one session, typed at collection. The package
+    # is priced from it (fee x the package's sessions) before the money is taken, since a
+    # house visit's rate is agreed at the door rather than read off the catalogue.
+    per_session_fee: Optional[float] = None
     # Branch Admin must explicitly tick a confirmation before money taken at the desk is
     # accepted — a deliberate double-check step, not just clicking Collect once.
     confirmed: bool = False
