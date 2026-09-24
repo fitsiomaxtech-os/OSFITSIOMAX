@@ -6,10 +6,9 @@
  * collected. Kept here rather than in either screen so neither imports the other — and so
  * there is one list to change when a fourth package appears.
  *
- * Mirrors PACKAGES in backend/consultation_packages.py, which is the authority: it derives
- * an item's duration_minutes from `key` on the way in and ignores whatever the form sent,
- * and it reads the price off the stored item rather than taking it from the desk. The
- * `minutes` here are a preview only. A test (backend/tests/test_consultation_packages.py)
+ * Mirrors PACKAGES in backend/consultation_packages.py. `minutes` is the default length the
+ * create form pre-fills; Super Admin can edit it per item, and the stored duration_minutes
+ * is what gets booked. A test (backend/tests/test_consultation_packages.py)
  * reads this file back and fails if the two lists disagree, because a preview promising 65
  * minutes while the server stores 45 would surface as a physio's afternoon running over
  * rather than as anything on screen.

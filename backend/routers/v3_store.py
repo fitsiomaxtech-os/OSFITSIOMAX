@@ -41,6 +41,21 @@ async def upload_store_image(file: UploadFile = File(...), _: V3UserOut = Depend
 
 VALID_DURATIONS_MINUTES = {15, 30, 45, 60, 120}
 
+# A packaged consultation starts at its package's length, but Super Admin may set it to
+# anything within a working day instead — the package is the default, not a lock.
+PACKAGED_MIN_MINUTES = 5
+PACKAGED_MAX_MINUTES = 480
+
+
+def _check_packaged_minutes(payload: "StoreItemIn", packaged_minutes: Optional[int]) -> None:
+    if packaged_minutes is None:
+        return
+    if not (PACKAGED_MIN_MINUTES <= payload.duration_minutes <= PACKAGED_MAX_MINUTES):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Duration must be between {PACKAGED_MIN_MINUTES} and {PACKAGED_MAX_MINUTES} minutes",
+        )
+
 def _packaged_duration(payload: "StoreItemIn") -> Optional[int]:
     """The duration this item's package fixes, or None where it names no package.
 
@@ -86,7 +101,7 @@ class StoreItemIn(BaseModel):
     price_offline: float = 800
     duration_minutes: int = 30  # one of VALID_DURATIONS_MINUTES; consultation items only
     # Which of the three fixed Physiotherapy consultation packages this is, if any. When
-    # set it decides duration_minutes and whatever the client sent for that is ignored —
+    # set, the form pre-fills duration_minutes from it and Super Admin may change it —
     # see CONSULTATION_PACKAGES. Absent on every item created before the packages existed,
     # and on the shelves that still name themselves (Fitness, Diet Consultations), which
     # go on picking a duration by hand.
@@ -135,10 +150,10 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
         raise HTTPException(status_code=400, detail="Price cannot be negative")
     if payload.item_type not in ITEM_TYPES:
         raise HTTPException(status_code=400, detail=f"item_type must be one of: {', '.join(ITEM_TYPES)}")
-    # A packaged consultation's length is whatever its package says, so the hand-picked
-    # whitelist is checked only for the shelves that still pick one. 45 + 20 is not a
-    # duration anybody can choose off the buttons, and it should not become one.
+    # A packaged consultation's length defaults to its package's but is editable, so the
+    # hand-picked whitelist is checked only for the shelves that still pick off buttons.
     packaged_minutes = _packaged_duration(payload)
+    _check_packaged_minutes(payload, packaged_minutes)
     if payload.item_type in TIMED_ITEM_TYPES and packaged_minutes is None and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
         raise HTTPException(status_code=400, detail="Duration must be one of 15, 30, 45, 60, or 120 minutes")
     if payload.item_type == "session" and (not payload.sessions_online or payload.sessions_online < 1):
@@ -146,8 +161,6 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
     if payload.item_type == "session" and (not payload.sessions_offline or payload.sessions_offline < 1):
         raise HTTPException(status_code=400, detail="Offline sessions count must be at least 1")
     doc = payload.model_dump()
-    if packaged_minutes is not None:
-        doc["duration_minutes"] = packaged_minutes
     doc["price_is_total"] = payload.category in PRICE_IS_TOTAL_CATEGORIES
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = _now()
@@ -165,6 +178,7 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
     if payload.item_type not in ITEM_TYPES:
         raise HTTPException(status_code=400, detail=f"item_type must be one of: {', '.join(ITEM_TYPES)}")
     packaged_minutes = _packaged_duration(payload)
+    _check_packaged_minutes(payload, packaged_minutes)
     if payload.item_type in TIMED_ITEM_TYPES and packaged_minutes is None and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
         raise HTTPException(status_code=400, detail="Duration must be one of 15, 30, 45, 60, or 120 minutes")
     if payload.item_type == "session" and (not payload.sessions_online or payload.sessions_online < 1):
@@ -172,8 +186,6 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
     if payload.item_type == "session" and (not payload.sessions_offline or payload.sessions_offline < 1):
         raise HTTPException(status_code=400, detail="Offline sessions count must be at least 1")
     update = payload.model_dump()
-    if packaged_minutes is not None:
-        update["duration_minutes"] = packaged_minutes
     update["price_is_total"] = payload.category in PRICE_IS_TOTAL_CATEGORIES
     update["updated_at"] = _now()
     res = await v3_col("store_items").update_one({"id": item_id}, {"$set": update})

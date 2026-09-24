@@ -14,10 +14,12 @@ Kept in its own module, free of FastAPI and of the database, so the arithmetic t
 how much of a calendar an appointment takes can be read and tested on its own. Same
 arrangement as lead_mapping and branch_routing.
 
-The popup mirrors this table (CONSULTATION_PACKAGES in frontend PackagesBoard.jsx) to draw
-the dropdown and preview the length. This side is the authority: it re-derives the duration
-on the way in and ignores whatever the form sent for it, so the two can disagree about the
-wording without ever disagreeing about the minutes.
+The popup mirrors this table (CONSULTATION_PACKAGES in frontend lib/consultationPackages.js)
+to draw the dropdown and pre-fill the length.
+
+Since 2026-09-24 a package's minutes are the *default* length only: Super Admin can edit the
+duration on the item, and the store saves what was typed (5-480 mins). The package key is
+still validated here.
 """
 
 from typing import Dict, List, Optional
