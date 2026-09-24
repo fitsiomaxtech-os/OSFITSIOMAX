@@ -3322,7 +3322,9 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
     const refNo = `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`;
     const shareToken = randomToken();
     // step and visit_package are the popup's own bookkeeping, not part of the booking.
-    const { step: _step, visit_package: _pkg, ...payload } = draft;
+    const { step: _step, visit_package: _pkg, ...rest } = draft;
+    // The typed amount only means something on a package with no fixed price.
+    const payload = { ...rest, visit_package_amount: _pkg?.manual ? Number(rest.visit_package_amount) || null : null };
     const saved = await scheduleBranchAppointment(lead.id, { ...payload, ref_no: refNo, share_token: shareToken });
     toast.success(`Appointment ${draft.appointment_date} ${to12h(draft.appointment_time)} → ${draft.final_stage}`);
     setApptDraft(null);
@@ -4842,7 +4844,16 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                           <button
                             key={it.id}
                             type="button"
-                            onClick={() => setApptDraft({ ...apptDraft, visit_type: "home", visit_package_id: it.id, visit_package: { id: it.id, name: it.name }, step: "book" })}
+                            // A package with no fixed price (a Distance visit) stays on this
+                            // step so its amount can be typed below; the rest go on to the slot.
+                            onClick={() => setApptDraft({
+                              ...apptDraft,
+                              visit_type: "home",
+                              visit_package_id: it.id,
+                              visit_package: { id: it.id, name: it.name, manual: Boolean(it.manual_price) },
+                              visit_package_amount: it.manual_price ? (apptDraft.visit_package_id === it.id ? apptDraft.visit_package_amount : "") : null,
+                              step: it.manual_price ? "package" : "book",
+                            })}
                             className={`flex items-start justify-between gap-3 rounded-xl border-2 p-3 text-left transition ${
                               picked ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"
                             }`}
@@ -4856,7 +4867,9 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                               </span>
                             </span>
                             <span className="flex shrink-0 flex-col items-end gap-1">
-                              <span className="text-base font-extrabold text-slate-900">₹{total}</span>
+                              {it.manual_price
+                                ? <span className="text-xs font-bold text-amber-700">Enter amount</span>
+                                : <span className="text-base font-extrabold text-slate-900">₹{total}</span>}
                               {picked && <CheckCircle2 className="h-5 w-5 text-teal-600" />}
                             </span>
                           </button>
@@ -4864,12 +4877,47 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                       })}
                     </div>
                   )}
+                  {/* The amount for a package Super Admin left unpriced. Typed here, by the
+                      desk that agreed it with the patient, and charged exactly as typed. */}
+                  {apptDraft.visit_package?.manual && (
+                    <div className="mt-4 rounded-xl border-2 border-amber-200 bg-amber-50 p-3" data-testid="branch-appt-package-amount">
+                      <label className="mb-1 block text-xs font-bold text-amber-800">Amount for {apptDraft.visit_package.name}</label>
+                      <div className="relative max-w-xs">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-amber-700">₹</span>
+                        <Input
+                          type="number"
+                          min="1"
+                          autoFocus
+                          value={apptDraft.visit_package_amount ?? ""}
+                          onChange={(e) => setApptDraft({ ...apptDraft, visit_package_amount: e.target.value })}
+                          placeholder="Enter the amount"
+                          className="bg-white pl-7"
+                          data-testid="branch-appt-package-amount-input"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-3 py-2 sm:px-5 sm:py-2.5">
                   <Button variant="outline" size="sm" onClick={() => setApptDraft({ ...apptDraft, step: "visit" })} data-testid="branch-appt-package-back">
                     <ChevronLeft className="mr-1 h-4 w-4" />Back
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setApptDraft(null)}>Cancel</Button>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setApptDraft(null)}>Cancel</Button>
+                    {apptDraft.visit_package?.manual && (
+                      <Button
+                        size="sm"
+                        className="bg-teal-600 text-white hover:bg-teal-700"
+                        onClick={() => {
+                          if (!(Number(apptDraft.visit_package_amount) > 0)) { toast.error("Enter the amount"); return; }
+                          setApptDraft({ ...apptDraft, step: "book" });
+                        }}
+                        data-testid="branch-appt-package-continue"
+                      >
+                        Continue
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -5265,6 +5313,11 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                   if (!apptDraft.appointment_date) { toast.error("Pick a date"); return; }
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
                   if (!apptDraft.appointment_time) { toast.error("Type the time agreed with the patient"); return; }
+                  if (apptDraft.visit_type === "home" && apptDraft.visit_package?.manual && !(Number(apptDraft.visit_package_amount) > 0)) {
+                    toast.error("Enter the amount for the House Visit package");
+                    setApptDraft({ ...apptDraft, step: "package" });
+                    return;
+                  }
                   if (apptDraft.visit_type === "home" && !apptDraft.visit_package_id) {
                     toast.error("Pick a House Visit package");
                     setApptDraft({ ...apptDraft, step: "package" });

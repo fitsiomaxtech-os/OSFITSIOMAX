@@ -713,6 +713,9 @@ class V3BranchAppointmentInput(BaseModel):
     # "home". Only the id travels: the name and price are read off the catalogue here, so
     # the figure on the booking is the one the catalogue charges.
     visit_package_id: Optional[str] = None
+    # Typed by the Branch Admin at booking, and only read for a package marked
+    # manual_price (a Distance visit): the catalogue carries no figure for those.
+    visit_package_amount: Optional[float] = None
 
 
 # The catalogue shelf a house-visit consultation is sold from — PackagesBoard's
@@ -720,7 +723,7 @@ class V3BranchAppointmentInput(BaseModel):
 HOME_VISIT_CONSULTATION_CATEGORY = "home_visit_consultation"
 
 
-def _visit_package_fields(item: Optional[dict]) -> dict:
+def _visit_package_fields(item: Optional[dict], manual_amount: Optional[float] = None) -> dict:
     """The House Visit package as it is kept on the lead and its appointment, or the same
     keys emptied. Priced the way the catalogue prices it: a per-visit rate times the
     visits, unless the row already holds the whole fee."""
@@ -728,10 +731,14 @@ def _visit_package_fields(item: Optional[dict]) -> dict:
         return {"visit_package_id": None, "visit_package_name": None, "visit_package_price": None, "visit_package_visits": None}
     rate = float(item.get("price_offline") or 0)
     visits = int(item.get("sessions_offline") or 0)
+    if item.get("manual_price"):
+        price = round(float(manual_amount or 0))
+    else:
+        price = round(rate if item.get("price_is_total") else rate * visits)
     return {
         "visit_package_id": item.get("id"),
         "visit_package_name": item.get("name"),
-        "visit_package_price": round(rate if item.get("price_is_total") else rate * visits),
+        "visit_package_price": price,
         "visit_package_visits": visits,
     }
 
@@ -770,6 +777,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     # A house visit is booked on a package or not at all: the consultant is going to the
     # patient's door, and what that visit costs is agreed before the day is.
     visit_package = None
+    manual_amount = payload.visit_package_amount
     if booking and payload.visit_type == "home":
         if not payload.visit_package_id:
             raise HTTPException(status_code=400, detail="Pick a House Visit package")
@@ -778,7 +786,13 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         )
         if not visit_package:
             raise HTTPException(status_code=404, detail="House Visit package not found")
-    package_fields = _visit_package_fields(visit_package)
+        # Moving an existing booking to another slot does not ask for the amount again: the
+        # figure already agreed for this same package stands.
+        if not (manual_amount and manual_amount > 0) and lead.get("visit_package_id") == visit_package.get("id"):
+            manual_amount = lead.get("visit_package_price")
+        if visit_package.get("manual_price") and not (manual_amount and manual_amount > 0):
+            raise HTTPException(status_code=400, detail=f"Enter the amount for {visit_package.get('name') or 'this package'}")
+    package_fields = _visit_package_fields(visit_package, manual_amount)
     physio = await v3_col("doctors").find_one(
         {"id": payload.physio_id}, {"_id": 0, "full_name": 1, "slot_details": 1, "meet_link": 1}
     )

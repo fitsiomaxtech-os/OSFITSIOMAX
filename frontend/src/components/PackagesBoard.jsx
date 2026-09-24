@@ -687,6 +687,11 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   const isZumba = category === "zumba";
   const isOfflineOnly = OFFLINE_ONLY_CATEGORIES.has(category);
   const isHomeVisit = HOME_VISIT_CATEGORIES.has(category);
+  // Only the Consultant shelf is booked from the Appointment popup, which is where the
+  // Branch Admin types the amount; nothing reads the flag anywhere else yet.
+  const canManualPrice = category === "home_visit_consultation";
+  const [manualPrice, setManualPrice] = useState(Boolean(item?.manual_price));
+  const isManual = canManualPrice && manualPrice;
   // Rehab and anything else sold as a whole course: the two price boxes hold the course
   // amount, not a per-session rate. What is stored is still the rate (see submit) — this is
   // only about which figure the person filling the form is asked for.
@@ -779,10 +784,11 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
         // divided by the session count and multiplied back out on the way to the bill,
         // which returned the right figure but meant the catalogue held 1,200 for a 31,200
         // course — a number nobody had agreed and every reader had to be taught to hide.
-        price_online: isZumba ? perClass : (Number(isOfflineOnly ? priceOffline : priceOnline) || 0),
-        price_offline: isZumba ? perClass : (Number(priceOffline) || 0),
+        price_online: isZumba ? perClass : isManual ? 0 : (Number(isOfflineOnly ? priceOffline : priceOnline) || 0),
+        price_offline: isZumba ? perClass : isManual ? 0 : (Number(priceOffline) || 0),
         sessions_online: sessions,
         sessions_offline: sessions,
+        manual_price: isManual,
       };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
@@ -923,11 +929,28 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-amber-800">
                   {isHomeVisit ? <><Home className="h-3 w-3" />Home Visit</> : <><MapPin className="h-3 w-3" />Offline Mode</>}
                 </p>
+                {canManualPrice && (
+                  <label className="mb-2 flex cursor-pointer items-start gap-2 rounded-md border border-amber-200 bg-white px-2.5 py-2 text-[11px] text-amber-900" data-testid="session-create-manual-price">
+                    <input type="checkbox" className="mt-0.5" checked={manualPrice} onChange={(e) => setManualPrice(e.target.checked)} />
+                    <span>
+                      <span className="block font-semibold">Branch Admin enters the amount</span>
+                      <span className="block text-amber-700">No fixed price — typed at booking, e.g. a Distance visit.</span>
+                    </span>
+                  </label>
+                )}
+                {isManual ? (
+                  <p className="mb-2 rounded-md bg-amber-100/70 px-2.5 py-2 text-[11px] font-semibold text-amber-800" data-testid="session-create-manual-note">
+                    Amount: set by the Branch Admin at booking
+                  </p>
+                ) : (
+                <>
                 <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">{isCourseTotal ? `Amount for ${sessions} Sessions` : isHomeVisit ? "Per Visit Amount" : "Per Session Amount"}</label>
                 <div className="relative mb-2">
                   <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-amber-600">₹</span>
                   <Input type="number" min="0" value={priceOffline} onChange={(e) => setPriceOffline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-offline" />
                 </div>
+                </>
+                )}
                 <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">{isHomeVisit ? "Visits" : "Sessions"}</label>
                 {/* One count behind both boxes — submit writes the same number to
                     sessions_online and sessions_offline, so two independent inputs would be
@@ -943,7 +966,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                   className={`h-8 text-sm ${isZumba ? "bg-amber-50" : ""}`}
                   data-testid="session-create-sessions-offline"
                 />
-{!isCourseTotal && (
+{!isCourseTotal && !isManual && (
                   <div className="mt-2 flex items-center justify-between border-t border-amber-200 pt-1.5">
                     <span className="text-[11px] font-semibold text-amber-700">Total Amount</span>
                     <span className="text-sm font-extrabold text-amber-900" data-testid="session-create-total-offline">₹{totalOffline}</span>
@@ -1057,6 +1080,7 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
   // filter needs: this is sold in the room, and here is what it costs.
   const showOffline = mode !== "online" || offlineOnly;
   const homeVisit = HOME_VISIT_CATEGORIES.has(item.category);
+  const manual = homeVisit && Boolean(item.manual_price);
   return (
   <div className={`grid gap-2 ${mode === "all" && !offlineOnly ? "grid-cols-2" : "grid-cols-1"}`} data-testid={testid}>
     {showOnline && (
@@ -1078,11 +1102,13 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
           {homeVisit ? <Home className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}{homeVisit ? "Home Visit" : offlineOnly ? "At the gym" : "Offline Mode"}
         </p>
         <div className="space-y-1.5 text-xs text-amber-800">
-          {!courseOnly && <div className="flex items-center justify-between"><span>{homeVisit ? "Per Visit" : "Per Session"}</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>}
+          {!courseOnly && !manual && <div className="flex items-center justify-between"><span>{homeVisit ? "Per Visit" : "Per Session"}</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>}
           <div className="flex items-center justify-between"><span>{homeVisit ? "Total Visits" : "Total Sessions"}</span><span className="font-bold">{item.sessions_offline ?? 0} {homeVisit ? "Visits" : "Sessions"}</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
-            <span className="text-sm font-extrabold text-amber-900">₹{packageTotal(item, "offline")}</span>
+            {manual
+              ? <span className="text-xs font-bold text-amber-900" data-testid={testid ? `${testid}-manual` : undefined}>Set by Branch Admin at booking</span>
+              : <span className="text-sm font-extrabold text-amber-900">₹{packageTotal(item, "offline")}</span>}
           </div>
         </div>
       </div>

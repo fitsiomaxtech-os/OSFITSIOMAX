@@ -1117,6 +1117,21 @@ SESSION_ITEM_RATE_PER_SESSION_OFFLINE = 800
 # it is created, without anyone remembering to mark it.
 COURSE_PRICED_CATEGORIES = ("zumba", "rehab", "fitness")
 
+# Home Visit's two shelves (Consultant and Physiotherapy). A visit to somebody's house is
+# priced by Super Admin package by package -- a Standard visit and a Distance visit are not
+# the same trip -- so the flat per-session rate below is not theirs either. Left in, the
+# pass put every one of them back to Rs.800 on each restart, which is what "I changed it to
+# 1600 and it went back to 800" was.
+HOME_VISIT_CATEGORIES = ("home_visit", "home_visit_consultation")
+
+
+async def _home_visit_item_ids() -> set:
+    rows = await v3_col("store_items").find(
+        {"category": {"$in": list(HOME_VISIT_CATEGORIES)}},
+        {"_id": 0, "id": 1},
+    ).to_list(500)
+    return {r["id"] for r in rows}
+
 
 async def _course_priced_item_ids() -> set:
     rows = await v3_col("store_items").find(
@@ -1255,8 +1270,8 @@ async def normalize_session_item_prices() -> None:
     themselves — it must never be pre-multiplied here.) Idempotent/safe to
     re-run: only writes an item whose price doesn't already match."""
     session_items = await v3_col("store_items").find(
-        # Course-priced shelves excluded: see COURSE_PRICED_CATEGORIES above.
-        {"item_type": "session", "category": {"$nin": list(COURSE_PRICED_CATEGORIES)}},
+        # Course-priced and Home Visit shelves excluded: see the two lists above.
+        {"item_type": "session", "category": {"$nin": list(COURSE_PRICED_CATEGORIES) + list(HOME_VISIT_CATEGORIES)}},
         {"_id": 0},
     ).to_list(500)
     for item in session_items:
@@ -1283,7 +1298,7 @@ async def normalize_lead_session_package_prices() -> None:
     # Same exemption as the store items above, one layer down: a lead holding a Zumba
     # membership or a Rehab course is holding a real course price, and recomputing it at the
     # flat rate would rewrite that patient's figure to one nobody quoted them.
-    course_items = await _course_priced_item_ids()
+    course_items = await _course_priced_item_ids() | await _home_visit_item_ids()
     leads = await v3_col("leads").find(
         {"session_package_sessions": {"$ne": None}, "treatment_fee_paid": None},
         {"_id": 0, "id": 1, "session_package_sessions": 1, "session_package_price": 1, "session_package_mode": 1, "session_package_id": 1},

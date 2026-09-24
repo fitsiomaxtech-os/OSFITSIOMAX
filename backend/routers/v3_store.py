@@ -97,6 +97,10 @@ class StoreItemIn(BaseModel):
     # session. Set from the category on the way in, never accepted from the client — the
     # two must not be able to disagree about what the number on the row means.
     price_is_total: Optional[bool] = None
+    # The amount is not set here but typed by the Branch Admin when the package is booked
+    # (Home Visit > Consultant, e.g. a Distance visit, whose cost depends on how far the
+    # trip is). The row's own price is then only a placeholder and is never charged.
+    manual_price: Optional[bool] = False
 
 
 class StoreItemOut(StoreItemIn):
