@@ -2,7 +2,9 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import {
   Activity,
   AlertCircle,
+  ArrowDown,
   ArrowLeftRight,
+  ArrowUp,
   BadgeIndianRupee,
   BarChart3,
   Building2,
@@ -374,7 +376,7 @@ export const BusinessLeadsDashboard = ({ currentUser = null, tab, onTabChange })
           );
         })}
         <div className="ml-auto flex flex-shrink-0 items-center gap-1.5 pb-1.5 pl-2">
-          <Button size="sm" onClick={() => setShowCreateLead(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="bd-quick-add-lead-btn">
+          <Button size="sm" onClick={() => setShowCreateLead(true)} className={`bg-sky-600 hover:bg-sky-700 ${activeTab === "dashboard" ? "hidden sm:inline-flex" : ""}`} data-testid="bd-quick-add-lead-btn">
             <UserPlus className="mr-1 h-4 w-4" /> Add Lead
           </Button>
           {/* The same Refresh as Branch Admin > Branch Leads: grey, icon-only, square,
@@ -423,6 +425,7 @@ export const BusinessLeadsDashboard = ({ currentUser = null, tab, onTabChange })
           onRefresh={refreshAll}
           onPulled={reloadAll}
           onBranchSwap={() => setSwapPicking(true)}
+          onAddLead={() => setShowCreateLead(true)}
           onOpenLead={openLeadDetail}
         />
       )}
@@ -1127,6 +1130,7 @@ function DashboardTab({
   onRefresh,
   onPulled,
   onBranchSwap,
+  onAddLead,
   onOpenLead,
 }) {
   // Which tab of the eight is on screen. OnBoarding, because this desk's own pipeline is
@@ -1321,14 +1325,19 @@ function DashboardTab({
           Analytics carry this same toolbar rather than a bare row of dates and actions
           with a filter of their own underneath. The dates and the four actions stay on all
           eight, because every one of them means the same thing on every one of them. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bd-dash-tools">
+      {/* On a phone the tools are one line: the search field, then every action as a bare
+          icon, Add Lead included (the strip's own Add Lead steps aside below sm). The five
+          ranges drop to a line of their own under it -- they are a choice among five, not
+          an action, and squeezing them into icons would lose which one is lit. What does
+          not fit a narrow phone scrolls sideways instead of wrapping. */}
+      <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 [scrollbar-width:none] sm:flex-wrap sm:gap-2 sm:overflow-visible [&::-webkit-scrollbar]:hidden" data-testid="bd-dash-tools">
         {/* The open list's own field. `flex-basis: 0` (from flex-1) is what keeps it off a
             line of its own: the row is measured as if this were zero wide and it then
             grows into whatever the other controls left, capped so a search box is not
             stretched across a 1600px board it cannot use. Full width on a phone, where it
             is the only thing on its line anyway. */}
         {searchHint && (
-          <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[220px] sm:flex-1">
+          <div className="relative min-w-[8rem] flex-1 sm:w-auto sm:min-w-[160px] sm:max-w-[220px]">
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
             <Input
               className="h-10 pl-9"
@@ -1350,7 +1359,7 @@ function DashboardTab({
             inline row under lg and keeps a full-width one underneath; this bar has no
             second row to fall back to, so the width is given here instead. From sm the
             buttons go flex-none and size themselves, and the wrapper gets out of the way. */}
-        <div className="w-full shrink-0 sm:w-auto">
+        <div className="order-last hidden w-full shrink-0 sm:order-none sm:block sm:w-auto">
           <QuickDateFilterBar
             value={quickDate}
             onChange={onQuickDate}
@@ -1408,17 +1417,29 @@ function DashboardTab({
             Wrappable, and deliberately not shrink-0: seven controls come to about 390px
             and a 375px phone is 15px short of that, so the alternative to a second line
             here is Pull From Sheet hanging off the edge of the screen. */}
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+        <div className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1.5 sm:shrink sm:flex-wrap">
           {onCards && (
             <>
               {/* Words rather than an arrow, for the reason Branch Admin's copy gives: two
                   arrow states say which way the glyph points and never which way the list
                   is about to go. The closed control says the order the list is already in. */}
+              {/* Phone: the order as one arrow that flips it -- down for newest first, up
+                  for oldest first, with the words on title and aria-label. */}
+              <button
+                type="button"
+                onClick={() => setSortOrder(sortOrder === "newest" ? "oldest" : "newest")}
+                title={sortOrder === "newest" ? "New to First — tap for Old to First" : "Old to First — tap for New to First"}
+                aria-label={sortOrder === "newest" ? "Sort: New to First" : "Sort: Old to First"}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 sm:hidden"
+                data-testid="bd-sort-order-toggle"
+              >
+                {sortOrder === "newest" ? <ArrowDown className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+              </button>
               <Select value={sortOrder} onValueChange={setSortOrder}>
                 <SelectTrigger
                   title="Order the list by date"
                   aria-label="Sort order"
-                  className="h-10 w-[112px] shrink-0 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-none transition-colors hover:bg-slate-50 focus:ring-2 focus:ring-sky-200 sm:w-[124px]"
+                  className="hidden h-10 w-[112px] shrink-0 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-none transition-colors hover:bg-slate-50 focus:ring-2 focus:ring-sky-200 sm:flex sm:w-[124px]"
                   data-testid="bd-sort-order"
                 >
                   <SelectValue />
@@ -1470,6 +1491,7 @@ function DashboardTab({
             testid="bd-date-filter"
             centered
             iconOnly
+            phoneIconOnly
           />
 
           <Button
@@ -1503,7 +1525,28 @@ function DashboardTab({
             noSourcesHint="No Google Sheet source is configured yet — add one under Settings → Marketing Source → Lead Sources."
             iconOnly
           />
+
+          <Button
+            onClick={onAddLead}
+            title="Add Lead"
+            aria-label="Add Lead"
+            className="h-10 w-10 shrink-0 bg-sky-600 p-0 text-white hover:bg-sky-700 sm:hidden"
+            data-testid="bd-toolbar-add-lead-btn"
+          >
+            <UserPlus className="h-4 w-4" />
+          </Button>
         </div>
+      </div>
+
+      {/* The five ranges' phone line -- see the note on the tools row above. */}
+      <div className="sm:hidden">
+        <QuickDateFilterBar
+          value={quickDate}
+          onChange={onQuickDate}
+          testid="bd-quick-date-phone"
+          inline
+          showCustom={false}
+        />
       </div>
 
       {/* The two card rows. Their empty and loading states are here rather than at the top

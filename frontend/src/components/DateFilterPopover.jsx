@@ -196,11 +196,14 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
           onClick={() => setOpen(true)}
           title={activeLabel}
           aria-label={activeLabel}
-          className={`h-10 ${iconOnly && !isActive ? "w-10 px-0" : ""} ${isActive ? "rounded-r-none border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : ""}`}
+          className={`h-10 ${iconOnly && !isActive ? "w-10 px-0" : ""} ${
+            phoneIconOnly && iconOnly && isActive ? "w-10 px-0 sm:w-auto sm:px-4" : ""
+          } ${isActive ? "rounded-r-none border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : ""}`}
           data-testid={`${testid}-btn`}
         >
-          <CalendarIcon className={`h-4 w-4 ${iconOnly && !isActive ? "" : "mr-2"}`} />
-          {(!iconOnly || isActive) && activeLabel}
+          <CalendarIcon className={`h-4 w-4 ${iconOnly && !isActive ? "" : phoneIconOnly && iconOnly ? "sm:mr-2" : "mr-2"}`} />
+          {(!iconOnly || isActive) &&
+            (phoneIconOnly && iconOnly ? <span className="hidden sm:inline">{activeLabel}</span> : activeLabel)}
         </Button>
         {isActive && (
           <button
