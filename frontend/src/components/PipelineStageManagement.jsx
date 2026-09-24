@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, Flag, GripVertical, AlertTriangle, Lock, Unlock, KeyRound, Check } from "lucide-react";
+import { Plus, Pencil, Trash2, Flag, GripVertical, AlertTriangle, Lock, KeyRound, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/sonner";
 import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone, getPhysioDayLock, setPhysioDayLock, getLeadDeleteButton, setLeadDeleteButton, getSaConsultBranchesSetting, setSaConsultBranchesSetting } from "@/lib/api";
 
@@ -662,122 +663,53 @@ export const PipelineStageManagement = ({ leading = null }) => {
             <Lock className="mr-1 h-4 w-4" /> Lock
           </Button>
         </CardHeader>
-        {/* One line each: the name on the left, its button on the right. The full warning
-            is in each button's confirm box, which is read before anything is wiped. */}
-        <CardContent className="grid gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3" data-testid="physio-day-lock-card">
-            <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-              Physio Treatment Days lock
-              {dayLock !== null && (
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${dayLock ? "bg-slate-200 text-slate-700" : "bg-amber-100 text-amber-700"}`}>
-                  {dayLock ? "LOCKED" : "UNLOCKED"}
+        {/* One list, a line each, the way the Super Admin's branch On/Off popup reads: the
+            name on the left, its switch or button on the right. The full warning is in each
+            one's confirm box, which is read before anything changes or is wiped. */}
+        <CardContent>
+          <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
+            {[
+              { key: "physio-day-lock", label: "Physio Treatment Days lock", value: dayLock, saving: savingDayLock, onFlip: toggleDayLock, on: "LOCKED", off: "UNLOCKED" },
+              { key: "lead-delete-button", label: "Branch Leads delete button", value: deleteButton, saving: savingDeleteButton, onFlip: toggleDeleteButton, on: "ON", off: "OFF" },
+              { key: "sa-consult-branches", label: "Super Admin branch On/Off", value: saBranches, saving: savingSaBranches, onFlip: toggleSaBranches, on: "ON", off: "OFF" },
+            ].map((row) => (
+              <label key={row.key} className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50" data-testid={`${row.key}-card`}>
+                <span className="text-sm font-medium text-slate-800">{row.label}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className={`text-[10px] font-bold uppercase ${row.value ? "text-emerald-600" : "text-slate-400"}`}>
+                    {row.value === null ? "…" : row.saving ? "Saving" : row.value ? row.on : row.off}
+                  </span>
+                  <Switch
+                    checked={!!row.value}
+                    disabled={row.value === null || row.saving}
+                    // The toggle functions confirm first and flip from the saved value, so
+                    // the switch only moves once the server has said so.
+                    onCheckedChange={() => row.onFlip()}
+                    className="data-[state=checked]:bg-emerald-600"
+                    data-testid={`${row.key}-toggle`}
+                  />
                 </span>
-              )}
-            </p>
-            <Button
-              variant="outline"
-              onClick={toggleDayLock}
-              disabled={dayLock === null || savingDayLock}
-              data-testid="physio-day-lock-toggle"
-            >
-              {dayLock === null ? "Loading..."
-                : savingDayLock ? "Saving..."
-                : dayLock ? (<><Unlock className="mr-1 h-4 w-4" /> Unlock</>)
-                : (<><Lock className="mr-1 h-4 w-4" /> Lock</>)}
-            </Button>
-          </div>
-          {/* The one switch here that adds a button to somebody else's screen rather than
-              wiping something. It sits in the Danger Zone because of what that button does,
-              not because turning it on destroys anything by itself. */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3" data-testid="lead-delete-button-card">
-            <div className="min-w-[14rem] flex-1">
-              <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                Branch Leads delete button
-                {deleteButton !== null && (
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${deleteButton ? "bg-rose-100 text-rose-700" : "bg-slate-200 text-slate-700"}`}>
-                    {deleteButton ? "ON" : "OFF"}
-                  </span>
-                )}
-              </p>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                The bin icon in the Action column. It deletes the patient outright — treatment
-                slots, collected payments, appointments, documents and portal login included.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              onClick={toggleDeleteButton}
-              disabled={deleteButton === null || savingDeleteButton}
-              data-testid="lead-delete-button-toggle"
-            >
-              {deleteButton === null ? "Loading..."
-                : savingDeleteButton ? "Saving..."
-                : deleteButton ? (<><Lock className="mr-1 h-4 w-4" /> Turn off</>)
-                : (<><Unlock className="mr-1 h-4 w-4" /> Turn on</>)}
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3" data-testid="sa-consult-branches-card">
-            <div className="min-w-[14rem] flex-1">
-              <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                Super Admin branch On/Off
-                {saBranches !== null && (
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${saBranches ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
-                    {saBranches ? "ON" : "OFF"}
-                  </span>
-                )}
-              </p>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                The branch icon on the Super Admin's My Consultation. Off hides it and lists
-                the Super Admin on every branch's Consultant Calendar.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              onClick={toggleSaBranches}
-              disabled={saBranches === null || savingSaBranches}
-              data-testid="sa-consult-branches-toggle"
-            >
-              {saBranches === null ? "Loading..."
-                : savingSaBranches ? "Saving..."
-                : saBranches ? (<><Lock className="mr-1 h-4 w-4" /> Turn off</>)
-                : (<><Unlock className="mr-1 h-4 w-4" /> Turn on</>)}
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-            <p className="text-sm font-semibold text-red-800">Reset all leads to a fresh state</p>
-            <Button
-              variant="outline"
-              className="border-red-300 text-red-700 hover:bg-red-100"
-              onClick={handleResetAllLeads}
-              disabled={resetting}
-              data-testid="reset-all-leads-btn"
-            >
-              <Trash2 className="mr-1 h-4 w-4" /> {resetting ? "Resetting..." : "Reset All Leads"}
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-            <p className="text-sm font-semibold text-red-800">Reset all payments to a fresh state</p>
-            <Button
-              variant="outline"
-              className="border-red-300 text-red-700 hover:bg-red-100"
-              onClick={handleResetAllPayments}
-              disabled={resettingPayments}
-              data-testid="reset-all-payments-btn"
-            >
-              <Trash2 className="mr-1 h-4 w-4" /> {resettingPayments ? "Resetting..." : "Reset All Payments"}
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-            <p className="text-sm font-semibold text-red-800">Reset all users to a fresh state (Without Super Admin)</p>
-            <Button
-              variant="outline"
-              className="border-red-300 text-red-700 hover:bg-red-100"
-              onClick={handleResetAllUsers}
-              disabled={resettingUsers}
-              data-testid="reset-all-users-btn"
-            >
-              <Trash2 className="mr-1 h-4 w-4" /> {resettingUsers ? "Resetting..." : "Reset All Users"}
-            </Button>
+              </label>
+            ))}
+            {[
+              { key: "reset-all-leads-btn", label: "Reset all leads to a fresh state", busy: resetting, onClick: handleResetAllLeads, text: "Reset All Leads" },
+              { key: "reset-all-payments-btn", label: "Reset all payments to a fresh state", busy: resettingPayments, onClick: handleResetAllPayments, text: "Reset All Payments" },
+              { key: "reset-all-users-btn", label: "Reset all users to a fresh state (Without Super Admin)", busy: resettingUsers, onClick: handleResetAllUsers, text: "Reset All Users" },
+            ].map((row) => (
+              <div key={row.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+                <span className="text-sm font-medium text-red-700">{row.label}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-red-300 text-red-700 hover:bg-red-50"
+                  onClick={row.onClick}
+                  disabled={row.busy}
+                  data-testid={row.key}
+                >
+                  <Trash2 className="mr-1 h-4 w-4" /> {row.busy ? "Resetting..." : row.text}
+                </Button>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
