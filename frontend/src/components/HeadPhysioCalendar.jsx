@@ -119,13 +119,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
   // a Head Physio's day holds consultations (booked from Branch Leads → Appointment);
   // a Physio's day holds treatment sessions; a Coach's day holds diet check-ins.
   const purpose = isCoach ? "Diet Check-ins" : isRehab ? "Rehab Sessions" : isPhysio ? "Treatment Sessions" : "Consultations";
-  const purposeLine = isCoach
-    ? "Diet check-in days only — booked against a patient's diet plan."
-    : isRehab
-    ? "Rehab sessions only — booked against a patient's rehab course."
-    : isPhysio
-    ? "Treatment sessions only — booked against a patient's session package."
-    : "Consultations only — booked from Branch Leads → Appointment.";
 
   const [doctors, setDoctors] = useState([]);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
@@ -707,11 +700,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
             </h3>
             <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{doctors.length}</span>
           </div>
-          <p className="mt-1 text-[10px] font-medium text-violet-500">{purposeLine}</p>
-          {/* Where this list comes from, named because it is now somewhere the reader can
-              act: HR Admin hires the person, but which desk they hold at which branch —
-              which is all this list is — is answered on the Team tab. */}
-          <p className="mt-0.5 text-[10px] text-slate-400">Staffed in MANAGER → TEAM</p>
         </div>
 
         <div className="flex gap-1.5 overflow-x-auto p-2 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible" data-testid="doctor-list">

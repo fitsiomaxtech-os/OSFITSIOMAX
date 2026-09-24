@@ -73,10 +73,6 @@ export const ZumbaMastersPanel = ({ branchId }) => {
             <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
               <Music className="h-4 w-4 text-violet-500" /> Zumba Masters
             </h3>
-            <p className="mt-1 text-[11px] text-slate-400">
-              Who takes each class. A customer registering is filed to whoever holds their slot, so changing this moves them with it.
-            </p>
-            <p className="mt-0.5 text-[10px] text-slate-400">Accounts are created in HR Admin</p>
           </div>
           <Button size="sm" variant="outline" onClick={load} disabled={loading} className="h-8 shrink-0 text-xs" data-testid="zumba-masters-refresh">
             <RefreshCw className={`mr-1 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
