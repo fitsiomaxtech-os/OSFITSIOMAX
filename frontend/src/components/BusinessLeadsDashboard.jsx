@@ -202,9 +202,14 @@ const dateParamsOf = (filter) => {
  *                     sub-tab acts as them; without this those tabs would be working on
  *                     behalf of nobody.
  */
-export const BusinessLeadsDashboard = ({ currentUser = null }) => {
+// `tab` / `onTabChange` hand the tab to the host, whose phone bottom bar switches it; with
+// them the strip's tab buttons stand down below md and only its actions stay.
+export const BusinessLeadsDashboard = ({ currentUser = null, tab, onTabChange }) => {
   // Holds a main tab key, or -- while Settings is open -- one of SETTINGS_SUB_VIEWS.
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [ownTab, setOwnTab] = useState("dashboard");
+  const activeTab = tab ?? ownTab;
+  const setActiveTab = onTabChange ?? setOwnTab;
+  const phoneFooter = !!onTabChange;
   const [loading, setLoading] = useState(false);
 
   const [summary, setSummary] = useState(null);
@@ -356,7 +361,7 @@ export const BusinessLeadsDashboard = ({ currentUser = null }) => {
               type="button"
               // Settings has no view of its own -- it opens on the first of its two.
               onClick={() => setActiveTab(tab.key === "settings" ? SETTINGS_SUB_VIEWS[0] : tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
+              className={`${phoneFooter ? "hidden md:flex" : "flex"} shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
                 isActive
                   ? "border-sky-500 text-sky-700"
                   : "border-transparent text-slate-400 hover:text-slate-600"

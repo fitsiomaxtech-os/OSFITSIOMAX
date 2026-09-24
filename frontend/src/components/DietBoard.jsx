@@ -10,6 +10,7 @@ import {
   Search,
   Stethoscope,
   Upload,
+  UserCircle,
   Users,
   X,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import { LeadMarks } from "@/components/ui/lead-marks";
 import { ZoomableImage, ZoomablePdf } from "@/components/ui/zoomable-view";
 import { dietChartUrl, dietConsultations, dietPatients, dietSessions, recommendDietChart, saveDietConsultationReport, sendDietChart } from "@/lib/api";
 import { to12h } from "@/lib/time";
+import { MyProfilePage } from "@/components/MyProfilePage";
 
 /**
  * Diet Master View — the Nutrition Coach's own board.
@@ -102,7 +104,10 @@ const StatTile = ({ label, value, color = "#64748b", onClick, active, testid }) 
 // One colour per tile, so a glance at the row says which number is which.
 const TILE_COLORS = { referred: "#0ea5e9", waiting: "#f59e0b", booked: "#10b981", neutral: "#64748b" };
 
-export const DietBoard = ({ coachId } = {}) => {
+// `user` / `roleLabel` / `onLogout` add the phone bar's Profile stop (the coach's own
+// board only -- Operations mounts this per coach without them). My Profile stands in the
+// board's place with the bar under it, and Logout sits on its Security tab.
+export const DietBoard = ({ coachId, user, roleLabel, onLogout } = {}) => {
   const [activeTab, setActiveTab] = useState("consultations");
   const [consultCount, setConsultCount] = useState(0);
   const [patientsCount, setPatientsCount] = useState(0);
@@ -154,6 +159,10 @@ export const DietBoard = ({ coachId } = {}) => {
         <PatientsTab coachId={coachId} onCountChange={setPatientsCount} toolbarSlot={slotFor("patients")} />
       </div>
 
+      {user && activeTab === "profile" && (
+        <MyProfilePage user={user} roleLabel={roleLabel} onBack={() => setActiveTab("consultations")} onLogout={onLogout} phoneBar />
+      )}
+
       {/* Phones only — the tab strip above is desk-only. */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500 pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="diet-bottom-nav">
         <div className="mx-auto flex max-w-lg items-stretch justify-around">
@@ -181,6 +190,17 @@ export const DietBoard = ({ coachId } = {}) => {
               </button>
             );
           })}
+          {user && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("profile")}
+              className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition ${activeTab === "profile" ? "text-white" : "text-slate-200"}`}
+              data-testid="diet-bottom-tab-profile"
+            >
+              <UserCircle className="h-5 w-5" />
+              Profile
+            </button>
+          )}
         </div>
       </div>
     </div>

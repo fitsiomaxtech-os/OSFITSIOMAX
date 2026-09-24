@@ -537,6 +537,8 @@ export const CRMPage = ({ auth, onLogout }) => {
   // not. So the header only carries them where the whole page is this board and there is
   // no nav above it.
   const [presalesView, setPresalesView] = useState("leads");
+  // BDE's board tab, held here so the phone footer can switch it.
+  const [bdTab, setBdTab] = useState("dashboard");
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackUnread, setFeedbackUnread] = useState(0);
 
@@ -904,10 +906,50 @@ export const CRMPage = ({ auth, onLogout }) => {
   // Logout lives on My Profile's Security tab rather than in the header. BDE and Accountant
   // have no bottom bar, so they keep the header avatar and lose only the logout beside it.
   // A Consultant's bar is sm:hidden where the others are md:hidden, hence two breakpoints.
-  const profileInFooter = showSuperAdminBoard || showHumanResourceBoard || showHeadPhysioBoard;
-  const logoutInProfile = profileInFooter || showPhysioBoard || showBranchBoard || showBusinessDevBoard || showAccountantBoard;
+  // The boards with no bar of their own get this page's phone footer (see phoneFooter below).
+  const showSalesHeadBoard = role === "sales_head";
+  const genericFooter = showBusinessDevBoard || showAccountantBoard || showSalesHeadBoard || showMarketingHeadBoard || showZumbaBoard;
+  const profileInFooter = showSuperAdminBoard || showHumanResourceBoard || showHeadPhysioBoard || showDietBoard || genericFooter;
+  const logoutInProfile = profileInFooter || showPhysioBoard || showBranchBoard;
   const profileInFooterClass = !profileInFooter ? "flex" : showHeadPhysioBoard ? "hidden sm:flex" : "hidden md:flex";
   const logoutInProfileClass = !logoutInProfile ? "" : showHeadPhysioBoard ? "hidden sm:inline-flex" : "hidden md:inline-flex";
+
+  // The phone footer for boards that have none of their own, in Super Admin's shape: a few
+  // direct stops, a More sheet where there are more, and My Profile last. Every stop closes
+  // My Profile on the way, the same as Super Admin's bar.
+  const bdStop = (key, label, icon) => ({
+    key, label, icon,
+    active: key === "settings" ? ["marketing", "stages"].includes(bdTab) : bdTab === key,
+    onSelect: () => setBdTab(key === "settings" ? "marketing" : key),
+  });
+  const onlyStop = (key, label, icon) => ({ key, label, icon, active: true, onSelect: () => {} });
+  const phoneFooter = !genericFooter ? null
+    : showBusinessDevBoard ? {
+      // Mirrors BusinessLeadsDashboard's TABS; that module is lazy, so it is not imported here.
+      stops: [bdStop("dashboard", "Dashboard", BarChart3), bdStop("marketing_view", "Marketing View", Megaphone), bdStop("sales_view", "Sales View", Headphones)],
+      more: [
+        bdStop("finance", "Finance", BadgeIndianRupee),
+        bdStop("hr", "HR Admin", Users),
+        bdStop("packages", "Services and Products", Store),
+        bdStop("branch_control", "Branch Control", LayoutDashboard),
+        bdStop("settings", "Settings", Settings),
+      ],
+    }
+    : showSalesHeadBoard ? {
+      stops: [
+        { key: "leads", label: "Leads", icon: Users, active: presalesView === "leads", onSelect: () => setPresalesView("leads") },
+        { key: "analytics", label: "Analytics", icon: BarChart3, active: presalesView === "analytics", onSelect: () => setPresalesView("analytics") },
+      ],
+      more: [],
+    }
+    : {
+      stops: [
+        showAccountantBoard ? onlyStop("finance", "Finance", BadgeIndianRupee)
+          : showMarketingHeadBoard ? onlyStop("marketing", "Marketing", Megaphone)
+            : onlyStop("zumba", "Zumba", LayoutDashboard),
+      ],
+      more: [],
+    };
 
   const filteredAppointmentsForPhysioBoards = appointments;
 
@@ -1045,7 +1087,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                   strip down only when it is handed the pair of props below, so the two can
                   never sit on screen disagreeing about which page is open. */}
               {role === "sales_head" && (
-                <div className="flex shrink-0 items-center gap-1 sm:ml-4" data-testid="header-presales-view-tabs">
+                <div className="hidden shrink-0 items-center gap-1 sm:ml-4 md:flex" data-testid="header-presales-view-tabs">
                   {[
                     { key: "leads", label: "Leads", icon: Users },
                     { key: "analytics", label: "Analytics", icon: BarChart3 },
@@ -1184,7 +1226,7 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         </Suspense>
 
-        <div className={`w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6 ${showSuperAdminBoard ? "pb-20 md:pb-6" : ""}`}>
+        <div className={`w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6 ${showSuperAdminBoard || showBusinessDevBoard || showAccountantBoard || showZumbaBoard ? "pb-20 md:pb-6" : ""}`}>
 
         {showSuperAdminBoard && (
           <div className="hidden flex-wrap gap-2 border-b border-slate-200 pb-2 md:flex" data-testid="super-admin-nav">
@@ -1297,6 +1339,90 @@ export const CRMPage = ({ auth, onLogout }) => {
           </div>
         )}
 
+        {phoneFooter && (
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500 pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="role-bottom-nav">
+            <div className="flex items-stretch justify-around">
+              {phoneFooter.stops.map((t) => {
+                const Icon = t.icon;
+                const active = !showProfile && t.active;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => { setShowProfile(false); setShowSuperAdminMenu(false); t.onSelect(); }}
+                    aria-label={t.label}
+                    aria-current={active ? "page" : undefined}
+                    title={t.label}
+                    className={`flex flex-1 items-center justify-center py-3.5 ${active ? "text-white" : "text-slate-200"}`}
+                    data-testid={`role-bottom-nav-${t.key}`}
+                  >
+                    <Icon className="h-6 w-6" />
+                  </button>
+                );
+              })}
+              {phoneFooter.more.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowSuperAdminMenu((v) => !v)}
+                  aria-label="More"
+                  aria-expanded={showSuperAdminMenu}
+                  title="More"
+                  className={`flex flex-1 items-center justify-center py-3.5 ${
+                    (!showProfile && phoneFooter.more.some((t) => t.active)) || showSuperAdminMenu ? "text-white" : "text-slate-200"
+                  }`}
+                  data-testid="role-bottom-nav-more"
+                >
+                  <MoreHorizontal className="h-6 w-6" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { setShowProfile(true); setShowSuperAdminMenu(false); }}
+                aria-label="My Profile"
+                aria-current={showProfile ? "page" : undefined}
+                title="My Profile"
+                className={`flex flex-1 items-center justify-center py-3.5 ${showProfile ? "text-white" : "text-slate-200"}`}
+                data-testid="role-bottom-nav-profile"
+              >
+                <UserCircle className="h-6 w-6" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phoneFooter && showSuperAdminMenu && (
+          <div
+            className="fixed inset-0 z-50 flex items-end bg-slate-900/40 md:hidden"
+            onClick={() => setShowSuperAdminMenu(false)}
+            data-testid="role-menu-sheet"
+          >
+            <div className="w-full rounded-t-2xl bg-white p-2 pb-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-3 py-2">
+                <p className="text-sm font-semibold text-slate-700">More</p>
+                <button type="button" onClick={() => setShowSuperAdminMenu(false)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" data-testid="role-menu-close">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {phoneFooter.more.map((t) => {
+                const Icon = t.icon;
+                const active = !showProfile && t.active;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => { setShowProfile(false); setShowSuperAdminMenu(false); t.onSelect(); }}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium ${active ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"}`}
+                    data-testid={`role-menu-${t.key}`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* My Profile stands in place of the board rather than over it.
             It used to be a dialog, and what is on it now — a month of attendance eleven
             columns wide, and every field HR holds — is a page's worth of screen. The nav
@@ -1380,7 +1506,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showBusinessDevBoard && (
-          <BusinessLeadsDashboard currentUser={auth?.user} />
+          <BusinessLeadsDashboard currentUser={auth?.user} tab={bdTab} onTabChange={setBdTab} />
         )}
 
         {showBranchBoard && (
@@ -1403,7 +1529,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showDietBoard && (
-          <DietBoard />
+          <DietBoard user={auth.user} roleLabel={roleLabel} onLogout={logout} />
         )}
 
         {showHumanResourceBoard && (
