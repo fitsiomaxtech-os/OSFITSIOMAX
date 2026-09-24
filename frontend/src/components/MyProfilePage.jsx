@@ -34,6 +34,7 @@ import {
   ChevronRight,
   Clock,
   Home,
+  LogOut,
   Palmtree,
   ShieldAlert,
   ShieldCheck,
@@ -691,7 +692,12 @@ const PHONE_BAR_TABS = TABS.map((t) => ({ ...t, phone: PHONE_BAR_MODES[t.key] })
  * (the bar underneath is the way out, and the header above already carries the name) and
  * puts all five tabs on one row. From sm up, and for every other host, the page is as it was.
  */
-export const MyProfilePage = ({ user, roleLabel, onBack, phoneBar = false }) => {
+/**
+ * `onLogout` is for a host whose phone header no longer carries a logout — Super Admin,
+ * whose bottom bar opens this page. Below md the button sits beside Back; from md up the
+ * header's own logout is on screen, so this one is not drawn.
+ */
+export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = false }) => {
   const [tab, setTab] = useState("attendance");
 
   return (
@@ -712,6 +718,17 @@ export const MyProfilePage = ({ user, roleLabel, onBack, phoneBar = false }) => 
             </h2>
           </div>
         </div>
+        {onLogout && (
+          <button
+            type="button"
+            onClick={onLogout}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 py-1.5 text-sm font-medium text-rose-600 shadow-sm hover:bg-rose-50 md:hidden"
+            data-testid="my-profile-logout"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout
+          </button>
+        )}
         {/* Full width on a phone, where the bar is its own row of four columns; sized to
             its labels from sm up. It used to be pinned to w-96, which fitted three tabs
             and cut all four down to "Atte…", "Tim…", "My …", "Sec…" — a tab clipped to

@@ -1163,7 +1163,9 @@ export const CRMPage = ({ auth, onLogout }) => {
               <button
                 type="button"
                 onClick={() => setShowProfile(true)}
-                className="flex items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-slate-50"
+                // Super Admin's phone reaches My Profile (and Logout, inside it) from the
+                // bottom bar, so the header drops both below md.
+                className={`${showSuperAdminBoard ? "hidden md:flex" : "flex"} items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-slate-50`}
                 data-testid="role-board-profile-button"
               >
                 {/* Whoever is signed in, by their own face. The same component the HR
@@ -1185,7 +1187,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                 variant="outline"
                 size="sm"
                 onClick={logout}
-                className="border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3"
+                className={`border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3 ${showSuperAdminBoard ? "hidden md:inline-flex" : ""}`}
                 data-testid="role-board-logout-button"
               >
                 <LogOut className="h-4 w-4" />
@@ -1255,7 +1257,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             <div className="flex items-stretch justify-around">
               {SUPER_ADMIN_BOTTOM_TABS.map((t) => {
                 const Icon = t.icon;
-                const active = superAdminView === t.key;
+                const active = !showProfile && superAdminView === t.key;
                 return (
                   <button
                     key={t.key}
@@ -1278,11 +1280,23 @@ export const CRMPage = ({ auth, onLogout }) => {
                 aria-expanded={showSuperAdminMenu}
                 title="More"
                 className={`flex flex-1 items-center justify-center py-3.5 ${
-                  SUPER_ADMIN_MORE_TABS.some((t) => isSuperAdminTabActive(superAdminView, t.key)) || showSuperAdminMenu ? "text-white" : "text-slate-200"
+                  (!showProfile && SUPER_ADMIN_MORE_TABS.some((t) => isSuperAdminTabActive(superAdminView, t.key))) || showSuperAdminMenu ? "text-white" : "text-slate-200"
                 }`}
                 data-testid="super-admin-nav-more"
               >
                 <MoreHorizontal className="h-6 w-6" />
+              </button>
+              {/* My Profile, and Logout inside it -- the header drops both on a phone. */}
+              <button
+                type="button"
+                onClick={() => { setShowProfile(true); setShowSuperAdminMenu(false); }}
+                aria-label="My Profile"
+                aria-current={showProfile ? "page" : undefined}
+                title="My Profile"
+                className={`flex flex-1 items-center justify-center py-3.5 ${showProfile ? "text-white" : "text-slate-200"}`}
+                data-testid="super-admin-nav-profile"
+              >
+                <UserCircle className="h-6 w-6" />
               </button>
             </div>
           </div>
@@ -1332,7 +1346,12 @@ export const CRMPage = ({ auth, onLogout }) => {
             left the same way any board is: by going somewhere else. */}
         {showProfile ? (
           <Suspense fallback={<BoardFallback />}>
-            <MyProfilePage user={auth.user} roleLabel={roleLabel} onBack={() => setShowProfile(false)} />
+            <MyProfilePage
+              user={auth.user}
+              roleLabel={roleLabel}
+              onBack={() => setShowProfile(false)}
+              onLogout={showSuperAdminBoard ? logout : undefined}
+            />
           </Suspense>
         ) : (
         <>
