@@ -262,7 +262,7 @@ const ConsultBranchSwitches = () => {
           onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
           data-testid="my-consultation-branch-switches"
         >
-          <section className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+          <section className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-lg bg-white shadow-xl">
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
               <div className="min-w-0">
                 <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
@@ -285,11 +285,12 @@ const ConsultBranchSwitches = () => {
             {rows.length === 0 ? (
               <p className="px-3 py-4 text-center text-xs text-slate-400">No branches yet.</p>
             ) : (
-              <div className="grid min-h-0 flex-1 gap-px overflow-y-auto bg-slate-100 sm:grid-cols-2 lg:grid-cols-3">
+              // One branch per row, read top to bottom like the branch picker beside it.
+              <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">
                 {rows.map((r) => (
                   <label
                     key={r.branch_id}
-                    className="flex cursor-pointer items-center justify-between gap-3 bg-white px-3 py-2.5"
+                    className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"
                     data-testid={`my-consultation-branch-switch-${r.branch_id}`}
                   >
                     <span className={`truncate text-sm ${r.on ? "font-medium text-slate-800" : "text-slate-400"}`}>{r.branch_name}</span>
