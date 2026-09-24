@@ -40,6 +40,8 @@ import {
   Pencil,
   Repeat,
   Eye,
+  Home,
+  Building2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1257,7 +1259,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   //
   // Each tab now shows the stages its own pipeline owns, and the board under it is decided
   // by the tab rather than by which pill happens to be lit.
-  const onConsultationTab = activeView === "branch_consultation";
+  const onHomeVisitTab = activeView === "branch_home_visit";
+  const onConsultationTab = activeView === "branch_consultation" || onHomeVisitTab;
 
   // What the cards above the list do when one of them is clicked.
   //
@@ -1324,7 +1327,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // which is also what stops a refresh from overriding somebody who pressed All Stages on
   // purpose.
   useEffect(() => {
-    const consultation = activeView === "branch_consultation";
+    const consultation = activeView === "branch_consultation" || activeView === "branch_home_visit";
     const pills = consultation ? consultationOnlyStages : leadPillStages;
     if (pills.length === 0) return;
 
@@ -1583,6 +1586,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // single letter apart, both compared as strings against activeView, is a bug waiting
     // for whoever types the wrong one; there is nothing to make it announce itself.
     { key: "branch_consultation", label: "Consultation", short: "Consult", icon: HeartPulse },
+    // The same board as Consultation, holding the bookings made as a House Visit — the
+    // consultant goes to the patient. A lead lands here the moment its appointment is
+    // booked with that visit type, and Consultation stops listing it.
+    { key: "branch_home_visit", label: "House Visit", short: "House", icon: Home },
     // Sits next to Branch Leads because it is the other list of people the branch is
     // signing up — but its own list, not a stage of theirs: nobody registering for a
     // Zumba class is consulted, treated or discharged.
@@ -1796,7 +1803,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 <Input
                   autoFocus
                   className="pl-9 pr-9"
-                  placeholder={onConsultationTab ? "Search in Consultations..." : "Search patients..."}
+                  placeholder={onHomeVisitTab ? "Search in House Visits..." : onConsultationTab ? "Search in Consultations..." : "Search patients..."}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   data-testid="branch-search-mobile"
@@ -1836,7 +1843,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input
                 className="pl-9"
-                placeholder={onConsultationTab ? "Search patients in Consultations..." : "Search patients..."}
+                placeholder={onHomeVisitTab ? "Search patients in House Visits..." : onConsultationTab ? "Search patients in Consultations..." : "Search patients..."}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 data-testid="branch-search"
@@ -2121,6 +2128,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 
           {onConsultationTab ? (
             <ConsultationsBoard
+              // Keyed per tab so a switch between Consultation and House Visit starts
+              // from a clean board rather than carrying the other tab's open popup.
+              key={activeView}
+              homeVisitScope={onHomeVisitTab ? "only" : "exclude"}
               branchId={branchId}
               viewerRole="branch_admin"
               // Same fact the calendars above are given: an arm with no room in it meets
@@ -2626,7 +2637,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             // The Consultation stages moved to their own tab, so the handoff has to go
             // there as well as set the pill — setting the pill alone would leave the
             // reader on Branch Leads with a filter that has no pill and no board.
-            setActiveView("branch_consultation");
+            setActiveView(selectedLead.visit_type === "home" ? "branch_home_visit" : "branch_consultation");
             setStageFilter(stage);
           }}
           onMoved={() => {
@@ -4020,6 +4031,9 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
                           notes: "",
                           duration: null,
                           final_stage: appointmentStageName,
+                          // Where the consultation happens. A House Visit booking is worked
+                          // from the House Visit tab rather than Consultation.
+                          visit_type: lead.visit_type === "home" ? "home" : "branch",
                         });
                         // The three time fields, opened on whatever the lead is already
                         // sitting on — reopening a booking has to show its own hour rather
@@ -5054,7 +5068,30 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved, o
 
             {/* No cancelling from here. This dialog books a slot; dropping the lead out of
                 the pipeline is the Cancelled stage pill's job, and that one asks first. */}
-            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-100 px-3 py-2 sm:px-5 sm:py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-3 py-2 sm:px-5 sm:py-2.5">
+              <div className="flex items-center gap-2" data-testid="branch-appt-visit-type">
+                <span className="text-xs font-semibold text-slate-500">Visit</span>
+                <div className="flex rounded-lg border border-slate-200 bg-white p-0.5">
+                  {[
+                    { key: "branch", label: "At Branch", icon: Building2 },
+                    { key: "home", label: "House Visit", icon: Home },
+                  ].map((v) => {
+                    const Icon = v.icon;
+                    const on = (apptDraft.visit_type || "branch") === v.key;
+                    return (
+                      <button
+                        key={v.key}
+                        type="button"
+                        onClick={() => setApptDraft({ ...apptDraft, visit_type: v.key })}
+                        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition ${on ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                        data-testid={`branch-appt-visit-${v.key}`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />{v.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="flex shrink-0 items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
               <Button

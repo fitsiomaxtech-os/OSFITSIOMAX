@@ -1301,6 +1301,7 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(requi
         "next_consultation_follow_up_at": None,
         "appointment_mode": None,
         "appointment_department": None,
+        "visit_type": None,
         "appointment_date": None,
         "appointment_time": None,
         "appointment_datetime": None,

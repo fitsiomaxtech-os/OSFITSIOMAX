@@ -2448,7 +2448,7 @@ const ConsultationSlotPicker = ({ branchId, leadId, value, onChange, currentCons
   );
 };
 
-const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment", externalSortOrder = "oldest" }) => {
+const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, externalMarkFilter, reloadToken, mobileCards = false, onlineArm = false, dateScope = "appointment", externalSortOrder = "oldest", homeVisitScope = null }) => {
   // Whether the board this is mounted on runs an arm with no room in it — one of the two
   // online admins. It gates one thing: whether a physio with no video room recorded is
   // worth remarking on when they are assigned. Passed in rather than worked out here for
@@ -3109,6 +3109,12 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
   // list it opens.
   const preStageFiltered = useMemo(() => {
     let rows = board.leads || [];
+    // The branch's Consultation and House Visit tabs are this one board split by where the
+    // consultation happens: "only" keeps the home bookings, "exclude" keeps the rest. Null
+    // (every other caller) leaves the list whole. Up here with the other board-wide
+    // narrowings so the stage counts describe the same rows.
+    if (homeVisitScope === "only") rows = rows.filter((l) => l.visit_type === "home");
+    else if (homeVisitScope === "exclude") rows = rows.filter((l) => l.visit_type !== "home");
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
       const to = dateFilter.to?.getTime();
@@ -3158,7 +3164,7 @@ const ConsultationsBoardInner = ({ branchId, viewerRole, mine = false, externalS
     if (externalMarkFilter === "vip") rows = rows.filter((l) => l.is_vip);
     else if (externalMarkFilter === "attention") rows = rows.filter((l) => l.needs_attention);
     return rows;
-  }, [board.leads, dateFilter, dateScope, search, externalMarkFilter]);
+  }, [board.leads, dateFilter, dateScope, search, externalMarkFilter, homeVisitScope]);
 
   // "Treatments" (Head Physio's own board only) is a cross-cutting view, not a real
   // position in the head_consultation_stage pipeline — a lead shows up here the moment

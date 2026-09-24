@@ -691,6 +691,9 @@ class V3BranchAppointmentInput(BaseModel):
     # by the caller so the link can be built without a second round trip.
     ref_no: Optional[str] = None
     share_token: Optional[str] = None
+    # "branch" | "home". Omitted by the calls that only move an existing booking (the
+    # handover and the slot edit), which leaves whatever the lead already holds.
+    visit_type: Optional[str] = None
 
 
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
@@ -722,6 +725,8 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             detail=f"final_stage must be '{appointment_stage}' or '{cancelled_stage}'",
         )
     booking = final_stage == appointment_stage
+    if payload.visit_type is not None and payload.visit_type not in ("branch", "home"):
+        raise HTTPException(status_code=400, detail="visit_type must be 'branch' or 'home'")
     physio = await v3_col("doctors").find_one(
         {"id": payload.physio_id}, {"_id": 0, "full_name": 1, "slot_details": 1, "meet_link": 1}
     )
@@ -788,6 +793,8 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         "branch_stage": final_stage,
         "updated_at": now_iso(),
     }
+    if payload.visit_type is not None:
+        updates["visit_type"] = payload.visit_type
     # When the appointment is booked (not cancelled), hand the lead to BOTH consultation
     # pipelines at once:
     #   - Head Physio's own board -> its first stage ("New Appointment"), where they pick it up

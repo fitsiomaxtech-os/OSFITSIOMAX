@@ -558,6 +558,11 @@ class V3LeadOut(BaseModel):
     next_consultation_follow_up_at: Optional[str] = None
     appointment_mode: Optional[str] = None  # "offline" | "online"
     appointment_department: Optional[str] = None  # "physio" | "fitness" — chosen when scheduling the appointment
+    # Where the booked consultation happens: "branch" (the default, and every booking made
+    # before this existed) or "home" — the consultant goes to the patient. Set by the branch's
+    # Appointment popup; a "home" booking is worked from the House Visit tab instead of
+    # Consultation.
+    visit_type: Optional[str] = None
     appointment_date: Optional[str] = None
     appointment_time: Optional[str] = None
     appointment_datetime: Optional[str] = None
