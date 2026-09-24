@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone, getPhysioDayLock, setPhysioDayLock, getLeadDeleteButton, setLeadDeleteButton } from "@/lib/api";
+import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone, getPhysioDayLock, setPhysioDayLock, getLeadDeleteButton, setLeadDeleteButton, getSaConsultBranchesSetting, setSaConsultBranchesSetting } from "@/lib/api";
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
@@ -121,6 +121,9 @@ export const PipelineStageManagement = ({ leading = null }) => {
   // Loading rather than guess a state and offer the wrong button.
   const [deleteButton, setDeleteButton] = useState(null);
   const [savingDeleteButton, setSavingDeleteButton] = useState(false);
+  // The Super Admin's branch-wise On/Off on My Consultation. null until the zone is open.
+  const [saBranches, setSaBranches] = useState(null);
+  const [savingSaBranches, setSavingSaBranches] = useState(false);
 
   // The tab being looked at, resolved once: `type` is this table's tab id, and for the
   // Branch pair it is not the same string as the pipeline's API type — both tabs are
@@ -237,9 +240,10 @@ export const PipelineStageManagement = ({ leading = null }) => {
 
   // Read once the zone is open, with the password it was opened with.
   useEffect(() => {
-    if (!devPassword) { setDayLock(null); setDeleteButton(null); return; }
+    if (!devPassword) { setDayLock(null); setDeleteButton(null); setSaBranches(null); return; }
     getPhysioDayLock(devPassword).then((r) => setDayLock(!!r.locked)).catch(() => setDayLock(null));
     getLeadDeleteButton(devPassword).then((r) => setDeleteButton(!!r.enabled)).catch(() => setDeleteButton(null));
+    getSaConsultBranchesSetting(devPassword).then((r) => setSaBranches(!!r.enabled)).catch(() => setSaBranches(null));
   }, [devPassword]);
 
   // One row, drawn for either half. `muted` is the only difference the half makes to a real
@@ -397,6 +401,23 @@ export const PipelineStageManagement = ({ leading = null }) => {
       resetFailed(e);
     }
     setSavingDeleteButton(false);
+  };
+
+  const toggleSaBranches = async () => {
+    const next = !saBranches;
+    const ok = window.confirm(next
+      ? "Show the Super Admin's branch On/Off?\n\nMy Consultation gets the branch icon again, and any branch the Super Admin had switched Off is Off again."
+      : "Hide the Super Admin's branch On/Off?\n\nThe branch icon disappears from My Consultation, and the Super Admin is listed on every branch's Consultant Calendar until it is shown again.");
+    if (!ok) return;
+    setSavingSaBranches(true);
+    try {
+      const r = await setSaConsultBranchesSetting(devPassword, next);
+      setSaBranches(!!r.enabled);
+      toast.success(r.enabled ? "Super Admin branch On/Off is shown" : "Super Admin branch On/Off is hidden");
+    } catch (e) {
+      resetFailed(e);
+    }
+    setSavingSaBranches(false);
   };
 
   const handleResetAllLeads = async () => {
@@ -692,6 +713,33 @@ export const PipelineStageManagement = ({ leading = null }) => {
               {deleteButton === null ? "Loading..."
                 : savingDeleteButton ? "Saving..."
                 : deleteButton ? (<><Lock className="mr-1 h-4 w-4" /> Turn off</>)
+                : (<><Unlock className="mr-1 h-4 w-4" /> Turn on</>)}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3" data-testid="sa-consult-branches-card">
+            <div className="min-w-[14rem] flex-1">
+              <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                Super Admin branch On/Off
+                {saBranches !== null && (
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${saBranches ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
+                    {saBranches ? "ON" : "OFF"}
+                  </span>
+                )}
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                The branch icon on the Super Admin's My Consultation. Off hides it and lists
+                the Super Admin on every branch's Consultant Calendar.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={toggleSaBranches}
+              disabled={saBranches === null || savingSaBranches}
+              data-testid="sa-consult-branches-toggle"
+            >
+              {saBranches === null ? "Loading..."
+                : savingSaBranches ? "Saving..."
+                : saBranches ? (<><Lock className="mr-1 h-4 w-4" /> Turn off</>)
                 : (<><Unlock className="mr-1 h-4 w-4" /> Turn on</>)}
             </Button>
           </div>

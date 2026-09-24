@@ -446,15 +446,30 @@ def v3_require_diet(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
     return user
 
 
-def super_admin_consults_at(user_doc: dict, branch_id: str) -> bool:
+def super_admin_consults_at(user_doc: dict, branch_id: str, switches_on: bool = True) -> bool:
     """Whether a Super Admin login takes consultations at this branch.
 
     On everywhere by default; `consult_off_branch_ids` on the login lists the branches they
     have switched off on My Consultation. Kept on the login rather than the consultant
     record for the reason consultants_serving_branch gives: where a consultant is OFFERED
     is read off the account, and the record stays one branchless sheet of hours.
+
+    `switches_on` is the developer setting (super_admin_branch_switches_enabled). With it
+    off the switches are hidden, so the off-list is ignored rather than left stranding them
+    Off at a branch with no screen to turn it back On.
     """
-    return branch_id not in (user_doc.get("consult_off_branch_ids") or [])
+    return not switches_on or branch_id not in (user_doc.get("consult_off_branch_ids") or [])
+
+
+# The Danger Zone row that shows or hides the Super Admin's branch On/Off on My Consultation.
+SA_CONSULT_BRANCHES_SETTING_ID = "super_admin_consult_branches"
+
+
+async def super_admin_branch_switches_enabled() -> bool:
+    """Are the Super Admin's branch-wise On/Off switches offered? On unless a developer
+    switched them off."""
+    row = await v3_col("app_settings").find_one({"id": SA_CONSULT_BRANCHES_SETTING_ID}, {"_id": 0})
+    return True if not row else bool(row.get("enabled", True))
 
 
 async def consultants_serving_branch(rows: list, branch_id: str) -> list:
@@ -499,13 +514,14 @@ async def consultants_serving_branch(rows: list, branch_id: str) -> list:
     # rather than an on-list, so a branch opened next month has them on without anybody
     # remembering to switch it.
     here: set = set()
+    switches_on = await super_admin_branch_switches_enabled() if user_ids else True
     if user_ids:
         async for u in v3_col("users").find(
             {"id": {"$in": user_ids}},
             {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1, "role": 1, "consult_off_branch_ids": 1},
         ):
             if (u.get("role") or "").strip().lower() == "super_admin":
-                if super_admin_consults_at(u, branch_id):
+                if super_admin_consults_at(u, branch_id, switches_on):
                     here.add(u["id"])
                 continue
             at = [b for b in (u.get("branch_ids") or []) if b]

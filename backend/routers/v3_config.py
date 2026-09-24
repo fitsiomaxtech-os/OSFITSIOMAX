@@ -14,6 +14,7 @@ from deps import (
     v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role,
     is_physio_role, is_diet_role, is_rehab_role, consultants_serving_branch,
     collapse_duplicate_experts, names_the_online_arm, super_admin_consults_at,
+    super_admin_branch_switches_enabled, SA_CONSULT_BRANCHES_SETTING_ID,
 )
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
@@ -771,11 +772,12 @@ async def team_roster_experts(branch_id: str, profile_type: str) -> list:
     # open the days they agreed on the phone.
     if profile_type == "head_physio":
         seen_ids = {u["id"] for u in members}
+        switches_on = await super_admin_branch_switches_enabled()
         async for u in v3_col("users").find(
             {"role": "super_admin", "is_active": {"$ne": False}},
             {"_id": 0, "id": 1, "full_name": 1, "role": 1, "employee_id": 1, "consult_off_branch_ids": 1},
         ):
-            if u["id"] not in seen_ids and super_admin_consults_at(u, branch_id):
+            if u["id"] not in seen_ids and super_admin_consults_at(u, branch_id, switches_on):
                 members.append(u)
 
     out = []
@@ -1180,6 +1182,36 @@ async def v3_set_lead_delete_button(
         {"id": lead_purge.DELETE_BUTTON_SETTING_ID},
         {"$set": {
             "id": lead_purge.DELETE_BUTTON_SETTING_ID,
+            "enabled": payload.enabled,
+            "updated_by": user.full_name,
+            "updated_at": now_iso(),
+        }},
+        upsert=True,
+    )
+    return {"enabled": payload.enabled}
+
+
+# Whether a Super Admin's My Consultation offers the branch-wise On/Off switches. Off hides
+# the icon and treats the Super Admin as On at every branch (see super_admin_consults_at),
+# so switching the feature away never leaves a branch unable to book them.
+class SaConsultBranchesInput(BaseModel):
+    enabled: bool
+
+
+@router.get("/admin/super-admin-consult-branches")
+async def v3_get_sa_consult_branches(_: V3UserOut = Depends(require_developer_password)):
+    return {"enabled": await super_admin_branch_switches_enabled()}
+
+
+@router.put("/admin/super-admin-consult-branches")
+async def v3_set_sa_consult_branches(
+    payload: SaConsultBranchesInput,
+    user: V3UserOut = Depends(require_developer_password),
+):
+    await v3_col("app_settings").update_one(
+        {"id": SA_CONSULT_BRANCHES_SETTING_ID},
+        {"$set": {
+            "id": SA_CONSULT_BRANCHES_SETTING_ID,
             "enabled": payload.enabled,
             "updated_by": user.full_name,
             "updated_at": now_iso(),

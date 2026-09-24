@@ -685,6 +685,9 @@ export const setPhysioDayLock = async (password, locked) => (await api.put("/adm
 // `lead_delete_enabled` by everyone else — only the Danger Zone reads and writes it here.
 export const getLeadDeleteButton = async (password) => (await api.get("/admin/lead-delete-button", { headers: developerHeaders(password) })).data;
 export const setLeadDeleteButton = async (password, enabled) => (await api.put("/admin/lead-delete-button", { enabled }, { headers: developerHeaders(password) })).data;
+// Whether the Super Admin's My Consultation offers its branch-wise On/Off.
+export const getSaConsultBranchesSetting = async (password) => (await api.get("/admin/super-admin-consult-branches", { headers: developerHeaders(password) })).data;
+export const setSaConsultBranchesSetting = async (password, enabled) => (await api.put("/admin/super-admin-consult-branches", { enabled }, { headers: developerHeaders(password) })).data;
 export const resetAllUsers = async (password) => (await api.post("/admin/reset-all-users", null, { params: { confirm: true }, headers: developerHeaders(password) })).data;
 
 // HR

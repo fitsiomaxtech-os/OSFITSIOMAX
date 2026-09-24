@@ -194,18 +194,30 @@ const ConsultantPicker = ({ branchId, excludeId, onPick }) => {
  * and reassign pickers, so the Branch Admin there can open the days agreed on the phone and
  * book a patient into them. Off takes them out of that branch only. Everything is On until
  * switched off, so a new branch has them without anybody remembering to add it.
+ *
+ * An icon beside the name chip, opening the switches in a popup — the header row stays one
+ * line. Not drawn at all when a developer has the feature off (Danger Zone).
  */
 const ConsultBranchSwitches = () => {
   const [rows, setRows] = useState(null);
+  const [enabled, setEnabled] = useState(false);
+  const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
   useEffect(() => {
     let live = true;
     getMyConsultBranches()
-      .then((res) => { if (live) setRows(res?.branches || []); })
+      .then((res) => { if (live) { setRows(res?.branches || []); setEnabled(!!res?.enabled); } })
       .catch(() => { if (live) setRows([]); });
     return () => { live = false; };
   }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   const flip = async (row, on) => {
     setBusyId(row.branch_id);
@@ -223,44 +235,81 @@ const ConsultBranchSwitches = () => {
     }
   };
 
-  if (rows === null) return null;
+  if (rows === null || !enabled) return null;
   const onCount = rows.filter((r) => r.on).length;
+  const someOff = onCount < rows.length;
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white" data-testid="my-consultation-branch-switches">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-slate-100 px-3 py-2">
-        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-          <Building2 className="h-4 w-4 text-slate-400" /> Take consultations at
-        </h3>
-        <span className="text-[11px] text-slate-400">
-          {onCount} of {rows.length} branches On · a branch that is On lists you on its Consultant Calendar
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="Take consultations at — branch On/Off"
+        aria-label="Take consultations at — branch On/Off"
+        className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+        data-testid="my-consultation-branch-switches-open"
+      >
+        <Building2 className="h-4 w-4" />
+        {/* How many are On, so a branch switched Off is visible without opening it. */}
+        <span className={`absolute -right-1.5 -top-1.5 rounded-full px-1.5 text-[9px] font-bold leading-4 text-white ${someOff ? "bg-amber-500" : "bg-emerald-600"}`}>
+          {onCount}/{rows.length}
         </span>
-      </div>
-      {rows.length === 0 ? (
-        <p className="px-3 py-4 text-center text-xs text-slate-400">No branches yet.</p>
-      ) : (
-        <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-3">
-          {rows.map((r) => (
-            <label
-              key={r.branch_id}
-              className="flex cursor-pointer items-center justify-between gap-3 bg-white px-3 py-2.5"
-              data-testid={`my-consultation-branch-switch-${r.branch_id}`}
-            >
-              <span className={`truncate text-sm ${r.on ? "font-medium text-slate-800" : "text-slate-400"}`}>{r.branch_name}</span>
-              <span className="flex shrink-0 items-center gap-2">
-                <span className={`text-[10px] font-bold uppercase ${r.on ? "text-emerald-600" : "text-slate-400"}`}>{r.on ? "On" : "Off"}</span>
-                <Switch
-                  checked={r.on}
-                  disabled={busyId !== null}
-                  onCheckedChange={(on) => flip(r, on)}
-                  className="data-[state=checked]:bg-emerald-600"
-                />
-              </span>
-            </label>
-          ))}
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+          data-testid="my-consultation-branch-switches"
+        >
+          <section className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                  <Building2 className="h-4 w-4 text-slate-400" /> Take consultations at
+                </h3>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  {onCount} of {rows.length} branches On · a branch that is On lists you on its Consultant Calendar
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Close"
+                data-testid="my-consultation-branch-switches-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {rows.length === 0 ? (
+              <p className="px-3 py-4 text-center text-xs text-slate-400">No branches yet.</p>
+            ) : (
+              <div className="grid min-h-0 flex-1 gap-px overflow-y-auto bg-slate-100 sm:grid-cols-2 lg:grid-cols-3">
+                {rows.map((r) => (
+                  <label
+                    key={r.branch_id}
+                    className="flex cursor-pointer items-center justify-between gap-3 bg-white px-3 py-2.5"
+                    data-testid={`my-consultation-branch-switch-${r.branch_id}`}
+                  >
+                    <span className={`truncate text-sm ${r.on ? "font-medium text-slate-800" : "text-slate-400"}`}>{r.branch_name}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className={`text-[10px] font-bold uppercase ${r.on ? "text-emerald-600" : "text-slate-400"}`}>{r.on ? "On" : "Off"}</span>
+                      <Switch
+                        checked={r.on}
+                        disabled={busyId !== null}
+                        onCheckedChange={(on) => flip(r, on)}
+                        className="data-[state=checked]:bg-emerald-600"
+                      />
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       )}
-    </section>
+    </>
   );
 };
 
@@ -611,9 +660,9 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
             )}
           </div>
         )}
-      </div>
 
-      {resolved?.is_super_admin && <ConsultBranchSwitches />}
+        {resolved?.is_super_admin && <ConsultBranchSwitches />}
+      </div>
 
       {notMine && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid="my-consultation-not-mine">
