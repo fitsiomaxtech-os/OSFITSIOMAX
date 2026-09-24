@@ -537,6 +537,10 @@ export const markInstallmentPaid = async (leadId, installmentNumber, payload) =>
 // Whose consultant book the board will show, and whether it belongs to the caller. My
 // Consultation reads it so it can never present somebody else's appointments as your own.
 export const hpResolvedConsultant = async () => (await api.get("/head-physio/resolved")).data;
+// The Super Admin's branch-wise On/Off: which branches' Consultant Calendars and booking
+// pickers offer them. Both answer the full list, so the switches redraw from the server.
+export const getMyConsultBranches = async () => (await api.get("/head-physio/my-branches")).data;
+export const setMyConsultBranch = async (branchId, on) => (await api.put(`/head-physio/my-branches/${branchId}`, { on })).data;
 // Who can be handed a consultation at this branch. Not available-experts: that one takes a
 // date and hides anyone with no open slot on it, which is the question for a NEW booking.
 // A reassignment keeps the slot the patient already holds.

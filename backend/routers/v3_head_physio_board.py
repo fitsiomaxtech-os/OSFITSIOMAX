@@ -5,8 +5,8 @@ from datetime import date
 import uuid
 
 from database import v3_col
-from utils import now_iso, physio_slot_load, slot_capacity_of, active_doctor_query
-from deps import v3_current_user, v3_require_roles, consultants_serving_branch
+from utils import now_iso, physio_slot_load, slot_capacity_of, active_doctor_query, live_branch_query
+from deps import v3_current_user, v3_require_roles, consultants_serving_branch, super_admin_consults_at
 from constants import V3_HEAD_CONSULTATION_STAGES
 from stage_utils import get_closing_stage_name, get_stage_name_at
 from schemas.v3 import (
@@ -205,6 +205,48 @@ async def hp_resolved_consultant(user: V3UserOut = Depends(v3_require_roles("hea
     # Only a head_physio login can still land here — one hired without a record. There is
     # nothing to fall back to that would be theirs, so the page is told plainly.
     return {"consultant_id": "", "consultant_name": "", "is_super_admin": False, "is_mine": False}
+
+
+async def _consult_branches_of(user_id: str) -> list:
+    """Every branch, each with whether this Super Admin takes consultations there."""
+    login = await v3_col("users").find_one(
+        {"id": user_id}, {"_id": 0, "consult_off_branch_ids": 1},
+    ) or {}
+    rows = await v3_col("branches").find(live_branch_query(), {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    rows.sort(key=lambda b: (b.get("branch_name") or "").lower())
+    return [
+        {"branch_id": b["id"], "branch_name": b.get("branch_name") or "", "on": super_admin_consults_at(login, b["id"])}
+        for b in rows if b.get("id")
+    ]
+
+
+class ConsultBranchToggle(BaseModel):
+    on: bool
+
+
+@router.get("/head-physio/my-branches")
+async def hp_my_consult_branches(user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """The branch-wise On/Off switches on a Super Admin's My Consultation.
+
+    On is where they are offered: that branch's Consultant Calendar lists them, and its
+    booking and reassign pickers can hand them a patient. Off takes them out of all of it
+    at that branch only. Appointments already booked there are left where they are —
+    switching off stops new bookings, it does not cancel anybody.
+    """
+    return {"branches": await _consult_branches_of(user.id)}
+
+
+@router.put("/head-physio/my-branches/{branch_id}")
+async def hp_set_consult_branch(
+    branch_id: str,
+    payload: ConsultBranchToggle,
+    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    if not await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=404, detail="Branch not found")
+    op = {"$pull": {"consult_off_branch_ids": branch_id}} if payload.on else {"$addToSet": {"consult_off_branch_ids": branch_id}}
+    await v3_col("users").update_one({"id": user.id}, op)
+    return {"branches": await _consult_branches_of(user.id)}
 
 
 @router.get("/head-physio/my-calendar")

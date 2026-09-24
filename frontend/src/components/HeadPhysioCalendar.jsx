@@ -744,7 +744,14 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio", onli
                   {doc.full_name?.charAt(0)?.toUpperCase() || "D"}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-800 truncate">{doc.full_name}</p>
+                  <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-slate-800">
+                    <span className="truncate">{doc.full_name}</span>
+                    {/* The Super Admin sits on every branch's list; the tag is the same one
+                        their rows wear on the Consultations board. */}
+                    {doc.is_super_admin && (
+                      <span className="shrink-0 rounded-[4px] bg-slate-100 px-1 py-px text-[9px] font-bold uppercase text-slate-600">Super Admin</span>
+                    )}
+                  </p>
                   {/* Their shift, not their qualification, once they are on one: which
                       hours this person works is what decides the day about to be opened
                       for them, and it is the thing to check before clicking a date. */}

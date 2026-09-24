@@ -9,11 +9,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/sonner";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { WeekStrip, todayIso } from "@/components/WeekStrip";
 import { RescheduledTag } from "@/components/ui/lead-marks";
-import { getConsultantSlots, getDoctors, hpResolvedConsultant, listBranchConsultants, reassignConsultant } from "@/lib/api";
+import {
+  getConsultantSlots, getDoctors, getMyConsultBranches, hpResolvedConsultant, listBranchConsultants,
+  reassignConsultant, setMyConsultBranch,
+} from "@/lib/api";
 import { to12h } from "@/lib/time";
 
 const ALL = "all";
@@ -180,6 +184,83 @@ const ConsultantPicker = ({ branchId, excludeId, onPick }) => {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+};
+
+/**
+ * Which branches the Super Admin takes consultations at — one On/Off per branch.
+ *
+ * On is what puts them on that branch's Consultant Calendar (MANAGEMENT) and in its booking
+ * and reassign pickers, so the Branch Admin there can open the days agreed on the phone and
+ * book a patient into them. Off takes them out of that branch only. Everything is On until
+ * switched off, so a new branch has them without anybody remembering to add it.
+ */
+const ConsultBranchSwitches = () => {
+  const [rows, setRows] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    getMyConsultBranches()
+      .then((res) => { if (live) setRows(res?.branches || []); })
+      .catch(() => { if (live) setRows([]); });
+    return () => { live = false; };
+  }, []);
+
+  const flip = async (row, on) => {
+    setBusyId(row.branch_id);
+    // Drawn at once, then replaced by the server's answer — or put back if it refused.
+    setRows((cur) => cur.map((r) => (r.branch_id === row.branch_id ? { ...r, on } : r)));
+    try {
+      const res = await setMyConsultBranch(row.branch_id, on);
+      setRows(res?.branches || []);
+      toast.success(`${row.branch_name}: consultations ${on ? "On" : "Off"}`);
+    } catch (err) {
+      setRows((cur) => cur.map((r) => (r.branch_id === row.branch_id ? { ...r, on: !on } : r)));
+      toast.error(err?.response?.data?.detail || "Could not change this branch");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (rows === null) return null;
+  const onCount = rows.filter((r) => r.on).length;
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white" data-testid="my-consultation-branch-switches">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-slate-100 px-3 py-2">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+          <Building2 className="h-4 w-4 text-slate-400" /> Take consultations at
+        </h3>
+        <span className="text-[11px] text-slate-400">
+          {onCount} of {rows.length} branches On · a branch that is On lists you on its Consultant Calendar
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-3 py-4 text-center text-xs text-slate-400">No branches yet.</p>
+      ) : (
+        <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-3">
+          {rows.map((r) => (
+            <label
+              key={r.branch_id}
+              className="flex cursor-pointer items-center justify-between gap-3 bg-white px-3 py-2.5"
+              data-testid={`my-consultation-branch-switch-${r.branch_id}`}
+            >
+              <span className={`truncate text-sm ${r.on ? "font-medium text-slate-800" : "text-slate-400"}`}>{r.branch_name}</span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className={`text-[10px] font-bold uppercase ${r.on ? "text-emerald-600" : "text-slate-400"}`}>{r.on ? "On" : "Off"}</span>
+                <Switch
+                  checked={r.on}
+                  disabled={busyId !== null}
+                  onCheckedChange={(on) => flip(r, on)}
+                  className="data-[state=checked]:bg-emerald-600"
+                />
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </section>
   );
 };
 
@@ -531,6 +612,8 @@ export const MyConsultationBoard = ({ user, search = "", onSearchChange, branche
           </div>
         )}
       </div>
+
+      {resolved?.is_super_admin && <ConsultBranchSwitches />}
 
       {notMine && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid="my-consultation-not-mine">

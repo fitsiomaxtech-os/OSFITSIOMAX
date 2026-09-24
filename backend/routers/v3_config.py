@@ -13,7 +13,7 @@ from security import hash_password, is_hashed, verify_password
 from deps import (
     v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role,
     is_physio_role, is_diet_role, is_rehab_role, consultants_serving_branch,
-    collapse_duplicate_experts, names_the_online_arm,
+    collapse_duplicate_experts, names_the_online_arm, super_admin_consults_at,
 )
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
@@ -765,9 +765,22 @@ async def team_roster_experts(branch_id: str, profile_type: str) -> list:
         {"_id": 0, "id": 1, "full_name": 1, "role": 1, "employee_id": 1},
     ).to_list(500)
     members = [u for u in rows if holds((u.get("role") or "").strip().lower())]
+    # The Super Admin on every branch's Consultant Calendar, unless they have switched this
+    # branch off on My Consultation. They are posted nowhere — they run every branch — so
+    # the Team query above never finds them, and without this a Branch Admin had no row to
+    # open the days they agreed on the phone.
+    if profile_type == "head_physio":
+        seen_ids = {u["id"] for u in members}
+        async for u in v3_col("users").find(
+            {"role": "super_admin", "is_active": {"$ne": False}},
+            {"_id": 0, "id": 1, "full_name": 1, "role": 1, "employee_id": 1, "consult_off_branch_ids": 1},
+        ):
+            if u["id"] not in seen_ids and super_admin_consults_at(u, branch_id):
+                members.append(u)
 
     out = []
     for u in members:
+        is_sa = (u.get("role") or "").strip().lower() == "super_admin"
         # head_physio is the one branchless record — see the docstring, and
         # holds_calendar_per_branch in routers/v3_hr.py, which draws the same line from the
         # role's side.
@@ -784,7 +797,7 @@ async def team_roster_experts(branch_id: str, profile_type: str) -> list:
         # Stood-down records dropped before the fullest is chosen, not after. Choosing first
         # and checking second would lose somebody whose richest record happens to be the
         # retired one while a live record of theirs sits right behind it.
-        if not found:
+        if not found and not is_sa:
             # Nothing under their login — but that is not the same as nothing at all. A
             # record can exist for this person carrying no user_id: the profile-only entries
             # Fitsiomax Experts creates have none, and several older paths wrote one without
@@ -838,7 +851,14 @@ async def team_roster_experts(branch_id: str, profile_type: str) -> list:
                 "user_id": u["id"],
                 "created_at": now_iso(),
             }
+            if is_sa:
+                row["is_super_admin"] = True
             await v3_col("doctors").insert_one(row.copy())
+        elif is_sa and not row.get("is_super_admin"):
+            # The same one-time stamp ensure_super_admin_consultant makes, so the tag is
+            # there whichever of the two screens reached the record first.
+            await v3_col("doctors").update_one({"id": row["id"]}, {"$set": {"is_super_admin": True}})
+            row["is_super_admin"] = True
         out.append(row)
     return out
 

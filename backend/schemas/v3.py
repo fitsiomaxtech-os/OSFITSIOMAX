@@ -242,6 +242,10 @@ class V3DoctorOut(BaseModel):
     shift_start: Optional[str] = None
     shift_end: Optional[str] = None
     shift_windows: Optional[List[dict]] = []
+    # The Super Admin's own consultant record, which every branch's Consultant Calendar now
+    # lists. Declared for the reason meet_link is: this model drops what it does not name,
+    # and the calendar needs it to tag the row.
+    is_super_admin: Optional[bool] = False
     created_at: str
 
 

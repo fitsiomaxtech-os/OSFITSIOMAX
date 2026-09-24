@@ -446,6 +446,17 @@ def v3_require_diet(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
     return user
 
 
+def super_admin_consults_at(user_doc: dict, branch_id: str) -> bool:
+    """Whether a Super Admin login takes consultations at this branch.
+
+    On everywhere by default; `consult_off_branch_ids` on the login lists the branches they
+    have switched off on My Consultation. Kept on the login rather than the consultant
+    record for the reason consultants_serving_branch gives: where a consultant is OFFERED
+    is read off the account, and the record stays one branchless sheet of hours.
+    """
+    return branch_id not in (user_doc.get("consult_off_branch_ids") or [])
+
+
 async def consultants_serving_branch(rows: list, branch_id: str) -> list:
     """Keep the consultants posted to this branch, and every other desk untouched.
 
@@ -462,7 +473,8 @@ async def consultants_serving_branch(rows: list, branch_id: str) -> list:
     An empty list means NOWHERE. That is the reversal, and it is the whole point: a
     Consultant nobody has posted yet is offered at no branch rather than at all of them.
     The one exception is a Super Admin taking consultations: nobody posts them anywhere
-    because they run every branch, so their empty list means EVERYWHERE instead.
+    because they run every branch, so their empty list means EVERYWHERE instead — less
+    the branches they have switched off themselves.
 
     A record with no login is a profile-only entry from Fitsiomax Experts, which requires a
     branch when it is created, so its own branch_id is its posting and is read directly.
@@ -482,15 +494,19 @@ async def consultants_serving_branch(rows: list, branch_id: str) -> list:
     # A Super Admin taking consultations is the one consultant "posted nowhere" must not
     # apply to. Their account carries no branch list — they are not posted to branches,
     # they run all of them — so the rule above would offer them at none, which is the
-    # opposite of what the role means. Held as a set of user ids rather than a branch list
-    # per account, because the answer is "everywhere" and a list cannot say that.
-    everywhere: set = set()
+    # opposite of what the role means. So they are offered everywhere EXCEPT the branches
+    # they have switched off on My Consultation (super_admin_consults_at). An off-list
+    # rather than an on-list, so a branch opened next month has them on without anybody
+    # remembering to switch it.
+    here: set = set()
     if user_ids:
         async for u in v3_col("users").find(
-            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1, "role": 1},
+            {"id": {"$in": user_ids}},
+            {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1, "role": 1, "consult_off_branch_ids": 1},
         ):
             if (u.get("role") or "").strip().lower() == "super_admin":
-                everywhere.add(u["id"])
+                if super_admin_consults_at(u, branch_id):
+                    here.add(u["id"])
                 continue
             at = [b for b in (u.get("branch_ids") or []) if b]
             if not at and u.get("branch_id"):
@@ -504,7 +520,7 @@ async def consultants_serving_branch(rows: list, branch_id: str) -> list:
             continue
         uid = r.get("user_id")
         if uid:
-            if uid in everywhere or branch_id in posted_by_user.get(uid, []):
+            if uid in here or branch_id in posted_by_user.get(uid, []):
                 kept.append(r)
         elif r.get("branch_id") == branch_id:
             kept.append(r)
