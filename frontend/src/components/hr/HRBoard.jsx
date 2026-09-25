@@ -2196,6 +2196,21 @@ const StructureTab = ({ meta, reloadMeta }) => {
     ...branches.map((b) => ({ value: b.id, label: b.branch_name })),
   ]), [branches]);
 
+  // Which picker a row gets is a question about the ROLE, and a row carries a designation.
+  // Asked of the title directly, only a title that happens to spell its slug answered it —
+  // "Consultant" did, "Physiotherapist" did not, so a Physio could be posted to one branch
+  // only. Resolved through the role's label instead, the same match Create User makes
+  // (jobKey: PHYSIOTHERAPIST → physio). Built-ins are written last so a custom role that
+  // shares a built-in's label cannot shadow it; retired slugs are skipped, as there.
+  const designationRole = useMemo(() => {
+    const map = {};
+    (meta.custom_roles || []).forEach((r) => { if (r.name && r.label) map[jobKey(r.label)] = r.name; });
+    Object.entries(ROLE_META).forEach(([slug, m]) => { if (!m.retired) map[jobKey(m.label)] = slug; });
+    return map;
+  }, [meta.custom_roles]);
+  const isMultiBranchDesk = (designation) =>
+    Boolean(multiBranchLabel(designation) || multiBranchLabel(designationRole[jobKey(designation)]));
+
   const holdersOf = (designation) => employees.filter(
     (e) => e.department === current?.name && e.designation === designation,
   );
@@ -2779,13 +2794,13 @@ const StructureTab = ({ meta, reloadMeta }) => {
       )}
 
       {/* Two pickers, one control, chosen by the desk being posted.
-          A Physio treats at the branch they belong to and a receptionist sits at one, so
-          for them the question has one answer and the list closes on it. A Nutritionist
-          holds a calendar at each branch they work and may work several — the backend has
+          A receptionist sits at one branch, so for them the question has one answer and
+          the list closes on it. A doctor — Consultant, Physio, Nutritionist — may work
+          several, and a Physio or Nutritionist holds a calendar at each — the backend has
           stored that as a list all along, and this dialog was the last place still asking
           for exactly one, which is why a coach covering two branches had to be filed under
           one of them and disappeared from the other. */}
-      {branchPickerFor && (multiBranchLabel(branchPickerFor.designation) ? (
+      {branchPickerFor && (isMultiBranchDesk(branchPickerFor.designation) ? (
         <PickerModal
           key={branchPickerFor.id}
           title={`Branches for ${branchPickerFor.full_name}`}
