@@ -87,24 +87,45 @@ code {
 
 /* The one exception, opted into per element: a strip wider than the screen whose
    overflow a mouse user would otherwise never find (Operations > Branch's tab row).
-   Outside the base layer so it beats the `*` rule above. */
+   Outside the base layer so it beats the `*` rule above.
+
+   Chrome 121+ draws its own native bar (grey, with arrow buttons) whenever
+   scrollbar-width / scrollbar-color are set, and then ignores ::-webkit-scrollbar.
+   So those two go to Firefox alone, and Chrome/Safari get the styled pseudo-elements
+   in the theme's sky. */
 .show-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+    .show-scrollbar {
+        scrollbar-width: thin;
+        scrollbar-color: #7dd3fc transparent;
+    }
 }
 
 .show-scrollbar::-webkit-scrollbar {
     display: block;
-    height: 6px;
+    height: 5px;
+}
+
+.show-scrollbar::-webkit-scrollbar-button {
+    display: none;
 }
 
 .show-scrollbar::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
+    background: #bae6fd;
     border-radius: 9999px;
+}
+
+.show-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #38bdf8;
 }
 
 .show-scrollbar::-webkit-scrollbar-track {
     background: transparent;
+    margin: 0 8px;
 }
 
 @layer base {

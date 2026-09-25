@@ -1690,7 +1690,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // scrolling inside it.
     <div className={`flex flex-col gap-4 [&>*]:min-w-0 ${embedded ? "" : "pb-20 md:pb-0"}`} data-testid="branch-admin-board-root">
       {/* View Tabs — desk only; a phone gets the bottom nav at the end of this file. */}
-      <div className="show-scrollbar hidden items-center gap-1 overflow-x-auto border-b border-slate-200 pb-0 md:flex" data-testid="branch-view-tabs">
+      <div className="show-scrollbar hidden items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 md:flex" data-testid="branch-view-tabs">
         {VIEW_TABS.map((tab) => {
           const Icon = tab.icon;
           return (
@@ -1698,10 +1698,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               key={tab.key}
               type="button"
               onClick={() => { setProfileOpen(false); setActiveView(tab.key); }}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
                 activeView === tab.key
-                  ? "border-sky-500 text-sky-700"
-                  : "border-transparent text-slate-400 hover:text-slate-600"
+                  ? "bg-sky-600 text-white shadow-sm"
+                  : "text-slate-500 hover:bg-sky-50 hover:text-sky-700"
               }`}
               data-testid={`branch-view-tab-${tab.key}`}
             >
