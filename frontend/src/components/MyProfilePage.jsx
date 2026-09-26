@@ -450,7 +450,9 @@ const MonthTable = ({ rows }) => {
   );
 };
 
-const AttendanceTab = () => {
+// `view`: "all" draws the whole month on one screen (desktop). On a phone the history is a
+// screen of its own behind a View History button, so it is "summary" or "history" there.
+const AttendanceTab = ({ view = "all" }) => {
   const [month, setMonth] = useState(thisMonth);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -527,14 +529,18 @@ const AttendanceTab = () => {
         <p className="py-16 text-center text-sm text-slate-400" data-testid="my-attendance-loading">Loading your month…</p>
       ) : (
         <>
-          {isThisMonth && <TodayStrip row={todayRow} standard={data?.standard} today={data?.today} />}
-          <MonthSummary
-            totals={data?.totals}
-            month={month}
-            today={data?.today}
-            workload={isThisMonth && <TodayWorkload workload={data?.workload} />}
-          />
-          <MonthTable rows={rows} />
+          {view !== "history" && (
+            <>
+              {isThisMonth && <TodayStrip row={todayRow} standard={data?.standard} today={data?.today} />}
+              <MonthSummary
+                totals={data?.totals}
+                month={month}
+                today={data?.today}
+                workload={isThisMonth && <TodayWorkload workload={data?.workload} />}
+              />
+            </>
+          )}
+          {view !== "summary" && <MonthTable rows={rows} />}
           {/* Said once, at the foot, rather than as a banner over the figures: the hours
               above are real either way — they are what this person pressed — and only the
               marks (leave, absent, half day) are missing without the link. */}
@@ -833,23 +839,35 @@ const PhoneProfileMenu = ({ user, onLogout, hideTimeOff, onBack }) => {
   const items = hideTimeOff ? MENU_ITEMS.filter((i) => i.key !== "timeoff") : MENU_ITEMS;
 
   if (open) {
-    const item = items.find((i) => i.key === open);
+    const history = open === "attendance-history";
+    const item = history ? { title: "Attendance History" } : items.find((i) => i.key === open);
     return (
       <div className="space-y-4" data-testid={`my-profile-screen-${open}`}>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setOpen(null)}
+            onClick={() => setOpen(history ? "attendance" : null)}
             className="-ml-1 rounded-full p-1.5 text-slate-700 active:bg-slate-100"
             aria-label="Back"
             data-testid="my-profile-screen-back"
           >
             <ChevronLeft className="h-6 w-6" />
           </button>
-          <h2 className="text-lg font-semibold text-slate-800">{item?.title}</h2>
+          <h2 className="min-w-0 flex-1 truncate text-lg font-semibold text-slate-800">{item?.title}</h2>
+          {open === "attendance" && (
+            <button
+              type="button"
+              onClick={() => setOpen("attendance-history")}
+              className="shrink-0 rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 active:bg-sky-100"
+              data-testid="my-attendance-view-history"
+            >
+              View History
+            </button>
+          )}
         </div>
         {open === "calendar" ? <MonthlyCalendarTab user={user} />
-          : open === "attendance" ? <AttendanceTab />
+          : open === "attendance" ? <AttendanceTab view="summary" />
+          : history ? <AttendanceTab view="history" />
           : open === "timeoff" ? <TimeOffTab />
             : open === "security" ? <SecurityTab />
               : <PhoneProfileList />}
