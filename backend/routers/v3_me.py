@@ -69,6 +69,11 @@ from routers.v3_hr import resolve_employee_branches
 # What a day amounts to, and which days the branch is closed. The same module HR's register
 # reads, so a person's own month and the register cannot disagree about their Tuesday.
 from attendance_rules import DEFAULTS as RULE_DEFAULTS, day_status, is_week_off, rules_of
+# Who a login is on the treatment and consultation books, and which role sees which day's
+# work. The same resolution the EOD report pre-fills from, so the figures on this tab and the
+# clients on tonight's report are the same day counted twice rather than two answers.
+from deps import is_branch_admin_role, is_head_physio_role, is_physio_role
+from physio_scope import resolve_physio_doctor
 
 router = APIRouter(prefix="/api/v3/me")
 
@@ -271,6 +276,84 @@ def _row(iso: str, clock: Optional[dict], mark: dict, now_at: str, rules: Dict[s
     }
 
 
+# ---------- today's work, by role ----------
+
+def _client_key(row: dict) -> str:
+    return row.get("lead_id") or str(row.get("lead_name") or row.get("patient_name") or "").strip().lower()
+
+
+def _split(rows: List[dict]) -> Dict[str, int]:
+    """Booked, done and still to do. A cancelled booking is none of the three."""
+    live = [r for r in rows if r.get("status") != "cancelled"]
+    done = len([r for r in live if r.get("status") == "completed"])
+    return {"total": len(live), "completed": done, "pending": len(live) - done}
+
+
+async def _today_workload(user: V3UserOut, on: str) -> Optional[Dict[str, Any]]:
+    """Today's clients and bookings for a Physio, a Consultant or a Branch Admin.
+
+    None for every other role -- their attendance tab is the clock and nothing else.
+    """
+    today = {"$regex": f"^{on}"}
+    fields = {"_id": 0, "lead_id": 1, "lead_name": 1, "patient_name": 1, "status": 1}
+
+    if is_physio_role(user.role):
+        doctor = await resolve_physio_doctor(user.id, user.role)
+        rows: List[dict] = []
+        if doctor:
+            ids = doctor.get("physio_ids") or [doctor["id"]]
+            for col in ("sessions", "rehab_sessions"):
+                rows += await v3_col(col).find({"physio_id": {"$in": ids}, "slot_time": today}, fields).to_list(300)
+        split = _split(rows)
+        return {
+            "kind": "physio",
+            "clients": len({_client_key(r) for r in rows if r.get("status") != "cancelled"}),
+            "treatments": split["total"],
+            "completed": split["completed"],
+            "pending": split["pending"],
+        }
+
+    if is_head_physio_role(user.role):
+        doctors = await v3_col("doctors").find(
+            {"user_id": user.id, "profile_type": "head_physio"}, {"_id": 0, "id": 1},
+        ).to_list(50)
+        ids = [d["id"] for d in doctors if d.get("id")]
+        rows = await v3_col("appointments").find(
+            {"doctor_id": {"$in": ids}, "slot_time": today}, fields,
+        ).to_list(300) if ids else []
+        split = _split(rows)
+        return {
+            "kind": "consultant",
+            "clients": len({_client_key(r) for r in rows if r.get("status") != "cancelled"}),
+            "consultations": split["total"],
+            "completed": split["completed"],
+            "pending": split["pending"],
+        }
+
+    if is_branch_admin_role(user.role):
+        branch_id = (user.branch_id or "").strip()
+        consults: List[dict] = []
+        treatments: List[dict] = []
+        if branch_id:
+            consults = await v3_col("appointments").find(
+                {"branch_id": branch_id, "slot_time": today}, {**fields, "appt_kind": 1},
+            ).to_list(1000)
+            for col in ("sessions", "rehab_sessions"):
+                treatments += await v3_col(col).find({"branch_id": branch_id, "slot_time": today}, fields).to_list(1000)
+        # Every booking the branch holds today, whatever book it sits in.
+        split = _split(consults + treatments)
+        return {
+            "kind": "branch",
+            "appointments": split["total"],
+            "completed": split["completed"],
+            "pending": split["pending"],
+            "consultations": _split([c for c in consults if c.get("appt_kind") != "diet"])["total"],
+            "treatments": _split(treatments)["total"],
+        }
+
+    return None
+
+
 @router.get("/attendance")
 async def my_attendance(
     month: Optional[str] = Query(None),
@@ -359,6 +442,9 @@ async def my_attendance(
         # 09:20 start was called late without having to guess at the rule behind it.
         "rules": rules,
         "linked": bool(employee_id),
+        # Today's clients and bookings, for the roles that have a book. Only on the current
+        # month, the one month that has a today in it.
+        "workload": await _today_workload(user, today) if mon == today[:7] else None,
         "totals": {
             "working_days": expected_month // STANDARD_MINUTES,
             "present_days": present_days,

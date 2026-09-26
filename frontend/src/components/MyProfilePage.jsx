@@ -196,20 +196,14 @@ const TodayStrip = ({ row, standard }) => {
             (Standard: {standard?.start} – {standard?.end})
           </span>
         </h3>
-        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${style.cls}`} data-testid="my-attendance-today-status">
-          {style.label}
-        </span>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm" data-testid="my-attendance-today-status">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Status</p>
+          <span className={`mt-1 inline-block rounded-full px-2.5 py-0.5 text-sm font-bold ${style.cls}`}>{style.label}</span>
+        </div>
         <Tile label="Login" value={prettyTime(row?.clock_in) || "—"} testid="my-attendance-today-in" />
         <Tile label="Logout" value={prettyTime(row?.clock_out) || "—"} testid="my-attendance-today-out" />
-        <Tile
-          label="Break"
-          value={row?.break_minutes ? duration(row.break_minutes) : "—"}
-          sub={row?.break_count ? `${row.break_count} taken` : ""}
-          tone="text-amber-600"
-          testid="my-attendance-today-break"
-        />
         <Tile label="Sessions" value={row?.sessions ?? 0} testid="my-attendance-today-sessions" />
         <Tile label="On the clock" value={hours(row?.login_minutes)} testid="my-attendance-today-login" />
         <Tile label="Work hours" value={hours(row?.worked_minutes)} tone="text-emerald-600" testid="my-attendance-today-worked" />
@@ -218,9 +212,45 @@ const TodayStrip = ({ row, standard }) => {
   );
 };
 
+/** Today's clients and bookings — what a Physio, a Consultant or a Branch Admin has on
+ *  their book today. Other roles get no `workload` and this draws nothing. */
+const WORKLOAD_TILES = {
+  physio: [
+    ["Today's clients", "clients", "text-slate-800"],
+    ["Today's treatments", "treatments", "text-sky-600"],
+    ["Completed treatments", "completed", "text-emerald-600"],
+    ["Pending treatments", "pending", "text-amber-600"],
+  ],
+  consultant: [
+    ["Today's clients", "clients", "text-slate-800"],
+    ["Today's consultations", "consultations", "text-sky-600"],
+    ["Completed consultations", "completed", "text-emerald-600"],
+    ["Pending consultations", "pending", "text-amber-600"],
+  ],
+  branch: [
+    ["Today's appointments", "appointments", "text-slate-800"],
+    ["Completed appointments", "completed", "text-emerald-600"],
+    ["Pending appointments", "pending", "text-amber-600"],
+    ["Today's consultations", "consultations", "text-sky-600"],
+    ["Today's treatments", "treatments", "text-violet-600"],
+  ],
+};
+
+const TodayWorkload = ({ workload }) => {
+  const tiles = WORKLOAD_TILES[workload?.kind];
+  if (!tiles) return null;
+  return (
+    <div className="grid grid-cols-2 gap-2 lg:grid-cols-5" data-testid="my-attendance-workload">
+      {tiles.map(([label, key, tone]) => (
+        <Tile key={key} label={label} value={workload[key] ?? 0} tone={tone} testid={`my-attendance-workload-${key}`} />
+      ))}
+    </div>
+  );
+};
+
 /** The month's counts, and then its hours. Two rows because they answer two questions —
  *  how many days, and how many hours — and one row of twelve tiles answers neither. */
-const MonthSummary = ({ totals, month, today }) => {
+const MonthSummary = ({ totals, month, today, workload }) => {
   const behind = (totals?.balance_minutes || 0) < 0;
   // Only when there is some. A "0.0h" permission tile on every month of every person who
   // has never asked for an hour off would be a column of zeroes explaining a feature
@@ -228,14 +258,14 @@ const MonthSummary = ({ totals, month, today }) => {
   const permission = (totals?.permission_minutes || 0) > 0;
   return (
     <>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6" data-testid="my-attendance-counts">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="my-attendance-counts">
         <Tile label="Working days" value={totals?.working_days ?? 0} sub={monthLabel(month)} testid="my-attendance-working-days" />
         <Tile label="Present days" value={totals?.present_days ?? 0} tone="text-sky-600" testid="my-attendance-present-days" />
         <Tile label="Absent" value={totals?.absent_days ?? 0} tone={totals?.absent_days ? "text-rose-600" : "text-slate-800"} testid="my-attendance-absent-days" />
         <Tile label="On leave" value={totals?.leave_days ?? 0} tone="text-violet-600" testid="my-attendance-leave-days" />
-        <Tile label="Late / half" value={`${totals?.late_days ?? 0} / ${totals?.half_days ?? 0}`} tone="text-amber-600" testid="my-attendance-late-days" />
-        <Tile label="Extra hours" value={plainHours(totals?.extra_minutes)} tone="text-emerald-600" sub="Over 8h, added up" testid="my-attendance-extra" />
       </div>
+
+      {workload}
 
       <section className="rounded-xl border border-sky-200 bg-white p-4 shadow-sm" data-testid="my-attendance-hours">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -483,7 +513,12 @@ const AttendanceTab = () => {
       ) : (
         <>
           {isThisMonth && <TodayStrip row={todayRow} standard={data?.standard} />}
-          <MonthSummary totals={data?.totals} month={month} today={data?.today} />
+          <MonthSummary
+            totals={data?.totals}
+            month={month}
+            today={data?.today}
+            workload={isThisMonth && <TodayWorkload workload={data?.workload} />}
+          />
           <MonthTable rows={rows} />
           {/* Said once, at the foot, rather than as a banner over the figures: the hours
               above are real either way — they are what this person pressed — and only the
