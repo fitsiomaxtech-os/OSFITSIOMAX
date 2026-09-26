@@ -47,18 +47,10 @@ export const RecordsPanel = ({ branchId }) => {
         })}
       </div>
       {sub === "branch_transfers" && <BranchTransferRecords branchId={branchId} />}
-      {/* The store's own vendor screen, read-only.
-
-          Not a second copy of the book: it is the same panel against the same org-wide
-          collection, so a vendor added in FITSIOMAX STORE is on this tab the moment it
-          loads and there is no version of it that can disagree.
-
-          Read-only is what makes it a record rather than a duplicate. Everything a branch
-          comes to Records for is here — who is supplied by whom, what was billed, what is
-          still owed, and the deliveries behind each figure — and the one place a vendor is
-          typed, edited or switched off stays FITSIOMAX STORE. Two screens that both edit
-          the same rows is how a branch ends up asking which of them is right. */}
-      {sub === "vendors" && <VendorPanel branchId={branchId} canEdit={false} />}
+      {/* The branch's one vendor screen. It moved here from Services and Products, so it
+          edits: add, change and switch off vendors, and from View, see and add the
+          expenses paid to each one. The book itself is still org-wide. */}
+      {sub === "vendors" && <VendorPanel branchId={branchId} />}
     </div>
   );
 };

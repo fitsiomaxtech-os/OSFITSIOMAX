@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Plus, Search, Pencil, Trash2, History, Power, Wallet,
+  Plus, Search, Pencil, Trash2, Eye, History, Power, Wallet, Receipt,
   Building2, Phone, Mail, X, UserRound, Package, ChevronRight, RefreshCw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,7 +16,11 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   listVendors, vendorDeliveries, createVendor, updateVendor, deleteVendor,
   vendorStock, createVendorStock, updateVendorStock, deleteVendorStock,
+  getFinanceExpenses, getBranchCash,
 } from "@/lib/api";
+// The branch's own Add Expense, opened with the vendor already picked -- the same form and
+// the same approval queue as Accountant Manage > Expenses, not a second way to spend.
+import { AddExpenseDialog } from "@/components/branch/BranchExpensesPanel";
 // The dialog shell, the labelled field and the input class the stock panel already uses.
 // Imported rather than copied: the two boards sit on the same tab row and a vendor form
 // with its own geometry would read as a different product.
@@ -206,7 +210,7 @@ const Panel = ({ title, icon: Icon, tint, children, className = "", testid }) =>
 const Readout = ({ label, value, tone = "text-slate-600" }) => (
   <div>
     <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">{label}</label>
-    <div className={`flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold ${tone}`}>{value}</div>
+    <div className={`flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold ${tone}`}><span className="truncate">{value}</span></div>
   </div>
 );
 
@@ -317,7 +321,8 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
 
   const [draft, setDraft] = useState(null);            // the vendor form
   const [stockDraft, setStockDraft] = useState(null);  // the stock detail form
-  const [ledger, setLedger] = useState(null);          // { vendor, rows }
+  const [ledger, setLedger] = useState(null);          // { vendor, rows, expenses }
+  const [expenseFor, setExpenseFor] = useState(null);  // { vendor, cash } -- Add Expense open
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -506,13 +511,24 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
     await run(() => deleteVendor(v.id), "Vendor removed");
   };
 
+  // View: the vendor, what has come in from them, and what has been paid to them out of
+  // the expense book -- old expenses typed before the picker included, which the server
+  // links to the vendor by name.
   const openLedger = async (v) => {
     try {
-      const res = await vendorDeliveries(v.id, scope);
-      setLedger({ vendor: v, rows: res.deliveries || [] });
+      const [res, exp] = await Promise.all([
+        vendorDeliveries(v.id, scope),
+        getFinanceExpenses({ ...scope, vendor_id: v.id }).catch(() => ({ expenses: [] })),
+      ]);
+      setLedger({ vendor: v, rows: res.deliveries || [], expenses: exp.expenses || [] });
     } catch (e) {
-      toast.error(errText(e, "Couldn't load the deliveries"));
+      toast.error(errText(e, "Couldn't load this vendor"));
     }
+  };
+
+  const openAddExpense = async (v) => {
+    const box = await getBranchCash({ branch_id: branchId }).catch(() => null);
+    setExpenseFor({ vendor: v, cash: box?.cash_in_hand ?? null });
   };
 
   // ---------------------------------------------------------------- the stock form
@@ -579,7 +595,7 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
         onClick={() => openLedger(vendor)}
         data-testid={`vendor-deliveries-${vendor.id}`}
       >
-        <History className="mr-1 h-3.5 w-3.5" /> Deliveries
+        <Eye className="mr-1 h-3.5 w-3.5" /> View
       </Button>
       {canEdit && (
         <>
@@ -1176,37 +1192,121 @@ export const VendorPanel = ({ branchId, canEdit = true, reloadToken }) => {
         </Modal>
       )}
 
-      {ledger && (
-        <Modal
-          title="Deliveries"
-          subtitle={`${ledger.vendor.name} · ${ledger.rows.length} booked in`}
-          accent="bg-sky-600"
-          onClose={() => setLedger(null)}
-          testid="vendor-ledger-modal"
-          footer={<Button variant="outline" onClick={() => setLedger(null)} data-testid="vendor-ledger-close">Close</Button>}
-        >
-          {ledger.rows.length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-400" data-testid="vendor-ledger-empty">
-              Nothing has come in from this vendor yet. Book it in from the stock shelf's Add button.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {ledger.rows.map((m) => (
-                <div key={m.id} className="rounded-lg border border-slate-200 p-2.5" data-testid={`vendor-ledger-${m.id}`}>
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-semibold text-slate-800">{m.item_name}</p>
-                    <p className="shrink-0 text-sm font-bold text-slate-700">+{m.qty}</p>
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    {when(m.created_at)} · {fmt(m.amount)}
-                    {m.note ? ` · ${m.note}` : ""}
-                    {m.by_user_name ? ` · ${m.by_user_name}` : ""}
-                  </p>
-                </div>
-              ))}
+      {ledger && (() => {
+        const v = ledger.vendor;
+        const exps = ledger.expenses || [];
+        const sum = (rows) => rows.reduce((t, r) => t + (Number(r.amount) || 0), 0);
+        const pending = exps.filter((r) => !r.approved && !r.rejected);
+        return (
+          <Modal
+            title={v.name}
+            subtitle={[v.contact_person, v.phone, v.city].filter(Boolean).join(" · ") || "Vendor details"}
+            accent="bg-sky-600"
+            width="max-w-2xl"
+            onClose={() => setLedger(null)}
+            testid="vendor-ledger-modal"
+            footer={(
+              <>
+                {branchId && v.active !== false && (
+                  <Button
+                    className="bg-violet-600 text-white hover:bg-violet-700"
+                    onClick={() => openAddExpense(v)}
+                    data-testid="vendor-add-expense"
+                  >
+                    <Plus className="mr-1 h-4 w-4" /> Add Expense
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => setLedger(null)} data-testid="vendor-ledger-close">Close</Button>
+              </>
+            )}
+          >
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="vendor-view-details">
+              <Readout label="GST" value={v.gst_number || "—"} />
+              <Readout label="Email" value={v.email || "—"} />
+              <Readout label="Terms" value={v.payment_terms || "—"} />
+              <Readout label="Status" value={v.active !== false ? "Active" : "Switched off"} tone={v.active !== false ? "text-emerald-600" : "text-slate-400"} />
+              <Readout label="Bill" value={fmt(v.amount)} />
+              <Readout label="Balance" value={fmt(v.balance)} tone={Number(v.balance) > 0 ? "text-amber-600" : "text-emerald-600"} />
+              <Readout label="Expenses paid" value={fmt(sum(exps.filter((r) => r.approved)))} />
+              <Readout label="Awaiting approval" value={pending.length ? `${pending.length} · ${fmt(sum(pending))}` : "None"} />
             </div>
-          )}
-        </Modal>
+
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <Receipt className="h-3.5 w-3.5" /> Expenses ({exps.length})
+              </p>
+              {exps.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400" data-testid="vendor-expenses-empty">
+                  No expenses paid to this vendor yet.
+                </p>
+              ) : (
+                <div className="space-y-2" data-testid="vendor-expenses">
+                  {exps.map((r) => (
+                    <div key={r.id} className="rounded-lg border border-slate-200 p-2.5" data-testid={`vendor-expense-${r.id}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-800">{r.category}</p>
+                        <p className="shrink-0 text-sm font-bold text-slate-700">{fmt(r.amount)}</p>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {r.expense_date || "—"}
+                        {r.branch_name ? ` · ${r.branch_name}` : ""}
+                        {r.reference ? ` · ${r.reference}` : ""}
+                        {r.note ? ` · ${r.note}` : ""}
+                        {" · "}
+                        <span className={`font-semibold ${r.rejected ? "text-rose-600" : r.approved ? "text-emerald-600" : "text-amber-600"}`}>
+                          {r.rejected ? "Rejected" : r.approved ? "Approved" : "Awaiting approval"}
+                        </span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <Package className="h-3.5 w-3.5" /> Deliveries ({ledger.rows.length})
+              </p>
+              {ledger.rows.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 py-5 text-center text-sm text-slate-400" data-testid="vendor-ledger-empty">
+                  Nothing has come in from this vendor yet. Book it in from the stock shelf&apos;s Add button.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {ledger.rows.map((m) => (
+                    <div key={m.id} className="rounded-lg border border-slate-200 p-2.5" data-testid={`vendor-ledger-${m.id}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-800">{m.item_name}</p>
+                        <p className="shrink-0 text-sm font-bold text-slate-700">+{m.qty}</p>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {when(m.created_at)} · {fmt(m.amount)}
+                        {m.note ? ` · ${m.note}` : ""}
+                        {m.by_user_name ? ` · ${m.by_user_name}` : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {expenseFor && (
+        <AddExpenseDialog
+          onClose={() => setExpenseFor(null)}
+          onSaved={() => {
+            const v = expenseFor.vendor;
+            setExpenseFor(null);
+            openLedger(v);
+          }}
+          cashInHand={expenseFor.cash}
+          branchId={branchId}
+          branches={[]}
+          pastRows={ledger?.vendor?.id === expenseFor.vendor.id ? ledger.expenses : []}
+          initialVendorId={expenseFor.vendor.id}
+        />
       )}
 
       {/* Where the contact details actually get used, said once rather than on every row:

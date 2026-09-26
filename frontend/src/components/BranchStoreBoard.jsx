@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { listStoreItems, getBranches } from "@/lib/api";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
-import { VendorPanel } from "@/components/branch/VendorPanel";
 import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
 import {
   TABS,
@@ -340,7 +339,11 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 
 // Which tabs have a panel of their own. The rest fall through to the placeholder, and a
 // tab graduates by being added here rather than by another branch in the JSX below.
-const PANELS_BUILT = new Set(["consultations", "sessions", "diet", "treatment", "vendor", "home_visit", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
+// Vendor lives under Records > Vendor Records for a branch -- one place to add, view and
+// pay a vendor from, beside the expenses paid to them -- so it is not offered here as well.
+const BRANCH_HIDDEN_TABS = new Set(["vendor"]);
+
+const PANELS_BUILT = new Set(["consultations", "sessions", "diet", "treatment", "home_visit", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
 
 /**
  * A branch's own FITSIO STORE — scoped to its own vertical rather than offering every
@@ -372,7 +375,7 @@ export const FitsiomaxStorePanel = ({ branchId }) => {
 
   const modeFilter = mode || "all";
   const branchStoreTabs = TABS.filter(
-    (t) => MODE_TAB_KEYS[modeFilter].has(t.key) && !SUPER_ADMIN_CATALOGUE_TABS.has(t.key),
+    (t) => MODE_TAB_KEYS[modeFilter].has(t.key) && !SUPER_ADMIN_CATALOGUE_TABS.has(t.key) && !BRANCH_HIDDEN_TABS.has(t.key),
   );
 
   // Falls back to Consultations rather than leaving `tab` pointed at a key this branch's
@@ -441,19 +444,6 @@ export const FitsiomaxStorePanel = ({ branchId }) => {
         />
       )}
       {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
-      {/* Who the stock on those three shelves came from. Editable here, unlike the
-          catalogues above: a branch buys from its own suppliers and is the only desk
-          that knows them, and the write endpoints take branch_admin. The list itself is
-          org-wide, so a vendor added here is the one every branch sees; the delivery
-          totals on each row are this branch's.
-
-          `branchId` is what makes that last part true for everyone looking. A Branch
-          Admin is pinned to their own branch by the server whatever the client sends, so
-          this changed nothing for them — but this board is also how Super Admin and
-          Business Development open one branch's store from Operations, and without it
-          those two read a branch's Vendor tab showing every branch's deliveries and spend
-          while the three shelves beside it showed only this one's. */}
-      {tab === "vendor" && <VendorPanel branchId={branchId} reloadToken={reloadTick} />}
       {/* The same board Super Admin keeps this catalogue on, read-only. The tab has been
           in this row since it was built and had no panel behind it, so a branch clicking
           Treatments got "setup coming soon" for a list that has been populated all along.

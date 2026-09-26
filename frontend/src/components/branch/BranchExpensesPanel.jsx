@@ -167,7 +167,7 @@ const usePickedBranchCash = (fixedBranchId, pickedBranchId, fallback) => {
 /** Vendor names compared the way the server links old expenses to them. */
 const vendorKey = (name) => (name || "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
 
-const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches, pastRows = [] }) => {
+export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches, pastRows = [], initialVendorId = "" }) => {
   const [form, setForm] = useState({
     category: BRANCH_EXPENSE_CATEGORIES[0], amount: "", expense_date: todayIso(),
     vendor_id: "", paid_to: "", reference: "", note: "",
@@ -197,6 +197,11 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches, pa
     () => (form.vendor_id ? pastRows.filter((r) => r.vendor_id === form.vendor_id) : []),
     [pastRows, form.vendor_id],
   );
+
+  // Opened from a vendor's View: pick them once the list has arrived.
+  useEffect(() => {
+    if (initialVendorId && vendors.some((v) => v.id === initialVendorId)) pickVendor(initialVendorId);
+  }, [vendors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickVendor = (id) => {
     const v = vendors.find((x) => x.id === id);
