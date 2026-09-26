@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Eye, Clock, CalendarCheck, RefreshCw } from "lucide-react";
+import { Eye, Pencil, Clock, CalendarCheck, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
@@ -19,6 +19,7 @@ import {
   PriceModeBadges,
   SessionPriceBoxes,
   ViewItemModal,
+  CreateConsultationModal,
 } from "@/components/PackagesBoard";
 
 // Same helper BranchManagementBoard.jsx, PreSalesCRM.jsx and MarketingBoard.jsx each
@@ -27,9 +28,13 @@ import {
 // group branches.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
-const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durationLabel = "Consultation Duration", reloadToken, modeFilter = "all" }) => {
+// `canEdit` is set only on the two consultation shelves, which a Branch Admin may edit with
+// Super Admin's own dialog. The server refuses a branch edit to any other item_type, so the
+// rest stay read-only here rather than showing a button that 403s.
+const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durationLabel = "Consultation Duration", reloadToken, modeFilter = "all", canEdit = false }) => {
   const [items, setItems] = useState([]);
   const [viewingItem, setViewingItem] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
   const isSession = itemType === "session";
 
   // useCallback so the effect can name it as a dependency — it was an inline function with
@@ -58,14 +63,26 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durati
               <CardContent className="space-y-2 p-4">
                 <div className="flex items-start justify-between gap-2">
                   <p className="flex-1 font-semibold text-slate-800">{it.name}</p>
-                  <button
-                    onClick={() => setViewingItem(it)}
-                    className="shrink-0 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
-                    data-testid={`${testidPrefix}-item-${it.id}-view`}
-                    title="View"
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      onClick={() => setViewingItem(it)}
+                      className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
+                      data-testid={`${testidPrefix}-item-${it.id}-view`}
+                      title="View"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => setEditingItem(it)}
+                        className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
+                        data-testid={`${testidPrefix}-item-${it.id}-edit`}
+                        title="Edit"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {it.image_url && <img src={it.image_url} alt={it.name} className="h-[200px] w-full rounded-lg object-cover" />}
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
@@ -105,8 +122,18 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durati
         <ViewItemModal
           item={viewingItem}
           kind={itemType}
-          canEdit={false}
+          canEdit={canEdit}
           onClose={() => setViewingItem(null)}
+          onEdit={() => { setEditingItem(viewingItem); setViewingItem(null); }}
+        />
+      )}
+      {editingItem && (
+        <CreateConsultationModal
+          kind={itemType}
+          category={category}
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSaved={loadItems}
         />
       )}
     </div>
@@ -142,6 +169,7 @@ export const BranchConsultationsPanel = ({ reloadToken, modeFilter = "all" }) =>
           testidPrefix="branch-consultation"
           reloadToken={reloadToken}
           modeFilter={modeFilter}
+          canEdit
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-consultations-subpanel-fitness" />}
@@ -158,6 +186,7 @@ export const BranchConsultationsPanel = ({ reloadToken, modeFilter = "all" }) =>
           testidPrefix="branch-diet-consultation"
           reloadToken={reloadToken}
           modeFilter={modeFilter}
+          canEdit
         />
       )}
     </div>
@@ -211,7 +240,7 @@ export const BranchSessionsPanel = ({ reloadToken, modeFilter = "all" }) => {
       )}
       {/* Rehab arrives here because SESSIONS_SUBTABS is the same list Super Admin's page
           reads, so the sub-tab shows up the moment it is added there. It is the shelf the
-          top-level Rehab tab already lists, read-only as everything on this board is —
+          top-level Rehab tab already lists, read-only as every session shelf here is —
           without this the button would select nothing and leave the panel blank. */}
       {sub === "rehab" && (
         <BranchItemsPanel

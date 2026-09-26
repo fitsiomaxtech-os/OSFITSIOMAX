@@ -391,7 +391,8 @@ const PACKAGE_KINDS = {
 // quietly rename it to whichever package happened to sort first.
 const KEEP_EXISTING_NAME = "__existing__";
 
-const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation", category = "physiotherapy" }) => {
+// Exported for Branch Admin's FITSIO STORE, which opens it to edit a consultation.
+export const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation", category = "physiotherapy" }) => {
   const cfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   const isEdit = Boolean(item);
   // Only the Physiotherapy consultation shelf is sold as fixed packages — see
