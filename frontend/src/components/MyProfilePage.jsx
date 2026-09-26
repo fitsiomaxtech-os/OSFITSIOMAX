@@ -28,7 +28,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Banknote,
   BriefcaseBusiness,
-  CalendarClock,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -143,17 +142,17 @@ const statusOf = (row) => STATUS_STYLES[row.status || row.state] || STATUS_STYLE
 
 // ---------- the small pieces ----------
 
-/** A labelled figure, as one row of a list: what it is on the left, the number on the
- *  right. The month's counts and its hours are both drawn with it, so they read as one
+/** A labelled figure, as one line of a list — the same shape as the Profile screen's
+ *  rows. The month's counts and its hours are both drawn with it, so they read as one
  *  summary rather than as two designs. */
 const Tile = ({ label, value, sub, tone = "text-slate-800", testid }) => (
-  <div className="flex items-center justify-between gap-3 py-2.5" data-testid={testid}>
-    <div className="min-w-0">
-      <p className="text-sm text-slate-500">{label}</p>
+  <div className="flex gap-2 py-3 text-sm" data-testid={testid}>
+    <dt className="w-40 shrink-0 text-slate-500">
+      {label}
       {/* The explanatory line under a label is desktop-only; a phone keeps label and value. */}
-      {sub && <p className="hidden text-[11px] leading-tight text-slate-400 md:block">{sub}</p>}
-    </div>
-    <p className={`shrink-0 text-base font-bold ${tone}`}>{value}</p>
+      {sub && <span className="hidden text-[11px] leading-tight text-slate-400 md:block">{sub}</span>}
+    </dt>
+    <dd className={`min-w-0 flex-1 font-medium ${tone}`}>{value}</dd>
   </div>
 );
 
@@ -190,27 +189,28 @@ const Panel = ({ title, icon: Icon, children, className = "", testid }) => (
 const TodayStrip = ({ row, standard }) => {
   const style = statusOf(row || {});
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="my-attendance-today">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-          <Clock className="h-4 w-4 text-slate-400" />
+    <section data-testid="my-attendance-today">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
           Today
           <span className="hidden text-xs font-normal text-slate-400 md:inline">
             (Standard: {standard?.start} – {standard?.end})
           </span>
         </h3>
       </div>
-      <div className="divide-y divide-slate-100">
-        <div className="flex items-center justify-between gap-3 py-2.5" data-testid="my-attendance-today-status">
-          <p className="text-sm text-slate-500">Status</p>
-          <span className={`rounded-full px-2.5 py-0.5 text-sm font-bold ${style.cls}`}>{style.label}</span>
+      <dl className="divide-y divide-slate-100 px-1">
+        <div className="flex items-center gap-2 py-3 text-sm" data-testid="my-attendance-today-status">
+          <dt className="w-40 shrink-0 text-slate-500">Status</dt>
+          <dd className="min-w-0 flex-1">
+            <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${style.cls}`}>{style.label}</span>
+          </dd>
         </div>
         <Tile label="Login" value={prettyTime(row?.clock_in) || "—"} testid="my-attendance-today-in" />
         <Tile label="Logout" value={prettyTime(row?.clock_out) || "—"} testid="my-attendance-today-out" />
         <Tile label="Sessions" value={row?.sessions ?? 0} testid="my-attendance-today-sessions" />
         <Tile label="On the clock" value={hours(row?.login_minutes)} testid="my-attendance-today-login" />
         <Tile label="Work hours" value={hours(row?.worked_minutes)} tone="text-emerald-600" testid="my-attendance-today-worked" />
-      </div>
+      </dl>
     </section>
   );
 };
@@ -243,11 +243,14 @@ const TodayWorkload = ({ workload }) => {
   const tiles = WORKLOAD_TILES[workload?.kind];
   if (!tiles) return null;
   return (
-    <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white px-4 shadow-sm" data-testid="my-attendance-workload">
-      {tiles.map(([label, key, tone]) => (
-        <Tile key={key} label={label} value={workload[key] ?? 0} tone={tone} testid={`my-attendance-workload-${key}`} />
-      ))}
-    </div>
+    <section data-testid="my-attendance-workload">
+      <h3 className="flex items-center gap-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Today's work</h3>
+      <dl className="divide-y divide-slate-100 px-1">
+        {tiles.map(([label, key, tone]) => (
+          <Tile key={key} label={label} value={workload[key] ?? 0} tone={tone} testid={`my-attendance-workload-${key}`} />
+        ))}
+      </dl>
+    </section>
   );
 };
 
@@ -261,21 +264,23 @@ const MonthSummary = ({ totals, month, today, workload }) => {
   const permission = (totals?.permission_minutes || 0) > 0;
   return (
     <>
-      <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white px-4 shadow-sm" data-testid="my-attendance-counts">
-        <Tile label="Working days" value={totals?.working_days ?? 0} sub={monthLabel(month)} testid="my-attendance-working-days" />
-        <Tile label="Present days" value={totals?.present_days ?? 0} tone="text-sky-600" testid="my-attendance-present-days" />
-        <Tile label="Absent" value={totals?.absent_days ?? 0} tone={totals?.absent_days ? "text-rose-600" : "text-slate-800"} testid="my-attendance-absent-days" />
-        <Tile label="On leave" value={totals?.leave_days ?? 0} tone="text-violet-600" testid="my-attendance-leave-days" />
-      </div>
+      <section data-testid="my-attendance-counts">
+        <h3 className="flex items-center gap-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">This month</h3>
+        <dl className="divide-y divide-slate-100 px-1">
+          <Tile label="Working days" value={totals?.working_days ?? 0} sub={monthLabel(month)} testid="my-attendance-working-days" />
+          <Tile label="Present days" value={totals?.present_days ?? 0} tone="text-sky-600" testid="my-attendance-present-days" />
+          <Tile label="Absent" value={totals?.absent_days ?? 0} tone={totals?.absent_days ? "text-rose-600" : "text-slate-800"} testid="my-attendance-absent-days" />
+          <Tile label="On leave" value={totals?.leave_days ?? 0} tone="text-violet-600" testid="my-attendance-leave-days" />
+        </dl>
+      </section>
 
       {workload}
 
-      <section className="rounded-xl border border-sky-200 bg-white p-4 shadow-sm" data-testid="my-attendance-hours">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-          <CalendarClock className="h-4 w-4 text-slate-400" />
+      <section data-testid="my-attendance-hours">
+        <h3 className="flex items-center gap-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
           Hours — {monthLabel(month)}
         </h3>
-        <div className="divide-y divide-slate-100">
+        <dl className="divide-y divide-slate-100 px-1">
           <Tile
             label="Expected"
             value={plainHours(totals?.expected_minutes)}
@@ -313,7 +318,7 @@ const MonthSummary = ({ totals, month, today, workload }) => {
             tone={behind ? "text-rose-600" : "text-emerald-600"}
             testid="my-attendance-balance"
           />
-        </div>
+        </dl>
       </section>
     </>
   );
@@ -334,15 +339,15 @@ const MonthTable = ({ rows }) => {
     );
   }
   return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="my-attendance-history">
-      <h3 className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">Attendance history</h3>
+    <section data-testid="my-attendance-history">
+      <h3 className="flex items-center gap-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400 border-b border-slate-100">Attendance history</h3>
 
       {/* Phone */}
       <ul className="divide-y divide-slate-100 sm:hidden">
         {rows.map((r) => {
           const style = statusOf(r);
           return (
-            <li key={r.date} className="px-4 py-3" data-testid={`my-attendance-card-${r.date}`}>
+            <li key={r.date} className="px-1 py-3" data-testid={`my-attendance-card-${r.date}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold text-slate-800">
                   {dayNumber(r.date)} <span className="font-normal text-slate-400">{r.weekday}</span>
@@ -479,7 +484,7 @@ const AttendanceTab = () => {
 
   return (
     <div className="space-y-4" data-testid="my-profile-attendance-tab">
-      <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
         <button
           type="button"
           onClick={() => setMonth(shiftMonth(month, -1))}
