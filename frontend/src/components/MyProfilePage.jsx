@@ -37,7 +37,6 @@ import {
   KeyRound,
   LogOut,
   Palmtree,
-  Search,
   ShieldAlert,
   ShieldCheck,
   UserRound,
@@ -716,20 +715,8 @@ const MENU_ITEMS = [
 // `onBack` is for a host with no bottom bar to leave by: the menu then carries its own way out.
 const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff, onBack }) => {
   const [open, setOpen] = useState(null);
-  const [query, setQuery] = useState("");
-  const [me, setMe] = useState(null);
-
-  // For the photo: the signed-in user object carries the name but not the picture.
-  useEffect(() => {
-    let live = true;
-    myProfile().then((d) => { if (live) setMe(d); }).catch(() => {});
-    return () => { live = false; };
-  }, []);
 
   const items = hideTimeOff ? MENU_ITEMS.filter((i) => i.key !== "timeoff") : MENU_ITEMS;
-  const q = query.trim().toLowerCase();
-  const shown = q ? items.filter((i) => `${i.title} ${i.sub}`.toLowerCase().includes(q)) : items;
-  const name = me?.full_name || user?.full_name || "";
 
   if (open) {
     const item = items.find((i) => i.key === open);
@@ -757,47 +744,21 @@ const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff, onBack }) =>
   }
 
   return (
-    <div className="-mx-1 rounded-2xl bg-white px-4 pb-4 pt-4 shadow-sm" data-testid="my-profile-menu">
-      <div className="flex items-center gap-1">
-        {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            className="-ml-1.5 rounded-full p-1.5 text-slate-700 active:bg-slate-100"
-            aria-label="Back"
-            data-testid="my-profile-back"
-          >
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-        )}
-        <h2 className="truncate text-xl font-bold text-slate-800" data-testid="my-profile-greeting">{name}</h2>
-      </div>
-
-      <label className="mt-3 flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2.5">
-        <Search className="h-4 w-4 shrink-0 text-slate-400" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search"
-          className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
-          data-testid="my-profile-menu-search"
-        />
-      </label>
-
-      <div className="mt-5 flex flex-col items-center">
-        {roleLabel && (
-          <div className="relative mb-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
-            {roleLabel}
-            <span className="absolute -bottom-1.5 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-b border-r border-slate-200 bg-white" />
-          </div>
-        )}
-        <button type="button" onClick={() => setOpen("profile")} aria-label="Open profile" data-testid="my-profile-menu-avatar">
-          <EmployeeAvatar employee={me || user} size={96} className="text-4xl" />
+    <div className="-mx-1 rounded-2xl bg-white px-4 pb-4 pt-1 shadow-sm" data-testid="my-profile-menu">
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="-ml-1.5 mt-3 rounded-full p-1.5 text-slate-700 active:bg-slate-100"
+          aria-label="Back"
+          data-testid="my-profile-back"
+        >
+          <ChevronLeft className="h-6 w-6" />
         </button>
-      </div>
+      )}
 
-      <ul className="mt-5 divide-y divide-slate-100">
-        {shown.map(({ key, title, sub, icon: Icon }) => (
+      <ul className="divide-y divide-slate-100">
+        {items.map(({ key, title, sub, icon: Icon }) => (
           <li key={key}>
             <button
               type="button"
@@ -814,8 +775,7 @@ const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff, onBack }) =>
             </button>
           </li>
         ))}
-        {!shown.length && <li className="py-6 text-center text-sm text-slate-400">No matches</li>}
-        {onLogout && !q && (
+        {onLogout && (
           <li>
             <button
               type="button"
