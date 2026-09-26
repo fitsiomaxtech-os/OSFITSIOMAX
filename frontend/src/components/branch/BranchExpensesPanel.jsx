@@ -198,11 +198,6 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
     [pastRows, form.vendor_id],
   );
 
-  // Opened from a vendor's View: pick them once the list has arrived.
-  useEffect(() => {
-    if (initialVendorId && vendors.some((v) => v.id === initialVendorId)) pickVendor(initialVendorId);
-  }, [vendors]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const pickVendor = (id) => {
     const v = vendors.find((x) => x.id === id);
     if (!v) { setForm((f) => ({ ...f, vendor_id: "", paid_to: "" })); return; }
@@ -216,6 +211,11 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
       category: last && BRANCH_EXPENSE_CATEGORIES.includes(last.category) ? last.category : f.category,
     }));
   };
+
+  // Opened from a vendor's View: pick them once the list has arrived.
+  useEffect(() => {
+    if (initialVendorId && vendors.some((v) => v.id === initialVendorId)) pickVendor(initialVendorId);
+  }, [vendors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
     if (!spendingBranch) { toast.error("Pick the branch whose drawer this cash came out of"); return; }
