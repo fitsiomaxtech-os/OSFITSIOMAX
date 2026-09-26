@@ -146,7 +146,7 @@ const statusOf = (row) => STATUS_STYLES[row.status || row.state] || STATUS_STYLE
  *  rows. The month's counts and its hours are both drawn with it, so they read as one
  *  summary rather than as two designs. */
 const Tile = ({ label, value, sub, tone = "text-slate-800", testid }) => (
-  <div className="flex gap-2 py-3 text-sm" data-testid={testid}>
+  <div className="flex items-center gap-2 py-3 text-sm" data-testid={testid}>
     <dt className="w-40 shrink-0 text-slate-500">
       {label}
       {/* The explanatory line under a label is desktop-only; a phone keeps label and value. */}
@@ -186,14 +186,20 @@ const Panel = ({ title, icon: Icon, children, className = "", testid }) => (
  *  The same six figures the header clock holds behind its pill, laid out rather than
  *  hidden — this is the screen somebody opened to look at them.
  */
-const TodayStrip = ({ row, standard }) => {
+const TodayStrip = ({ row, standard, today }) => {
   const style = statusOf(row || {});
+  const when = today ? new Date(`${today}T00:00:00`) : null;
   return (
     <section data-testid="my-attendance-today">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
           Today
-          <span className="hidden text-xs font-normal text-slate-400 md:inline">
+          {when && (
+            <span className="font-medium normal-case tracking-normal text-slate-600" data-testid="my-attendance-today-date">
+              · {dayNumber(today)} · {when.toLocaleDateString("en-GB", { weekday: "long" })}
+            </span>
+          )}
+          <span className="hidden text-xs font-normal normal-case tracking-normal text-slate-400 md:inline">
             (Standard: {standard?.start} – {standard?.end})
           </span>
         </h3>
@@ -205,11 +211,13 @@ const TodayStrip = ({ row, standard }) => {
             <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${style.cls}`}>{style.label}</span>
           </dd>
         </div>
-        <Tile label="Login" value={prettyTime(row?.clock_in) || "—"} testid="my-attendance-today-in" />
-        <Tile label="Logout" value={prettyTime(row?.clock_out) || "—"} testid="my-attendance-today-out" />
+        <Tile
+          label="Login – Logout"
+          value={<>{prettyTime(row?.clock_in) || "—"} <span className="text-slate-300">–</span> {prettyTime(row?.clock_out) || "—"}</>}
+          testid="my-attendance-today-in-out"
+        />
         <Tile label="Sessions" value={row?.sessions ?? 0} testid="my-attendance-today-sessions" />
-        <Tile label="On the clock" value={hours(row?.login_minutes)} testid="my-attendance-today-login" />
-        <Tile label="Work hours" value={hours(row?.worked_minutes)} tone="text-emerald-600" testid="my-attendance-today-worked" />
+        <Tile label="On the clock" value={hours(row?.login_minutes)} tone="text-emerald-600" testid="my-attendance-today-login" />
       </dl>
     </section>
   );
@@ -519,7 +527,7 @@ const AttendanceTab = () => {
         <p className="py-16 text-center text-sm text-slate-400" data-testid="my-attendance-loading">Loading your month…</p>
       ) : (
         <>
-          {isThisMonth && <TodayStrip row={todayRow} standard={data?.standard} />}
+          {isThisMonth && <TodayStrip row={todayRow} standard={data?.standard} today={data?.today} />}
           <MonthSummary
             totals={data?.totals}
             month={month}
