@@ -505,14 +505,16 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
                               entered is already signed off by the act of entering it, and
                               one already decided is not a decision to make twice. */}
                           {pending(exp) ? decideButtons(exp) : null}
-                          <button
-                            onClick={() => remove(exp)}
-                            className="text-slate-300 transition hover:text-rose-600"
-                            title="Delete this expense"
-                            data-testid={`finance-expense-delete-${exp.id}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {data.delete_enabled && (
+                            <button
+                              onClick={() => remove(exp)}
+                              className="text-slate-300 transition hover:text-rose-600"
+                              title="Delete this expense"
+                              data-testid={`finance-expense-delete-${exp.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -545,14 +547,16 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
                     <StatusChip exp={exp} />
                     <div className="ml-auto flex items-center gap-2">
                       {pending(exp) ? decideButtons(exp) : null}
-                      <button
-                        onClick={() => remove(exp)}
-                        className="text-slate-300 transition hover:text-rose-600"
-                        title="Delete this expense"
-                        data-testid={`finance-expense-card-delete-${exp.id}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {data.delete_enabled && (
+                        <button
+                          onClick={() => remove(exp)}
+                          className="text-slate-300 transition hover:text-rose-600"
+                          title="Delete this expense"
+                          data-testid={`finance-expense-card-delete-${exp.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                   {pending(exp) && exp.created_by ? (

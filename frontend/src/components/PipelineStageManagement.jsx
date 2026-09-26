@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/sonner";
-import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone, getPhysioDayLock, setPhysioDayLock, getLeadDeleteButton, setLeadDeleteButton, getSaConsultBranchesSetting, setSaConsultBranchesSetting } from "@/lib/api";
+import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads, resetAllPayments, resetAllUsers, unlockDangerZone, getPhysioDayLock, setPhysioDayLock, getLeadDeleteButton, setLeadDeleteButton, getExpenseDeleteButton, setExpenseDeleteButton, getSaConsultBranchesSetting, setSaConsultBranchesSetting } from "@/lib/api";
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
@@ -129,6 +129,8 @@ export const PipelineStageManagement = ({ leading = null }) => {
   // Loading rather than guess a state and offer the wrong button.
   const [deleteButton, setDeleteButton] = useState(null);
   const [savingDeleteButton, setSavingDeleteButton] = useState(false);
+  const [expenseDelete, setExpenseDelete] = useState(null);
+  const [savingExpenseDelete, setSavingExpenseDelete] = useState(false);
   // The Super Admin's branch-wise On/Off on My Consultation. null until the zone is open.
   const [saBranches, setSaBranches] = useState(null);
   const [savingSaBranches, setSavingSaBranches] = useState(false);
@@ -264,7 +266,8 @@ export const PipelineStageManagement = ({ leading = null }) => {
 
   // Read once the zone is open, with the password it was opened with.
   useEffect(() => {
-    if (!devPassword) { setDayLock(null); setDeleteButton(null); setSaBranches(null); return; }
+    if (!devPassword) { setDayLock(null); setDeleteButton(null); setExpenseDelete(null); setSaBranches(null); return; }
+    getExpenseDeleteButton(devPassword).then((r) => setExpenseDelete(!!r.enabled)).catch(() => setExpenseDelete(null));
     getPhysioDayLock(devPassword).then((r) => setDayLock(!!r.locked)).catch(() => setDayLock(null));
     getLeadDeleteButton(devPassword).then((r) => setDeleteButton(!!r.enabled)).catch(() => setDeleteButton(null));
     getSaConsultBranchesSetting(devPassword).then((r) => setSaBranches(!!r.enabled)).catch(() => setSaBranches(null));
@@ -433,6 +436,23 @@ export const PipelineStageManagement = ({ leading = null }) => {
       resetFailed(e);
     }
     setSavingDeleteButton(false);
+  };
+
+  const toggleExpenseDelete = async () => {
+    const next = !expenseDelete;
+    const ok = window.confirm(next
+      ? "Turn the Accountant expense delete button ON?\n\nThe accountant gets a bin icon on every expense in Approvals > Expenses Approval and on the Expense tab. It deletes the expense outright. It cannot be undone."
+      : "Turn the Accountant expense delete button OFF?\n\nThe bin icon disappears from the accountant's expense lists, and the server refuses the request even if one is sent. Nothing already deleted comes back.");
+    if (!ok) return;
+    setSavingExpenseDelete(true);
+    try {
+      const r = await setExpenseDeleteButton(devPassword, next);
+      setExpenseDelete(!!r.enabled);
+      toast.success(r.enabled ? "Expense delete button is ON" : "Expense delete button is OFF");
+    } catch (e) {
+      resetFailed(e);
+    }
+    setSavingExpenseDelete(false);
   };
 
   const toggleSaBranches = async () => {
@@ -702,6 +722,7 @@ export const PipelineStageManagement = ({ leading = null }) => {
             {[
               { key: "physio-day-lock", label: "Physio Treatment Days lock", value: dayLock, saving: savingDayLock, onFlip: toggleDayLock, on: "LOCKED", off: "UNLOCKED" },
               { key: "lead-delete-button", label: "Branch Leads delete button", value: deleteButton, saving: savingDeleteButton, onFlip: toggleDeleteButton, on: "ON", off: "OFF" },
+              { key: "expense-delete-button", label: "Accountant expense delete button", value: expenseDelete, saving: savingExpenseDelete, onFlip: toggleExpenseDelete, on: "ON", off: "OFF" },
               { key: "sa-consult-branches", label: "Super Admin branch On/Off", value: saBranches, saving: savingSaBranches, onFlip: toggleSaBranches, on: "ON", off: "OFF" },
             ].map((row) => (
               <label key={row.key} className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50" data-testid={`${row.key}-card`}>

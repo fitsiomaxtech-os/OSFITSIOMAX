@@ -865,6 +865,19 @@ def _expense_approved(row: dict) -> bool:
     return True if value is None else bool(value)
 
 
+# ---- Expense delete: a bin on each expense, switched on and off in Developer Access ----
+#
+# Off unless a developer switches it on, the same shape as the Branch Leads delete button:
+# for clearing demo and testing expenses. The endpoint refuses while it is off, not just
+# the icon hiding. The toggle's own endpoints live in v3_config beside the others.
+EXPENSE_DELETE_SETTING_ID = "expense_delete_button"
+
+
+async def expense_delete_enabled() -> bool:
+    row = await v3_col("app_settings").find_one({"id": EXPENSE_DELETE_SETTING_ID}, {"_id": 0})
+    return bool(row and row.get("enabled"))
+
+
 # When expenses started being written approved on save (commit 0da48efd). That was
 # reversed: an expense waits for the accountant. Anything written in between was signed off
 # by whoever entered it, and goes back to the accountant's queue.
@@ -968,6 +981,7 @@ async def list_expenses(
         "pending_total": sum(r.get("amount", 0) for r in pending_rows),
         "pending_count": len(pending_rows),
         "payment_modes": payment_modes,
+        "delete_enabled": await expense_delete_enabled(),
     }
 
 
@@ -1168,6 +1182,8 @@ async def reject_expense(
 
 @router.delete("/finance/expenses/{expense_id}")
 async def delete_expense(expense_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev"))):
+    if not await expense_delete_enabled():
+        raise HTTPException(status_code=403, detail="Expense delete is switched off in Developer Access")
     res = await v3_col("expenses").delete_one({"id": expense_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Expense not found")

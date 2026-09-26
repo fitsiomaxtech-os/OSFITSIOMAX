@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Coins, Eye, Receipt, X } from "lucide-react";
+import { Check, Coins, Eye, Receipt, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import { getFinanceExpenses, approveFinanceExpense, rejectFinanceExpense } from "@/lib/api";
+import { getFinanceExpenses, approveFinanceExpense, rejectFinanceExpense, deleteFinanceExpense } from "@/lib/api";
 import { notesLabel } from "@/lib/denominations";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -138,6 +138,8 @@ export const ExpenseApprovalsPanel = ({
   const [loading, setLoading] = useState(true);
   const [deciding, setDeciding] = useState(null);
   const [viewing, setViewing] = useState(null); // the expense open in Expense Details
+  // Switched on and off in Developer Access; the list says which.
+  const [deleteEnabled, setDeleteEnabled] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -149,6 +151,7 @@ export const ExpenseApprovalsPanel = ({
       if (endDate) params.end_date = endDate;
       const data = await getFinanceExpenses(params);
       setRows(data.expenses || []);
+      setDeleteEnabled(!!data.delete_enabled);
       setTotals({
         approved_total: data.approved_total || 0,
         approved_count: data.approved_count || 0,
@@ -187,6 +190,22 @@ export const ExpenseApprovalsPanel = ({
       onChanged();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not save that");
+    } finally {
+      setDeciding(null);
+    }
+  };
+
+  const remove = async (exp) => {
+    if (!window.confirm(`Delete this ${exp.category} expense of ${fmt(exp.amount)}? It cannot be undone.`)) return;
+    setDeciding(exp.id);
+    try {
+      await deleteFinanceExpense(exp.id);
+      toast.success("Expense deleted");
+      setViewing(null);
+      load();
+      onChanged();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not delete that");
     } finally {
       setDeciding(null);
     }
@@ -308,6 +327,19 @@ export const ExpenseApprovalsPanel = ({
                       Reject
                     </Button>
                   </>
+                )}
+                {deleteEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => remove(exp)}
+                    disabled={deciding === exp.id}
+                    className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                    title="Delete this expense"
+                    aria-label="Delete this expense"
+                    data-testid={`finance-expense-approvals-delete-${exp.id}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 )}
               </div>
             </div>

@@ -21,7 +21,7 @@ from shift_utils import attach_shifts
 import lead_control
 import lead_purge
 from seed import create_default_lead_source, sync_lead_source_branch_name
-from routers.v3_finance import REVENUE_ACTIONS
+from routers.v3_finance import REVENUE_ACTIONS, EXPENSE_DELETE_SETTING_ID, expense_delete_enabled
 from routers.v3_inventory import _add_to_stock
 from routers.v3_zumba import MASTER_SLOT_FIELD
 from schemas.v3 import (
@@ -1182,6 +1182,35 @@ async def v3_set_lead_delete_button(
         {"id": lead_purge.DELETE_BUTTON_SETTING_ID},
         {"$set": {
             "id": lead_purge.DELETE_BUTTON_SETTING_ID,
+            "enabled": payload.enabled,
+            "updated_by": user.full_name,
+            "updated_at": now_iso(),
+        }},
+        upsert=True,
+    )
+    return {"enabled": payload.enabled}
+
+
+# Whether the accountant's expense lists offer a Delete bin -- Approvals > Expenses
+# Approval and the Expense tab. Off hides the icon and the delete endpoint refuses.
+class ExpenseDeleteButtonInput(BaseModel):
+    enabled: bool
+
+
+@router.get("/admin/expense-delete-button")
+async def v3_get_expense_delete_button(_: V3UserOut = Depends(require_developer_password)):
+    return {"enabled": await expense_delete_enabled()}
+
+
+@router.put("/admin/expense-delete-button")
+async def v3_set_expense_delete_button(
+    payload: ExpenseDeleteButtonInput,
+    user: V3UserOut = Depends(require_developer_password),
+):
+    await v3_col("app_settings").update_one(
+        {"id": EXPENSE_DELETE_SETTING_ID},
+        {"$set": {
+            "id": EXPENSE_DELETE_SETTING_ID,
             "enabled": payload.enabled,
             "updated_by": user.full_name,
             "updated_at": now_iso(),
