@@ -6,7 +6,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   getBranches, getFinanceExpenses, createFinanceExpense,
   getBranchCash, createCashHandover, listCashHandovers, cancelCashHandover,
-  listVendors,
+  listVendors, createVendor,
 } from "@/lib/api";
 import { DENOMINATIONS, noteTotal, countedNotes, noteBreakdown, notesLabel } from "@/lib/denominations";
 
@@ -199,6 +199,26 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
     [pastRows, form.vendor_id],
   );
 
+  // The + beside the picker: a vendor added here goes into the same Vendor list as
+  // Records > Vendor Records, and is picked for this expense straight away.
+  const [newVendor, setNewVendor] = useState(null); // { name, phone } while open
+  const [addingVendor, setAddingVendor] = useState(false);
+  const saveNewVendor = async () => {
+    if (!newVendor?.name.trim()) { toast.error("Enter the vendor name"); return; }
+    setAddingVendor(true);
+    try {
+      const v = await createVendor({ name: newVendor.name.trim(), phone: newVendor.phone.trim() });
+      setVendors((list) => [...list, v].sort((a, b) => a.name.localeCompare(b.name)));
+      setForm((f) => ({ ...f, vendor_id: v.id }));
+      setNewVendor(null);
+      toast.success(`${v.name} added`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not add the vendor");
+    } finally {
+      setAddingVendor(false);
+    }
+  };
+
   const pickVendor = (id) => {
     const v = vendors.find((x) => x.id === id);
     setForm((f) => ({ ...f, vendor_id: v ? id : "" }));
@@ -298,15 +318,58 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
             </div>
             <div className="sm:col-span-2">
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Vendor</label>
-              <select
-                value={form.vendor_id}
-                onChange={(e) => pickVendor(e.target.value)}
-                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
-                data-testid="branch-expense-vendor"
-              >
-                <option value="">-- not a listed vendor --</option>
-                {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={form.vendor_id}
+                  onChange={(e) => pickVendor(e.target.value)}
+                  className="min-w-0 flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
+                  data-testid="branch-expense-vendor"
+                >
+                  <option value="">-- not a listed vendor --</option>
+                  {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setNewVendor(newVendor ? null : { name: "", phone: "" })}
+                  className={`flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-md border ${
+                    newVendor ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                  title="Add vendor"
+                  aria-label="Add vendor"
+                  data-testid="branch-expense-vendor-add"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+              {newVendor && (
+                <div className="mt-2 flex flex-wrap gap-2 rounded-lg border border-sky-200 bg-sky-50/50 p-2" data-testid="branch-expense-new-vendor">
+                  <Input
+                    value={newVendor.name}
+                    onChange={(e) => setNewVendor((n) => ({ ...n, name: e.target.value }))}
+                    placeholder="Vendor name *"
+                    className="min-w-[140px] flex-1 bg-white"
+                    autoFocus
+                    data-testid="branch-expense-new-vendor-name"
+                  />
+                  <Input
+                    value={newVendor.phone}
+                    onChange={(e) => setNewVendor((n) => ({ ...n, phone: e.target.value }))}
+                    placeholder="Phone"
+                    className="w-32 bg-white"
+                    data-testid="branch-expense-new-vendor-phone"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-9 bg-sky-600 text-white hover:bg-sky-700"
+                    disabled={addingVendor}
+                    onClick={saveNewVendor}
+                    data-testid="branch-expense-new-vendor-save"
+                  >
+                    {addingVendor ? "Adding…" : "Add"}
+                  </Button>
+                </div>
+              )}
               {vendorHistory.length > 0 && (
                 <p className="mt-1 text-[10px] text-slate-500" data-testid="branch-expense-vendor-history">
                   {`${vendorHistory.length} earlier expense${vendorHistory.length === 1 ? "" : "s"} · ${fmt(vendorHistory.reduce((t, r) => t + (Number(r.amount) || 0), 0))} · last ${fmt(vendorHistory[0].amount)} on ${vendorHistory[0].expense_date || "—"}`}
