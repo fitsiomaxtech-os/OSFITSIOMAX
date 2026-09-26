@@ -260,7 +260,6 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50/60 px-5 py-4">
           <div>
             <h3 className="text-base font-semibold text-slate-800">Add Expense</h3>
-            <p className="text-[11px] text-slate-500">Cash out of the branch drawer. Goes to the accountant to approve before it counts.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Close">
             <X className="h-4 w-4" />
