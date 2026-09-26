@@ -445,6 +445,8 @@ export const getBranchFinance = async (params = {}) => {
 
 // ---- Finance: Approvals / Expenses / Profit (Accountant) ----
 export const getFinanceApprovals = async (params = {}) => (await api.get("/finance/approvals", { params })).data;
+// Behind the Developer Access delete switch; reverses the payment at its source.
+export const deleteTransaction = async (id) => (await api.delete(`/finance/transactions/${id}`)).data;
 // payload: { confirmed_amount } for Cash, { transaction_ref } for Bank Transfer/UPI,
 // { cheque_number } for Cheque — whichever the row's own payment mode calls for.
 export const approveTransaction = async (activityId, payload = {}) => (await api.post(`/finance/transactions/${activityId}/approve`, payload)).data;

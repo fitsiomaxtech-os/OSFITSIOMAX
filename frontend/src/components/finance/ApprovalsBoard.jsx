@@ -1,11 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, CheckCircle2, ChevronRight, Minus, RotateCcw, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronRight, Minus, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { FinanceDateFilter } from "@/components/finance/FinanceDateFilter";
 import { rangeFor, rangeIncomplete } from "@/lib/dateRange";
-import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransaction, bulkApproveTransactions } from "@/lib/api";
+import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransaction, bulkApproveTransactions, deleteTransaction } from "@/lib/api";
 import { ExpenseApprovalsPanel } from "@/components/finance/ExpenseApprovalsPanel";
 
 // The two things this desk signs off. Money coming in was all it ever held, because money
@@ -391,7 +391,22 @@ const RefCell = ({ lead, sub, testId }) => (
  * line up under one heading each, which is how a desk checking a batch against a bank
  * statement actually works — down a column, not across a card.
  */
-const PendingTable = ({ rows, selected, onToggle, onApprove }) => (
+/** The bin, shown only while Developer Access has the delete switch on. */
+const DeleteIcon = ({ onClick, disabled, testId }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+    title="Delete this payment"
+    aria-label="Delete this payment"
+    data-testid={testId}
+  >
+    <Trash2 className="h-4 w-4" />
+  </button>
+);
+
+const PendingTable = ({ rows, selected, onToggle, onApprove, onDelete, busyId }) => (
   <div className="overflow-x-auto">
     <table className="w-full min-w-[1240px] text-sm" data-testid="finance-pending-table">
       <thead className="bg-slate-500 text-left text-[10px] font-semibold uppercase tracking-wider text-white">
@@ -461,14 +476,23 @@ const PendingTable = ({ rows, selected, onToggle, onApprove }) => (
               </td>
               <td className="whitespace-nowrap px-3 py-3 text-right font-bold text-emerald-600">{fmt(tx.amount)}</td>
               <td className="px-3 py-3 text-right">
-                <Button
-                  size="sm"
-                  onClick={() => onApprove(tx)}
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                  data-testid={`finance-approve-${tx.id}`}
-                >
-                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" />Approve
-                </Button>
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => onApprove(tx)}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    data-testid={`finance-approve-${tx.id}`}
+                  >
+                    <CheckCircle2 className="mr-1 h-3.5 w-3.5" />Approve
+                  </Button>
+                  {onDelete && (
+                    <DeleteIcon
+                      onClick={() => onDelete({ key: tx.id, head: tx, items: [tx] })}
+                      disabled={busyId === tx.id}
+                      testId={`finance-delete-${tx.id}`}
+                    />
+                  )}
+                </div>
               </td>
             </tr>
           );
@@ -488,7 +512,7 @@ const PendingTable = ({ rows, selected, onToggle, onApprove }) => (
  * them. Nothing else on this board drills in, so opening happens in place rather than
  * navigating away.
  */
-const ApprovedTable = ({ groups, busyId, onUndo }) => {
+const ApprovedTable = ({ groups, busyId, onUndo, onDelete }) => {
   const [open, setOpen] = useState(() => new Set());
   const toggle = (key) => setOpen((prev) => {
     const next = new Set(prev);
@@ -536,15 +560,24 @@ const ApprovedTable = ({ groups, busyId, onUndo }) => {
                   <td className="px-4 py-3 text-right font-bold text-emerald-600">{fmt(g.total)}</td>
                   {/* The click that acts on a row must not also open it. */}
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onUndo(g)}
-                      disabled={busyId === g.key}
-                      data-testid={`finance-unapprove-${g.key}`}
-                    >
-                      <RotateCcw className="mr-1 h-3.5 w-3.5" />Undo
-                    </Button>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onUndo(g)}
+                        disabled={busyId === g.key}
+                        data-testid={`finance-unapprove-${g.key}`}
+                      >
+                        <RotateCcw className="mr-1 h-3.5 w-3.5" />Undo
+                      </Button>
+                      {onDelete && (
+                        <DeleteIcon
+                          onClick={() => onDelete(g)}
+                          disabled={busyId === g.key}
+                          testId={`finance-delete-${g.key}`}
+                        />
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <ChevronRight
@@ -659,6 +692,23 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
 
   // One approved row can hold several payments of the same lead, so Undo takes them all
   // back to pending, where each is approved on its own again.
+  // Deletes the payment at its source -- see delete_transaction. A grouped approved row
+  // deletes every payment in it.
+  const removePayments = async (group) => {
+    const n = group.items.length;
+    const who = group.head?.patient_name || "this client";
+    if (!window.confirm(`Delete ${n > 1 ? `${n} payments` : "this payment"} of ${who}?\n\nThe fee goes back to owed on the client (a store sale's stock goes back on the shelf). This cannot be undone.`)) return;
+    setBusyId(group.key);
+    try {
+      let last = "";
+      for (const tx of group.items) last = (await deleteTransaction(tx.id))?.message || last;
+      toast.success(n > 1 ? `${n} payments deleted` : last || "Payment deleted");
+    } catch (e) { toast.error(e?.response?.data?.detail || "Could not delete that"); }
+    await load();
+    onChanged();
+    setBusyId(null);
+  };
+
   const undo = async (group) => {
     setBusyId(group.key);
     try {
@@ -925,9 +975,9 @@ export const ApprovalsBoard = ({ pending = { income: 0, expenses: 0 }, onChanged
               {view === "pending" ? "Nothing waiting on approval." : "Nothing approved yet."}
             </p>
           ) : view === "approved" ? (
-            <ApprovedTable groups={groupByLead(rows)} busyId={busyId} onUndo={undo} />
+            <ApprovedTable groups={groupByLead(rows)} busyId={busyId} onUndo={undo} onDelete={data.delete_enabled ? removePayments : null} />
           ) : (
-            <PendingTable rows={rows} selected={selected} onToggle={toggleOne} onApprove={setApproving} />
+            <PendingTable rows={rows} selected={selected} onToggle={toggleOne} onApprove={setApproving} onDelete={data.delete_enabled ? removePayments : null} busyId={busyId} />
           )}
         </div>
       </div>

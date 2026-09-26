@@ -1191,8 +1191,8 @@ async def v3_set_lead_delete_button(
     return {"enabled": payload.enabled}
 
 
-# Whether the accountant's expense lists offer a Delete bin -- Approvals > Expenses
-# Approval and the Expense tab. Off hides the icon and the delete endpoint refuses.
+# Whether the accountant's Approvals offer a Delete bin -- Income Approval, Expenses
+# Approval and the Expense tab. Off hides the icon and the delete endpoints refuse.
 class ExpenseDeleteButtonInput(BaseModel):
     enabled: bool
 

@@ -547,6 +547,115 @@ async def unapprove_transaction(
     return {"message": "Approval removed"}
 
 
+# The fields each lead payment action writes, so deleting the payment can take them off
+# the lead again. The five scheduled fees come from FEE_SCHEDULES (defined further down,
+# read at call time); these are the three that carry no schedule.
+_UNSCHEDULED_PAYMENT_FIELDS = {
+    "consultation_paid": ["consultation_fee", "consultation_payment_mode"],
+    "package_sold": ["package_paid", "package_payment_mode", "package_payment_details"],
+}
+
+
+def _payment_fields(row: dict) -> list:
+    action = row.get("action")
+    for cfg in FEE_SCHEDULES.values():
+        if cfg["action"] == action:
+            return [cfg["paid"], cfg["mode"], cfg["details"]]
+    if action == "fee_collected":
+        # The old collect-fee endpoint: "Consultation fee collected" or "Package fee ...".
+        return ["consultation_fee"] if (row.get("details") or "").lower().startswith("consultation") else ["package_amount"]
+    return _UNSCHEDULED_PAYMENT_FIELDS.get(action, [])
+
+
+async def _reverse_lead_payment(row: dict, user: V3UserOut) -> str:
+    """Take one fee's payment off a patient, so Branch Admin sees it owed again.
+
+    A fee is one set of fields on the lead (paid, mode, schedule), however many activity
+    rows it took to get there -- a first collection, a correction, installments. So the
+    fee is reset whole, and every payment row of that fee for this patient goes with it;
+    leaving the others would list money the lead no longer says it has.
+
+    The consultation stage steps back too when the fee it stood on is gone: Fee Collected
+    needs a consultation or treatment fee paid, and Physio Assign a treatment fee.
+    """
+    lead_id, action = row.get("lead_id"), row.get("action")
+    fields = _payment_fields(row)
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0}) if lead_id else None
+    removed = await v3_col("lead_activity").delete_many({"lead_id": lead_id, "action": action}) if lead_id else None
+    if not removed or not removed.deleted_count:
+        await v3_col("lead_activity").delete_one({"id": row["id"]})
+    if not lead:
+        return "Payment deleted"
+
+    update = {f: None for f in fields}
+    after = {**lead, **update}
+    stage = lead.get("consultation_stage")
+    has_consult = after.get("package_paid") is not None
+    has_treatment = after.get("treatment_fee_paid") is not None
+    if stage == "Physio Assign" and not has_treatment:
+        update["consultation_stage"] = "Fee Collected" if has_consult else "Consultation Visit"
+    elif stage == "Fee Collected" and not has_consult and not has_treatment:
+        update["consultation_stage"] = "Consultation Visit"
+    update["updated_at"] = _now()
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": update})
+
+    label = PAYMENT_ACTION_LABELS.get(action, "Payment")
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "payment_deleted",
+        "details": f"{label} payment deleted by {user.full_name} from the Accountant's Approvals -- the fee is owed again",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    return f"{label} deleted -- {lead.get('name') or 'the patient'} owes it again"
+
+
+@router.delete("/finance/transactions/{activity_id}")
+async def delete_transaction(
+    activity_id: str,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "business_dev")),
+):
+    """Delete one collected payment from the Approvals tab, for clearing demo and testing
+    money. Behind the same Developer Access switch as the expense bin.
+
+    Undone at the source, not only hidden: a patient's fee reads owed again, a store sale's
+    quantity goes back on the shelf, and a Zumba or Fitness registration keeps its fee and
+    term with nothing paid against it -- the same reset reset-all-payments does, for one.
+    """
+    if not await expense_delete_enabled():
+        raise HTTPException(status_code=403, detail="Delete is switched off in Developer Access")
+
+    row = await v3_col("lead_activity").find_one({"id": activity_id, "action": {"$in": REVENUE_ACTIONS}}, {"_id": 0})
+    if row:
+        return {"message": await _reverse_lead_payment(row, user)}
+
+    sale = await v3_col("inventory_movements").find_one({"id": activity_id, "kind": "sale"}, {"_id": 0})
+    if sale:
+        from routers.v3_inventory import _add_to_stock
+        item = await v3_col("inventory_items").find_one({"id": sale.get("item_id")}, {"_id": 0, "id": 1})
+        qty = int(sale.get("qty") or 0)
+        if item and sale.get("branch_id") and qty > 0:
+            await _add_to_stock(sale["item_id"], sale["branch_id"], qty)
+        await v3_col("inventory_movements").delete_one({"id": activity_id})
+        return {"message": "Store sale deleted -- the stock is back on the shelf"}
+
+    unset = {
+        "approved_by": "", "approved_at": "",
+        "approval_confirmed_amount": "", "approval_transaction_ref": "", "approval_cheque_number": "",
+        "income_requested_by": "", "income_requested_at": "",
+    }
+    cleared = {"fee_paid": 0.0, "payment_mode": "", "payment_reference": "", "payment_lines": [], "approved": False, "income_requested": False}
+    res = await v3_col("zumba_registrations").update_one({"id": activity_id}, {"$set": cleared, "$unset": unset})
+    if res.matched_count:
+        return {"message": "Zumba payment deleted -- the fee is owed again"}
+    res = await v3_col("fitness_registrations").update_one({"id": activity_id}, {"$set": {**cleared, "payments": []}, "$unset": unset})
+    if res.matched_count:
+        return {"message": "Fitness payment deleted -- the fee is owed again"}
+    raise HTTPException(status_code=404, detail="Payment not found")
+
+
 @router.get("/finance/approvals")
 async def finance_approvals(
     branch_id: Optional[str] = None,
@@ -804,6 +913,7 @@ async def finance_approvals(
     # not a comparison. Both piles are built now; only what is listed narrows.
     listed = rows if approved is None else (approved_rows if approved else pending)
     return {
+        "delete_enabled": await expense_delete_enabled(),
         "transactions": listed[:1000],
         "summary": {
             "pending_count": len(pending),
