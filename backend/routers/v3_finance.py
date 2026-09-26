@@ -1042,7 +1042,7 @@ async def create_expense(
         "amount": payload.amount,
         "branch_id": branch_id,
         "note": reason,
-        "paid_to": (vendor or {}).get("name") or (payload.paid_to or "").strip(),
+        "paid_to": (payload.paid_to or "").strip() or (vendor or {}).get("name", ""),
         "vendor_id": (vendor or {}).get("id"),
         "vendor_name": (vendor or {}).get("name", ""),
         "payment_mode": payment_mode,

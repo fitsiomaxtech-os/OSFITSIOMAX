@@ -8,7 +8,6 @@ import {
   getBranchCash, createCashHandover, listCashHandovers, cancelCashHandover,
   listVendors,
 } from "@/lib/api";
-import { BRANCH_EXPENSE_CATEGORIES } from "@/lib/expenseCategories";
 import { DENOMINATIONS, noteTotal, countedNotes, noteBreakdown, notesLabel } from "@/lib/denominations";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -168,8 +167,10 @@ const usePickedBranchCash = (fixedBranchId, pickedBranchId, fallback) => {
 const vendorKey = (name) => (name || "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
 
 export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches, pastRows = [], initialVendorId = "" }) => {
+  // No Category box: the vendor picked is what the expense is for, and one not from a
+  // listed vendor is filed as Other. paid_to is the Name typed by hand.
   const [form, setForm] = useState({
-    category: BRANCH_EXPENSE_CATEGORIES[0], amount: "", expense_date: todayIso(),
+    amount: "", expense_date: todayIso(),
     vendor_id: "", paid_to: "", reference: "", note: "",
   });
   // The Vendor book, for the Paid to picker. Switched-off vendors are left out, as they
@@ -200,16 +201,7 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
 
   const pickVendor = (id) => {
     const v = vendors.find((x) => x.id === id);
-    if (!v) { setForm((f) => ({ ...f, vendor_id: "", paid_to: "" })); return; }
-    // The last expense to them fills the category, when it is one a branch may use --
-    // a vendor paid for Printing last time is usually paid for Printing again.
-    const last = pastRows.find((r) => r.vendor_id === id);
-    setForm((f) => ({
-      ...f,
-      vendor_id: id,
-      paid_to: v.name,
-      category: last && BRANCH_EXPENSE_CATEGORIES.includes(last.category) ? last.category : f.category,
-    }));
+    setForm((f) => ({ ...f, vendor_id: v ? id : "" }));
   };
 
   // Opened from a vendor's View: pick them once the list has arrived.
@@ -220,7 +212,7 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
   const submit = async () => {
     if (!spendingBranch) { toast.error("Pick the branch whose drawer this cash came out of"); return; }
     if (!(amountNum > 0)) { toast.error("Enter how much was spent"); return; }
-    if (!form.paid_to.trim()) { toast.error("Say who it was paid to"); return; }
+    if (!form.paid_to.trim()) { toast.error("Enter the name"); return; }
     // Every branch expense is cash out of the drawer, and cash leaves no invoice behind
     // it — this sentence is the whole of what the accountant approves it on.
     if (!form.note.trim()) { toast.error("Say what the cash was spent on — the accountant approves it on that"); return; }
@@ -232,9 +224,11 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
     try {
       // A name typed by hand that is a listed vendor is booked against that vendor.
       const typedVendor = form.vendor_id ? null : vendors.find((v) => vendorKey(v.name) === vendorKey(form.paid_to));
+      const vendor = vendors.find((v) => v.id === form.vendor_id) || typedVendor;
       await createFinanceExpense({
         ...form,
-        vendor_id: form.vendor_id || typedVendor?.id || undefined,
+        category: vendor?.name || "Other",
+        vendor_id: vendor?.id || undefined,
         amount: amountNum,
         // Whose drawer the notes came out of, and that they came out of a drawer at all.
         // Both are sent rather than left to the role: a Super Admin or Business Dev
@@ -284,16 +278,13 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
           )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Category *</label>
-              <select
-                value={form.category}
-                onChange={(e) => set("category", e.target.value)}
-                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
-                data-testid="branch-expense-category"
-              >
-                {BRANCH_EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <p className="mt-1 text-[10px] text-slate-400">Rent, salary and EB are paid centrally — not from a branch.</p>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Name *</label>
+              <Input
+                value={form.paid_to}
+                onChange={(e) => set("paid_to", e.target.value)}
+                placeholder="Enter name"
+                data-testid="branch-expense-paid-to"
+              />
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Amount *</label>
@@ -317,28 +308,11 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
                 <option value="">-- not a listed vendor --</option>
                 {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
-              {form.vendor_id ? (
+              {vendorHistory.length > 0 && (
                 <p className="mt-1 text-[10px] text-slate-500" data-testid="branch-expense-vendor-history">
-                  {vendorHistory.length
-                    ? `${vendorHistory.length} earlier expense${vendorHistory.length === 1 ? "" : "s"} · ${fmt(vendorHistory.reduce((t, r) => t + (Number(r.amount) || 0), 0))} · last ${fmt(vendorHistory[0].amount)} on ${vendorHistory[0].expense_date || "—"}`
-                    : "No earlier expenses to this vendor."}
-                </p>
-              ) : (
-                <p className="mt-1 text-[10px] text-slate-400">
-                  {vendors.length ? "Pick one to fill Paid to from the Vendor list." : "No vendors listed yet — type who it was paid to."}
+                  {`${vendorHistory.length} earlier expense${vendorHistory.length === 1 ? "" : "s"} · ${fmt(vendorHistory.reduce((t, r) => t + (Number(r.amount) || 0), 0))} · last ${fmt(vendorHistory[0].amount)} on ${vendorHistory[0].expense_date || "—"}`}
                 </p>
               )}
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Paid to *</label>
-              <Input
-                value={form.paid_to}
-                onChange={(e) => set("paid_to", e.target.value)}
-                placeholder="Who received it"
-                readOnly={!!form.vendor_id}
-                className={form.vendor_id ? "bg-slate-50 text-slate-600" : undefined}
-                data-testid="branch-expense-paid-to"
-              />
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Spent on</label>
@@ -665,7 +639,7 @@ const ExpenseList = ({ rows, loading, empty, showBranch, testid }) => {
                   ) : null}
                 </td>
                 <td className="break-words px-4 py-3 text-slate-600">
-                  {r.vendor_name || r.paid_to || "—"}
+                  {r.paid_to || "—"}
                   {r.vendor_id ? <VendorTag /> : null}
                 </td>
                 <td className="break-words px-4 py-3 text-slate-500">{r.reference || "—"}</td>
