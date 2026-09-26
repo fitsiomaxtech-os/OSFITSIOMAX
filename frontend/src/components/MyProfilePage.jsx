@@ -634,7 +634,7 @@ const ProfileTab = ({ roleLabel }) => {
 };
 
 /** Profile on a phone: no panels, one label/value line after another. */
-const PhoneProfileList = ({ roleLabel }) => {
+const PhoneProfileList = () => {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
 
@@ -663,7 +663,6 @@ const PhoneProfileList = ({ roleLabel }) => {
     ["Name", data.full_name, "my-profile-name"],
     ["Date of Birth", prettyDate(data.dob)],
     ["Employee ID", data.employee_code || account.short_id, "my-profile-employee-id"],
-    ["Role", roleLabel || titleCase(account.role), "my-profile-role"],
     ["Branch", account.branch_name, "my-profile-branch"],
     ["Designation", data.designation],
     ["Department", data.department],
@@ -680,7 +679,7 @@ const PhoneProfileList = ({ roleLabel }) => {
           <dd className="min-w-0 flex-1 break-all font-medium text-slate-800" data-testid={testid}>{value || "—"}</dd>
         </div>
       ))}
-      <div className="flex gap-2 py-3 text-sm">
+      <div className="flex items-center gap-2 py-3 text-sm">
         <dt className="w-32 shrink-0 text-slate-500">Status</dt>
         <dd className="min-w-0 flex-1">
           {data.status ? (
@@ -688,10 +687,11 @@ const PhoneProfileList = ({ roleLabel }) => {
               {titleCase(data.status)}
             </span>
           ) : <span className="font-medium text-slate-800">—</span>}
-          <span className="mt-1 block text-xs text-slate-500">
-            Joining Date: <span className="font-medium text-slate-700" data-testid="my-profile-joining">{prettyDate(data.joining_date) || "—"}</span>
-          </span>
         </dd>
+      </div>
+      <div className="flex gap-2 py-3 text-sm">
+        <dt className="w-32 shrink-0 text-slate-500">Joining Date</dt>
+        <dd className="min-w-0 flex-1 font-medium text-slate-800" data-testid="my-profile-joining">{prettyDate(data.joining_date) || "—"}</dd>
       </div>
     </dl>
   );
@@ -777,7 +777,7 @@ const MENU_ITEMS = [
  * across a phone is five glyphs to learn; a list says what each one is.
  */
 // `onBack` is for a host with no bottom bar to leave by: the menu then carries its own way out.
-const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff, onBack }) => {
+const PhoneProfileMenu = ({ user, onLogout, hideTimeOff, onBack }) => {
   const [open, setOpen] = useState(null);
 
   const items = hideTimeOff ? MENU_ITEMS.filter((i) => i.key !== "timeoff") : MENU_ITEMS;
@@ -802,7 +802,7 @@ const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff, onBack }) =>
           : open === "attendance" ? <AttendanceTab />
           : open === "timeoff" ? <TimeOffTab />
             : open === "security" ? <SecurityTab />
-              : <PhoneProfileList roleLabel={roleLabel} />}
+              : <PhoneProfileList />}
       </div>
     );
   }
@@ -887,7 +887,7 @@ export const MyProfilePage = ({ user, roleLabel, onBack, onLogout, phoneBar = fa
   const phoneTabs = hideTimeOff ? PHONE_BAR_TABS.filter((t) => t.key !== "timeoff") : PHONE_BAR_TABS;
 
   if (phoneMenu && phone) {
-    return <PhoneProfileMenu user={user} roleLabel={roleLabel} onLogout={onLogout} hideTimeOff={hideTimeOff} onBack={keepBack || !phoneBar ? onBack : null} />;
+    return <PhoneProfileMenu user={user} onLogout={onLogout} hideTimeOff={hideTimeOff} onBack={keepBack || !phoneBar ? onBack : null} />;
   }
 
   return (
