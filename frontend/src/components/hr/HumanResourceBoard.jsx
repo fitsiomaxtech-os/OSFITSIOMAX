@@ -462,8 +462,8 @@ const SourceManageView = ({ stageCount, onImported, onStagesChanged }) => {
 };
 
 
-/** Table from tablet up; the same rows as cards on a phone, where six columns can only
-    scroll sideways past the ones that matter. */
+/** Table from tablet up; on a phone the same rows as a flat list split by thin lines,
+    where six columns can only scroll sideways past the ones that matter. */
 const CandidateList = ({ rows, onOpen, loading }) => {
   if (!rows.length) {
     return (
@@ -475,13 +475,13 @@ const CandidateList = ({ rows, onOpen, loading }) => {
 
   return (
     <>
-      <div className="space-y-2 sm:hidden" data-testid="hr-list-mobile">
+      <div className="divide-y divide-slate-200 border-y border-slate-200 sm:hidden" data-testid="hr-list-mobile">
         {rows.map((c) => (
           <button
             key={c.id}
             type="button"
             onClick={() => onOpen(c)}
-            className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left"
+            className="block w-full px-1 py-3 text-left active:bg-slate-50"
             data-testid={`hr-card-row-${c.id}`}
           >
             <div className="flex items-start justify-between gap-2">
