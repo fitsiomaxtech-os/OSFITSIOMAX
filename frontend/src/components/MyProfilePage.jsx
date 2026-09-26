@@ -633,6 +633,70 @@ const ProfileTab = ({ roleLabel }) => {
   );
 };
 
+/** Profile on a phone: no panels, one label/value line after another. */
+const PhoneProfileList = ({ roleLabel }) => {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    myProfile()
+      .then((d) => { if (live) setData(d); })
+      .catch((e) => { if (live) setError(e?.response?.data?.detail || "Could not load your profile"); });
+    return () => { live = false; };
+  }, []);
+
+  if (error) {
+    return (
+      <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" data-testid="my-profile-error">
+        {error}
+      </p>
+    );
+  }
+  if (!data) {
+    return <p className="py-16 text-center text-sm text-slate-400" data-testid="my-profile-loading">Loading your profile…</p>;
+  }
+
+  const account = data.account || {};
+  const active = String(data.status || "").toLowerCase() === "active";
+  const rows = [
+    ["Name", data.full_name, "my-profile-name"],
+    ["Date of Birth", prettyDate(data.dob)],
+    ["Employee ID", data.employee_code || account.short_id, "my-profile-employee-id"],
+    ["Role", roleLabel || titleCase(account.role), "my-profile-role"],
+    ["Branch", account.branch_name, "my-profile-branch"],
+    ["Designation", data.designation],
+    ["Department", data.department],
+    ["Email", data.email, "my-profile-email"],
+    ["Gender", titleCase(data.gender)],
+    ["Marital Status", titleCase(data.marital_status)],
+  ];
+
+  return (
+    <dl className="divide-y divide-slate-100 px-1" data-testid="my-profile-profile-tab">
+      {rows.map(([label, value, testid]) => (
+        <div key={label} className="flex gap-2 py-3 text-sm">
+          <dt className="w-32 shrink-0 text-slate-500">{label}</dt>
+          <dd className="min-w-0 flex-1 break-all font-medium text-slate-800" data-testid={testid}>{value || "—"}</dd>
+        </div>
+      ))}
+      <div className="flex gap-2 py-3 text-sm">
+        <dt className="w-32 shrink-0 text-slate-500">Status</dt>
+        <dd className="min-w-0 flex-1">
+          {data.status ? (
+            <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+              {titleCase(data.status)}
+            </span>
+          ) : <span className="font-medium text-slate-800">—</span>}
+          <span className="mt-1 block text-xs text-slate-500">
+            Joining Date: <span className="font-medium text-slate-700" data-testid="my-profile-joining">{prettyDate(data.joining_date) || "—"}</span>
+          </span>
+        </dd>
+      </div>
+    </dl>
+  );
+};
+
 // ---------- monthly calendar ----------
 
 const ORG_WIDE = ["super_admin", "business_dev"];
@@ -738,7 +802,7 @@ const PhoneProfileMenu = ({ user, roleLabel, onLogout, hideTimeOff, onBack }) =>
           : open === "attendance" ? <AttendanceTab />
           : open === "timeoff" ? <TimeOffTab />
             : open === "security" ? <SecurityTab />
-              : <ProfileTab roleLabel={roleLabel} />}
+              : <PhoneProfileList roleLabel={roleLabel} />}
       </div>
     );
   }
