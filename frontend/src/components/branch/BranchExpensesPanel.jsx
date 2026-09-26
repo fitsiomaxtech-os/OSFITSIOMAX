@@ -18,7 +18,7 @@ const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractio
  * follows. `amount` is what it is checked against; `onChange` gets { notes, coins,
  * counted }.
  */
-const DenominationFields = ({ amount, notes, coins, onNotes, onCoins, testPrefix }) => {
+const DenominationFields = ({ amount, notes, coins, onNotes, onCoins, testPrefix, required = false }) => {
   const counted = noteTotal(notes) + (Number(coins) || 0);
   const target = Number(amount) || 0;
   const diff = counted - target;
@@ -26,7 +26,7 @@ const DenominationFields = ({ amount, notes, coins, onNotes, onCoins, testPrefix
   return (
     <div data-testid={`${testPrefix}-denominations`}>
       <div className="mb-1 flex items-center justify-between">
-        <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Denominations (optional)</label>
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{required ? "Denominations *" : "Denominations (optional)"}</label>
         <button
           type="button"
           onClick={() => { onNotes(noteBreakdown(target)); onCoins(""); }}
@@ -235,8 +235,10 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
     if (!form.paid_to.trim()) { toast.error("Enter the name"); return; }
     // Every branch expense is cash out of the drawer, and cash leaves no invoice behind
     // it — this sentence is the whole of what the accountant approves it on.
-    if (!form.note.trim()) { toast.error("Say what the cash was spent on — the accountant approves it on that"); return; }
-    if (countEntered && Math.abs(counted - amountNum) >= 0.01) {
+    if (!form.note.trim()) { toast.error("Say what the cash was spent on"); return; }
+    // Cash is counted out by note, always -- and the count has to come to the amount.
+    if (!countEntered) { toast.error("Enter the denominations for the cash"); return; }
+    if (Math.abs(counted - amountNum) >= 0.01) {
       toast.error("The notes counted do not add up to the amount");
       return;
     }
@@ -258,10 +260,10 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
         branch_id: spendingBranch,
         from_branch_drawer: true,
         payment_mode: "cash",
-        cash_denominations: countEntered ? (countedNotes(notes) || {}) : undefined,
+        cash_denominations: countedNotes(notes) || {},
         cash_coins: Number(coins) || 0,
       });
-      toast.success("Sent to the accountant — and taken out of the drawer");
+      toast.success("Expense saved and approved");
       onSaved();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not send that");
@@ -421,6 +423,7 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
             onNotes={setNotes}
             onCoins={setCoins}
             testPrefix="branch-expense"
+            required
           />
 
           <div>
@@ -440,7 +443,7 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
             {!form.note.trim() && (
               <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-amber-700" data-testid="branch-expense-reason-missing">
                 <AlertTriangle className="h-3 w-3" />
-                Required — it is the only thing the accountant can approve it on
+                Required
               </span>
             )}
           </div>
@@ -449,7 +452,7 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button className="bg-sky-600 text-white hover:bg-sky-700" disabled={saving} onClick={submit} data-testid="branch-expense-submit">
-            {saving ? "Sending…" : "Send for approval"}
+            {saving ? "Saving…" : "Save Expense"}
           </Button>
         </div>
       </div>
@@ -1159,10 +1162,10 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
       title: "Expense requests not yet approved",
       hint: "Waiting and sent back, newest first — approved ones move to Expense Approved",
       rows: piles.request.rows,
-      empty: "No open requests. Add Expense sends a request to the accountant.",
+      empty: "No open requests.",
     },
     expense_approved: {
-      title: "Expenses signed off by the accountant",
+      title: "Approved expenses",
       hint: "Each one as it was raised, approved and paid",
       rows: piles.approved.rows,
       empty: "Nothing approved yet.",

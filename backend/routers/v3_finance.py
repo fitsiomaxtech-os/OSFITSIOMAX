@@ -1026,6 +1026,18 @@ async def create_expense(
             detail="Say what the cash was spent on — it is what the accountant approves it on",
         )
 
+    # Cash out of a drawer is counted out by note, and the count has to come to the amount
+    # -- the same rule a cash fee is held to. It is what the expense is approved on now
+    # that a branch's expense no longer waits for the accountant.
+    if from_drawer:
+        notes_total, _ = _denomination_total(payload.cash_denominations)
+        counted = round(notes_total + float(payload.cash_coins or 0), 2)
+        if abs(counted - round(float(payload.amount), 2)) >= 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail="Count the cash out by note -- the denominations must add up to the amount",
+            )
+
     vendor = None
     if payload.vendor_id:
         vendor = await v3_col("vendors").find_one(
@@ -1057,9 +1069,12 @@ async def create_expense(
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
-        "approved": not from_drawer,
-        "approved_by": None if from_drawer else user.full_name,
-        "approved_at": None if from_drawer else _now(),
+        # Approved as it is written, a branch's drawer expense included: the branch asked
+        # for its spending to count straight away rather than wait in the accountant's
+        # queue. from_drawer still marks whose it was -- cash only, a reason, a count.
+        "approved": True,
+        "approved_by": user.full_name,
+        "approved_at": _now(),
         "rejected": False,
         "rejection_reason": "",
     }
