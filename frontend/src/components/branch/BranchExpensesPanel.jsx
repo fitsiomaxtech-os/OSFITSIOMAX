@@ -263,7 +263,7 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
         cash_denominations: countedNotes(notes) || {},
         cash_coins: Number(coins) || 0,
       });
-      toast.success("Expense saved and approved");
+      toast.success("Sent to the accountant for approval");
       onSaved();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not send that");
@@ -452,7 +452,7 @@ export const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branc
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button className="bg-sky-600 text-white hover:bg-sky-700" disabled={saving} onClick={submit} data-testid="branch-expense-submit">
-            {saving ? "Saving…" : "Save Expense"}
+            {saving ? "Sending…" : "Send for approval"}
           </Button>
         </div>
       </div>
@@ -1165,7 +1165,7 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
       empty: "No open requests.",
     },
     expense_approved: {
-      title: "Approved expenses",
+      title: "Expenses approved by the accountant",
       hint: "Each one as it was raised, approved and paid",
       rows: piles.approved.rows,
       empty: "Nothing approved yet.",

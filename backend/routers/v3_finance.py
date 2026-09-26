@@ -865,6 +865,25 @@ def _expense_approved(row: dict) -> bool:
     return True if value is None else bool(value)
 
 
+# When expenses started being written approved on save (commit 0da48efd). That was
+# reversed: an expense waits for the accountant. Anything written in between was signed off
+# by whoever entered it, and goes back to the accountant's queue.
+_SELF_APPROVED_SINCE = "2026-09-26T13:00:00"
+
+
+async def return_self_approved_expenses() -> None:
+    """Put the expenses approved by their own author back into Pending. Idempotent: once
+    a row is pending, or approved by somebody else, it no longer matches."""
+    await v3_col("expenses").update_many(
+        {
+            "created_at": {"$gte": _SELF_APPROVED_SINCE},
+            "approved": True,
+            "$expr": {"$eq": ["$approved_by", "$created_by"]},
+        },
+        {"$set": {"approved": False, "approved_by": None, "approved_at": None}},
+    )
+
+
 async def _link_expense_vendors(rows: list) -> None:
     """Tie each expense to its Vendor book row, the old ones included.
 
@@ -1069,12 +1088,12 @@ async def create_expense(
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
-        # Approved as it is written, a branch's drawer expense included: the branch asked
-        # for its spending to count straight away rather than wait in the accountant's
-        # queue. from_drawer still marks whose it was -- cash only, a reason, a count.
-        "approved": True,
-        "approved_by": user.full_name,
-        "approved_at": _now(),
+        # Every expense waits for the accountant, wherever it was added -- a branch
+        # drawer, a vendor's View, or the accountant's own form. It counts once the
+        # accountant has opened it in Approvals and signed it off.
+        "approved": False,
+        "approved_by": None,
+        "approved_at": None,
         "rejected": False,
         "rejection_reason": "",
     }

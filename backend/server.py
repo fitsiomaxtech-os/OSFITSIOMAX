@@ -190,6 +190,7 @@ async def startup_seed_data():
     await v3_patient_portal.backfill_portal_account_phones()
     await v3_inventory.ensure_inventory_indexes()
     await v3_vendors.ensure_vendor_indexes()
+    await v3_finance.return_self_approved_expenses()
     # Anything a deleted patient left behind on the other boards goes — see its docstring.
     await lead_purge.sweep_orphaned_trails()
     start_auto_sync_scheduler()

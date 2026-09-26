@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Coins, Receipt } from "lucide-react";
+import { Check, Coins, Eye, Receipt, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { getFinanceExpenses, approveFinanceExpense, rejectFinanceExpense } from "@/lib/api";
+import { notesLabel } from "@/lib/denominations";
 
 const fmt = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
@@ -40,6 +41,90 @@ const reasonIsTheOnlyEvidence = (exp) =>
  * branch select of its own, which meant the tab could be looking at one branch's income
  * beside another branch's expenses — two answers to a question the reader asked once.
  */
+const Detail = ({ label, children }) => (
+  <div className="min-w-0">
+    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+    <div className="break-words text-sm text-slate-800">{children || "—"}</div>
+  </div>
+);
+
+/** Everything the expense was raised with, read before it is signed off. */
+const ExpenseDetailModal = ({ exp, deciding, onDecide, onClose }) => {
+  const notes = notesLabel(exp.cash_denominations);
+  const status = exp.rejected ? "Rejected" : exp.approved ? "Approved" : "Pending approval";
+  const tone = exp.rejected ? "bg-rose-50 text-rose-700" : exp.approved ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700";
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-testid="finance-expense-detail"
+    >
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50/60 px-5 py-4">
+          <h3 className="text-base font-semibold text-slate-800">Expense Details</h3>
+          <button type="button" onClick={onClose} className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-2xl font-bold text-slate-800" data-testid="finance-expense-detail-amount">{fmt(exp.amount)}</p>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>{status}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            <Detail label="Name">{exp.paid_to}</Detail>
+            <Detail label="Vendor / Category">{exp.vendor_name || exp.category}</Detail>
+            <Detail label="Branch">{exp.branch_name}</Detail>
+            <Detail label="Spent on">{exp.expense_date}</Detail>
+            <Detail label="Payment mode">{MODE_LABELS[exp.payment_mode] || exp.payment_mode}</Detail>
+            <Detail label="Bill / reference no.">{exp.reference}</Detail>
+            {notes ? (
+              <div className="col-span-2">
+                <Detail label="Denominations">
+                  {notes}{Number(exp.cash_coins) > 0 ? ` + Rs.${exp.cash_coins} coins` : ""}
+                </Detail>
+              </div>
+            ) : null}
+            <div className="col-span-2">
+              <Detail label="What it was spent on">{exp.note}</Detail>
+            </div>
+            <Detail label="Raised by">{exp.created_by}</Detail>
+            <Detail label="Raised at">{(exp.created_at || "").slice(0, 16).replace("T", " ")}</Detail>
+            {exp.approved && exp.approved_by ? <Detail label="Approved by">{exp.approved_by}</Detail> : null}
+            {exp.rejected && exp.rejection_reason ? (
+              <div className="col-span-2"><Detail label="Rejected because">{exp.rejection_reason}</Detail></div>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          {!exp.approved && (
+            <>
+              <Button
+                variant="outline"
+                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                disabled={deciding}
+                onClick={() => onDecide(exp, false)}
+                data-testid="finance-expense-detail-reject"
+              >
+                Reject
+              </Button>
+              <Button
+                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                disabled={deciding}
+                onClick={() => onDecide(exp, true)}
+                data-testid="finance-expense-detail-approve"
+              >
+                <Check className="mr-1 h-4 w-4" /> Approve
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const ExpenseApprovalsPanel = ({
   onChanged = () => {},
   branchId = "",
@@ -52,6 +137,7 @@ export const ExpenseApprovalsPanel = ({
   const [view, setView] = useState("pending"); // "pending" | "approved"
   const [loading, setLoading] = useState(true);
   const [deciding, setDeciding] = useState(null);
+  const [viewing, setViewing] = useState(null); // the expense open in Expense Details
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,6 +182,7 @@ export const ExpenseApprovalsPanel = ({
       if (approve) await approveFinanceExpense(exp.id);
       else await rejectFinanceExpense(exp.id, reason.trim());
       toast.success(approve ? "Approved" : "Rejected");
+      setViewing(null);
       load();
       onChanged();
     } catch (e) {
@@ -190,6 +277,15 @@ export const ExpenseApprovalsPanel = ({
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-sm font-bold text-rose-600">{fmt(exp.amount)}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 border-sky-200 px-3 text-xs text-sky-700 hover:bg-sky-50"
+                  onClick={() => setViewing(exp)}
+                  data-testid={`finance-expense-approvals-view-${exp.id}`}
+                >
+                  <Eye className="mr-1 h-3.5 w-3.5" /> View
+                </Button>
                 {!exp.approved && (
                   <>
                     <Button
@@ -218,6 +314,15 @@ export const ExpenseApprovalsPanel = ({
           ))}
         </div>
       </div>
+
+      {viewing && (
+        <ExpenseDetailModal
+          exp={viewing}
+          deciding={deciding === viewing.id}
+          onDecide={decide}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>
   );
 };

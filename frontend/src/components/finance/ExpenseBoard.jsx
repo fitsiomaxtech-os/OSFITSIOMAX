@@ -225,7 +225,7 @@ export const ExpenseBoard = ({ branchId: branchIdProp, mode: modeProp, scoped = 
         cash_denominations: paidInCash ? (countedNotes(notes) || {}) : {},
         cash_coins: paidInCash ? coinsPaid : 0,
       });
-      toast.success("Expense logged");
+      toast.success("Expense logged — waiting in Approvals");
       closeAdd();
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to log expense"); }
