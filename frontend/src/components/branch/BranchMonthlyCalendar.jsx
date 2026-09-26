@@ -90,8 +90,6 @@ export const BranchMonthlyCalendar = ({ branchId }) => {
           <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} data-testid="mcal-next"><ChevronRight className="h-4 w-4" /></Button>
         </div>
         <div className="flex w-full flex-wrap items-center justify-center gap-2 text-xs sm:w-auto sm:justify-end">
-          <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700" data-testid="mcal-working-count">{workingCount} working</span>
-          <span className="rounded-full bg-rose-50 px-2.5 py-1 font-semibold text-rose-600" data-testid="mcal-leave-count">{leaveCount} leave</span>
           {!canEdit && data && (
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-500"><Lock className="h-3 w-3" />View only</span>
           )}
@@ -144,6 +142,18 @@ export const BranchMonthlyCalendar = ({ branchId }) => {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* The month's totals, below the grid as two big boxes so they read at a glance. */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center" data-testid="mcal-working-count">
+          <p className="text-3xl font-bold leading-none text-emerald-700">{workingCount}</p>
+          <p className="mt-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-600">Working days</p>
+        </div>
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-center" data-testid="mcal-leave-count">
+          <p className="text-3xl font-bold leading-none text-rose-600">{leaveCount}</p>
+          <p className="mt-1.5 text-xs font-semibold uppercase tracking-wide text-rose-500">Leave days</p>
         </div>
       </div>
 
