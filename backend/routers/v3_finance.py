@@ -826,6 +826,9 @@ class ExpenseCreate(BaseModel):
     # sign off is a claim about a real payment, and "Rs.4,000, Maintenance" is not one an
     # accountant can check — they need to know who it went to and how it was paid.
     paid_to: Optional[str] = ""
+    # The Vendor book row it was paid to, when it was one. paid_to is still written --
+    # filled from the vendor's name -- so a row reads the same whichever way it was entered.
+    vendor_id: Optional[str] = None
     payment_mode: Optional[str] = ""
     # What the payment can be traced by, whatever the tender calls it: a UPI id, a card
     # batch, a bank transaction number, a cheque number. One field rather than four
@@ -862,12 +865,33 @@ def _expense_approved(row: dict) -> bool:
     return True if value is None else bool(value)
 
 
+async def _link_expense_vendors(rows: list) -> None:
+    """Tie each expense to its Vendor book row, the old ones included.
+
+    An expense written before the vendor picker carries only the typed paid_to. Where that
+    text is a vendor's name (case and spacing aside) the row is read as paid to that
+    vendor -- worked out on read rather than written back, so nothing is migrated and a
+    vendor added tomorrow picks up last year's expenses to them the moment it exists. A
+    row already booked against a vendor keeps it, and shows the vendor's current name.
+    """
+    vendors = await v3_col("vendors").find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    by_id = {v["id"]: v.get("name", "") for v in vendors}
+    by_name = {" ".join((v.get("name") or "").lower().split()): v["id"] for v in vendors}
+    for r in rows:
+        vid = r.get("vendor_id")
+        if not vid or vid not in by_id:
+            vid = by_name.get(" ".join((r.get("paid_to") or "").lower().split()))
+        r["vendor_id"] = vid or None
+        r["vendor_name"] = by_id.get(vid, "") if vid else ""
+
+
 @router.get("/finance/expenses")
 async def list_expenses(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     branch_id: Optional[str] = None,
     mode: Optional[str] = None,  # "online" | "offline"
+    vendor_id: Optional[str] = None,
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "business_dev")),
 ):
     if is_branch_admin_role(user.role):
@@ -883,6 +907,9 @@ async def list_expenses(
     if date_query:
         query["expense_date"] = date_query
     rows = await v3_col("expenses").find(query, {"_id": 0}).sort("expense_date", -1).to_list(2000)
+    await _link_expense_vendors(rows)
+    if vendor_id:
+        rows = [r for r in rows if r.get("vendor_id") == vendor_id]
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
     if mode in ("online", "offline"):
@@ -999,13 +1026,25 @@ async def create_expense(
             detail="Say what the cash was spent on — it is what the accountant approves it on",
         )
 
+    vendor = None
+    if payload.vendor_id:
+        vendor = await v3_col("vendors").find_one(
+            {"id": payload.vendor_id}, {"_id": 0, "id": 1, "name": 1, "active": 1}
+        )
+        if not vendor:
+            raise HTTPException(status_code=400, detail="That vendor no longer exists")
+        if vendor.get("active") is False:
+            raise HTTPException(status_code=400, detail=f"{vendor['name']} is switched off in the Vendor list")
+
     doc = {
         "id": str(uuid.uuid4()),
         "category": payload.category.strip(),
         "amount": payload.amount,
         "branch_id": branch_id,
         "note": reason,
-        "paid_to": (payload.paid_to or "").strip(),
+        "paid_to": (vendor or {}).get("name") or (payload.paid_to or "").strip(),
+        "vendor_id": (vendor or {}).get("id"),
+        "vendor_name": (vendor or {}).get("name", ""),
         "payment_mode": payment_mode,
         "reference": (payload.reference or "").strip(),
         # Stored as sent, not required here. The accountant's own form asks for the count

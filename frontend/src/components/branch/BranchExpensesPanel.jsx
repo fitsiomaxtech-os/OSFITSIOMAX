@@ -6,6 +6,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   getBranches, getFinanceExpenses, createFinanceExpense,
   getBranchCash, createCashHandover, listCashHandovers, cancelCashHandover,
+  listVendors,
 } from "@/lib/api";
 import { BRANCH_EXPENSE_CATEGORIES } from "@/lib/expenseCategories";
 import { DENOMINATIONS, noteTotal, countedNotes, noteBreakdown, notesLabel } from "@/lib/denominations";
@@ -163,11 +164,20 @@ const usePickedBranchCash = (fixedBranchId, pickedBranchId, fallback) => {
   return fixedBranchId ? fallback : picked;
 };
 
-const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches }) => {
+/** Vendor names compared the way the server links old expenses to them. */
+const vendorKey = (name) => (name || "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+
+const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches, pastRows = [] }) => {
   const [form, setForm] = useState({
     category: BRANCH_EXPENSE_CATEGORIES[0], amount: "", expense_date: todayIso(),
-    paid_to: "", reference: "", note: "",
+    vendor_id: "", paid_to: "", reference: "", note: "",
   });
+  // The Vendor book, for the Paid to picker. Switched-off vendors are left out, as they
+  // are from Add Stock -- the server refuses an expense booked against one.
+  const [vendors, setVendors] = useState([]);
+  useEffect(() => {
+    listVendors({ active_only: true }).then((v) => setVendors(v || [])).catch(() => setVendors([]));
+  }, []);
   const [pickedBranch, setPickedBranch] = useState("");
   const [notes, setNotes] = useState({});
   const [coins, setCoins] = useState("");
@@ -180,6 +190,27 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches }) 
   const overDrawer = drawer != null && amountNum > 0 && amountNum > drawer;
   const counted = noteTotal(notes) + (Number(coins) || 0);
   const countEntered = counted > 0;
+
+  // What this vendor has been paid before, old expenses included -- the list already
+  // links a typed name to its vendor, so the history is there without a second fetch.
+  const vendorHistory = useMemo(
+    () => (form.vendor_id ? pastRows.filter((r) => r.vendor_id === form.vendor_id) : []),
+    [pastRows, form.vendor_id],
+  );
+
+  const pickVendor = (id) => {
+    const v = vendors.find((x) => x.id === id);
+    if (!v) { setForm((f) => ({ ...f, vendor_id: "", paid_to: "" })); return; }
+    // The last expense to them fills the category, when it is one a branch may use --
+    // a vendor paid for Printing last time is usually paid for Printing again.
+    const last = pastRows.find((r) => r.vendor_id === id);
+    setForm((f) => ({
+      ...f,
+      vendor_id: id,
+      paid_to: v.name,
+      category: last && BRANCH_EXPENSE_CATEGORIES.includes(last.category) ? last.category : f.category,
+    }));
+  };
 
   const submit = async () => {
     if (!spendingBranch) { toast.error("Pick the branch whose drawer this cash came out of"); return; }
@@ -194,8 +225,11 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches }) 
     }
     setSaving(true);
     try {
+      // A name typed by hand that is a listed vendor is booked against that vendor.
+      const typedVendor = form.vendor_id ? null : vendors.find((v) => vendorKey(v.name) === vendorKey(form.paid_to));
       await createFinanceExpense({
         ...form,
+        vendor_id: form.vendor_id || typedVendor?.id || undefined,
         amount: amountNum,
         // Whose drawer the notes came out of, and that they came out of a drawer at all.
         // Both are sent rather than left to the role: a Super Admin or Business Dev
@@ -267,12 +301,37 @@ const AddExpenseDialog = ({ onClose, onSaved, cashInHand, branchId, branches }) 
                 data-testid="branch-expense-amount"
               />
             </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Vendor</label>
+              <select
+                value={form.vendor_id}
+                onChange={(e) => pickVendor(e.target.value)}
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
+                data-testid="branch-expense-vendor"
+              >
+                <option value="">-- not a listed vendor --</option>
+                {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+              {form.vendor_id ? (
+                <p className="mt-1 text-[10px] text-slate-500" data-testid="branch-expense-vendor-history">
+                  {vendorHistory.length
+                    ? `${vendorHistory.length} earlier expense${vendorHistory.length === 1 ? "" : "s"} · ${fmt(vendorHistory.reduce((t, r) => t + (Number(r.amount) || 0), 0))} · last ${fmt(vendorHistory[0].amount)} on ${vendorHistory[0].expense_date || "—"}`
+                    : "No earlier expenses to this vendor."}
+                </p>
+              ) : (
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {vendors.length ? "Pick one to fill Paid to from the Vendor list." : "No vendors listed yet — type who it was paid to."}
+                </p>
+              )}
+            </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Paid to *</label>
               <Input
                 value={form.paid_to}
                 onChange={(e) => set("paid_to", e.target.value)}
                 placeholder="Who received it"
+                readOnly={!!form.vendor_id}
+                className={form.vendor_id ? "bg-slate-50 text-slate-600" : undefined}
                 data-testid="branch-expense-paid-to"
               />
             </div>
@@ -528,6 +587,12 @@ const EmptyList = ({ children, testid }) => (
  *                    the row has to say whose. Scoped to one, it would be that branch's
  *                    name repeated down the screen.
  */
+const VendorTag = () => (
+  <span className="ml-1.5 inline-block rounded-full bg-sky-50 px-1.5 py-0.5 align-middle text-[9px] font-semibold uppercase text-sky-700">
+    Vendor
+  </span>
+);
+
 const ExpenseList = ({ rows, loading, empty, showBranch, testid }) => {
   if (loading) return <EmptyList testid={`${testid}-loading`}>Loading…</EmptyList>;
   if (!rows.length) return <EmptyList testid="branch-expense-empty">{empty}</EmptyList>;
@@ -544,7 +609,10 @@ const ExpenseList = ({ rows, loading, empty, showBranch, testid }) => {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold text-slate-800">{r.category}</p>
-                <p className="truncate text-xs text-slate-500">{r.paid_to || "Paid to not set"}</p>
+                <p className="truncate text-xs text-slate-500">
+                  {r.paid_to || "Paid to not set"}
+                  {r.vendor_id ? <VendorTag /> : null}
+                </p>
               </div>
               <span className="shrink-0 text-sm font-bold tabular-nums text-slate-800">{fmt(r.amount)}</span>
             </div>
@@ -591,7 +659,10 @@ const ExpenseList = ({ rows, loading, empty, showBranch, testid }) => {
                     </span>
                   ) : null}
                 </td>
-                <td className="break-words px-4 py-3 text-slate-600">{r.paid_to || "—"}</td>
+                <td className="break-words px-4 py-3 text-slate-600">
+                  {r.vendor_name || r.paid_to || "—"}
+                  {r.vendor_id ? <VendorTag /> : null}
+                </td>
                 <td className="break-words px-4 py-3 text-slate-500">{r.reference || "—"}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-slate-800">
                   {fmt(r.amount)}
@@ -1166,6 +1237,7 @@ export const BranchExpensesPanel = ({ onChanged, branchId }) => {
           cashInHand={cashInHand}
           branchId={branchId}
           branches={branches}
+          pastRows={rows}
         />
       )}
       {handingOver && (
